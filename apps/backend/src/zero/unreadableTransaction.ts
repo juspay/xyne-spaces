@@ -206,9 +206,10 @@ function unreadableMutate(mutate: Tx['mutate']): UnreadableMutate {
 /**
  * The facts `spec` asks for, for each row, from the stored values (before they are wrapped).
  * With DB encryption on, one encryption-service call for all of them (a value may be
- * workspace-DEK ciphertext); off, extracted here from the plaintext.
+ * workspace-DEK ciphertext); off, extracted here from the plaintext. Also behind the Prisma
+ * layer's readWithFacts (database/unreadable-extension.ts).
  */
-async function deriveRowFacts(
+export async function deriveRowFacts(
   table: string,
   rows: unknown[],
   spec: Record<string, DerivedSpec | undefined>,

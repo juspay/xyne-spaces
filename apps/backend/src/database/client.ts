@@ -15,7 +15,7 @@ import { setupTicketCreatedActivity } from './middleware/ticketCreatedActivity';
 import { setupUserVespaSync } from './middleware/userVespaSync';
 import { setupEnumTextValidation } from './middleware/enumTextValidation';
 import { pingDatabase } from '@/bypassAcl/healthServices';
-import { type UnreadableDb, withUnreadableReads, withUnreadableWrites } from './unreadable-extension';
+import { type UnreadableDb, installUnreadableWrites, withUnreadableReads } from './unreadable-extension';
 
 export class DatabaseClient {
   private static instance: PrismaClient | null = null;
@@ -66,6 +66,10 @@ export class DatabaseClient {
         },
       });
 
+      // First: an UnreadableString in a write is unwrapped before any other middleware or
+      // extension sees it (see installUnreadableWrites).
+      installUnreadableWrites(DatabaseClient.instance);
+
       // TEMPORARY: UserSession change logging for debugging - remove after issue resolved
       if (config.logging.logUserSessionChanges) {
         setupUserSessionLogging(DatabaseClient.instance, true);
@@ -95,9 +99,8 @@ export class DatabaseClient {
       // Apply zero field encryption extension (public build: pass-through)
       DatabaseClient.instance = DatabaseClient.instance.$extends(encryptionExtension) as unknown as PrismaClient;
       DatabaseClient.instance = DatabaseClient.instance.$extends(auditExtension) as unknown as PrismaClient;
-      // Outermost: an UnreadableString in a write is unwrapped before any other extension sees it.
-      DatabaseClient.wrappedInstance = withUnreadableWrites(
-        withWorkspaceStamp(withAclExtension(DatabaseClient.instance)),
+      DatabaseClient.wrappedInstance = withWorkspaceStamp(
+        withAclExtension(DatabaseClient.instance),
       ) as unknown as PrismaClient;
     }
 

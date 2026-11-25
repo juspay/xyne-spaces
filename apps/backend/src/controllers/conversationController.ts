@@ -50,7 +50,7 @@ import {
 import { MessagesSideEffectHandler } from '../zero/side-effects/tables/messages-handler';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { messageSchema } from '@/vespa/src/types';
-import { db } from '@/database/client';
+import { db, DatabaseClient } from '@/database/client';
 import { NAMESPACE } from '@/vespa/vespaConfig';
 import { replaceTicketSuggestionWithCreated } from '../utils/ticketSuggestionMarkdownGenerator';
 import {
@@ -216,7 +216,10 @@ export class ConversationController {
         }
       }
 
-      const message = await this.messageRepository.findById(messageId);
+      // Unreadable reads (encryptedReadRoute): the message's content and its attachments'
+      // filenames are only passed through to the response, never read here.
+      const unreadableDb = DatabaseClient.getUnreadableInstance();
+      const message = await this.messageRepository.findByIdUnreadable(messageId);
       if (!message || message.conversationId !== conversationId) {
         res.status(404).json({ error: 'Message not found for this conversation' });
         return;
@@ -228,7 +231,7 @@ export class ConversationController {
 
       const [attachments, nudgeCounts] = await Promise.all([
         message.hasAttachment
-          ? db.messageAttachment.findMany({
+          ? unreadableDb.messageAttachment.findMany({
               where: {
                 entityId: message.messageId,
                 entityType: AttachmentEntityType.CHAT,

@@ -7,7 +7,8 @@ import type { DerivedFacts, RequestContract, RequestDerived } from '@xyne/shared
  * `unreadableTransaction`: inside it, code decides on these facts instead of the text, and
  * the database client handles `UnreadableString` (see database/unreadable-extension.ts).
  */
-type UnreadableScope = { contract: RequestContract; derived: DerivedFacts | undefined };
+/** `contract` is the route's request contract; a read route (encryptedReadRoute) has none. */
+type UnreadableScope = { contract: RequestContract | undefined; derived: DerivedFacts | undefined };
 
 const unreadableScopeContext = new AsyncLocalStorage<UnreadableScope>();
 

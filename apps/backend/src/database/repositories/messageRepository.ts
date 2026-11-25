@@ -2,8 +2,7 @@ import { BaseRepository } from './base';
 import { Message } from '@prisma/client';
 import { PaginationOptions, PaginatedResult, QueryOptions } from '@/types/database';
 import { sanitizeMessageContent } from '@/utils/contentUtils';
-import { getMessageContentLength, isEncryptedField, MAX_MESSAGE_CONTENT_LENGTH, MessageType, type UnreadableString } from '@xyne/shared';
-import { unreadableWriteValue } from '@/database/unreadable-extension';
+import { getMessageContentLength, isEncryptedField, MAX_MESSAGE_CONTENT_LENGTH, MessageType } from '@xyne/shared';
 //import { queueMessageIngestion } from '@/queues/vespaQueue';
 
 //import { extractAllMentions } from '@/utils/mentionParser';
@@ -142,7 +141,7 @@ export class MessageRepository extends BaseRepository<Message, CreateMessageInpu
    * Resolve the workspaceId to denormalize onto a message row: caller-supplied
    * value, or (default) the owning conversation's workspaceId.
    */
-  private async resolveMessageWorkspaceId(data: Pick<CreateMessageInput, 'workspaceId' | 'conversationId'>): Promise<string> {
+  private async resolveMessageWorkspaceId(data: CreateMessageInput): Promise<string> {
     if (data.workspaceId) return data.workspaceId;
     const conversation = await this.db.conversation.findUnique({
       where: { conversationId: data.conversationId },
@@ -205,47 +204,9 @@ export class MessageRepository extends BaseRepository<Message, CreateMessageInpu
       return result;
   }
 
-  /**
-   * `create` for content the caller holds as `UnreadableString`, on a route behind
-   * encryptedRoute: it is stored as it is held (ciphertext, or plaintext untrimmed), and the
-   * required and length checks come from its facts instead of its text. Takes no metadata, so
-   * no markdown sanitizing applies (create sanitizes only `contentFormat: 'markdown'`). The row
-   * comes back with `content` unreadable.
-   */
-  async createUnreadable(
-    data: Omit<CreateMessageInput, 'content' | 'contentLength' | 'metadata'> & {
-      content: UnreadableString;
-      facts: { textIsEmpty: boolean; textLength: number };
-    },
-  ) {
-    await this.validateString(data.conversationId, 'conversationId');
-    await this.validateString(data.senderId, 'senderId');
-    if (!data.hasAttachment && data.facts.textIsEmpty) {
-      throw new Error('content is required when no attachments are present');
-    }
-    if (!data.facts.textIsEmpty) {
-      this.validateVisibleLength(data.facts.textLength); // Max 10k visible characters
-    }
-    if (data.msgType) {
-      await this.validateEnum(data.msgType, 'msgType', ['USER', 'BOT', 'SYSTEM', 'FORWARDED']);
-    }
-
-    const workspaceId = await this.resolveMessageWorkspaceId(data);
-    return this.unreadable.message.create({
-      data: {
-        ...(data.messageId && { messageId: data.messageId }),
-        conversationId: data.conversationId,
-        senderId: data.senderId,
-        workspaceId,
-        content: unreadableWriteValue(data.content),
-        msgType: data.msgType || 'USER',
-        hasAttachment: data.hasAttachment || false,
-        showInChannel: data.showInChannel ?? false,
-        visibleTo: data.visibleTo ?? null,
-        childConversationId: data.childConversationId,
-        ...(data.createdAt && { createdAt: data.createdAt }),
-      },
-    });
+  /** `findById` through `unreadableDb`: `content` comes back as `UnreadableString`. */
+  async findByIdUnreadable(id: string) {
+    return this.unreadable.message.findUnique({ where: { messageId: id } });
   }
 
   async findById(id: string): Promise<Message | null> {

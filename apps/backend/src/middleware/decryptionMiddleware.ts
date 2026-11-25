@@ -31,15 +31,51 @@ function hasEncryptedFields(obj: unknown): boolean {
 }
 
 /**
+ * Routes mounted with encryptedRoute, as their manifest rule names them (`POST /apps/chat/postMessage`:
+ * no `/api` prefix, `:param` for a path segment). Their bodies go to the encryption service as
+ * the client sent them (transformRequest), so the decrypt at authentication leaves them alone:
+ * decrypted there, a field the rule has the client encrypt would reach the service as
+ * plaintext and be refused (409 ENC_MANIFEST_STALE).
+ */
+const ruleRoutes: { method: string; segments: string[] }[] = [];
+
+function pathSegments(path: string): string[] {
+  return path.split('/').filter(Boolean);
+}
+
+export function registerRuleRoute(route: string): void {
+  const match = /^([A-Z]+) (\/\S*)$/.exec(route);
+  if (!match) {
+    throw new Error(`encryptedRoute: route must be "METHOD /path" as its manifest rule names it, got "${route}"`);
+  }
+  ruleRoutes.push({ method: match[1], segments: pathSegments(match[2]) });
+}
+
+/** Whether `req` is on a registered rule route, its path read as the encryption service reads it: no query string, no `/api` prefix. */
+function isRuleRoute(req: Request): boolean {
+  const method = req.method?.toUpperCase();
+  const path = (req.originalUrl ?? '').split('?')[0];
+  const segments = pathSegments(path === '/api' || path.startsWith('/api/') ? path.slice('/api'.length) : path);
+  return ruleRoutes.some(
+    (route) =>
+      route.method === method &&
+      route.segments.length === segments.length &&
+      route.segments.every((segment, index) => segment.startsWith(':') || segment === segments[index]),
+  );
+}
+
+/**
  * Decrypt `ENC:v1|tk-<version>|…` fields with the keys derived for the caller's transit
  * public key (header or `xk` cookie). Runs after authentication: the auth middlewares call
  * it in place of `next()` once `req.user` is set, rather than it being mounted globally.
+ * Skips rule routes (see ruleRoutes): encryptedRoute transforms their bodies instead.
  */
 export async function decryptRequestBodyMiddleware(
   req: Request,
   _res: Response,
   next: NextFunction,
 ): Promise<void> {
+  if (isRuleRoute(req)) return next();
   await decryptRequestBody(req, next);
 }
 

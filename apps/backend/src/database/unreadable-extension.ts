@@ -1,6 +1,8 @@
 import { Prisma, type PrismaClient } from '@prisma/client';
 import { UnreadableString, reveal } from '@xyne/shared';
+import type { DerivedSpec, FieldDerived } from '@xyne/shared';
 import { UNREADABLE_COLUMNS } from '@/zero/unreadableColumns';
+import { deriveRowFacts } from '@/zero/unreadableTransaction';
 import { isInUnreadableScope } from '@/services/encryption/unreadableScope';
 
 type UnreadableTable = keyof typeof UNREADABLE_COLUMNS;
@@ -47,6 +49,11 @@ type TableOf<M> = { [T in UnreadableTable]: (typeof MODEL_OF_TABLE)[T] extends M
 
 /** The unreadable fields of model `M`; `never` for a model with none. */
 type UnreadableField<M> = (typeof UNREADABLE_COLUMNS)[TableOf<M>][number];
+
+/** The table of each model in MODEL_OF_TABLE. */
+const TABLE_OF_MODEL = Object.fromEntries(
+  (Object.keys(MODEL_OF_TABLE) as UnreadableTable[]).map(table => [MODEL_OF_TABLE[table], table]),
+) as Record<UnreadableModel, UnreadableTable>;
 
 /** Per Prisma model, its unreadable fields. */
 const FIELDS_OF_MODEL: Readonly<Record<string, readonly string[]>> = Object.fromEntries(
@@ -166,19 +173,19 @@ function assertInScope(what: string): void {
  *
  * Only inside an unreadable scope, the one place an `UnreadableString` can come from (the
  * route's body, or a read through `unreadableDb`); every other query goes straight through.
- * Outermost on the client, so it unwraps before the encryption extension sees the value.
+ *
+ * A `$use` middleware, not a query extension, and installed before every other middleware:
+ * Prisma deep-copies a query's arguments after the middlewares and before the first query
+ * extension, which turns an `UnreadableString` (its value is held outside the object) into
+ * `{}`. Only a middleware still sees it, so the encryption extension gets the value it holds.
  */
-export const unreadableWritesExtension = Prisma.defineExtension({
-  name: 'unreadable-writes',
-  query: {
-    $allModels: {
-      async $allOperations({ model, operation, args, query }) {
-        if (!isInUnreadableScope()) return query(args);
-        return query(unwrapArgs(model, operation, args) as typeof args);
-      },
-    },
-  },
-});
+export function installUnreadableWrites(client: PrismaClient): void {
+  client.$use(async (params, next) => {
+    if (!params.model || !isInUnreadableScope()) return next(params);
+    const args = unwrapArgs(params.model, params.action, params.args);
+    return next(args === params.args ? params : { ...params, args });
+  });
+}
 
 /**
  * Reads, for `unreadableDb` only: every read returns the fields in UNREADABLE_COLUMNS as
@@ -202,11 +209,6 @@ export const unreadableReadsExtension = Prisma.defineExtension({
   },
 });
 
-/** `client` with unreadable writes (see `unreadableWritesExtension`). */
-export function withUnreadableWrites(client: PrismaClient) {
-  return client.$extends(unreadableWritesExtension);
-}
-
 /** `client` with unreadable reads (see `unreadableReadsExtension`); extends the ACL-wrapped client, so scoping still applies. */
 export function withUnreadableReads(client: PrismaClient) {
   return client.$extends(unreadableReadsExtension);
@@ -217,7 +219,7 @@ export type UnreadableDb = ReturnType<typeof withUnreadableReads>;
 
 /**
  * An unreadable value typed as the string a Prisma write argument declares, for a write
- * through `db` or `unreadableDb`: `unreadableWritesExtension` unwraps it right before the
+ * through `db` or `unreadableDb`: `installUnreadableWrites` unwraps it before the
  * query, so the code writing it never reads it. Only for a field in UNREADABLE_COLUMNS
  * (anything else is refused), and only inside an unreadable scope (outside one nothing would
  * unwrap it, so it throws here instead of storing "<redacted>").
@@ -225,4 +227,50 @@ export type UnreadableDb = ReturnType<typeof withUnreadableReads>;
 export function unreadableWriteValue(value: UnreadableString): string {
   assertInScope('unreadableWriteValue');
   return value as unknown as string;
+}
+
+/**
+ * The facts a readWithFacts asks for, per unreadable field of model `M`, in the same form as a
+ * contract's `sourceToDerived`: `{ content: { textIsEmpty: derive.textIsEmpty } }`.
+ */
+export type ReadFactsSpec<M extends UnreadableModel> = { readonly [F in UnreadableField<M>]?: DerivedSpec };
+
+/** One row read with readWithFacts: the row as `unreadableDb` returned it and, per field, the facts asked for. */
+type RowWithFacts<R, S> = { row: R; facts: { [F in keyof S]?: FieldDerived<S, F> } };
+
+/** `row`'s stored values of `fields`, which the wrapping holds: read at this layer's edge, as tx.read does. */
+function storedValues(row: unknown, fields: string[]): Record<string, unknown> {
+  const record = (row ?? {}) as Record<string, unknown>;
+  return Object.fromEntries(
+    fields.map(field => {
+      const value = record[field];
+      return [field, value instanceof UnreadableString ? reveal(value) : value];
+    }),
+  );
+}
+
+/**
+ * `tx.read` for the Prisma layer: the rows of `read`, a query on `unreadableDb` (so their
+ * unreadable fields are `UnreadableString`), each with the facts `spec` asks for from those
+ * fields' stored values, derived as tx.read derives them (deriveRowFacts: the encryption service
+ * with DB encryption on, extracted here with it off). A field's facts are absent when it is null.
+ * Facts are a step of their own because Prisma computes result fields synchronously: the
+ * wrapping cannot call the encryption service.
+ *
+ *   const read = await readWithFacts('Message', unreadableDb.message.findUnique({ where }),
+ *     { content: { forwardedHasOptionalText: derive.forwardedHasOptionalText } }, workspaceId);
+ */
+export async function readWithFacts<M extends UnreadableModel, R, const S extends ReadFactsSpec<M>>(
+  model: M,
+  read: Promise<R>,
+  spec: S,
+  workspaceId: string,
+): Promise<R extends null | undefined ? R : R extends readonly (infer E)[] ? RowWithFacts<E, S>[] : RowWithFacts<R, S>> {
+  const result: unknown = await read;
+  if (result === null || result === undefined) return result as never;
+  const rows: unknown[] = Array.isArray(result) ? result : [result];
+  const stored = rows.map(row => storedValues(row, Object.keys(spec)));
+  const facts = await deriveRowFacts(TABLE_OF_MODEL[model], stored, spec, workspaceId);
+  const withFacts = rows.map((row, index) => ({ row, facts: facts[index] }));
+  return (Array.isArray(result) ? withFacts : withFacts[0]) as never;
 }
