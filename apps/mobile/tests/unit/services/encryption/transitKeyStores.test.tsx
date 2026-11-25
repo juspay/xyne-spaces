@@ -21,6 +21,13 @@ jest.mock('@/src/utils/logger', () => ({
 jest.mock('@xyne/shared', () => ({
   toBase64: (value: Uint8Array) => Buffer.from(value).toString('base64'),
   fromBase64: (value: string) => new Uint8Array(Buffer.from(value, 'base64')),
+  TransitKeyUnavailableError: class TransitKeyUnavailableError extends Error {
+    storage: string;
+    constructor(storage: string, reason: string) {
+      super(`Transit key unavailable (${storage}): ${reason}`);
+      this.storage = storage;
+    }
+  },
 }));
 
 const loadStore = (): typeof import('@/src/services/encryption/transitKeyStores') =>

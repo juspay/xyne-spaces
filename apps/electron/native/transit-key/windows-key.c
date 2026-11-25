@@ -1,9 +1,12 @@
 // Transit key helper for Windows: an ECDH P-256 key held by Windows CNG, in the TPM (Microsoft
-// Platform Crypto Provider) or, as a fallback, the Microsoft Software Key Storage Provider. The
-// key is created on first use under the name the app passes (one per app flavor), per Windows
-// user, not exportable and without any UI, and Windows keeps it: the app writes nothing to disk.
+// Platform Crypto Provider) or, on a PC without a TPM that can hold one, the Microsoft Software
+// Key Storage Provider; `probe` tells the app which, on every launch. The key is created on
+// first use under the name the app passes (one per app flavor), per Windows user, not exportable
+// and without any UI, and Windows keeps it: the app writes nothing to disk.
 // Counterpart of secure-enclave.swift.
 //
+//   transit-key.exe probe  tpm                   → {"available": "true" | "false"}: a TPM that
+//                                                  does P-256 key agreement
 //   transit-key.exe agree  tpm|software <name>   stdin: base64 server point (65-byte P-256)
 //                                                → {"secret": b64 (32 B), "publicKey": b64}
 //   transit-key.exe delete tpm|software <name>   → {"deleted": "true"}
@@ -39,7 +42,7 @@
 #define COORD_LEN 32
 #define POINT_LEN (1 + 2 * COORD_LEN)
 #define ECC_BLOB_LEN (sizeof(BCRYPT_ECCKEY_BLOB) + 2 * COORD_LEN)
-#define USAGE "usage: transit-key.exe agree|delete tpm|software <key name>"
+#define USAGE "usage: transit-key.exe probe tpm | agree|delete tpm|software <key name>"
 
 /** The key's name, one per app flavor: XyneTransitKey, XyneTransitKey-sandbox, ... */
 static WCHAR key_name[MAX_KEY_NAME + 1];
@@ -268,7 +271,34 @@ static int run_delete(NCRYPT_PROV_HANDLE provider) {
   return 0;
 }
 
+/**
+ * Whether this PC has a TPM that can hold the key. Only "no TPM provider here" or "it has no
+ * P-256 key agreement" (a TPM 1.2) answers false; any other failure is an error, so a TPM that is
+ * busy or not ready after resume never counts as missing.
+ */
+static int run_probe(void) {
+  NCRYPT_PROV_HANDLE provider = 0;
+  SECURITY_STATUS status = NCryptOpenStorageProvider(&provider, provider_name("tpm"), 0);
+  if (status != ERROR_SUCCESS) {
+    if (provider_exit_code(status) != EXIT_UNSUPPORTED) {
+      return fail_status("cannot open the TPM provider", status, EXIT_OTHER);
+    }
+    printf("{\"available\":\"false\"}\n");
+    return 0;
+  }
+  status = NCryptIsAlgSupported(provider, NCRYPT_ECDH_P256_ALGORITHM, 0);
+  NCryptFreeObject(provider);
+  if (status != ERROR_SUCCESS && status != NTE_NOT_SUPPORTED) {
+    return fail_status("cannot ask the TPM provider for P-256", status, EXIT_OTHER);
+  }
+  printf("{\"available\":\"%s\"}\n", status == ERROR_SUCCESS ? "true" : "false");
+  return 0;
+}
+
 int main(int argc, char **argv) {
+  if (argc == 3 && strcmp(argv[1], "probe") == 0 && strcmp(argv[2], "tpm") == 0) {
+    return run_probe();
+  }
   if (argc != 4) return fail(USAGE);
   LPCWSTR name = provider_name(argv[2]);
   if (!name || set_key_name(argv[3]) != 0) return fail(USAGE);

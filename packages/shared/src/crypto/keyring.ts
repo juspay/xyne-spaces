@@ -23,9 +23,25 @@ export interface TransitServerKeys {
   keys: TransitServerKey[];
 }
 
-/** Where the client's key pair lives between page loads. */
+/**
+ * Where the client's key pair lives between page loads. A device has exactly one store, chosen
+ * from what it has: its secure hardware when it has some, else that platform's software store.
+ * A store that fails throws TransitKeyUnavailableError; nothing falls back to another store.
+ */
 export interface TransitKeyStore {
   getOrCreate(): Promise<TransitKeyPair>;
+}
+
+/** The device's transit key store gave no key. Shown to the user, never answered with another key. */
+export class TransitKeyUnavailableError extends Error {
+  constructor(
+    /** The store this device uses: `secure_enclave`, `tpm`, `wrapped`, `indexeddb`, ... */
+    readonly storage: string,
+    reason: string,
+  ) {
+    super(`Transit key unavailable (${storage}): ${reason}`);
+    this.name = 'TransitKeyUnavailableError';
+  }
 }
 
 const TRANSIT_KEY_ID_PREFIX = 'tk-';
@@ -69,7 +85,7 @@ export function webCryptoTransitKeyPair(privateKey: CryptoKey, publicKey: string
   };
 }
 
-/** A fresh non-extractable ECDH pair; the default store keeps it for the page's lifetime. */
+/** A fresh non-extractable ECDH pair, kept by no store. */
 export async function generateTransitKeyPair(): Promise<TransitKeyPair> {
   const pair = await crypto.subtle.generateKey(ECDH, false, ['deriveBits']);
   const publicKey = toBase64(await crypto.subtle.exportKey('raw', pair.publicKey));

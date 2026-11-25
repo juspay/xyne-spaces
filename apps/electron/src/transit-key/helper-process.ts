@@ -4,8 +4,9 @@ import path from 'path';
 
 /**
  * Runs the bundled transit key helper for this platform (native/transit-key): `transit-key`
- * on macOS (Swift, Secure Enclave), `transit-key.exe` on Windows (C, TPM). Each call is one
- * short-lived process; inputs go on stdin, never argv. The helper prints one JSON line.
+ * on macOS (Swift, Secure Enclave), `transit-key.exe` on Windows (C, TPM or software KSP). Each
+ * call is one short-lived process; inputs go on stdin, never argv. The helper prints one JSON
+ * line.
  */
 
 /** A hung helper must never hold up login: it is killed and the attempt fails. */
@@ -32,17 +33,12 @@ export function isBrokenKey(error: unknown): boolean {
 }
 
 /**
- * Spawn errors that mean the helper cannot run on this machine at all, not that it failed this
- * once: no binary in this build (ENOENT), not executable (EACCES), or not a binary this machine
- * runs, such as a wrong architecture (ENOEXEC, EFTYPE: "not a valid Win32 application").
+ * The helper says the hardware its key needs is not there. A helper that cannot run at all (not
+ * in this build, not executable, the wrong architecture) is a broken build, never this: it fails
+ * loudly instead of moving the install to software.
  */
-const CANNOT_RUN_HERE = ['ENOENT', 'EACCES', 'ENOEXEC', 'EFTYPE'];
-
-/** This machine cannot do the tier at all: the helper says so, or it cannot run here. */
 export function isUnsupported(error: unknown): boolean {
-  if (error instanceof TransitKeyHelperError) return error.exitCode === EXIT_UNSUPPORTED;
-  const code = (error as NodeJS.ErrnoException | null)?.code;
-  return code !== undefined && CANNOT_RUN_HERE.includes(code);
+  return error instanceof TransitKeyHelperError && error.exitCode === EXIT_UNSUPPORTED;
 }
 
 function helperPath(fileName: string): string {
@@ -71,7 +67,7 @@ export function runHelper(
     child.stderr.on('data', (chunk: Buffer) => (stderr += chunk.toString()));
     child.on('error', (error) => {
       clearTimeout(timer);
-      reject(error);
+      reject(new Error(`transit-key helper cannot run (${fileName}): ${error.message}`));
     });
     child.on('close', (code) => {
       clearTimeout(timer);
@@ -110,4 +106,11 @@ export function base64Field(output: Record<string, unknown>, name: string): Buff
   const value = output[name];
   if (typeof value !== 'string') throw new Error(`transit-key returned no ${name}`);
   return Buffer.from(value, 'base64');
+}
+
+/** A probe's answer, `{"available": "true" | "false"}`; anything else is an error, not a "no". */
+export function availableField(output: Record<string, unknown>): boolean {
+  if (output.available === 'true') return true;
+  if (output.available === 'false') return false;
+  throw new Error('transit-key probe returned no answer');
 }

@@ -1,5 +1,6 @@
 package net.juspay.xynespaces.transitkey
 
+import android.content.pm.PackageManager
 import android.os.Build
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyInfo
@@ -38,30 +39,31 @@ import javax.crypto.spec.GCMParameterSpec
 
 /**
  * The transit key on Android, an ECDH P-256 key that needs no user authentication (so it never
- * prompts) and is per app, so each build flavor has its own:
+ * prompts) and is per app, so each build flavor has its own. A phone has exactly one of:
  *
- * - The Keystore key: in StrongBox when the phone has one, else the TEE. It cannot be exported
- *   and ECDH runs inside the Keystore; only the 32-byte shared secret comes out.
- * - The wrapped key, on Android 11 and older (the Keystore cannot do key agreement there) or where
- *   the Keystore cannot make a working key: a key made in software, stored in no-backup app
- *   storage encrypted with an AES key that lives in the Keystore. It is decrypted only for each
- *   ECDH and is useless off this phone.
+ * - The Keystore key, on a phone whose secure hardware does key agreement (Android 12+ with
+ *   KeyMint): in StrongBox when that can make it, else the TEE. It cannot be exported and ECDH
+ *   runs inside the Keystore; only the 32-byte shared secret comes out.
+ * - The wrapped key, on a phone without that (Android 11 and older, or no KeyMint): a key made in
+ *   software, stored in no-backup app storage encrypted with an AES key that lives in the
+ *   Keystore. It is decrypted only for each ECDH and is useless off this phone.
  *
- * Once chosen, a tier is kept (see selectKey), so the public key never changes between launches
- * unless the key itself is broken.
+ * Which one is decided by what the phone has, never by a failure: a Keystore key that cannot be
+ * made or used fails the call loudly (and is retried), it is never replaced by a wrapped key.
  */
 class TransitKeyModule(reactContext: ReactApplicationContext) :
   ReactContextBaseJavaModule(reactContext) {
 
   init {
     wrappedKeyFile = File(reactContext.applicationContext.noBackupFilesDir, WRAPPED_KEY_FILE)
+    hardwareAgreement = hasHardwareAgreement(reactContext.packageManager)
   }
 
   override fun getName(): String = NAME
 
   /**
    * Resolves `{ publicKey: base64 65-byte point, storage }`, storage being
-   * "strongbox" | "tee" | "software" (the Keystore key) or "wrapped".
+   * "strongbox" | "tee" | "unknown_secure" (the Keystore key) or "wrapped".
    */
   @ReactMethod
   fun getPublicKey(promise: Promise) {
@@ -74,7 +76,7 @@ class TransitKeyModule(reactContext: ReactApplicationContext) :
         promise.resolve(result)
       } catch (error: Throwable) {
         // Throwable, not Exception: an Error must settle the promise too, not leave JS waiting.
-        promise.reject(ERROR_CODE, error.message ?: error.javaClass.simpleName, error)
+        reject(promise, error)
       }
     }
   }
@@ -93,7 +95,7 @@ class TransitKeyModule(reactContext: ReactApplicationContext) :
           secret.fill(0)
         }
       } catch (error: Throwable) {
-        promise.reject(ERROR_CODE, error.message ?: error.javaClass.simpleName, error)
+        reject(promise, error)
       }
     }
   }
@@ -155,6 +157,10 @@ class TransitKeyModule(reactContext: ReactApplicationContext) :
   private class SelfCheckFailed :
     GeneralSecurityException("Transit key agreement self-check failed")
 
+  /** The Keystore made a software key on a phone whose secure hardware does key agreement. */
+  private class NotHardwareBacked :
+    GeneralSecurityException("The Keystore made a software key, not one in secure hardware")
+
   companion object {
     const val NAME = "LotusTransitKey"
     private const val TAG = "TransitKey"
@@ -185,6 +191,26 @@ class TransitKeyModule(reactContext: ReactApplicationContext) :
 
     private lateinit var wrappedKeyFile: File
 
+    /** Whether this phone's secure hardware does key agreement; set when the module loads. */
+    @Volatile private var hardwareAgreement = false
+
+    /**
+     * Android 12+ with KeyMint 1.0 or newer (feature version 100), the first Keystore HAL with key
+     * agreement. A phone upgraded to Android 12 that kept Keymaster (version 41 and below) has
+     * none, nor does one whose Keystore has no secure hardware at all.
+     */
+    private fun hasHardwareAgreement(packageManager: PackageManager): Boolean =
+      Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
+        packageManager.hasSystemFeature(PackageManager.FEATURE_HARDWARE_KEYSTORE, 100)
+
+    /** Rejections name the phone's store, "keystore" or "wrapped", ahead of the reason. */
+    private fun reject(promise: Promise, error: Throwable) {
+      val storage = if (hardwareAgreement) "keystore" else "wrapped"
+      val reason = error.message ?: error.javaClass.simpleName
+      Log.e(TAG, "No transit key from the $storage store", error)
+      promise.reject(ERROR_CODE, "$storage: $reason", error)
+    }
+
     private fun checkedKey(): TransitKey {
       cached?.let { return it }
       val key = selectKey()
@@ -193,27 +219,22 @@ class TransitKeyModule(reactContext: ReactApplicationContext) :
     }
 
     /**
-     * The tier is picked so the public key stays the same across launches:
-     * - Once a wrapped key file exists it is used for good, also after an OS upgrade that brings
-     *   Keystore key agreement: switching would change the public key.
-     * - Android 11 and older: the wrapped key (the Keystore cannot do key agreement).
-     * - Otherwise the stored Keystore key. Any failure other than the key being broken fails
-     *   this call, with nothing cached, so the next call retries the same key.
-     * - With no usable Keystore key (none yet, or a broken one now deleted): a new one, else the
-     *   wrapped key, which then stays.
+     * The phone's one store. Any failure other than a stored key being broken fails this call
+     * with nothing cached, so the next call retries the same store.
+     * - Hardware key agreement: the stored Keystore key, else (none yet, or a broken one now
+     *   deleted) a new one. A new one that cannot be made fails the call.
+     * - Otherwise: the wrapped key.
      */
     private fun selectKey(): TransitKey {
-      if (wrappedKeyFile.exists() || Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
-        return wrappedKey()
-      }
+      // The SDK check is implied by hardwareAgreement; it is here for the API level lint.
+      if (!hardwareAgreement || Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return wrappedKey()
       storedKeystoreKeyChecked()?.let { return it }
       return try {
         newKeystoreKey()
       } catch (error: Exception) {
-        Log.w(TAG, "The Keystore cannot make a transit key; using a wrapped key", error)
         // A half-made key would otherwise be found, and fail, on every later launch.
         runCatching { keyStore().deleteEntry(KEY_ALIAS) }
-        wrappedKey()
+        throw error
       }
     }
 
@@ -246,7 +267,7 @@ class TransitKeyModule(reactContext: ReactApplicationContext) :
 
     private fun keyStore(): KeyStore = KeyStore.getInstance(KEYSTORE_PROVIDER).apply { load(null) }
 
-    // Keystore key (Android 12+)
+    // Keystore key (hardware key agreement)
 
     /**
      * The stored Keystore key once it passes the self-check; null when there is none, or when it
@@ -307,12 +328,14 @@ class TransitKeyModule(reactContext: ReactApplicationContext) :
       val storage = when (info.securityLevel) {
         KeyProperties.SECURITY_LEVEL_STRONGBOX -> "strongbox"
         KeyProperties.SECURITY_LEVEL_TRUSTED_ENVIRONMENT -> "tee"
-        else -> "software"
+        // Secure hardware whose kind the Keystore does not say.
+        KeyProperties.SECURITY_LEVEL_UNKNOWN_SECURE -> "unknown_secure"
+        else -> throw NotHardwareBacked()
       }
       return KeystoreKey(privateKey, uncompressedPoint(publicKey as ECPublicKey), storage)
     }
 
-    // Wrapped key (Android 11 and older, or a Keystore that cannot make the key)
+    // Wrapped key (no hardware key agreement)
 
     private fun wrappedKey(): TransitKey {
       val stored = try {

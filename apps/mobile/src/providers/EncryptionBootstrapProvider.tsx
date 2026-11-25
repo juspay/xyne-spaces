@@ -42,7 +42,7 @@ export function EncryptionBootstrapProvider({ children }: { children: ReactNode 
   const userId = user?.user_id ?? null;
   const workspaceId = user?.workspaceId ?? null;
   const scope = useMemo(() => ({ userId, workspaceId }), [userId, workspaceId]);
-  const state = useEncryptionBootstrapInit(scope, { keyStore: transitKeyStore });
+  const state = useEncryptionBootstrapInit(scope, { keyStore: transitKeyStore, logger });
 
   // Each sign-in is a new server session (the shell can stay mounted through it), so register again.
   const { reset } = state;
@@ -67,7 +67,7 @@ export function EncryptionBootstrapProvider({ children }: { children: ReactNode 
           if (!cancelled) setCookie({ keyring, error: null });
         })
         .catch((error: unknown) => {
-          logger.warn(Event.ENCRYPTION_KEY_GENERATED, {
+          logger.error(Event.ENCRYPTION_KEY_REGISTRATION_FAILED, {
             type: 'transit_key',
             message: '[TransitKey] Could not set the sync proxy key cookie',
             error: error instanceof Error ? error.message : String(error),

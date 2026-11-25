@@ -1,45 +1,41 @@
 import { createECDH, type ECDH } from 'crypto';
 import { app, safeStorage } from 'electron';
-import { promises as fs } from 'fs';
+import { existsSync, promises as fs } from 'fs';
 import path from 'path';
 import log from 'electron-log/main';
 import { isBrokenKey, isUnsupported } from './helper-process';
-import { createEnclaveKey, enclaveAgree } from './secure-enclave';
-import { deleteWindowsKey, windowsAgree, type WindowsKeyProvider } from './windows-key';
+import { createEnclaveKey, enclaveAgree, hasSecureEnclave } from './secure-enclave';
+import { deleteWindowsKey, hasTpm, windowsAgree, type WindowsKeyProvider } from './windows-key';
 
 /**
  * The desktop app's transit key (ECDH P-256), held by the main process for every window. The
  * renderer gets only the public key and ECDH results — the key is never in IndexedDB.
  *
- * macOS: the key lives in the Secure Enclave. Its encrypted handle is sealed with safeStorage
- * (the Keychain) in userData, so the same key is used across launches.
- * Windows: the key lives in the TPM, else in the Windows software key storage provider; Windows
- * keeps it by name per user and app flavor, so the app stores nothing.
- * Where the machine can do neither, and on Linux: a software key in this process, its private
- * key sealed with safeStorage (Keychain, DPAPI, GNOME Keyring / KWallet) in userData, so it too
- * is kept across launches.
- * Without even that: no key here. The calls reject with NO_PLATFORM_KEY, so every window uses the
- * same persisted WebCrypto pair in IndexedDB.
+ * The store is chosen on every launch from what the machine has (a helper's `probe`); nothing
+ * records the choice, so there is no label to edit:
  *
- * The tier is chosen once per install and saved, and only a machine that cannot do a tier moves
- * on to the next. After that the saved tier is the only one used: a failure that is not the key's
- * own (a busy TPM, a helper timeout, a Keychain that cannot decrypt the file now) fails the call
- * and is retried, never answered with another tier's key, and a stored key is replaced only when
- * it is itself broken. The public key would otherwise change, and data the server already
- * encrypted for the old one would be unreadable. A failure never prompts.
+ * macOS: the Secure Enclave. Its encrypted handle is sealed with safeStorage (the Keychain) in
+ * userData, so the same key is used across launches. A Mac without one (Intel without a T2) uses
+ * the OS keyring store instead.
+ * Windows: the TPM. A PC without one that does P-256 key agreement uses the Windows software key
+ * storage provider instead, whose key Windows also keeps out of this process. Windows keeps
+ * either by name per user and app flavor, so the app stores nothing.
+ * Linux: the OS keyring store.
+ * The OS keyring store is a software key in this process, its private key sealed with
+ * safeStorage (Keychain, GNOME Keyring / KWallet) in userData, so it is kept across launches.
+ *
+ * Nothing falls back. A failure (a busy TPM, a helper timeout, a missing helper, a probe that
+ * fails rather than answers, a Keychain that cannot decrypt the file now, no keyring) fails the
+ * call loudly and is retried; it is never answered with another store's key. A stored key is
+ * replaced only when it is itself broken. The public key would otherwise change, and data the
+ * server already encrypted for the old one would be unreadable. A failure never prompts.
+ *
+ * A Mac that holds a Secure Enclave key but reports no Enclave fails loudly: a Mac's Enclave
+ * cannot go away, so that answer is wrong. A Windows TPM can (switched off in firmware, cleared),
+ * and leaves nothing here to notice it by: that PC moves to the software provider with a new key.
  */
 
-type Tier = 'secure_enclave' | WindowsKeyProvider | 'os_keyring' | 'none';
-type TransitKeyStorage = Exclude<Tier, 'none'>;
-
-const TIERS: readonly Tier[] = ['secure_enclave', 'tpm', 'software', 'os_keyring', 'none'];
-
-/** Tried in this order on an install's first choice; one is skipped only when it cannot work here. */
-const CANDIDATE_TIERS: Partial<Record<NodeJS.Platform, TransitKeyStorage[]>> = {
-  darwin: ['secure_enclave', 'os_keyring'],
-  win32: ['tpm', 'software', 'os_keyring'],
-  linux: ['os_keyring'],
-};
+type TransitKeyStorage = 'secure_enclave' | WindowsKeyProvider | 'os_keyring';
 
 interface TransitKeyBackend {
   storage: TransitKeyStorage;
@@ -48,18 +44,10 @@ interface TransitKeyBackend {
   derive(serverPoint: Uint8Array): Promise<Buffer>;
 }
 
-/**
- * The rejection when this install holds no platform key, kept for the whole launch. The renderer
- * matches this text (older desktop builds use it too) to fall back to its IndexedDB pair.
- */
-const NO_PLATFORM_KEY = 'No platform transit key';
-
 /** The Secure Enclave's encrypted handle to its key. */
 const ENCLAVE_FILE = 'transit-key.bin';
-/** The OS keyring tier's private key. */
+/** The OS keyring store's private key. */
 const KEYRING_FILE = 'transit-key-software.bin';
-/** The tier this install chose. Not secret. */
-const TIER_FILE = 'transit-key-tier.json';
 
 let backend: Promise<TransitKeyBackend> | null = null;
 
@@ -71,19 +59,27 @@ class SelfCheckFailed extends Error {
   }
 }
 
-/** No OS keyring behind safeStorage on this machine, so no tier that seals a file can work. */
-class KeyringUnavailable extends Error {
-  constructor(fileName: string) {
-    super(`No OS keyring to store ${fileName}`);
-    this.name = 'KeyringUnavailable';
+/**
+ * Every failure the renderer sees, in the text the dashboard parses back into its
+ * TransitKeyUnavailableError (IPC keeps only an error's message).
+ */
+class TransitKeyUnavailable extends Error {
+  constructor(storage: TransitKeyStorage | 'unknown', reason: string) {
+    super(`Transit key unavailable (${storage}): ${reason}`);
+    this.name = 'TransitKeyUnavailable';
   }
 }
 
-const isTierUnsupported = (error: unknown): boolean =>
-  isUnsupported(error) || error instanceof KeyringUnavailable;
-
-const isNoPlatformKey = (error: unknown): boolean =>
-  error instanceof Error && error.message === NO_PLATFORM_KEY;
+function unavailable(storage: TransitKeyStorage | 'unknown', error: unknown): Error {
+  if (error instanceof TransitKeyUnavailable) return error;
+  const reason =
+    storage !== 'unknown' && storage !== 'os_keyring' && isUnsupported(error)
+      ? `the hardware this key is kept in cannot be used here (${String(error)})`
+      : error instanceof Error
+        ? error.message
+        : String(error);
+  return new TransitKeyUnavailable(storage, reason);
+}
 
 const userDataPath = (fileName: string): string => path.join(app.getPath('userData'), fileName);
 
@@ -131,37 +127,13 @@ async function readSealed(fileName: string): Promise<Buffer | null> {
   return Buffer.from(safeStorage.decryptString(sealed), 'base64');
 }
 
-// Throws when the value cannot be kept: a key that is not kept would change on the next launch,
-// so without a keyring the tier cannot be used here at all.
+// Throws when the value cannot be kept: a key that is not kept would change on the next launch.
 async function writeSealed(fileName: string, value: Buffer): Promise<void> {
-  if (!keyringAvailable()) throw new KeyringUnavailable(fileName);
+  if (!keyringAvailable()) throw new Error(`No OS keyring to store ${fileName}`);
   await writeFileAtomic(
     userDataPath(fileName),
     safeStorage.encryptString(value.toString('base64'))
   );
-}
-
-/** The saved tier; null when there is none yet, or the file holds no tier it knows. */
-async function readSavedTier(): Promise<Tier | null> {
-  let text: string;
-  try {
-    text = await fs.readFile(userDataPath(TIER_FILE), 'utf8');
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
-    throw error;
-  }
-  try {
-    const tier = (JSON.parse(text) as { tier?: unknown }).tier;
-    if (TIERS.includes(tier as Tier)) return tier as Tier;
-  } catch {
-    // Not JSON: chosen again below.
-  }
-  log.warn(`[TransitKey] ${TIER_FILE} holds no known tier; choosing again`);
-  return null;
-}
-
-async function saveTier(tier: Tier): Promise<void> {
-  await writeFileAtomic(userDataPath(TIER_FILE), JSON.stringify({ tier }));
 }
 
 // One ECDH against a throwaway point, checked from the other side, proves a platform key works
@@ -272,7 +244,7 @@ function keyringKeyBackend(ecdh: ECDH): TransitKeyBackend {
 // A software key in this process, its private key sealed with safeStorage in userData, so the
 // same key is used across launches. Node runs the ECDH, so there is no helper to self-check.
 async function keyringBackend(): Promise<TransitKeyBackend> {
-  if (!keyringAvailable()) throw new KeyringUnavailable(KEYRING_FILE);
+  if (!keyringAvailable()) throw new Error(`No OS keyring to store ${KEYRING_FILE}`);
   const ecdh = createECDH('prime256v1');
   const stored = await readSealed(KEYRING_FILE);
   if (stored) {
@@ -289,46 +261,52 @@ async function keyringBackend(): Promise<TransitKeyBackend> {
   return keyringKeyBackend(ecdh);
 }
 
-function openTier(tier: TransitKeyStorage): Promise<TransitKeyBackend> {
-  switch (tier) {
+function openStore(storage: TransitKeyStorage): Promise<TransitKeyBackend> {
+  switch (storage) {
     case 'secure_enclave':
       return secureEnclaveBackend();
     case 'tpm':
     case 'software':
-      return windowsBackend(tier);
+      return windowsBackend(storage);
     case 'os_keyring':
       return keyringBackend();
   }
 }
 
-async function selectBackend(): Promise<TransitKeyBackend> {
-  const saved = await readSavedTier();
-  if (saved === 'none') throw new Error(NO_PLATFORM_KEY);
-  if (saved) {
-    try {
-      return await openTier(saved);
-    } catch (error) {
-      if (!isTierUnsupported(error)) throw error;
-      // The machine can no longer do the saved tier (a TPM switched off, a build without the
-      // helper): its key is out of reach either way, so choose again.
-      log.warn(`[TransitKey] Saved ${saved} tier is no longer supported; choosing again`, error);
+/**
+ * This machine's store, from what it has: its secure hardware, else that platform's software
+ * store. A probe that fails (rather than answering) fails the choice.
+ */
+async function detectStore(): Promise<TransitKeyStorage> {
+  switch (process.platform) {
+    case 'darwin': {
+      if (await hasSecureEnclave()) return 'secure_enclave';
+      // An Enclave key here means this Mac has an Enclave; the answer is wrong, not the key.
+      if (existsSync(userDataPath(ENCLAVE_FILE))) {
+        throw new TransitKeyUnavailable(
+          'secure_enclave',
+          `this Mac holds a Secure Enclave key (${ENCLAVE_FILE}) but reports no Secure Enclave`
+        );
+      }
+      return 'os_keyring';
     }
+    case 'win32':
+      return (await hasTpm()) ? 'tpm' : 'software';
+    case 'linux':
+      return 'os_keyring';
+    default:
+      throw new Error(`No transit key store on ${process.platform}`);
   }
+}
 
-  for (const tier of CANDIDATE_TIERS[process.platform] ?? []) {
-    try {
-      const chosen = await openTier(tier);
-      await saveTier(tier);
-      return chosen;
-    } catch (error) {
-      // A failure that is not "cannot work here" saves nothing: the next call starts over, so
-      // one slow or busy launch never settles the install on a lesser tier.
-      if (!isTierUnsupported(error)) throw error;
-      log.info(`[TransitKey] ${tier} is not supported here`, error);
-    }
+async function selectBackend(): Promise<TransitKeyBackend> {
+  let storage: TransitKeyStorage | 'unknown' = 'unknown';
+  try {
+    storage = await detectStore();
+    return await openStore(storage);
+  } catch (error) {
+    throw unavailable(storage, error);
   }
-  await saveTier('none');
-  throw new Error(NO_PLATFORM_KEY);
 }
 
 function getBackend(): Promise<TransitKeyBackend> {
@@ -338,14 +316,9 @@ function getBackend(): Promise<TransitKeyBackend> {
       return selected;
     },
     (error: unknown) => {
-      // A failure is not kept, so the next call (from any window) tries again. "No platform
-      // key" is kept for the launch: every window then uses the same IndexedDB pair.
-      if (isNoPlatformKey(error)) {
-        log.warn('[TransitKey] No platform key; windows use their WebCrypto key');
-      } else {
-        backend = null;
-        log.warn('[TransitKey] Transit key unavailable for now; the next call retries', error);
-      }
+      // A failure is not kept, so the next call (from any window) tries the same store again.
+      backend = null;
+      log.error('[TransitKey] No transit key; encrypted data stays closed until a retry', error);
       throw error;
     }
   );
@@ -357,5 +330,11 @@ export async function getTransitPublicKey(): Promise<Uint8Array> {
 }
 
 export async function deriveTransitSharedSecret(serverPoint: Uint8Array): Promise<Uint8Array> {
-  return new Uint8Array(await (await getBackend()).derive(serverPoint));
+  const selected = await getBackend();
+  try {
+    return new Uint8Array(await selected.derive(serverPoint));
+  } catch (error) {
+    log.error(`[TransitKey] ${selected.storage} key agreement failed`, error);
+    throw unavailable(selected.storage, error);
+  }
 }

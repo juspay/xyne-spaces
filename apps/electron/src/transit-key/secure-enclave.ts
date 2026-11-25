@@ -1,4 +1,4 @@
-import { base64Field, runHelper } from './helper-process';
+import { availableField, base64Field, runHelper } from './helper-process';
 
 /**
  * Talks to the bundled Swift helper (native/transit-key/secure-enclave.swift) that keeps the
@@ -6,6 +6,11 @@ import { base64Field, runHelper } from './helper-process';
  */
 
 const HELPER = 'transit-key';
+
+/** Whether this Mac has a Secure Enclave (Apple Silicon, or Intel with a T2). */
+export async function hasSecureEnclave(): Promise<boolean> {
+  return availableField(await runHelper(HELPER, ['probe'], ''));
+}
 
 /** A new key in the Secure Enclave; returns the Enclave's encrypted handle to it. */
 export async function createEnclaveKey(): Promise<Buffer> {

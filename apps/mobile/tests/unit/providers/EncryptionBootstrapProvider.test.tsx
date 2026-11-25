@@ -43,8 +43,11 @@ jest.mock('@/src/services/encryption/transitPlatform', () => ({
   installMobileTransitPlatform: jest.fn(),
 }));
 jest.mock('@/src/utils/logger', () => ({
-  Event: { ENCRYPTION_KEY_GENERATED: 'ENCRYPTION_KEY_GENERATED' },
-  logger: { info: jest.fn(), warn: jest.fn() },
+  Event: {
+    ENCRYPTION_KEY_GENERATED: 'ENCRYPTION_KEY_GENERATED',
+    ENCRYPTION_KEY_REGISTRATION_FAILED: 'ENCRYPTION_KEY_REGISTRATION_FAILED',
+  },
+  logger: { info: jest.fn(), warn: jest.fn(), error: jest.fn() },
 }));
 jest.mock('@react-native-community/netinfo', () => ({
   addEventListener: () => () => undefined,

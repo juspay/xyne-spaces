@@ -1,6 +1,5 @@
 import type { EncryptedTableConfig } from '../zero/query-validation.js';
-import { generateTransitKeyPair } from './keyring.js';
-import type { TransitKeyPair, TransitKeyStore, TransitServerKeys } from './keyring.js';
+import type { TransitServerKeys } from './keyring.js';
 import { getTransitPlatform } from './transit-platform.js';
 
 export interface EncryptionConfig {
@@ -62,18 +61,3 @@ export async function fetchTransitServerKeys(): Promise<TransitServerKeys> {
   }
   return parseServerKeys(await response.json());
 }
-
-let memoryPair: Promise<TransitKeyPair> | null = null;
-
-/** One key pair per page load, for hosts without a persistent store. */
-export const memoryTransitKeyStore: TransitKeyStore = {
-  getOrCreate(): Promise<TransitKeyPair> {
-    if (!memoryPair) {
-      memoryPair = generateTransitKeyPair();
-      memoryPair.catch(() => {
-        memoryPair = null;
-      });
-    }
-    return memoryPair;
-  },
-};

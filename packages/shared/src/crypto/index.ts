@@ -7,11 +7,11 @@ export {
   fetchEncryptionConfig,
   registerTransitKey,
   fetchTransitServerKeys,
-  memoryTransitKeyStore,
 } from './transit.js';
 export type { EncryptionConfig } from './transit.js';
 export {
   TransitKeyring,
+  TransitKeyUnavailableError,
   generateTransitKeyPair,
   webCryptoTransitKeyPair,
   deriveTransitKey,
@@ -21,11 +21,7 @@ export {
   fromBase64,
 } from './keyring.js';
 export type { TransitKeyPair, TransitKeyStore, TransitServerKey, TransitServerKeys } from './keyring.js';
-export {
-  indexedDbTransitKeyStore,
-  chainTransitKeyStores,
-} from './transit-key-stores.js';
-export type { ChainTransitKeyStoresOptions } from './transit-key-stores.js';
+export { indexedDbTransitKeyStore } from './transit-key-stores.js';
 export {
   getClientManifest,
   refreshClientManifest,

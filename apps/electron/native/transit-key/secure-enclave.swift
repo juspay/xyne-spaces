@@ -3,6 +3,7 @@
 // (`dataRepresentation`), which works on this Mac alone. No user presence is required, so it
 // never shows a prompt.
 //
+//   transit-key probe    → {"available": "true" | "false"}: whether this Mac has a Secure Enclave
 //   transit-key create   → {"blob": b64}
 //   transit-key agree    stdin {"blob": b64, "serverPoint": b64}
 //                        → {"secret": b64 (32 bytes), "publicKey": b64 (65-byte uncompressed point)}
@@ -52,10 +53,15 @@ func bytes(_ input: [String: String], _ name: String) throws -> Data {
 }
 
 do {
+  let command = CommandLine.arguments.dropFirst().first
+  // The one question that picks this Mac's store: asked on every launch, answered exit 0.
+  if command == "probe" {
+    respond(["available": SecureEnclave.isAvailable ? "true" : "false"])
+  }
   guard SecureEnclave.isAvailable else {
     throw Failure(message: "Secure Enclave unavailable", code: exitUnsupported)
   }
-  switch CommandLine.arguments.dropFirst().first {
+  switch command {
   case "create":
     let key = try SecureEnclave.P256.KeyAgreement.PrivateKey()
     respond(["blob": key.dataRepresentation.base64EncodedString()])
@@ -84,7 +90,7 @@ do {
       "publicKey": key.publicKey.x963Representation.base64EncodedString(),
     ])
   default:
-    throw Failure(message: "usage: transit-key create | agree")
+    throw Failure(message: "usage: transit-key probe | create | agree")
   }
 } catch let failure as Failure {
   respond(["error": failure.message], code: failure.code)

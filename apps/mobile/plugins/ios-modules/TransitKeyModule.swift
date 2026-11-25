@@ -3,20 +3,21 @@
 //  Lotus
 //
 //  The transit key on iOS, an ECDH P-256 key that needs no user authentication (so it never
-//  prompts), created on first use:
+//  prompts), created on first use. A device has exactly one of:
 //
 //  - The Secure Enclave key: ECDH runs inside the Enclave. The Enclave hands out only an
 //    encrypted handle to the key, usable by this phone's Enclave alone, which is kept in the
 //    Keychain. Every iPhone that runs the app has a Secure Enclave.
-//  - The Keychain key, whenever the Enclave key fails (and in the Simulator, which has no
-//    Enclave): a key made in software whose private key is kept in the Keychain, encrypted by
-//    iOS, and read back only for each ECDH.
+//  - The Keychain key, only where there is no Enclave (the Simulator): a key made in software
+//    whose private key is kept in the Keychain, encrypted by iOS, and read back only for each ECDH.
 //
-//  Both are Keychain items in an access group of their own (not the one the notification
-//  extension shares), usable after the first unlock since boot, never in backups and never
-//  moved to another phone; the Enclave key itself is usable on the same terms. Once a tier is
-//  chosen it is kept, so the public key changes only when the key itself is broken. Only the
-//  public key and ECDH results leave this module.
+//  Which one is decided by whether the device has an Enclave, never by a failure: an Enclave key
+//  that cannot be made or used fails the call loudly (and is retried), it is never replaced by a
+//  Keychain key. Both are Keychain items in an access group of their own (not the one the
+//  notification extension shares), usable after the first unlock since boot, never in backups
+//  and never moved to another phone; the Enclave key itself is usable on the same terms. The
+//  public key changes only when the key itself is broken. Only the public key and ECDH results
+//  leave this module.
 //
 
 import CryptoKit
@@ -50,7 +51,7 @@ class TransitKeyModule: NSObject {
         let key = try Self.checkedKey()
         resolve(["publicKey": key.publicPoint.base64EncodedString(), "storage": key.storage])
       } catch {
-        reject(Self.errorCode, Self.describe(error), error)
+        Self.fail(reject, error)
       }
     }
   }
@@ -71,7 +72,7 @@ class TransitKeyModule: NSObject {
         defer { secret.resetBytes(in: 0..<secret.count) }
         resolve(secret.base64EncodedString())
       } catch {
-        reject(Self.errorCode, Self.describe(error), error)
+        Self.fail(reject, error)
       }
     }
   }
@@ -152,26 +153,23 @@ class TransitKeyModule: NSObject {
     return key
   }
 
-  /// The tier is kept across launches, so the public key never changes unless the key is broken:
-  /// - A Keychain key, once one exists, is used for good.
+  /// The device's one store. Any failure other than a stored key being broken (a locked phone, a
+  /// Keychain error, an Enclave that cannot make a key) fails this call with nothing cached, so
+  /// the next call retries the same store.
+  /// - A Secure Enclave: the stored Enclave key, else (none yet, or a broken one now deleted) a
+  ///   new one.
   /// - No Secure Enclave (the Simulator): the Keychain key.
-  /// - Otherwise the stored Enclave key. Any failure other than the key being broken (a locked
-  ///   phone, a Keychain error) fails this call with nothing cached, so the next call retries it.
-  /// - With no usable Enclave key (none yet, or a broken one now deleted): a new one, else the
-  ///   Keychain key, which then stays.
   private static func selectKey() throws -> TransitKey {
-    if try itemExists(account: keychainAccount) || !SecureEnclave.isAvailable {
-      return try keychainKey()
-    }
+    guard SecureEnclave.isAvailable else { return try keychainKey() }
     if let key = try storedEnclaveKey() { return key }
-    do {
-      return try newEnclaveKey()
-    } catch {
-      NSLog(
-        "[TransitKey] The Secure Enclave cannot make a transit key; using a Keychain key: %@",
-        describe(error))
-      return try keychainKey()
-    }
+    return try newEnclaveKey()
+  }
+
+  /// Rejections name the device's store, "secure_enclave" or "keychain", ahead of the reason.
+  private static func fail(_ reject: RCTPromiseRejectBlock, _ error: Error) {
+    let storage = SecureEnclave.isAvailable ? "secure_enclave" : "keychain"
+    NSLog("[TransitKey] No transit key from the %@ store: %@", storage, describe(error))
+    reject(errorCode, "\(storage): \(describe(error))", error)
   }
 
   /// The Enclave says the key object is corrupt or gone, or agreement worked but gave the wrong
@@ -329,14 +327,6 @@ class TransitKeyModule: NSObject {
     guard status == errSecSuccess else { throw TransitKeyError.keychain(status) }
     guard let data = result as? Data else { throw TransitKeyError.corruptItem }
     return data
-  }
-
-  /// Whether the item exists, without reading its data.
-  private static func itemExists(account: String) throws -> Bool {
-    let status = SecItemCopyMatching(try baseQuery(account: account) as CFDictionary, nil)
-    if status == errSecItemNotFound { return false }
-    guard status == errSecSuccess else { throw TransitKeyError.keychain(status) }
-    return true
   }
 
   /// Replaces the item in one step when it exists, else adds it: the stored value is never
