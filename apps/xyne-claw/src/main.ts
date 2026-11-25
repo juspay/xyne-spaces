@@ -20,6 +20,7 @@ import { chatTitleRouter } from "./routes/chat-title.js";
 import { attachmentsRouter } from "./routes/attachments.js";
 import { xorDecideTryRouter } from "./routes/xor-decide-try.js";
 import { litellmModelsRouter } from "./routes/litellm-models.js";
+import { workflowSandboxRouter } from "./routes/workflow-sandbox.js";
 import { startSessionCleanup, flushAllActiveSessions } from "./session-store.js";
 import { beginDraining, isDraining } from "./drain.js";
 import { RUN_EXECUTION_QUEUE_NAME, markRunQueueDrainPaused, runQueueConcurrency, runQueueConnectionOptions, startRunQueueWorker } from "./run-queue-worker.js";
@@ -104,6 +105,7 @@ app.use(xorDecideTryRouter);
 app.use(chatTitleRouter);
 app.use(attachmentsRouter);
 app.use(litellmModelsRouter);
+app.use(workflowSandboxRouter);
 
 const server = app.listen(SERVER.port, () => {
   log.info(`[xyne-claw] Server listening on port ${SERVER.port}`);

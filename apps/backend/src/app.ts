@@ -238,6 +238,7 @@ import formFieldValuesRoutes from '@/routes/formFieldValues';
 import officeConversionRoutes from '@/routes/officeConversion';
 import sdlcRoutes from '@/routes/sdlc';
 import sdlcClawRoutes from '@/routes/sdlcClaw';
+import clawInternalRoutes from '@/routes/clawInternal';
 import sdlcVcsInternalRoutes from '@/routes/sdlcVcsInternal';
 import sdlcAgentInternalRoutes from '@/routes/sdlcAgentInternal';
 import { createSdkPublicRouter, createSdkRouter } from '@/api/sdk';
@@ -751,6 +752,8 @@ export class App {
         res.status(500).json({ error: 'Internal error' });
       }
     });
+    // Only the Claw services (XYNE_CLAW_S2S_KEY).
+    this.app.use('/api/internal/claw', clawInternalRoutes);
     this.app.post(
       '/api/internal/automations/claw-callback/:executionId/:stepName',
       validateS2SKey,

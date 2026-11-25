@@ -646,25 +646,33 @@ function serverToolsKey(serverType: string, serverName: string): string {
   return `${serverType}\u0000${serverName}`;
 }
 
+// Under the app-mode swap, xyne-spaces-app-tools stands in for xyne-spaces, so the agent's
+// xyne-spaces grants decide which of its tools are listed (prefilter and enforcement alike).
+const APP_SWAP_CONFIGURED_AS: ReadonlyMap<string, string> = new Map([["xyne-spaces-app-tools", "xyne-spaces"]]);
+
 async function serverTypesAgentCannotUse(
   entries: ListEntry[],
   userId: string,
   config: AgentToolsConfig | undefined,
   sessionAgentTools: { slug: string; subagentToolRefs: SubagentToolRefs[] } | null | undefined,
+  configuredAs: ReadonlyMap<string, string> = new Map(),
 ): Promise<Set<string>> {
   const skipped = new Set<string>();
   if (!config || !sessionAgentTools) return skipped;
   const known = await loadKnownMcpTools(userId, [...new Set(entries.map((e) => e.serverType))]);
   for (const entry of entries) {
     if (CUSTOM_TOOL_INJECTIONS.some((inj) => inj.match(entry.serverType))) continue;
-    const keep = mcpServerMayServeAgentConfig({
-      config,
-      serverType: entry.serverType,
-      serverName: entry.serverName,
-      knownTools: known.get(entry.serverType) ?? null,
-      parseGatewayServerType,
-      subagentRefs: sessionAgentTools.subagentToolRefs,
-    });
+    const mayServe = (serverType: string, serverName: string) =>
+      mcpServerMayServeAgentConfig({
+        config,
+        serverType,
+        serverName,
+        knownTools: known.get(entry.serverType) ?? null,
+        parseGatewayServerType,
+        subagentRefs: sessionAgentTools.subagentToolRefs,
+      });
+    const alias = configuredAs.get(entry.serverType);
+    const keep = mayServe(entry.serverType, entry.serverName) || (!!alias && mayServe(alias, alias));
     if (!keep) skipped.add(entry.serverType);
   }
   return skipped;
@@ -676,6 +684,10 @@ function enforceMcpToolsListing(
   agentSlug: string,
   entryTypes: Map<string, EnforcementLogType>,
   subagentRefs: SubagentToolRefs[] = [],
+  // Server types checked against the agent config as another type: under the app-mode
+  // swap, xyne-spaces-app-tools stands in for xyne-spaces, so the agent's xyne-spaces
+  // grants decide which of its tools are listed.
+  configuredAs: ReadonlyMap<string, string> = new Map(),
 ): McpServerTools[] {
   let kept = 0;
   let dropped = 0;
@@ -688,14 +700,26 @@ function enforceMcpToolsListing(
       continue;
     }
 
+    const alias = configuredAs.get(serverTools.serverType);
     const retainedForSubagents = new Set<string>();
-    const filtered = filterMcpServerToolsForAgentConfig(
-      serverTools,
-      config,
-      parseGatewayServerType,
-      subagentRefs,
-      retainedForSubagents,
-    );
+    const aliasFiltered = alias
+      ? filterMcpServerToolsForAgentConfig(
+          { ...serverTools, serverType: alias, serverName: alias },
+          config,
+          parseGatewayServerType,
+          subagentRefs,
+          retainedForSubagents,
+        )
+      : null;
+    const filtered = aliasFiltered
+      ? { ...aliasFiltered, serverType: serverTools.serverType, serverName: serverTools.serverName }
+      : filterMcpServerToolsForAgentConfig(
+          serverTools,
+          config,
+          parseGatewayServerType,
+          subagentRefs,
+          retainedForSubagents,
+        );
     if (!filtered) {
       dropped += 1;
       const type =
@@ -1045,6 +1069,62 @@ router.use("/:sessionId/actions", requireStrictS2S, requireSessionToken);
  * "connected". Built before agent-selection enforcement, so it answers "can this
  * user/agent reach it", not "is the agent granted it".
  */
+/**
+ * Whether this session's Spaces calls are served in app mode, by xyne-spaces-app-tools
+ * acting as the agent's bot instead of the user's xyne-spaces server. Automation runs
+ * always are; without SPACES_DB_URL there is no user Spaces session, so every run is.
+ * The swap applies only when the bot's app token resolves AND the app-tools server row
+ * exists — otherwise it would strip Spaces access and silently break the run.
+ * Shared by the listing and by /mcp/call + /actions/sign, which route the runner's
+ * xyne-spaces calls back to app-tools for the same session.
+ */
+async function resolveAppModeSwap(
+  userId: string,
+  sessionId: string,
+  spacesAppId: string | undefined,
+): Promise<{
+  swap: boolean;
+  useAppMode: boolean;
+  appUserId: string;
+  hasAppCreds: boolean;
+  hasAppToolsRow: boolean;
+  runCtx: Awaited<ReturnType<typeof import("./webhook.js").getSession>> | null;
+}> {
+  const { getSession } = await import("./webhook.js");
+  const runCtx = await getSession(sessionId).catch(() => null);
+  const isAutomationRun =
+    runCtx?.isAutomation === true ||
+    runCtx?.resolveMentions === true ||
+    !!runCtx?.externalResultCallback;
+  const useAppMode = isAutomationRun || !CONFIG.spacesDbUrl;
+  if (!useAppMode) {
+    return { swap: false, useAppMode, appUserId: userId, hasAppCreds: false, hasAppToolsRow: false, runCtx };
+  }
+  // A listing without a run context (e.g. after the session's run entry expired) still
+  // knows the agent from the session's spacesAppId; its bot is the app user to act as.
+  const appUserId =
+    runCtx?.spacesAppUserId ||
+    (spacesAppId
+      ? (await prisma.agent.findUnique({ where: { spacesAppId }, select: { spacesAppUserId: true } }))
+          ?.spacesAppUserId
+      : null) ||
+    userId;
+  const hasAppCreds = !!(await getAppTokenCredentials(appUserId));
+  const hasAppToolsRow = !!(await prisma.mcpServer.findUnique({ where: { type: "xyne-spaces-app-tools" } }));
+  return { swap: hasAppCreds && hasAppToolsRow, useAppMode, appUserId, hasAppCreds, hasAppToolsRow, runCtx };
+}
+
+/** The server that serves `serverType` for this session: app-tools for xyne-spaces under the swap. */
+async function backingServerType(
+  serverType: string,
+  userId: string,
+  sessionId: string,
+  spacesAppId: string | undefined,
+): Promise<string> {
+  if (serverType !== "xyne-spaces") return serverType;
+  return (await resolveAppModeSwap(userId, sessionId, spacesAppId)).swap ? "xyne-spaces-app-tools" : serverType;
+}
+
 async function buildMcpResolutionEntries(args: {
   userId: string;
   sessionId: string;
@@ -1116,21 +1196,14 @@ async function buildMcpResolutionEntries(args: {
   // splicing the listing afterwards. `isAutomation` is the explicit dispatch
   // flag; resolveMentions/externalResultCallback is the legacy proxy kept
   // for sessions dispatched before the flag existed.
-  const { getSession } = await import("./webhook.js");
-  const runCtx = await getSession(sessionId).catch(() => null);
-  const isAutomationRun =
-    runCtx?.isAutomation === true ||
-    runCtx?.resolveMentions === true ||
-    !!runCtx?.externalResultCallback;
-  let automationAppSwap = false;
-  if (isAutomationRun) {
-    // Only swap when the app token actually resolves AND the app-tools
-    // server row exists — otherwise we'd strip Spaces access and silently
-    // break the run. Keep the user server and log loudly instead.
-    const appCreds = await getAppTokenCredentials(runCtx?.spacesAppUserId || userId);
-    const appToolsRow = await prisma.mcpServer.findUnique({ where: { type: "xyne-spaces-app-tools" } });
-    if (appCreds && appToolsRow) {
-      automationAppSwap = true;
+  //
+  // Without SPACES_DB_URL there is no source for a user's Spaces session, so
+  // every run is served in app mode: Spaces calls act as the agent's bot.
+  const appMode = await resolveAppModeSwap(userId, sessionId, spacesAppId);
+  const { runCtx, appUserId } = appMode;
+  const automationAppSwap = appMode.swap;
+  if (appMode.useAppMode) {
+    if (automationAppSwap) {
       let dropped = 0;
       for (let i = entries.length - 1; i >= 0; i--) {
         if (entries[i]!.serverType === "xyne-spaces") {
@@ -1144,8 +1217,8 @@ async function buildMcpResolutionEntries(args: {
       );
     } else {
       log.warn(
-        `[mcp/tools] automation app-mode SKIPPED for userId=${userId} appUserId=${runCtx?.spacesAppUserId ?? "none"}: ` +
-        `appCreds=${!!appCreds} appToolsRow=${!!appToolsRow}. ` +
+        `[mcp/tools] automation app-mode SKIPPED for userId=${userId} appUserId=${appUserId === userId ? "none" : appUserId}: ` +
+        `appCreds=${appMode.hasAppCreds} appToolsRow=${appMode.hasAppToolsRow}. ` +
         "Keeping xyne-spaces user MCP to avoid stripping Spaces access. " +
         "If this is an automation run, the agent's app is likely not installed / app token missing.",
       );
@@ -1327,7 +1400,13 @@ async function listContextMcpServers({ userId, sessionId, agentSlug, spacesAppId
         })
       : Promise.resolve(null);
 
-  const prefilterSkips = await serverTypesAgentCannotUse(entries, userId, strictAgentToolsConfig, sessionAgentTools);
+  const prefilterSkips = await serverTypesAgentCannotUse(
+    entries,
+    userId,
+    strictAgentToolsConfig,
+    sessionAgentTools,
+    automationAppSwap ? APP_SWAP_CONFIGURED_AS : undefined,
+  );
   const listingEntries = entries.filter((entry) => !prefilterSkips.has(entry.serverType));
   if (prefilterSkips.size > 0) {
     log.info(
@@ -1661,8 +1740,19 @@ router.get("/:sessionId/mcp/tools", async (req: Request<{ sessionId: string }>, 
           sessionAgentTools.slug,
           entryTypes,
           sessionAgentTools.subagentToolRefs,
+          automationAppSwap ? APP_SWAP_CONFIGURED_AS : undefined,
         ),
       );
+    }
+
+    // Under the swap, app-tools is this run's xyne-spaces: list it under that type so the
+    // runner's grant matching and the "configured but unresolved" check see the server the
+    // agent config names. /mcp/call and /actions/sign route xyne-spaces back to app-tools.
+    if (automationAppSwap) {
+      const appToolsIdx = data.findIndex((s) => s.serverType === "xyne-spaces-app-tools");
+      if (appToolsIdx >= 0) {
+        data[appToolsIdx] = { ...data[appToolsIdx]!, serverType: "xyne-spaces", serverName: "Xyne Spaces" };
+      }
     }
 
     // Servers the agent's selection grants that never reached `data`: no
@@ -1712,7 +1802,7 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
     const strictAgentToolsConfig = isStrictAgentToolsEnabled()
       ? await withSurfaceDefaultToolsConfig(sessionAgentTools?.toolsConfig, req.params.sessionId, spacesAppId, userId)
       : undefined;
-    const { serverType, tool, params, permission, backendId, subagentId } = req.body as {
+    const { serverType: requestedServerType, tool, params, permission, backendId, subagentId } = req.body as {
       serverType?: string;
       tool?: string;
       params?: Record<string, unknown>;
@@ -1723,10 +1813,11 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
       subagentId?: string;
     };
 
-    if (!serverType || typeof serverType !== "string") {
+    if (!requestedServerType || typeof requestedServerType !== "string") {
       res.status(400).json({ success: false, error: "serverType is required" });
       return;
     }
+    let serverType: string = requestedServerType;
 
     if (!tool || typeof tool !== "string") {
       res.status(400).json({ success: false, error: "tool is required" });
@@ -2105,6 +2196,10 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
       return;
     }
 
+    // The agent-config gates above saw the type the runner listed; from here on the call
+    // runs against the server that serves it (app-tools for xyne-spaces under the swap).
+    serverType = await backingServerType(serverType, userId, req.params.sessionId, spacesAppId);
+
     if (!(await hasConnectorDefinition(serverType))) {
       res.status(400).json({ success: false, error: `No adapter for server type: ${serverType}` });
       return;
@@ -2234,6 +2329,8 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
         return;
       }
       const action = writeActionPayload({
+        // The executing server (app-tools under the swap): approved-write runs the action
+        // by this type, with that server's credentials.
         serverType,
         tool,
         params: effectiveParams,
@@ -2727,6 +2824,9 @@ router.post("/:sessionId/actions/sign", async (req: Request<{ sessionId: string 
           if (sdlcChannelId) actionParams = { ...actionParams, sdlcChannelId };
         }
       } else {
+        // Sign for the server that executes the action (app-tools for xyne-spaces under the
+        // swap): approved-write runs it by the signed type, with that server's credentials.
+        serverType = await backingServerType(serverType, userId, req.params.sessionId, spacesAppId);
         // Revalidate non-gateway actions before issuing a signature.
         if (!(await hasConnectorDefinition(serverType))) {
           res.status(400).json({ success: false, error: `No adapter for server type: ${serverType}` });

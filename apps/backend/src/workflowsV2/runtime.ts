@@ -26,6 +26,7 @@ import { conversationalFlowQueue } from '@/queues/conversationalFlowQueue';
 import { RedisEventBus } from './adapters/event-bus';
 import { PrismaPersistenceAdapter } from './adapters/persistence';
 import { BullQueueAdapter } from './adapters/queue';
+import { createWorkflowSandboxAdapter } from './adapters/sandbox';
 import { BullSchedulerAdapter } from './adapters/scheduler';
 import { workflowStorage } from './adapters/storage';
 import { XyneWorkflowAuthorizer } from './authorizer';
@@ -45,6 +46,8 @@ export const persistence = new PrismaPersistenceAdapter();
 export const eventBus = new RedisEventBus();
 
 const storage = workflowStorage;
+/** Code-execution sandbox (Kata, through xyne-claw) for the CODE step and `run_code`; undefined when not configured. */
+const sandbox = createWorkflowSandboxAdapter();
 const services = new ServiceRegistry();
 
 const connectors = new ConnectorRegistry();
@@ -131,6 +134,7 @@ const executor = new WorkflowExecutor(persistence, connectors, services, {
   egressProxyUrl: config.ssrf.egressProxyUrl,
   storage,
   logger: sdkLogger,
+  ...(sandbox ? { sandbox } : {}),
 });
 
 export const workflowRuntime = new WorkflowRuntime<Record<string, unknown>, XyneCtx, XyneFilter>({
@@ -141,6 +145,7 @@ export const workflowRuntime = new WorkflowRuntime<Record<string, unknown>, Xyne
   connectors,
   executor,
   storage,
+  ...(sandbox ? { sandbox } : {}),
   eventBus,
   authorizer: new XyneWorkflowAuthorizer(),
   logger: sdkLogger,
