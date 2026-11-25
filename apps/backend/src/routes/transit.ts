@@ -2,17 +2,12 @@ import { Router, type Request, type Response } from 'express';
 import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
 import { config } from '@/config/env';
 import { getEncryptionProvider } from '@/services/encryption';
-import { TRANSIT_KEY_COOKIE } from '@/services/encryption/types';
-import { deviceCookieOptions } from '@/services/authSessionService';
-import { websocketService } from '@/services/websocketService';
 import { logger } from '@/utils/logger';
 
 const router = Router();
 
 // Base64 of a 65-byte uncompressed P-256 point (leading 0x04 encodes as 'B').
 const P256_POINT_BASE64 = /^B[A-Za-z0-9+/]{86}=$/;
-// The key pair belongs to the browser, not the user, so the cookie outlives any session.
-const TRANSIT_KEY_COOKIE_MAX_AGE_MS = 365 * 24 * 60 * 60 * 1000;
 
 const registerLimiter = rateLimit({
   windowMs: 60 * 1000,
@@ -43,11 +38,7 @@ router.get('/config', async (_req: Request, res: Response) => {
   }
 });
 
-// The client's P-256 public key, which every transit key for it is derived from. Kept by
-// the encryption service under the auth session id (for pushes that carry no cookie) and
-// set as the `xk` cookie for websockets and the sync proxy, which cannot see headers the
-// client sets. Responds with the encryption service's public keys, the other half of the
-// derivation; nothing secret travels and nothing is minted.
+// The client's P-256 public key, kept by the encryption service under the auth session id; every transit key for the session is derived from it.
 router.post('/register', registerLimiter, async (req: Request, res: Response) => {
   const sid = req.user?.sid;
   if (!req.user || !sid) {
@@ -63,12 +54,6 @@ router.post('/register', registerLimiter, async (req: Request, res: Response) =>
 
   try {
     const serverKeys = await getEncryptionProvider().registerTransitClientKey(sid, publicKey);
-    websocketService.setSessionTransitKey(sid, publicKey);
-    res.cookie(TRANSIT_KEY_COOKIE, publicKey, {
-      ...deviceCookieOptions(req),
-      path: '/',
-      maxAge: TRANSIT_KEY_COOKIE_MAX_AGE_MS,
-    });
     res.json(serverKeys);
   } catch (err) {
     serviceUnavailable(res, 'key registration', req, err);
