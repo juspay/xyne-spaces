@@ -43,44 +43,6 @@ interface RunOptionsWithName {
   [key: string]: unknown;
 }
 
-async function encryptMutationArgs(
-  args: ReadonlyJSONValue | undefined,
-  keyring: TransitKeyring,
-  metrics: MetricsRecorder,
-  mutationName: string,
-): Promise<ReadonlyJSONValue | undefined> {
-  if (!args || typeof args !== 'object' || Array.isArray(args)) {
-    return args;
-  }
-  const record = args as Record<string, ReadonlyJSONValue>;
-  let modified = false;
-  const copy: Record<string, ReadonlyJSONValue> = {};
-  let encryptedCount = 0;
-
-  for (const [fieldName, value] of Object.entries(record)) {
-    if (typeof value === 'string' && value.length > 0) {
-      const startTime = performance.now();
-      copy[fieldName] = await encryptField(value, keyring);
-      const duration = performance.now() - startTime;
-      metrics.recordLatency('crypto.encrypt.field', duration, {
-        mutation: mutationName,
-        field: fieldName,
-      });
-      metrics.incrementCounter('crypto.encrypt.operations', {
-        mutation: mutationName,
-        status: 'success',
-      });
-      modified = true;
-      encryptedCount++;
-    }
-  }
-
-  if (!modified) {
-    return args;
-  }
-  return { ...record, ...copy };
-}
-
 async function decryptQueryResult(
   result: unknown,
   keyring: TransitKeyring,
@@ -125,45 +87,6 @@ async function decryptQueryResult(
   }
   return result;
 }
-
-const decryptArgs = async (
-  args: ReadonlyJSONValue | undefined,
-  keyring: TransitKeyring | null,
-  metrics: MetricsRecorder,
-  mutationName: string,
-): Promise<ReadonlyJSONValue | undefined> => {
-  if (!keyring || !args) return args;
-  if (typeof args === 'object' && args !== null) {
-    const decrypted: Record<string, unknown> = {};
-    for (const [k, value] of Object.entries(args)) {
-      if (typeof value === 'string' && value.startsWith('ENC:')) {
-        const startTime = performance.now();
-        try {
-          decrypted[k] = await decryptField(value, keyring);
-          const duration = performance.now() - startTime;
-          metrics.recordLatency('crypto.decrypt.args', duration, {
-            mutation: mutationName,
-            field: k,
-          });
-          metrics.incrementCounter('crypto.decrypt.args.operations', {
-            mutation: mutationName,
-            status: 'success',
-          });
-        } catch {
-          metrics.incrementCounter('crypto.decrypt.args.operations', {
-            mutation: mutationName,
-            status: 'error',
-          });
-          decrypted[k] = value;
-        }
-      } else {
-        decrypted[k] = value;
-      }
-    }
-    return decrypted as ReadonlyJSONValue;
-  }
-  return args;
-};
 
 export function useZero(): Zero {
   const originalZero = useOriginalZero();
@@ -311,43 +234,6 @@ export function useZero(): Zero {
               client: deferredResult.then(r => r.client),
               server,
             } as PromiseWithServerResult;
-            handleCompletion(result);
-            return result;
-          }
-
-          if (keyring && clientEncryptionEnabled) {
-            const originalFn = originalMutator.fn;
-            (originalMutator as { fn: (options: unknown) => Promise<unknown> }).fn = async (options: unknown) => {
-              const decryptedArgs = await decryptArgs(
-                (options as { args?: ReadonlyJSONValue }).args,
-                keyring,
-                metrics,
-                mutationName,
-              );
-              return originalFn({
-                ...(options as Record<string, unknown>),
-                args: decryptedArgs,
-              } as Parameters<typeof originalFn>[0]);
-            };
-
-            const deferredResult = encryptMutationArgs(
-              mutationRequest.args,
-              keyring,
-              metrics,
-              mutationName,
-            ).then(encryptedArgs =>
-                target.mutate({
-                  ...mutationRequest,
-                  args: encryptedArgs as TArgs,
-                  mutator: originalMutator,
-                } as Parameters<Zero['mutate']>[0]),
-              );
-
-            const result = {
-              client: deferredResult.then(r => r.client),
-              server: deferredResult.then(r => r.server),
-            } as PromiseWithServerResult;
-
             handleCompletion(result);
             return result;
           }

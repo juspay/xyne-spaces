@@ -135,6 +135,14 @@ const MUTATION_CONTRACTS: Record<string, RequestContract> = {
   'conversations.forwardMessage': conversationsForwardMessageClient,
 };
 
+/** Whether `value` holds transit ciphertext (`ENC:v<n>|tk-<version>|…`) anywhere. */
+function hasTransitCiphertext(value: unknown): boolean {
+  if (typeof value === 'string') return /^ENC:v\d+\|tk-/.test(value);
+  if (Array.isArray(value)) return value.some(hasTransitCiphertext);
+  if (value && typeof value === 'object') return Object.values(value).some(hasTransitCiphertext);
+  return false;
+}
+
 /** Who is mutating, for the encryption service: the transit caller (transitCaller). */
 export type MutationEncryptionContext = TransitCaller;
 
@@ -414,6 +422,21 @@ export async function prepareEncryptedMutations(
       if (!ruled.has(String(m?.name))) {
         // PREPARED_ARG is set here only; one the client sent is dropped.
         const { [PREPARED_ARG]: _forged, ...plain } = args as Record<string, unknown>;
+        // No rule: the args are plaintext. Transit ciphertext here comes from a client still
+        // encrypting every arg (an old tab); it is refused, never decrypted or stored.
+        if (hasTransitCiphertext(plain)) {
+          const key = randomUUID();
+          getCryptoOperations().add(1, { operation: 'mutation_args', status: 'error', reason: 'transit_without_rule' });
+          logger.warn('[encryptedMutation] transit ciphertext in a mutation without a manifest rule', { mutator: String(m!.name) });
+          prepared.set(key, {
+            error: new MutationEncryptionError(
+              'TRANSIT_WITHOUT_RULE',
+              `${String(m!.name)} has no manifest rule, so its args must be sent as plaintext; reload the page`,
+            ),
+          });
+          set({ ...plain, [PREPARED_ARG]: key });
+          return;
+        }
         // Plaintext args of a contracted mutator: extract the facts here, no passthrough.
         let derived: DerivedFacts | undefined;
         try {
