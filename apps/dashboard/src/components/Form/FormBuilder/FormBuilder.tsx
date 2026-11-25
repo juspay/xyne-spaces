@@ -299,6 +299,7 @@ export const FormBuilder = ({
     replaceField(
       rowId,
       current => {
+        if (current.definitionId) return current;
         const { fieldEnum, ...rest } = current;
         if (!isSelectFieldType(fieldType)) return { ...rest, fieldType };
         return {

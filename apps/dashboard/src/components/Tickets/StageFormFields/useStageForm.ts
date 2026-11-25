@@ -6,10 +6,12 @@ import {
   FormFieldType,
   isFieldActive,
   isManualSubTicketBoard,
+  readFormEntityValue,
   ReenterMode,
   TicketStageRequestStatus,
 } from '@xyne/shared';
-import type { FormEntityValues, Ticket, TicketStageRequest } from '@xyne/shared';
+import type { QueryResultType } from '@rocicorp/zero';
+import type { Ticket, TicketStageRequest } from '@xyne/shared';
 import type { Stage } from '../../../routes/KanbanBoardScreen/KanbanBoardScreen.types';
 import { useAuth } from '../../../hooks/useAuth';
 import { useZero } from '../../../hooks/useZero';
@@ -25,6 +27,8 @@ import {
 } from '../../../utils/board/resolveDisplayFormFields';
 import { buildLatestEntityWideValueByField } from '../../../utils/board/boardFormEntityValues';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
+
+type FormEntityValueRow = QueryResultType<typeof queries.getFormEntityValuesByEntityId>[number];
 
 export type PersistMode = 'save' | 'submit' | 'move' | 'review';
 
@@ -105,7 +109,7 @@ const asArray = <T>(value: T[] | readonly T[] | undefined | null): T[] =>
 
 export interface UseStageFormResult {
   fields: ResolvedDisplayFormField[];
-  valuesForRender: FormEntityValues[];
+  valuesForRender: FormEntityValueRow[];
   isFieldsLoading: boolean;
   hydrated: boolean;
   formData: Record<string, string[]>;
@@ -148,15 +152,14 @@ export type StageFormResolvedInputs = {
 
 type StageFormPersistOverrides = Partial<StageFormResolvedInputs>;
 
-const toFieldValue = (actualFieldValue: unknown): string[] => {
-  if (Array.isArray(actualFieldValue)) return actualFieldValue as string[];
-  if (
-    typeof actualFieldValue === 'string' ||
-    typeof actualFieldValue === 'number' ||
-    typeof actualFieldValue === 'boolean'
-  ) {
-    return [String(actualFieldValue)];
+const toFieldValue = (row: FormEntityValueRow, fieldType: FormFieldType | undefined): string[] => {
+  const value = readFormEntityValue(row);
+  if (Array.isArray(value)) return value;
+  // The date input works in YYYY-MM-DD; DATE values are read as full ISO strings.
+  if (typeof value === 'string') {
+    return [fieldType === FormFieldType.DATE ? value.slice(0, 10) : value];
   }
+  if (typeof value === 'number' || typeof value === 'boolean') return [String(value)];
   return [];
 };
 
@@ -245,7 +248,7 @@ export const useStageForm = ({
   const shouldReuseExistingValueIds = !isNonLinearBoard || hasActiveRequest || isContinueReentry;
   const latestValueRowByField = useMemo(() => {
     const fieldIds = new Set(fields.map(field => field.id));
-    const map = new Map<string, FormEntityValues>();
+    const map = new Map<string, FormEntityValueRow>();
     values
       .filter(value => value.contextId === targetStage.id && fieldIds.has(value.fieldId))
       .forEach(value => {
@@ -262,12 +265,13 @@ export const useStageForm = ({
     return buildLatestEntityWideValueByField(values, fieldIds);
   }, [fields, values]);
   const currentSavedFormData = useMemo(() => {
+    const fieldTypeById = new Map(fields.map(field => [field.id, field.fieldType]));
     const result: Record<string, string[]> = {};
     latestEntityWideValueByField.forEach((row, fieldId) => {
-      result[fieldId] = toFieldValue(row.actualFieldValue);
+      result[fieldId] = toFieldValue(row, fieldTypeById.get(fieldId));
     });
     return result;
-  }, [latestEntityWideValueByField]);
+  }, [fields, latestEntityWideValueByField]);
 
   const stageEtasForTarget = useMemo(
     () => (targetStageEtas ?? []).filter(eta => eta.stageId === targetStage.id),
@@ -304,7 +308,7 @@ export const useStageForm = ({
         }
       }
       if (!entityWideValue) return;
-      const parsed = toFieldValue(entityWideValue.actualFieldValue);
+      const parsed = toFieldValue(entityWideValue, field.fieldType);
       if (parsed.length > 0) prefilled[field.id] = parsed;
     });
 

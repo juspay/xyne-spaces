@@ -11,7 +11,7 @@ import type { TicketListItem } from './TicketListView.types';
 import { UserSelector } from '../CreateTicketModal/UserSelector';
 import { useTicketAssignee, resolveAssigneeRef } from '../../../hooks/useTicketAssignee';
 import { PriorityPicker } from './PriorityPicker';
-import { AutoDraftStatus, DeskType } from '@xyne/shared';
+import { AutoDraftStatus, DeskType, readFormEntityValue } from '@xyne/shared';
 import {
   getTicketListColumnAlignClass,
   type TicketListColumnDefinition,
@@ -479,9 +479,9 @@ export const TicketListRow = ({
               >
                 <DynamicFieldCell
                   fieldType={field.fieldType}
-                  value={
-                    ticket.formEntityValues?.find(v => v.fieldId === field.id)?.actualFieldValue
-                  }
+                  value={readFormEntityValue(
+                    ticket.formEntityValues?.find(v => v.fieldId === field.id),
+                  )}
                   className={hasUnread ? 'text-foreground font-semibold' : undefined}
                 />
               </div>

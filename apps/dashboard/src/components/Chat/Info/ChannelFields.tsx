@@ -9,6 +9,7 @@ import {
   FormEntityType,
   FormFieldType,
   parseFieldOptionValues,
+  readFormEntityValue,
 } from '@xyne/shared';
 import { useAuthContextValues } from '../../../hooks/useAuth';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
@@ -143,7 +144,7 @@ export function ChannelFields({
         </div>
         {shown.map(field => {
           const value = valueOf.get(field.id);
-          const current = value?.actualFieldValue ?? value?.fieldValue ?? null;
+          const current = readFormEntityValue(value);
           if (!TEXT_TYPES.has(field.type)) {
             return (
               <EditableFormField

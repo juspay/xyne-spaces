@@ -110,6 +110,9 @@ export const FormFieldEditor = ({ field, nested, ctx }: FormFieldEditorProps): R
   const track = ctx.trackingCategory;
 
   const issues = ctx.getIssues(field.rowId);
+  // A saved field (or an existing one picked from autocomplete) keeps its type: its stored values
+  // live in the column for that type. The backend rejects a type change too.
+  const isTypeLocked = Boolean(field.definitionId);
   const nameError = issues.find(issue => NAME_CODES.has(issue.code))?.message;
   const typeError = issues.find(issue => issue.code === 'unsupported-type')?.message;
   const optionsError = issues.find(issue => issue.code === 'select-missing-option')?.message;
@@ -313,11 +316,21 @@ export const FormFieldEditor = ({ field, nested, ctx }: FormFieldEditorProps): R
 
           <FieldTypeDropdown
             value={field.fieldType}
-            disabled={ctx.disabled}
+            disabled={ctx.disabled || isTypeLocked}
             trackingCategory={track}
             onChange={value => ctx.onChangeType(field.rowId, value)}
           />
-          {typeError && <p className='mt-1 text-[11px] text-destructive'>{typeError}</p>}
+          {typeError ? (
+            <p className='mt-1 text-[11px] text-destructive'>{typeError}</p>
+          ) : (
+            !ctx.readOnly && (
+              <p className='mt-1 text-[11px] text-muted-foreground'>
+                {isTypeLocked
+                  ? "Type can't be changed once a field is saved."
+                  : "You can't change the type after saving."}
+              </p>
+            )
+          )}
 
           {showOptions && (
             <FormFieldOptionsEditor

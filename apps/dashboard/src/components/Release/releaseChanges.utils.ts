@@ -6,7 +6,12 @@ import { type ChangeSectionsGroup, type RenderableFileGroup } from './ChangeCard
 import { extractEnvVarsFromBag } from './envVars';
 import type { ReleaseStageOption } from './ReleaseStagePicker';
 import { repoWebUrl } from './repoVisual';
-import type { TicketStatusV2, VCSProviderType } from '@xyne/shared';
+import {
+  readFormEntityValue,
+  type TicketStatusV2,
+  type TypedFormEntityValueRow,
+  type VCSProviderType,
+} from '@xyne/shared';
 
 // ─── Minimal input shapes (structural) ───────────────────────────────────────
 // We use minimal structural types so callers don't need to import Zero generics.
@@ -34,10 +39,8 @@ export function buildStagesByBoard(
   return map;
 }
 
-export interface ChangeFormValueInput {
+export interface ChangeFormValueInput extends TypedFormEntityValueRow {
   entityId: string;
-  fieldValue: string | null | undefined;
-  actualFieldValue: unknown;
   formField?: { fieldName?: string | null } | null | undefined;
   globalField?: { fieldName?: string | null } | null | undefined;
 }
@@ -72,10 +75,10 @@ export function buildValuesByChangeId(
     const fieldName = fv.globalField?.fieldName ?? fv.formField?.fieldName;
     if (!fieldName) continue;
     const bag = map.get(fv.entityId) ?? {};
-    const raw = fv.actualFieldValue;
+    const raw = readFormEntityValue(fv);
     bag[fieldName] =
-      raw === null || raw === undefined
-        ? (fv.fieldValue ?? '')
+      raw === null
+        ? ''
         : typeof raw === 'string' || typeof raw === 'number' || typeof raw === 'boolean'
           ? String(raw)
           : JSON.stringify(raw);

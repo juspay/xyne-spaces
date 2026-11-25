@@ -1,4 +1,4 @@
-import { FormFieldType } from '@xyne/shared';
+import { FormFieldType, readFormEntityValue, type TypedFormEntityValueRow } from '@xyne/shared';
 
 /** UI value for one dynamic field filter (dashboard TicketFilters.dynamicFields). */
 export type DynamicFieldFilterValue = string[] | { start?: number; end?: number };
@@ -13,6 +13,7 @@ export type DynamicFieldFilterEntry = {
 export type DynamicFieldQueryFilter = {
   fieldId: string;
   values?: (string | number | boolean)[];
+  fieldType?: FormFieldType;
 };
 
 const SCALAR_EQUALITY_FIELD_TYPES = new Set<FormFieldType>([
@@ -24,8 +25,8 @@ const SCALAR_EQUALITY_FIELD_TYPES = new Set<FormFieldType>([
 
 /**
  * Build Zero `dynamicFieldFilters` from UI entries (dashboard `toDynamicFieldQueryFilters`).
- * MULTI_SELECT is stored as an array, so V4 `actualFieldValue = value` cannot
- * match a picked option. Send `{ fieldId }` only and thin the page client-side.
+ * Scalar types match on the typed value columns; MULTI_SELECT sends `{ fieldId }` only
+ * and thins the page client-side.
  */
 export function toDynamicFieldQueryFilters(
   entries: readonly DynamicFieldFilterEntry[],
@@ -49,7 +50,7 @@ export function toDynamicFieldQueryFilters(
           else if (raw === 'false') values.push(false);
         }
       }
-      return { fieldId: entry.fieldId, values };
+      return { fieldId: entry.fieldId, fieldType: entry.fieldType, values };
     }
     return { fieldId: entry.fieldId };
   });
@@ -60,9 +61,8 @@ export type DynamicFieldClientFilter = {
   values: readonly string[];
 };
 
-export type TicketDynamicFieldValueLike = {
+export type TicketDynamicFieldValueLike = TypedFormEntityValueRow & {
   fieldId?: string | null;
-  actualFieldValue?: unknown;
 };
 
 export type TicketWithDynamicFieldValuesLike = {
@@ -110,7 +110,7 @@ export function ticketMatchesDynamicFieldClientFilters(
     const fieldId = mapping?.fieldId?.trim();
     if (!fieldId) continue;
     const existing = valuesByField.get(fieldId) ?? [];
-    existing.push(...parseActualFieldValues(mapping?.actualFieldValue));
+    existing.push(...parseActualFieldValues(readFormEntityValue(mapping)));
     valuesByField.set(fieldId, existing);
   }
 

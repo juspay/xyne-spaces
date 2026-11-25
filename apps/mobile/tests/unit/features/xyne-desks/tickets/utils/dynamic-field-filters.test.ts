@@ -19,7 +19,7 @@ describe('toDynamicFieldQueryFilters', () => {
           value: ['true'],
         },
       ]),
-      [{ fieldId: 'bool-1', values: ['true', true] }],
+      [{ fieldId: 'bool-1', fieldType: FormFieldType.BOOLEAN, values: ['true', true] }],
     );
   });
 
@@ -63,11 +63,11 @@ describe('filterSupportTicketsByDynamicFieldClientFilters', () => {
     const rows = [
       {
         id: 'hit',
-        formEntityValues: [{ fieldId: 'tags', actualFieldValue: ['Red', 'Green'] }],
+        formEntityValues: [{ fieldId: 'tags', items: [{ item: 'Red' }, { item: 'Green' }] }],
       },
       {
         id: 'miss',
-        formEntityValues: [{ fieldId: 'tags', actualFieldValue: ['Blue'] }],
+        formEntityValues: [{ fieldId: 'tags', items: [{ item: 'Blue' }] }],
       },
       { id: 'empty', formEntityValues: [] },
     ];

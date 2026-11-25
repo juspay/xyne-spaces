@@ -3,8 +3,10 @@ import { Dialog } from '../../ui/Dialog/Dialog';
 import { FileText } from '@xyne/icons';
 import {
   FormFieldType,
+  readFormEntityValue,
   type FormEntityValues,
   type MessageAttachment,
+  type TypedFormEntityValueRow,
   type User,
 } from '@xyne/shared';
 import { useCachedQuery } from '../../../hooks/useCachedQuery';
@@ -13,6 +15,7 @@ import { useUsers } from '../../../hooks/useUsers';
 import { getUserDisplayName } from '../../../utils/userDisplayName';
 
 export type FormEntityValuesWithField = FormEntityValues & {
+  items: TypedFormEntityValueRow['items'];
   formField?: {
     fieldName?: string | null;
     fieldType?: FormFieldType | string | null;
@@ -71,9 +74,10 @@ const renderFieldValue = (
   attachmentById: ReadonlyMap<string, MessageAttachment>,
   userById: ReadonlyMap<string, User>,
 ): ReactNode => {
-  const raw = fv.actualFieldValue ?? fv.fieldValue;
+  const raw = readFormEntityValue(fv);
   const fieldType = getFieldType(fv);
-  if (raw === null || raw === undefined) return '—';
+  if (raw === null) return '—';
+  if (fieldType === FormFieldType.DATE && typeof raw === 'string') return raw.slice(0, 10);
   if (fieldType === FormFieldType.BOOLEAN) {
     if (typeof raw === 'boolean') return raw ? 'Yes' : 'No';
     if (typeof raw === 'string') {
@@ -136,7 +140,7 @@ export const FormViewerDialog: React.FC<FormViewerDialogProps> = ({
     const ids = new Set<string>();
     formValues.forEach(fv => {
       if (getFieldType(fv) !== FormFieldType.DOC) return;
-      stringValuesFromJson(fv.actualFieldValue ?? fv.fieldValue).forEach(id => ids.add(id));
+      stringValuesFromJson(readFormEntityValue(fv)).forEach(id => ids.add(id));
     });
     return Array.from(ids);
   }, [formValues]);
