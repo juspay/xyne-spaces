@@ -8,7 +8,7 @@ import { SlackBlockKitParser } from '@/integrations/adapters/slack-webhook-ticke
 import { SlackAttachment } from '@/integrations/adapters/slack-webhook-tickets/utils/slackBlockKitTypes';
 import { config } from '@/config/env';
 import { resolveChannelId } from '../utils/channelUtils';
-import { MessageType } from '@xyne/shared';
+import { MessageType, type DerivedFacts } from '@xyne/shared';
 import { validateFlowDefinition, formatValidationErrors, MESSAGE_DELIVERY, flowFallbackLabel } from '@xyne/shared';
 import { deliverEphemeralMessage } from '../core/ephemeralDelivery';
 import { ContentFormat } from '../types';
@@ -339,6 +339,13 @@ export class ChatController {
           content = await this.processMessageContent(text, attachments, req.user?.workspaceId);
       }
 
+      // Through the transit proxy `markdownText` arrives encrypted, so the content stored is
+      // ciphertext; the encryption service extracted its facts (appsChatPostMessageClient). The
+      // insert side effects read them as the message content's facts, as for conversations.send.
+      // Only when the content is markdownText: a flow message's content is the flow, not it.
+      const markdownFacts = !flow && markdownText ? req.derived?.fields.markdownText : undefined;
+      const derived: DerivedFacts | undefined = markdownFacts ? { version: 2, fields: { content: markdownFacts } } : undefined;
+
       // Messages posted via the internal /api/internal/postAsUser route are authored
       // on behalf of a real human user (Digital Twin approvals), so they must be
       // persisted as USER messages — otherwise the dashboard renders them with the
@@ -358,6 +365,7 @@ export class ChatController {
         uploadedFiles,
         messageType,
         { ...(isMarkdown && { contentFormat: ContentFormat.MARKDOWN }), ...metadata },
+        derived,
       );
 
       res.status(201).json(result);
