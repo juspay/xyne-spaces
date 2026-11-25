@@ -1597,6 +1597,14 @@ export const router = createBrowserRouter([
                 ),
               },
               {
+                path: 'sdlc/:channelId/workflows/*',
+                element: (
+                  <ResourceProtectedRoute resourceName='SDLC' minAccess='READ'>
+                    <SdlcScreen />
+                  </ResourceProtectedRoute>
+                ),
+              },
+              {
                 path: 'sdlc/:channelId/tickets/:ticketId',
                 element: (
                   <ResourceProtectedRoute resourceName='SDLC' minAccess='READ'>

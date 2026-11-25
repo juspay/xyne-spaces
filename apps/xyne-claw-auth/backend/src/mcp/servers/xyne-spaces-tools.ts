@@ -5550,14 +5550,19 @@ function pick(args: Record<string, unknown>, keys: readonly string[]): Record<st
   return Object.fromEntries(keys.filter((key) => args[key] !== undefined).map((key) => [key, args[key]]));
 }
 
-/** Hub routes that take the Actor from the acting-user header. */
+/** Hub routes that take the Actor from the acting-user header. A bot run has no cookie, so it takes their S2S twin. */
+function sdlcClawFetch(path: string, body: Record<string, unknown>, ctx: HandlerContext): Promise<unknown> {
+  if (ctx.authMode === "app") return sdlcInternalFetch(`/api/internal/sdlc/hub${path}`, body, ctx);
+  return spacesFetch(`/api/sdlc/claw${path}`, {
+    method: "POST",
+    headers: { "x-xyne-acting-user-id": ctx.userId },
+    body: JSON.stringify(body),
+  });
+}
+
 async function sdlcClawCall(label: string, path: string, body: Record<string, unknown>, ctx: HandlerContext): Promise<ToolResult> {
   try {
-    const data = await spacesFetch(`/api/sdlc/claw${path}`, {
-      method: "POST",
-      headers: { "x-xyne-acting-user-id": ctx.userId },
-      body: JSON.stringify(body),
-    });
+    const data = await sdlcClawFetch(path, body, ctx);
     return ok(JSON.stringify(data));
   } catch (e) {
     return err(`${label} error: ${errMsg(e)}`);
@@ -5591,8 +5596,14 @@ function sdlcActor(args: Record<string, unknown>): Record<string, unknown> {
   return pick(args, ["workspaceId", "actorUserId"]);
 }
 
+// The bot calls on behalf of the run's bound actor: Spaces wants that person as the acting user.
+// Safe only because /mcp/call overwrites actorUserId from the session, or strips it.
 function sdlcTool(def: Omit<ToolDef, "appHandler">): ToolDef {
-  return { ...def, appHandler: def.handler };
+  const handler: ToolDef["handler"] = (args, ctx) => {
+    const actor = args["actorUserId"];
+    return def.handler(args, typeof actor === "string" && actor ? { ...ctx, userId: actor } : ctx);
+  };
+  return { ...def, handler, appHandler: handler };
 }
 
 const spacesSdlcListRepositories = sdlcTool({
@@ -5818,15 +5829,11 @@ async function writeSdlcArtifact(args: Record<string, unknown>, ctx: HandlerCont
 
 async function createSdlcArtifact(args: Record<string, unknown>, ctx: HandlerContext): Promise<ToolResult> {
   try {
-    const data = (await spacesFetch("/api/sdlc/claw/artifacts", {
-      method: "POST",
-      headers: { "x-xyne-acting-user-id": ctx.userId },
-      // Spaces stores the artifact type as a folder and names it folderId; the dashboard posts to the same route.
-      body: JSON.stringify({
-        ...pick(args, ["channelId", "trackId", "trackFolderId", "title", "markdown", "repoIds", "relatedCanvasIds"]),
-        folderId: args["artifactTypeId"],
-      }),
-    })) as { artifact: { canvasId: string; viewAccessId?: string; url?: string } };
+    // Spaces stores the artifact type as a folder and names it folderId; the dashboard posts to the same route.
+    const data = (await sdlcClawFetch("/artifacts", {
+      ...pick(args, ["channelId", "trackId", "trackFolderId", "title", "markdown", "repoIds", "relatedCanvasIds"]),
+      folderId: args["artifactTypeId"],
+    }, ctx)) as { artifact: { canvasId: string; viewAccessId?: string; url?: string } };
     const artifact = data.artifact;
     const citations: Citation[] = [];
     pushCanvasCitation(citations, artifact.viewAccessId, 1, String(args["title"] ?? "SDLC artifact"));

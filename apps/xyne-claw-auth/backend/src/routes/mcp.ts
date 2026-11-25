@@ -1,7 +1,7 @@
 import { Router, type Request, type Response } from "express";
 import { AWAKENING_SEND_TOOL } from "../awakening/send-tool.js";
 import { errMsg } from "../lib/errors.js";
-import { sdlcRunChannelId, withSdlcRunTools } from "../lib/sdlc-run-tools.js";
+import { sdlcRunActor, sdlcRunChannelId, withSdlcRunTools } from "../lib/sdlc-run-tools.js";
 import crypto from "node:crypto";
 import { prisma } from "../db.js";
 import { decrypt } from "../crypto.js";
@@ -649,6 +649,8 @@ function serverToolsKey(serverType: string, serverName: string): string {
 // Under the app-mode swap, xyne-spaces-app-tools stands in for xyne-spaces, so the agent's
 // xyne-spaces grants decide which of its tools are listed (prefilter and enforcement alike).
 const APP_SWAP_CONFIGURED_AS: ReadonlyMap<string, string> = new Map([["xyne-spaces-app-tools", "xyne-spaces"]]);
+
+const SDLC_TOOL_NAME_SET: ReadonlySet<string> = new Set(Object.values(SDLC_TOOL_NAMES));
 
 async function serverTypesAgentCannotUse(
   entries: ListEntry[],
@@ -2310,6 +2312,13 @@ router.post("/:sessionId/mcp/call", async (req: Request<{ sessionId: string }>, 
         },
       });
       return;
+    }
+
+    // The SDLC tools send actorUserId as the acting user, so only the run's verified context may set it.
+    if (SDLC_TOOL_NAME_SET.has(tool)) {
+      const { actorUserId: _unboundActor, workspaceId: _unboundWorkspace, ...unbound } = effectiveParams;
+      const actor = await sdlcRunActor(req.params.sessionId);
+      effectiveParams = actor ? { ...unbound, ...actor } : unbound;
     }
 
     // Filing a personal canvas into a hub widens its audience: only an approved (signed "ask") call may.

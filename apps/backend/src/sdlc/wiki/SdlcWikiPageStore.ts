@@ -114,7 +114,7 @@ export class SdlcWikiPageStore {
     }
   }
 
-  /** Wiki generation ran as a workflow V2 run, which this build no longer has: no write is one. */
+  /** No exception for runs: a Wiki workflow acts for whoever started it, so the hub-admin check applies. */
   isGenerationRun(
     _input: Pick<WriteSdlcWikiPageInput, 'channelId' | 'actorUserId' | 'repoId' | 'generationCommit'>,
   ): Promise<boolean> {

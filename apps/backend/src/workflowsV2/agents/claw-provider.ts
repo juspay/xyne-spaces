@@ -13,9 +13,9 @@ import { withOptions } from '@xyne/workflow-sdk';
 import type { Attachment, ResumePayload, StepExecutionContext } from '@xyne/workflow-sdk';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
-import { runS2SClawAgent } from '@/services/clawAgentService';
+import { listScopedClawAgents, runScopedClawAgent } from '@/services/clawAgentService';
 import { parseAgentAttachments } from '@/automations/services/agent-attachment.service';
-import { listDispatchableClawAgents, resolveClawRunIdentity } from './identity';
+import { clawScopeFor, resolveClawRunIdentity, runAuthorOf } from './identity';
 import type { XyneCtx, XyneResourceAttrs } from '../types';
 
 /**
@@ -57,9 +57,10 @@ export class ClawAgentProvider
   readonly configSchema = ClawAgentConfigSchema;
 
   /** Backs the agent picker on `agentSlug` (served through the step's `getOptions`). */
-  override async listAgents(_ctx: XyneCtx): Promise<AgentDescriptor[]> {
-    const agents = await listDispatchableClawAgents();
-    return agents.map((agent) => ({
+  override async listAgents(ctx: XyneCtx): Promise<AgentDescriptor[]> {
+    const agents = await listScopedClawAgents(await clawScopeFor(ctx.userId, ctx.workspaceId));
+    // `spacesAppId` signs the dispatch and `spacesAppUserId` is the run's identity: an agent missing either fails mid-run.
+    return agents.filter((agent) => agent.spacesAppId && agent.spacesAppUserId).map((agent) => ({
       id: agent.slug,
       name: agent.name,
       ...(agent.description ? { description: agent.description } : {}),
@@ -72,7 +73,13 @@ export class ClawAgentProvider
     ctx: StepExecutionContext,
   ): Promise<{ externalRef: string }> {
     const { workspaceId } = ctx.runtime.attributes as XyneResourceAttrs;
-    const identity = await resolveClawRunIdentity(stepConfig.agentSlug, workspaceId);
+    const author = runAuthorOf(ctx);
+    if (!author) {
+      throw new Error('[workflows] RUN_AGENT has no author to pick the agent for. Save the workflow again to stamp one.');
+    }
+    // Scoped to the author, so a slug only matches an agent they can reach in their own org.
+    const scope = await clawScopeFor(author, workspaceId);
+    const identity = await resolveClawRunIdentity(stepConfig.agentSlug, scope);
 
     // One session per turn and attempt. Claw-auth only accepts ids of
     // [A-Za-z0-9_-] (anything else is silently swapped for a random one), and it
@@ -95,7 +102,8 @@ export class ClawAgentProvider
       + `node=${ctx.runtime.stepName} agent=${stepConfig.agentSlug} session=${sessionId}`,
     );
 
-    const response = await dispatchWithBusyRetry(Boolean(conversationId), () => runS2SClawAgent({
+    const response = await dispatchWithBusyRetry(Boolean(conversationId), () => runScopedClawAgent({
+      identity: scope,
       sessionId,
       ...(conversationId ? { conversationId } : {}),
       agentSlug: stepConfig.agentSlug,
@@ -136,7 +144,7 @@ export class ClawAgentProvider
 }
 
 /** Claw joins the agent's last text messages, so a mid-run note can precede the JSON. */
-function jsonAtEnd(text: string): string | null {
+export function jsonAtEnd(text: string): string | null {
   for (let start = text.indexOf('{'); start !== -1; start = text.indexOf('{', start + 1)) {
     try {
       JSON.parse(text.slice(start));
@@ -344,6 +352,6 @@ async function storeCallbackAttachments(
   );
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
+export function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
 }

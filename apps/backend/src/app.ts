@@ -240,7 +240,7 @@ import merchantRoutes from '@/routes/merchants';
 import formFieldValuesRoutes from '@/routes/formFieldValues';
 import officeConversionRoutes from '@/routes/officeConversion';
 import sdlcRoutes from '@/routes/sdlc';
-import sdlcClawRoutes from '@/routes/sdlcClaw';
+import sdlcClawRoutes, { authenticateActingUser } from '@/routes/sdlcClaw';
 import clawInternalRoutes from '@/routes/clawInternal';
 import sdlcVcsInternalRoutes from '@/routes/sdlcVcsInternal';
 import sdlcAgentInternalRoutes from '@/routes/sdlcAgentInternal';
@@ -781,6 +781,8 @@ export class App {
     this.app.use('/api/internal/sdlc/vcs', validateS2SKey, sdlcVcsInternalRoutes);
     this.app.use('/api/internal/sdlc/agent', validateS2SKey, sdlcAgentInternalRoutes);
     this.app.use('/api/internal/sdlc/wiki', validateS2SKey, sdlcWikiInternalRoutes);
+    // A Claw run's SDLC hub calls, as the person claw-auth bound to the run (see authenticateActingUser).
+    this.app.use('/api/internal/sdlc/hub', validateS2SKey, authenticateActingUser, sdlcClawRoutes);
     this.app.use(
       '/api/internal/sdlc/artifact-versions',
       validateS2SKey,

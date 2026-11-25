@@ -6,10 +6,25 @@ export const SDLC_AGENT_TOOL_PROFILE = sdlcAgentToolProfile(xyneSpacesTools.map(
 
 const SDLC_RUN_TTL_SECONDS = 86400;
 const sdlcRunKey = (sessionId: string) => `sdlc-run:${sessionId}`;
+const sdlcRunActorKey = (sessionId: string) => `sdlc-run-actor:${sessionId}`;
+
+export interface SdlcRunActor {
+  workspaceId: string;
+  actorUserId: string;
+}
 
 /** start-run adds the SDLC tools to the config it sends claw; this lets the MCP gate admit the same run. */
-export async function markSdlcRun(sessionId: string, channelId: string): Promise<void> {
-  await redisService.getConnection().set(sdlcRunKey(sessionId), channelId, "EX", SDLC_RUN_TTL_SECONDS);
+export async function markSdlcRun(sessionId: string, channelId: string, actor?: SdlcRunActor): Promise<void> {
+  const redis = redisService.getConnection();
+  await redis.set(sdlcRunKey(sessionId), channelId, "EX", SDLC_RUN_TTL_SECONDS);
+  if (actor) await redis.set(sdlcRunActorKey(sessionId), JSON.stringify(actor), "EX", SDLC_RUN_TTL_SECONDS);
+}
+
+/** Who the run's SDLC calls act for, from its verified context; null when it has none. */
+export async function sdlcRunActor(sessionId: string): Promise<SdlcRunActor | null> {
+  // Only markSdlcRun writes it; a corrupt value throws, failing the call closed.
+  const raw = await redisService.getConnection().get(sdlcRunActorKey(sessionId)).catch(() => null);
+  return raw ? (JSON.parse(raw) as SdlcRunActor) : null;
 }
 
 /** The hub a run started in, or null when it did not start in one. */

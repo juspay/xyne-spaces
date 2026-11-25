@@ -1180,7 +1180,14 @@ export async function prepareRun(
     }
     if (sdlcAgentRunContext) {
       try {
-        await markSdlcRun(sessionId, String(sdlcAgentRunContext["channelId"]));
+        const { workspaceId: sdlcWorkspaceId, actorUserId: sdlcActorUserId } = sdlcAgentRunContext;
+        await markSdlcRun(
+          sessionId,
+          String(sdlcAgentRunContext["channelId"]),
+          typeof sdlcWorkspaceId === "string" && typeof sdlcActorUserId === "string"
+            ? { workspaceId: sdlcWorkspaceId, actorUserId: sdlcActorUserId }
+            : undefined,
+        );
       } catch (error) {
         log.error(`[run] Failed to mark SDLC run ${sessionId}; the MCP gate will refuse its SDLC tools:`, error);
       }
