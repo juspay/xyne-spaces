@@ -85,9 +85,6 @@ import {
   parseFieldOptions,
   serializeFieldOptions,
   ReleaseTrackingMode,
-  parseRepliesMd,
-  addReplyToData,
-  serializeRepliesMd,
   type CallParticipantMetadata,
   SUMMARY_PROMPT_MAX_LENGTH,
   MAX_NOTIFICATION_KEYWORDS,
@@ -131,7 +128,7 @@ import {
 } from '@xyne/shared';
 import { ConnectEntityType } from '@xyne/shared';
 import type { ExtractorOutput } from '@xyne/shared';
-import { forwardedMessageEditTemplate, forwardedMessageTemplate } from '@xyne/shared';
+import { forwardedMessageEditTemplate, forwardedMessageTemplate, repliesMdAddReplierTemplate } from '@xyne/shared';
 import {
   conversationsForwardMessageClient,
   messagesUpdateClient,
@@ -3995,15 +3992,21 @@ export function createMutators(
             }
           }
 
-          const repliesData = parseRepliesMd(conversation.replies_md);
-          const updatedRepliesData = addReplyToData(repliesData, authData.sub);
-          const updatedRepliesMd = serializeRepliesMd(updatedRepliesData);
+          // replies_md is unreadable: the encryption service adds the replier (repliesMdAddReplierTemplate).
+          const replies = await compose(
+            {
+              template: repliesMdAddReplierTemplate,
+              inputs: { repliesMd: conversation.replies_md ?? null, replierId: authData.sub },
+              current: conversation.replies_md ?? null,
+            },
+            { workspaceId: authData.workspaceId },
+          );
 
           await tx.mutate.conversations.update({
             conversationId,
             replyCount: conversation.replyCount + 1,
             lastActivityAt: timestamp,
-            ...(updatedRepliesMd !== conversation.replies_md && { replies_md: updatedRepliesMd }),
+            ...(!replies.unchanged && { replies_md: replies.value }),
           });
 
           if (showInChannel) {

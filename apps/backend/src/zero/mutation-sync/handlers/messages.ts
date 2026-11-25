@@ -1,14 +1,10 @@
 import type { Transaction } from '@rocicorp/zero';
 import { MessageType, Schema } from '@xyne/shared';
 import { zql } from '../../queries';
-import {
-  serializeRepliesMd,
-  buildInitialMessageMd,
-  serializeParentMessageMd,
-} from '@xyne/shared';
-import type { ParentMessageSummary } from '@xyne/shared';
+import { serializeRepliesMd } from '@xyne/shared';
 import type { MessagePreviousValue } from '../types';
 import { BaseMutationSyncHandler } from '../base-handler';
+import { composeInitialMessageMd, composeParentMessageMd } from '../composeMd';
 
 export class MessagesMutationSyncHandler extends BaseMutationSyncHandler {
   async onInsert(args: unknown, tx: Transaction<Schema>): Promise<void> {
@@ -31,6 +27,7 @@ export class MessagesMutationSyncHandler extends BaseMutationSyncHandler {
 type InitialMessageRow = {
   messageId: string;
   conversationId: string;
+  workspaceId: string;
   senderId: string;
   content: string;
   msgType: MessageType;
@@ -48,43 +45,16 @@ type InitialMessageRow = {
   childConversationId: string | null;
 };
 
-function buildParentMessageSummary(
-  message: {
-    messageId: string;
-    conversationId: string;
-    senderId: string;
-    content: string;
-    msgType: MessageType;
-    createdAt: number;
-  },
-): ParentMessageSummary {
-  return {
-    messageId: message.messageId,
-    conversationId: message.conversationId,
-    senderId: message.senderId,
-    content: message.content,
-    msgType: message.msgType,
-    createdAt: message.createdAt,
-  };
-}
-
 async function syncInitialMessageMd(
   message: InitialMessageRow,
-  conversation: { conversationId: string; initial_message_md: string | null },
+  conversation: { conversationId: string; workspaceId: string; initial_message_md: string | null },
   tx: Transaction<Schema>,
 ): Promise<void> {
-  const md = buildInitialMessageMd(message);
-
-  if (conversation.initial_message_md === md) return;
-
-  await tx.mutate.conversations.update({
-    conversationId: conversation.conversationId,
-    initial_message_md: md,
-  });
+  await composeInitialMessageMd(tx, message, conversation);
 }
 
 async function syncParentMessageMdForMessage(
-  message: Parameters<typeof buildParentMessageSummary>[0],
+  message: InitialMessageRow,
   tx: Transaction<Schema>,
 ): Promise<void> {
   // Find conversations where this message is the parentMessage
@@ -92,17 +62,8 @@ async function syncParentMessageMdForMessage(
     zql.conversations.where('parentMessageId', message.messageId),
   );
 
-  if (conversations.length === 0) return;
-
-  const summary = buildParentMessageSummary(message);
-  const md = serializeParentMessageMd(summary);
-
   for (const conv of conversations) {
-    if (conv.parent_message_md === md) continue;
-    await tx.mutate.conversations.update({
-      conversationId: conv.conversationId,
-      parent_message_md: md,
-    });
+    await composeParentMessageMd(tx, message, conv);
   }
 }
 
