@@ -15,6 +15,7 @@ import {
   clearParked,
   dismissBubbleToast,
   getBubbles,
+  markBubbleSeen,
   parkThread,
   reportBubbleAgents,
   resetBubblesForTests,
@@ -189,6 +190,13 @@ describe('bubble geometry', () => {
     assert.equal(isOverCloseTarget(170, 750, target), true);
     assert.equal(isOverCloseTarget(20, 120, target), false);
   });
+
+  it('reaches further above the close target, so a drop just over the tab bar closes', () => {
+    const target = { x: 150, y: 760, width: 96, height: 40 };
+    // Centre 60 above the target: past the side slop, inside the reach above.
+    assert.equal(isOverCloseTarget(170, 760 - 60 - 29, target), true);
+    assert.equal(isOverCloseTarget(170, 760 - 100 - 29, target), false);
+  });
 });
 
 describe('the trail', () => {
@@ -287,6 +295,24 @@ describe('bubble store', () => {
     assert.equal(getBubbles().agents['a']?.kind, 'answered');
     unparkThread('a');
     assert.equal(getBubbles().agents['a'], undefined);
+  });
+
+  it('rests the bubble again once its thread is opened from it', () => {
+    parkThread('s', thread('a', 'Has this happened before?'));
+    reportBubbleAgents('a', { agentIds: ['claw'], agentName: 'Xyne Claw' });
+    reportBubbleAgents('a', null);
+    markBubbleSeen('a');
+    assert.equal(getBubbles().agents['a'], RESTING);
+    assert.equal(getBubbles().toast, null);
+    assert.equal(getBubbles().parked.length, 1);
+  });
+
+  it('leaves a still-working agent alone when its thread is opened', () => {
+    parkThread('s', thread('a', 'Has this happened before?'));
+    reportBubbleAgents('a', { agentIds: ['claw'], agentName: null });
+    const before = getBubbles();
+    markBubbleSeen('a');
+    assert.equal(getBubbles(), before);
   });
 
   it('ignores agents of threads that are not parked', () => {

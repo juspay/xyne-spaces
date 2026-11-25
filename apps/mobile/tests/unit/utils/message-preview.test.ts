@@ -191,3 +191,14 @@ test('buildLastMessagePreview: forwarded message falls back to the forwarded bod
     text: 'the original body',
   });
 });
+
+test('buildLastMessagePreview: separate paragraphs keep a space between them', () => {
+  const conv = makeConversation(
+    makeSummary({ content: '<p class="m-0">Const a = 1</p><p class="m-0">const b = 2</p>' }),
+  );
+  const preview = buildLastMessagePreview(conv, CURRENT_USER);
+  assert.ok(
+    'text' in preview && preview.text.includes('Const a = 1 const b = 2'),
+    JSON.stringify(preview),
+  );
+});

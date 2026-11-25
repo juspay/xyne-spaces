@@ -9,6 +9,7 @@ import {
 } from '@/src/features/conversation/constants';
 import {
   computeHoldLayout,
+  holdMenuCopiedNotice,
   holdMenuLabel,
   holdMenuNaturalHeight,
   orderHoldMenuActions,
@@ -118,6 +119,19 @@ describe('holdMenuLabel', () => {
   it('words the bookmark toggle by its state', () => {
     assert.equal(holdMenuLabel('bookmark', 'Remove Bookmark'), 'Remove from Starred');
     assert.equal(holdMenuLabel('bookmark', 'Add Bookmark'), 'Add to Starred');
+  });
+
+  it('calls editing "Edit message"', () => {
+    assert.equal(holdMenuLabel('edit-in-chat', 'Edit in Chat'), 'Edit message');
+  });
+});
+
+describe('holdMenuCopiedNotice', () => {
+  it('confirms each copy row and nothing else', () => {
+    assert.equal(holdMenuCopiedNotice('copy-message'), 'Copied');
+    assert.equal(holdMenuCopiedNotice('copy-link'), 'Link copied');
+    assert.equal(holdMenuCopiedNotice('copy-image'), 'Image copied');
+    assert.equal(holdMenuCopiedNotice('pin'), null);
   });
 });
 
