@@ -2127,9 +2127,11 @@ export class ClawAgentLookupError extends Error {
  * disabled agents). Authenticated with INTERNAL_S2S_KEY, the key the backend
  * shares with claw-auth (the backend is not given XYNE_CLAW_S2S_KEY).
  * Returns true/false only on a well-formed answer; every other outcome throws
- * ClawAgentLookupError.
+ * ClawAgentLookupError. With Claw off (XYNE_CLAW_ENABLED=false: a stack with no
+ * claw-auth) no app can be a Claw agent, so the answer is false without asking.
  */
 export async function isSpacesAppClawAgent(spacesAppId: string): Promise<boolean> {
+  if (!config.xyneClaw.enabled) return false;
   const key = config.internalS2sKey;
   if (!key) throw new ClawAgentLookupError('INTERNAL_S2S_KEY is not configured');
   const url = `${getClawBaseUrl()}/claw/api/v1/internal/agents/by-spaces-app/${encodeURIComponent(spacesAppId)}`;

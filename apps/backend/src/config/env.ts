@@ -565,6 +565,8 @@ const envSchema = Joi.object({
   MICROSOFT_GRAPH_BASE_URL: Joi.string().uri().default('https://graph.microsoft.com/v1.0'),
   MICROSOFT_GRAPH_CLIENT_STATE_BACKFILL_ENABLED: Joi.boolean().default(false),
   // XYNE Claw Integration (Ask AI v2)
+  // Off on a stack with no Claw (no claw-auth to ask): every installed app is then an APP, never an AGENT.
+  XYNE_CLAW_ENABLED: Joi.boolean().default(true),
   XYNE_CLAW_URL: Joi.string().uri().default('http://localhost:3002'),
   XYNE_CLAW_S2S_KEY: Joi.string().allow('').default(''),
   XYNE_CLAW_AUTH_URL: Joi.string().uri().default('http://localhost:3003'),
@@ -1468,6 +1470,7 @@ export const config = {
     clientStateBackfillEnabled: envVars.MICROSOFT_GRAPH_CLIENT_STATE_BACKFILL_ENABLED as boolean,
   },
   xyneClaw: {
+    enabled: envVars.XYNE_CLAW_ENABLED as boolean,
     url: envVars.XYNE_CLAW_URL as string,
     s2sKey: envVars.XYNE_CLAW_S2S_KEY as string,
     authUrl: envVars.XYNE_CLAW_AUTH_URL as string,
