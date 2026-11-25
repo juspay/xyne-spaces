@@ -176,9 +176,12 @@ async function fatalFlushAndExit(kind: string, reason: unknown): Promise<void> {
   log.error(`[xyne-claw] ${kind} — flushing active sessions before exit:`, reason);
   beginDraining();
   setTimeout(() => process.exit(1), FATAL_FLUSH_TIMEOUT_MS + 5_000).unref();
-  await flushAllActiveSessions(FATAL_FLUSH_TIMEOUT_MS).catch((err) => {
-    log.error(`[xyne-claw] fatal flush failed after ${kind}:`, err);
-  });
+  await Promise.all([
+    flushAllActiveSessions(FATAL_FLUSH_TIMEOUT_MS).catch((err) => {
+      log.error(`[xyne-claw] fatal flush failed after ${kind}:`, err);
+    }),
+    flushLlmUsage(),
+  ]);
   server.close(() => process.exit(1));
 }
 

@@ -164,6 +164,7 @@ export async function completeEntityPrompt(
     throw new EntityLlmError("LITELLM_API_KEY not set on claw", 503);
   }
 
+  const startedAt = Date.now();
   // Through the shared gate: the proxy key's parallel cap is small and shared
   // with live agent runs, and a discovery run fans out on its own. Throttling
   // locally instead (as this used to) is exactly what llm-gate.ts was built to
@@ -216,7 +217,7 @@ export async function completeEntityPrompt(
   const data = (await res.json()) as {
     choices?: Array<{ message?: { content?: string } }>;
   };
-  recordChatCompletion("entity", ENTITY_MODEL, data);
+  recordChatCompletion("entity", ENTITY_MODEL, data, { startedAt });
   return data.choices?.[0]?.message?.content ?? "";
 }
 

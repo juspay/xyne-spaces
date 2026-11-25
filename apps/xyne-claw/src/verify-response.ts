@@ -267,6 +267,7 @@ async function llmVerify(input: VerifyResponseInput): Promise<ResponseVerdict | 
   ].join("\n");
 
   try {
+    const startedAt = Date.now();
     const res = await fetch(litellmEndpoint("/v1/chat/completions"), {
       method: "POST",
       headers: {
@@ -295,7 +296,7 @@ async function llmVerify(input: VerifyResponseInput): Promise<ResponseVerdict | 
     const data = (await res.json()) as {
       choices?: Array<{ message?: { tool_calls?: Array<{ function?: { arguments?: string } }> } }>;
     };
-    recordChatCompletion("verify", LITELLM.model, data);
+    recordChatCompletion("verify", LITELLM.model, data, { startedAt });
     const raw = data.choices?.[0]?.message?.tool_calls?.[0]?.function?.arguments;
     if (!raw) {
       log.warn("[verify-response] no tool_call in response — verifier unavailable");

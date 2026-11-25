@@ -161,6 +161,7 @@ export async function extractEvalPairs(input: ExtractInput): Promise<ExtractResu
   for (let attempt = 1; attempt <= EXTRACT_RETRIES; attempt++) {
     const last = attempt === EXTRACT_RETRIES;
     try {
+      const startedAt = Date.now();
       // Shared concurrency gate with the judge — see llm-gate.ts. Copilot
       // calls run on the user's own quota, so they skip the gate.
       const doFetch = () =>
@@ -190,7 +191,7 @@ export async function extractEvalPairs(input: ExtractInput): Promise<ExtractResu
         const data = (await res.json()) as {
           choices?: Array<{ message?: { tool_calls?: Array<{ function?: { arguments?: string } }> } }>;
         };
-        recordChatCompletion("eval", model, data, viaCopilot ? { provider: "copilot", billing: "subscription" } : {});
+        recordChatCompletion("eval", model, data, { startedAt, ...(viaCopilot ? { provider: "copilot", billing: "subscription" } : {}) });
         const got = data.choices?.[0]?.message?.tool_calls?.[0]?.function?.arguments;
         if (got) {
           if (attempt > 1) log.info(`[eval-extract] succeeded on attempt ${attempt} (model=${model})`);

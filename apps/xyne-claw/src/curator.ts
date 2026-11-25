@@ -392,6 +392,7 @@ async function llmCall(
     tool_choice: { type: "function", function: { name: tool.function.name } },
   };
   try {
+    const startedAt = Date.now();
     const res = await fetchLiteLLMWithRetry(`${LITELLM_URL}/chat/completions`, {
       method: "POST",
       headers: {
@@ -413,7 +414,7 @@ async function llmCall(
         };
       }>;
     };
-    recordChatCompletion("curator", CURATOR_MODEL, data);
+    recordChatCompletion("curator", CURATOR_MODEL, data, { startedAt });
     const message = data.choices?.[0]?.message;
     const toolCalls = message?.tool_calls;
     if (!Array.isArray(toolCalls) || toolCalls.length === 0) {

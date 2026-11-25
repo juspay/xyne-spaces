@@ -294,7 +294,7 @@ export async function extractOpenLoops(input: ExtractInput): Promise<ExtractResu
     const data = (await res.json()) as {
       choices?: Array<{ message?: { content?: string | null; tool_calls?: Array<{ function?: { arguments?: string } }> } }>;
     };
-    recordChatCompletion("triage", EXTRACT_MODEL, data);
+    recordChatCompletion("triage", EXTRACT_MODEL, data, { startedAt: started });
     const message = data.choices?.[0]?.message;
     const raw = message?.tool_calls?.[0]?.function?.arguments ?? message?.content ?? "";
     const result = parseExtractArguments(raw);

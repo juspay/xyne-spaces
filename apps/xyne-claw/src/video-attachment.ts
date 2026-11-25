@@ -173,6 +173,7 @@ async function rollWindow(
     `${priorState || "(nothing yet — these are the first frames)"}\n\n` +
     `Here are the next ${windowFrames.length} frame(s) in order. Update the description.`;
 
+  const startedAt = Date.now();
   const res = await fetch(litellmEndpoint("/v1/chat/completions"), {
     method: "POST",
     headers: {
@@ -202,7 +203,7 @@ async function rollWindow(
     return priorState;
   }
   const json = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
-  recordChatCompletion("video", LITELLM.model, json);
+  recordChatCompletion("video", LITELLM.model, json, { startedAt });
   const next = json.choices?.[0]?.message?.content?.trim();
   return next && next.length > 0 ? next : priorState;
 }

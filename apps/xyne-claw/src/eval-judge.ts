@@ -211,6 +211,7 @@ export async function judgeSemanticMatch(input: EvalJudgeInput): Promise<EvalJud
   for (let attempt = 1; attempt <= JUDGE_RETRIES; attempt++) {
     const last = attempt === JUDGE_RETRIES;
     try {
+      const startedAt = Date.now();
       // All shared-key LLM calls go through one concurrency gate — the proxy
       // key's parallel cap is tiny and shared with live agents (llm-gate.ts).
       // Copilot calls run on the user's own quota, so they skip the gate.
@@ -245,7 +246,7 @@ export async function judgeSemanticMatch(input: EvalJudgeInput): Promise<EvalJud
         const data = (await res.json()) as {
           choices?: Array<{ message?: { tool_calls?: Array<{ function?: { arguments?: string } }> } }>;
         };
-        recordChatCompletion("eval", model, data, viaCopilot ? { provider: "copilot", billing: "subscription" } : {});
+        recordChatCompletion("eval", model, data, { startedAt, ...(viaCopilot ? { provider: "copilot", billing: "subscription" } : {}) });
         const raw = data.choices?.[0]?.message?.tool_calls?.[0]?.function?.arguments;
         if (raw) {
           const parsed = JSON.parse(raw) as { score?: unknown; reasoning?: unknown };

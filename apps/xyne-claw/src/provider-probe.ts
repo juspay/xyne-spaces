@@ -128,6 +128,7 @@ export async function probeProvider(input: ProbeInput): Promise<ProbeResult> {
 
   let result: ProbeResult;
   try {
+    const startedAt = Date.now();
     const res = await fetch(target.url, {
       method: "POST",
       headers: {
@@ -146,7 +147,7 @@ export async function probeProvider(input: ProbeInput): Promise<ProbeResult> {
     });
     if (res.ok) {
       const usageBody = await Promise.resolve(res).then((r) => r.json()).catch(() => null);
-      recordChatCompletion("probe", target.model, usageBody, input.providerConfig?.apiKey ? { provider: input.provider, billing: "api_key" } : {});
+      recordChatCompletion("probe", target.model, usageBody, { startedAt, ...(input.providerConfig?.apiKey ? { provider: input.provider, billing: "api_key" } : {}) });
     }
     const body = res.ok ? "" : (await res.text().catch(() => "")).slice(0, 300);
     result = classify(res.status, body);

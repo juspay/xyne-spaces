@@ -15,7 +15,7 @@ const log = createLogger("llm-usage");
 
 export type LlmCallPurpose =
   | "main" | "subagent" | "compaction" | "title" | "follow_up" | "judge" | "verify" | "prefetch" | "twin_gate"
-  | "curator" | "entity" | "routing" | "video" | "triage" | "probe" | "prompt_tools" | "eval";
+  | "curator" | "entity" | "routing" | "video" | "triage" | "probe" | "prompt_tools" | "eval" | "xor";
 
 export type BillingBasis = "platform" | "api_key" | "subscription";
 
@@ -104,6 +104,9 @@ export interface PiCallLabels {
   serviceTier?: string | undefined;
 }
 
+/** pi's built-in compaction reuses the agent's streamFn; its summarizer prompt is the only marker. */
+export const PI_SUMMARIZER_PROMPT_START = "You are a context summarization assistant.";
+
 /** One pi call: `result` is the final assistant message (error/aborted ones carry what usage arrived). */
 export function recordPiCall(args: { model: Model<Api>; context?: Context | undefined; result: AssistantMessage | undefined; startedAt: number; labels?: PiCallLabels | undefined }): void {
   const { model, result, labels } = args;
@@ -114,7 +117,7 @@ export function recordPiCall(args: { model: Model<Api>; context?: Context | unde
   const served = result?.responseModel ?? (result?.model && result.model !== model.id ? result.model : undefined);
   enqueue({
     ...eventScope(scope),
-    purpose: labels?.purpose ?? "main",
+    purpose: args.context?.systemPrompt?.startsWith(PI_SUMMARIZER_PROMPT_START) ? "compaction" : labels?.purpose ?? "main",
     ...(labels?.subagent ? { subagent: labels.subagent } : {}),
     outcome: !result || result.stopReason === "error" ? "error" : result.stopReason === "aborted" ? "aborted" : "ok",
     provider,
@@ -196,11 +199,13 @@ function eventScope(s: UsageScope): Pick<LlmCallEvent, "id" | "runId" | "userId"
 }
 
 /**
- * Scopes every request to the caller it is for: claw-auth's x-usage-* headers,
- * else the identity fields most claw endpoints already carry in the body.
+ * Scopes every request to the caller it is for: claw-auth's x-usage-* headers when
+ * it sends any (so a body it forwards cannot name another run or org), else the
+ * identity fields most claw endpoints already carry in the body.
  */
 export function usageScopeMiddleware(req: { headers: Record<string, unknown>; body?: unknown }, _res: unknown, next: () => void): void {
-  const body = (req.body && typeof req.body === "object" ? req.body : {}) as Record<string, unknown>;
+  const fromHeaders = Object.keys(req.headers).some((h) => h.startsWith("x-usage-"));
+  const body = (!fromHeaders && req.body && typeof req.body === "object" ? req.body : {}) as Record<string, unknown>;
   const pick = (header: string, field: string): string | undefined => {
     const h = req.headers[header];
     const v = typeof h === "string" && h ? h : body[field];

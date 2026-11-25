@@ -79,6 +79,7 @@ export async function generateRoutingCard(input: RoutingCardInput): Promise<stri
 }
 
 async function complete(messages: Array<{ role: string; content: string }>): Promise<string> {
+  const startedAt = Date.now();
   const res = await fetchLiteLLMWithRetry(
     litellmEndpoint("/v1/chat/completions"),
     {
@@ -96,7 +97,7 @@ async function complete(messages: Array<{ role: string; content: string }>): Pro
   );
   if (!res.ok) throw new Error(`LLM returned ${res.status}`);
   const data = (await res.json()) as { choices?: Array<{ message?: { content?: string | null } }> };
-  recordChatCompletion("routing", LITELLM.model, data);
+  recordChatCompletion("routing", LITELLM.model, data, { startedAt });
   const card = (data.choices?.[0]?.message?.content ?? "").trim();
   if (!card) throw new Error("LLM returned no card");
   return card;

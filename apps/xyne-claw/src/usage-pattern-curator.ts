@@ -258,6 +258,7 @@ export async function curateUsagePatterns(req: UsagePatternRequest): Promise<Usa
   const samples = req.samples.slice(0, MAX_SAMPLES);
 
   try {
+    const startedAt = Date.now();
     const res = await fetchLiteLLMWithRetry(`${LITELLM_URL}/v1/chat/completions`, {
       method: "POST",
       headers: {
@@ -288,7 +289,7 @@ export async function curateUsagePatterns(req: UsagePatternRequest): Promise<Usa
     const json = await res.json() as {
       choices?: Array<{ message?: { tool_calls?: Array<{ function?: { arguments?: string } }> } }>;
     };
-    recordChatCompletion("curator", CURATOR_MODEL, json);
+    recordChatCompletion("curator", CURATOR_MODEL, json, { startedAt });
     const args = json.choices?.[0]?.message?.tool_calls?.[0]?.function?.arguments;
     if (!args) {
       log.warn("[usage-pattern-curator] no tool_call in response");

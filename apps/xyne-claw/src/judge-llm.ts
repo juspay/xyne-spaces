@@ -86,6 +86,7 @@ export async function llmJudgePost(
   signal: AbortSignal,
 ): Promise<Record<string, XorAnswer>> {
   const cfg = llmJudgeConfig();
+  const startedAt = Date.now();
   const res = await fetch(cfg.url, {
     method: "POST",
     signal,
@@ -102,6 +103,6 @@ export async function llmJudgePost(
   });
   if (!res.ok) throw new Error(`judge-llm ${res.status}`);
   const body = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
-  recordChatCompletion("judge", cfg.model, body);
+  recordChatCompletion("judge", cfg.model, body, { startedAt });
   return parseLlmJudgeReply(body.choices?.[0]?.message?.content ?? "", questions);
 }

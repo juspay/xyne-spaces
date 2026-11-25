@@ -12,6 +12,7 @@ import type {
   CallableAgentSpec,
 } from "./agent-delegation.js";
 import { createLogger } from "./logger.js";
+import { withUsageScope } from "./llm-usage.js";
 
 const clog = createLogger("run-execution");
 
@@ -251,8 +252,9 @@ export async function executeRunFromPayload(
   pinRunOptimizations(optimizations, agentConfig?.["optimizations"], tierOptimizationDefaults(delegationMode));
 
   try {
-    // Process in background
-    await processTask(
+    // Early side calls (attachments, prefetch) run before runTask sets this.
+    const usage = { runId: sessionId, userId, agentSlug, conversationId, ticketId: ticketIds?.[0] };
+    await withUsageScope(usage, () => processTask(
       sessionId,
       trimmedSessionToken,
       (userId ?? "").trim(),
@@ -308,7 +310,7 @@ export async function executeRunFromPayload(
       awakening,
       agentHandoff,
       state,
-    );
+    ));
   } catch (err) {
     clog.error(
       `[run-execution] run threw (sessionId=${sessionId}): ${err instanceof Error ? err.stack ?? err.message : String(err)}`,

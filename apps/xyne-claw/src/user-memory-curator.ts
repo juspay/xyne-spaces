@@ -260,6 +260,7 @@ async function runDistillAttempt(
   const meta: AttemptMeta = {};
   let raw: string | undefined;
   try {
+    const startedAt = Date.now();
     const res = await postChatCompletion(LITELLM_API_KEY, {
       model: CURATOR_MODEL,
       messages: [
@@ -285,7 +286,7 @@ async function runDistillAttempt(
     }
 
     const data = (await res.json()) as ChatCompletionResponse;
-    recordChatCompletion("curator", CURATOR_MODEL, data);
+    recordChatCompletion("curator", CURATOR_MODEL, data, { startedAt });
 
     if (data.usage) meta.usage = tokenUsage(data.usage);
 
