@@ -31,7 +31,7 @@ const DELIVER_TIMEOUT_MS = 30_000;
 const GIT_TIMEOUT_MS = 60_000;
 const DISCOVERY_TIMEOUT_MS = 20_000;
 
-type SandboxSession = NonNullable<ReturnType<typeof getSandboxSession>>;
+export type SandboxSession = NonNullable<ReturnType<typeof getSandboxSession>>;
 
 export interface PrRunContext {
   userId: string;
@@ -79,7 +79,7 @@ function shellQuote(arg: string): string {
   return `'${arg.replace(/'/g, `'\\''`)}'`;
 }
 
-function sandboxGitRunner(session: SandboxSession, repoRoot: string): GitRunner {
+export function sandboxGitRunner(session: SandboxSession, repoRoot: string): GitRunner {
   return async (args: string[]): Promise<GitRunResult> => {
     const cmd = ["git", "-C", repoRoot, "--no-pager", ...args].map(shellQuote).join(" ");
     const result = await session.commands.run(cmd, GIT_TIMEOUT_MS);
@@ -325,7 +325,7 @@ function buildRoomTools(session: SandboxSession, repoRoot: string): ToolDefiniti
   return [readFile, search, gitLog, listDir];
 }
 
-async function discoverRepoRoot(session: SandboxSession, pr: PrRoomFact): Promise<string | undefined> {
+export async function discoverRepoRoot(session: SandboxSession, pr: Pick<PrRoomFact, "repo">): Promise<string | undefined> {
   let listing = "";
   try {
     const result = await session.commands.run(
