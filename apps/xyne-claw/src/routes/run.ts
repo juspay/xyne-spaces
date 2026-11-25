@@ -215,6 +215,8 @@ import {
 import { createLogger } from "../logger.js";
 import { UI_TESTER_SANDBOX_TOOL_NAMES, buildUiTesterTools } from "../ui-tester/tools.js";
 import { buildXorDecideTool } from "../xor-decide-tool.js";
+import { buildXorPrReviewTool } from "../xor-pr-review.js";
+import { xorEnabled } from "../xor.js";
 import {
   buildPrefetchBlock,
   prefetchEnabled,
@@ -2425,6 +2427,9 @@ export async function processTask(
       : builtSubagentTools;
 
     directTools.push(buildPublishReviewRoomTool(sessionId));
+    // Rule-by-rule review of the branch's changes against a review skill, with the
+    // classifier; every rule check is a judge trace in the debug panel.
+    if (xorEnabled()) directTools.push(buildXorPrReviewTool(meta, skills ?? []));
 
     let fastMetaTools: ToolDefinition[] = [];
 
