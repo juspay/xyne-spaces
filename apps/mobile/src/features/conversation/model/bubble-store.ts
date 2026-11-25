@@ -76,6 +76,21 @@ export function unparkThread(threadId: string): void {
   });
 }
 
+/**
+ * The thread was opened from its bubble, which keeps it parked: its answer has
+ * been seen, so the bubble rests again and any toast for it goes.
+ */
+export function markBubbleSeen(threadId: string): void {
+  const agent = state.agents[threadId];
+  const toastHere = state.toast?.threadId === threadId;
+  if (agent?.kind !== 'answered' && !toastHere) return;
+  commit({
+    ...state,
+    agents: agent?.kind === 'answered' ? { ...state.agents, [threadId]: RESTING } : state.agents,
+    toast: toastHere ? null : state.toast,
+  });
+}
+
 /** Puts every parked thread down. */
 export function clearParked(): void {
   if (state.parked.length === 0) return;

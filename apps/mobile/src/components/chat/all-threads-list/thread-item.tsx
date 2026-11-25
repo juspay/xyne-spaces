@@ -2,6 +2,7 @@ import { memo, useCallback, useMemo } from 'react';
 import { Pressable, Text, View } from 'react-native';
 import { useCSSVariable, useUniwind } from 'uniwind';
 import { useRouter } from 'expo-router';
+import { threadRoutePathname } from '@/src/features/conversation/thread-route';
 import Avatar from '@/src/components/ui/avatar';
 import { ConversationComposerMarkdownBody } from '@/src/components/conversation-composer/conversation-composer-markdown-body';
 import { buildComposerMarkdownStyle } from '@/src/components/conversation-composer/utils/markdownStyle';
@@ -120,9 +121,22 @@ export const ThreadItem = memo(({ row, currentUserId }: Props) => {
   const router = useRouter();
   const preview = useThreadConversationPreview(row.conversationId, row.channelId, currentUserId);
 
-  const handleReply = useCallback(() => {
-    router.push(`/chat/${preview.channelId}/${preview.conversationId}`);
-  }, [router, preview.channelId, preview.conversationId]);
+  const openThread = useCallback(
+    (focusComposer: boolean) => {
+      router.push({
+        pathname: threadRoutePathname(),
+        params: {
+          channelId: preview.channelId,
+          threadId: preview.conversationId,
+          // The Reply button opens the thread ready to type.
+          ...(focusComposer ? { focus: '1' } : {}),
+        },
+      });
+    },
+    [router, preview.channelId, preview.conversationId],
+  );
+  const handleOpen = useCallback(() => openThread(false), [openThread]);
+  const handleReply = useCallback(() => openThread(true), [openThread]);
 
   if (preview.isLoading) {
     return <ThreadItemSkeleton />;
@@ -153,7 +167,7 @@ export const ThreadItem = memo(({ row, currentUserId }: Props) => {
       {/* "X more replies" — tappable, routes to thread */}
       {preview.moreRepliesCount > 0 && (
         <Pressable
-          onPress={handleReply}
+          onPress={handleOpen}
           className='flex-row items-center gap-2 self-stretch rounded-lg px-5 py-2 active:bg-muted/20'
           accessibilityRole='button'
           accessibilityLabel={`${preview.moreRepliesCount} more ${preview.moreRepliesCount === 1 ? 'reply' : 'replies'}`}

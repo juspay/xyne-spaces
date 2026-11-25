@@ -1,4 +1,5 @@
 import { useMemo, type ReactElement } from 'react';
+import { useNavigationState, useRoute } from 'expo-router/react-navigation';
 import { Pressable, Text, View } from 'react-native';
 import { ChevronDown, Minus } from 'lucide-react-native';
 import { useCSSVariable } from 'uniwind';
@@ -21,6 +22,7 @@ import {
 } from '../constants';
 import { useParkThread } from '../hooks/use-park-thread';
 import { useSelfFace } from '../hooks/use-self-face';
+import { roomBeneathCard, type NavStateLike } from '../model/room-beneath';
 import { roomKindOf, roomTitle } from '../model/room-title';
 import { replyCountLabel, stripRepliers } from '../model/thread-strip';
 import { colorOf } from '../model/token-color';
@@ -37,13 +39,17 @@ type ThreadHeaderProps = {
  * The thread card's header (Figma "6 · A thread, opened"): collapse on the
  * left, park on the right, and the repliers with their count between them
  * (which opens the parent conversation). Both controls leave the thread;
- * park also keeps it as a bubble over the room.
+ * park also keeps it as a bubble. Over anything but its own room (Activity,
+ * Search, another room) the count is followed by "in #room", as that tap is
+ * then the way into the room.
  * Absolutely positioned, because the thread screen reserves its height with a
  * spacer below it.
  */
 export function ThreadHeader({ channelId, threadId, onBack }: ThreadHeaderProps): ReactElement {
   const foreground = colorOf(useCSSVariable('--color-spaces-foreground'));
-  const { channel, displayName, isDM } = useConversationHeaderData(channelId, { enabled: false });
+  const { channel, displayName, isDM, isPrivateChannel } = useConversationHeaderData(channelId, {
+    enabled: false,
+  });
   const { replyCount, repliesMd, rootMessage, handleOpenParentConversation } =
     useThreadHeaderActions({
       channelId,
@@ -56,10 +62,16 @@ export function ThreadHeader({ channelId, threadId, onBack }: ThreadHeaderProps)
     [repliesMd],
   );
   const self = useSelfFace();
+  const roomKind = roomKindOf(channel?.scopeType);
+  const roomName = roomTitle(displayName, roomKind, roomKind === 'channel' && isPrivateChannel);
+  const cardKey = useRoute().key;
+  const overOwnRoom = useNavigationState(
+    state => roomBeneathCard(state as NavStateLike, cardKey) === channelId,
+  );
   const park = useParkThread({
     channelId,
     threadId,
-    channelName: roomTitle(displayName, roomKindOf(channel?.scopeType)),
+    channelName: roomName,
     rootMessage,
     repliesMd,
     onBack,
@@ -90,7 +102,7 @@ export function ThreadHeader({ channelId, threadId, onBack }: ThreadHeaderProps)
 
         <Pressable
           accessibilityRole='button'
-          accessibilityLabel={`Open conversation ${displayName}`}
+          accessibilityLabel={`Open conversation ${roomName}`}
           onPress={handleOpenParentConversation}
           className='min-w-0 flex-1 flex-row items-center justify-center active:opacity-60'
           style={{ columnGap: THREAD_HEADER_GAP }}
@@ -101,12 +113,19 @@ export function ThreadHeader({ channelId, threadId, onBack }: ThreadHeaderProps)
             overlap={THREAD_HEADER_AVATAR_OVERLAP}
             self={self}
           />
-          <Text
-            className='shrink text-[16px] font-medium leading-5 text-spaces-foreground'
-            numberOfLines={1}
-          >
-            {replyCount > 0 ? replyCountLabel(replyCount) : 'Thread'}
-          </Text>
+          <View className='min-w-0 shrink items-center'>
+            <Text
+              className='text-[16px] font-medium leading-5 text-spaces-foreground'
+              numberOfLines={1}
+            >
+              {replyCount > 0 ? replyCountLabel(replyCount) : 'Thread'}
+            </Text>
+            {overOwnRoom || !displayName ? null : (
+              <Text className='text-[12px] leading-4 text-spaces-subtle' numberOfLines={1}>
+                in {roomName}
+              </Text>
+            )}
+          </View>
         </Pressable>
 
         <IconButton

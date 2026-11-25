@@ -1,4 +1,4 @@
-import React, { ReactElement, Suspense, useEffect, useMemo } from 'react';
+import React, { ReactElement, Suspense, useEffect, useMemo, useState } from 'react';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Stack, useLocalSearchParams, usePathname, useSegments } from 'expo-router';
 import { useCSSVariable } from 'uniwind';
@@ -33,6 +33,10 @@ import { setRouteSnapshot } from '@/src/features/chat/navigation/routeSnapshot';
 import { ensureQueryCacheStorageReady } from '@/src/machines/queryCacheMachine';
 import { GuideReturnBar } from '@/src/features/user-guide/components/guide-return-bar';
 import { isFlagOn, useFlagGeneration } from '@/src/flags';
+// Direct paths, not the conversation barrel: with the flag off nothing else of it loads.
+import { BubbleHost } from '@/src/features/conversation/components/bubbles/bubble-host';
+import { isConversationThreadCard } from '@/src/features/conversation/flag';
+import { setThreadCardRoute } from '@/src/features/conversation/thread-route';
 
 const DASHBOARD_WEBVIEW_ROUTE_SEGMENTS = new Set(['canvas', 'rca', 'call', 'channel-canvas']);
 
@@ -72,6 +76,14 @@ function NativeShell(): ReactElement {
   useIncomingShareTarget();
 
   const stackContentBackground = useCSSVariable('--color-background') as string;
+  // The redesigned thread card and its parked bubbles live at this level, over
+  // every screen. Read once per shell (a flag change remounts it), and handed
+  // to the thread route before any child can open a thread.
+  const [isThreadCard] = useState(() => {
+    const enabled = isConversationThreadCard();
+    setThreadCardRoute(enabled);
+    return enabled;
+  });
   const pathname = usePathname();
   const insets = useSafeAreaInsets();
   const callBarVisibility = useIsCallBarVisible();
@@ -138,6 +150,15 @@ function NativeShell(): ReactElement {
                   options={{ presentation: 'transparentModal', animation: 'fade' }}
                 />
                 <Stack.Screen
+                  name='thread/[channelId]/[threadId]'
+                  // The card animates itself over the screen that opened it.
+                  options={{
+                    presentation: 'transparentModal',
+                    animation: 'none',
+                    contentStyle: { backgroundColor: 'transparent' },
+                  }}
+                />
+                <Stack.Screen
                   name='create-workspace'
                   options={{
                     presentation: 'fullScreenModal',
@@ -153,6 +174,7 @@ function NativeShell(): ReactElement {
                 <Stack.Screen name='community-join' />
               </Stack>
             </SafeAreaInsetsProvider>
+            {isThreadCard ? <BubbleHost /> : null}
             <OngoingCallBanner />
           </CallBarVisibilityContext.Provider>
           <GuideReturnBar />

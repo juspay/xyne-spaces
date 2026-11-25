@@ -12,6 +12,7 @@ import { useChatRenderTokens } from '@/src/features/chat/v2/components/chat/mess
 import { getParentMessagePreviewText } from '@/src/utils/conversationMessageHelpers';
 import { getParentMessagePreviewMarkdown } from './utils/htmlToMD';
 import { hasCustomEmojiInMarkdown } from './utils/parseCustomEmojiMarkdownSegments';
+import { threadRoutePathname } from '@/src/features/conversation/thread-route';
 
 type RepliedToThreadProps = {
   className?: string;
@@ -73,7 +74,7 @@ const RepliedToThread = memo(({ className }: RepliedToThreadProps): ReactElement
     const targetMessageId = parentMessage?.messageId;
     if (!threadId || !item.channelId) return;
     router.push({
-      pathname: '/chat/[channelId]/[threadId]',
+      pathname: threadRoutePathname(),
       params: {
         channelId: item.channelId,
         threadId,

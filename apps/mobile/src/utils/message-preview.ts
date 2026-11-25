@@ -14,10 +14,11 @@ type ConversationWithAttachments = DmConversation & {
   initialMessageAttachments?: Conversation['initialMessageAttachments'];
 };
 
+/** Line breaks and the ends of block elements (paragraphs, list items) become spaces. */
+const LINE_BREAK_OR_BLOCK_END = /<br\s*\/?>|<\/(?:p|div|li|h[1-6]|blockquote|pre)>/gi;
+
 function stripHtml(html: string): string {
-  return stripHtmlTags(html.replace(/<br\s*\/?>/gi, ' '))
-    .replace(/\s+/g, ' ')
-    .trim();
+  return stripHtmlTags(html.replace(LINE_BREAK_OR_BLOCK_END, ' ')).replace(/\s+/g, ' ').trim();
 }
 
 function getInitialMessageFromConversation(

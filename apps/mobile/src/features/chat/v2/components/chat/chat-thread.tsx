@@ -265,6 +265,14 @@ export type ChatThreadProps = {
   notificationOpenKind?: string | undefined;
   // Keep the header mounted while route-level surface checks are pending.
   isSurfacePending?: boolean;
+  /** Called once the thread's rows are first shown, as for a host that animates in around them. */
+  onListRevealed?: () => void;
+  /**
+   * A thread of at most this many rows opens at its parent, top-aligned, as a
+   * page read from the top (the redesigned card). Unset, every thread opens at
+   * its latest reply, bottom-aligned.
+   */
+  startShortThreadsAtTop?: number;
   hideHeader?: boolean;
   isTranscript?: boolean;
   /** Optional replacements for the thread message content and inline date block. */
@@ -330,6 +338,8 @@ function ChatThreadInner({
   chatOpenAttemptId,
   notificationOpenKind,
   isSurfacePending = false,
+  onListRevealed,
+  startShortThreadsAtTop,
   hideHeader = false,
   isTranscript = false,
   composerInsetMode,
@@ -496,6 +506,8 @@ function ChatThreadInner({
     [expandedConversationIds],
   );
   const [editingTarget, setEditingTarget] = useState<EditingTarget | null>(null);
+  // Only a custom row shows which message is being edited; the classic rows never re-render for it.
+  const editingMessageId = renderers?.ThreadMessageRow ? (editingTarget?.messageId ?? null) : null;
   const composerGeometry = useChatComposerGeometry(
     composerMinimumHeight(insets.bottom, includeBottomSafeArea),
     composerHeightResetKey,
@@ -952,7 +964,19 @@ function ChatThreadInner({
     );
     reportOpenMessageHighlighted();
   }, [reportOpenMessageHighlighted, threadLandingScrollKey, threadOpenIdentityKey]);
-  const shouldUseThreadInitialScrollAtEnd = !messageId && data.length > 0;
+  // Decided once, on the first rows, so the list never flips ends as more load.
+  const startsAtTopRef = useRef<{ key: string; atTop: boolean } | null>(null);
+  if (startsAtTopRef.current?.key !== threadOpenIdentityKey && data.length > 0) {
+    startsAtTopRef.current = {
+      key: threadOpenIdentityKey,
+      atTop:
+        // A short thread fits whole, so an opened-at message stays in view too.
+        startShortThreadsAtTop !== undefined && data.length <= startShortThreadsAtTop,
+    };
+  }
+  const startsAtTop =
+    startsAtTopRef.current?.key === threadOpenIdentityKey && startsAtTopRef.current.atTop;
+  const shouldUseThreadInitialScrollAtEnd = !messageId && data.length > 0 && !startsAtTop;
   const usesInitialThreadAnchorPlacement =
     !threadListInstanceLoadedRef.current &&
     !!messageId &&
@@ -1136,6 +1160,11 @@ function ChatThreadInner({
 
   const threadRevealAnchorKeyRef = useRef(threadOpenIdentityKey);
   const wasBlockingThreadRevealRef = useRef(shouldBlockThreadListReveal);
+
+  const isThreadListRevealed = revealedThreadOpenIdentityKey === threadOpenIdentityKey;
+  useEffect(() => {
+    if (isThreadListRevealed) onListRevealed?.();
+  }, [isThreadListRevealed, onListRevealed]);
 
   useLayoutEffect(() => {
     const shouldConcealThreadList = shouldConcealChatListForOpenIdentity({
@@ -2055,6 +2084,7 @@ function ChatThreadInner({
             ? { onLongPress: (): void => handleLongPress(item.messageId) }
             : {})}
           {...(handleParentTicketPress ? { onTicketPress: handleParentTicketPress } : {})}
+          isEditing={editingMessageId === item.messageId}
           // The replies divider sits between the root and its first reply, so that
           // reply cannot join the root's block.
           {...(previousPaintItem && !(index === 1 && replyCount > 0)
@@ -2150,6 +2180,7 @@ function ChatThreadInner({
       currentUser,
       data,
       dismissKeyboard,
+      editingMessageId,
       expandedConversationIds,
       formatThreadDate,
       getPaintItemForMessage,
@@ -2405,11 +2436,11 @@ function ChatThreadInner({
                     {/* The keyboard wrapper owns keyboard movement and the composer inset. */}
                     <KeyboardAwareLegendList
                       ref={listRef}
-                      alignItemsAtEnd
+                      alignItemsAtEnd={!startsAtTop}
                       applyWorkaroundForContentInsetHitTestBug
                       automaticallyAdjustContentInsets={false}
                       data={data}
-                      extraData={expandedConversationKey}
+                      extraData={`${expandedConversationKey}|${editingMessageId ?? ''}`}
                       keyExtractor={keyExtractor}
                       estimatedItemSize={estimatedThreadItemSize}
                       getItemType={getThreadItemType}
@@ -2420,7 +2451,7 @@ function ChatThreadInner({
                       onLoad={handleThreadListLoad}
                       recycleItems
                       maintainScrollAtEnd={
-                        !shouldShowJoinChannel && shouldMaintainThreadTail
+                        !shouldShowJoinChannel && shouldMaintainThreadTail && !startsAtTop
                           ? {
                               animated: false,
                               on: { dataChange: true, itemLayout: true },

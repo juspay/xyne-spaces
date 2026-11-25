@@ -28,7 +28,8 @@ const LinkPreview = memo(({ flat = false }: LinkPreviewProps): ReactElement => {
       mutedForeground={mutedForeground}
       accentColor={ambientAccentColor}
       {...(flat
-        ? {}
+        ? // Its own surface, so it still reads as a card on the dark flat layout.
+          { surfaceClassName: 'bg-spaces-surface' }
         : {
             currentUserColors: {
               backgroundColor: embeddedBgUser,

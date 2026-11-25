@@ -19,11 +19,10 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { scheduleOnRN } from 'react-native-worklets';
-import { useGlobalSearchParams, useRouter } from 'expo-router';
+import { useRouter } from 'expo-router';
+import { useReanimatedKeyboardAnimation } from 'react-native-keyboard-controller';
 
-import { resolveBaseConversationSurface } from '@/src/features/chat/baseConversationSurface';
 import { haptics } from '@/src/utils/haptics';
-import { openBaseChatRoute } from '@/src/utils/openChatRoute';
 
 import {
   BUBBLE_BEHIND_MAX,
@@ -33,10 +32,12 @@ import {
   BUBBLE_CLOSE_HEIGHT,
   BUBBLE_EDGE_INSET,
   BUBBLE_FOLD_MS,
+  BUBBLE_HEAD_STILL,
   BUBBLE_HOLD_MS,
   BUBBLE_LAND_TOP,
   BUBBLE_LIST_ENTER_MS,
   BUBBLE_LIST_EXIT_MS,
+  BUBBLE_OPEN_GUARD_MS,
   BUBBLE_POP_SCALE,
   BUBBLE_SIZE,
   BUBBLE_SPRING,
@@ -56,6 +57,7 @@ import {
   behindDirection,
   bubbleListPlacement,
   bubbleRestX,
+  bubbleKeyboardLift,
   bubbleSettleSide,
   bubbleTuckSide,
   bubbleTuckedX,
@@ -71,6 +73,8 @@ import {
 } from '../../model/bubbles';
 import { fadeScaleTransition } from '../../model/fade-scale-transition';
 import { floatingCardBottom } from '../../model/floating-card';
+import { setThreadCardSource } from '../../model/thread-card-source-store';
+import { THREAD_CARD_ROUTE } from '../../thread-route';
 import { ConversationOverlayLayer } from '../conversation-overlay-layer';
 import { BubbleAnswerToast } from './bubble-answer-toast';
 import { BubbleBehind } from './bubble-behind';
@@ -115,8 +119,6 @@ type BubbleStackProps = {
 export function BubbleStack({ bubbles, visible }: BubbleStackProps): ReactElement {
   const { parked, agents, toast } = bubbles;
   const router = useRouter();
-  // The bubbles show over a room only, so the focused route's channel is the room's.
-  const { channelId: roomId } = useGlobalSearchParams<{ channelId?: string }>();
   const insets = useSafeAreaInsets();
   const { width, height } = useWindowDimensions();
   const reducedMotion = useReducedMotion();
@@ -152,7 +154,14 @@ export function BubbleStack({ bubbles, visible }: BubbleStackProps): ReactElemen
   const setTrailActive = useCallback((active: boolean): void => {
     frameRef.current?.setActive(active);
   }, []);
+  // Where the bubble was last frame: the trail stops only once the bubble has too.
+  const lastHead = useSharedValue<[number, number]>([NaN, NaN]);
   const frame = useFrameCallback((info: FrameInfo) => {
+    const [lastX, lastY] = lastHead.get();
+    const headStill =
+      Math.abs(x.get() - lastX) < BUBBLE_HEAD_STILL &&
+      Math.abs(y.get() - lastY) < BUBBLE_HEAD_STILL;
+    lastHead.set([x.get(), y.get()]);
     const direction = behindDirection(y.get(), height);
     const spreadOut = dragging.get() === 1;
     const follow = reducedMotion
@@ -160,7 +169,9 @@ export function BubbleStack({ bubbles, visible }: BubbleStackProps): ReactElemen
       : frameFollow(BUBBLE_TRAIL_FOLLOW, info.timeSincePreviousFrame ?? 0);
     const next = stepTrail(trail.get(), x.get(), y.get(), direction, spreadOut, follow);
     trail.set(next);
-    if (!spreadOut && trailSettled(next, foldedTrail(x.get(), y.get(), direction))) {
+    // A spring from a still finger barely moves on its first frame, so the trail
+    // must not count as settled until the bubble itself is still.
+    if (!spreadOut && headStill && trailSettled(next, foldedTrail(x.get(), y.get(), direction))) {
       scheduleOnRN(setTrailActive, false);
     }
   }, false);
@@ -170,37 +181,49 @@ export function BubbleStack({ bubbles, visible }: BubbleStackProps): ReactElemen
 
   const closeList = useCallback((): void => setList(null), []);
 
-  // Back where you were (Figma "9 · Tap one"): a thread from another room
-  // opens over its own room, reached as any channel open reaches it.
+  // The card opens over wherever you are, as the bubbles float over every
+  // screen; tapped straight from the bubble, it grows out of the bubble.
+  const openedAtRef = useRef(0);
+  const keyboard = useReanimatedKeyboardAnimation();
   const open = useCallback(
-    (thread: ParkedThread): void => {
+    (thread: ParkedThread, fromBubble: boolean): void => {
+      const now = Date.now();
+      if (now - openedAtRef.current < BUBBLE_OPEN_GUARD_MS) return;
+      openedAtRef.current = now;
       setList(null);
-      if (thread.channelId !== roomId) {
-        const surface =
-          thread.surface === 'channels' || thread.surface === 'dms' ? thread.surface : undefined;
-        openBaseChatRoute(router, thread.channelId, {
-          surface: resolveBaseConversationSurface(thread.scopeType, surface),
+      if (fromBubble) {
+        // Where the bubble shows, lifted over the keyboard if it is up.
+        setThreadCardSource({
+          x: x.get(),
+          y: y.get() + bubbleKeyboardLift(y.get(), height, -keyboard.height.get()),
+          width: BUBBLE_SIZE,
+          height: BUBBLE_SIZE,
+          radius: BUBBLE_SIZE / 2,
         });
       }
       router.push({
-        pathname: '/chat/[channelId]/[threadId]',
+        pathname: THREAD_CARD_ROUTE,
         params: {
           channelId: thread.channelId,
           threadId: thread.threadId,
           from: 'channel_thread',
-          openStartedAtMs: String(Date.now()),
+          // Keeps it parked: collapsing the card puts it back in its bubble.
+          bubble: '1',
+          openStartedAtMs: String(now),
           ...(thread.surface ? { surface: thread.surface } : {}),
           ...(thread.scopeType ? { scopeType: thread.scopeType } : {}),
         },
       });
     },
-    [roomId, router],
+    [router, x, y, height, keyboard],
   );
+
+  const openFromList = useCallback((thread: ParkedThread): void => open(thread, false), [open]);
 
   const openById = useCallback(
     (threadId: string): void => {
       const thread = parked.find(entry => entry.threadId === threadId);
-      if (thread) open(thread);
+      if (thread) open(thread, false);
     },
     [open, parked],
   );
@@ -209,7 +232,7 @@ export function BubbleStack({ bubbles, visible }: BubbleStackProps): ReactElemen
     void haptics.buttonTap();
     const [only] = parked;
     if (parked.length === 1 && only) {
-      open(only);
+      open(only, true);
       return;
     }
     setList(current =>
@@ -357,6 +380,15 @@ export function BubbleStack({ bubbles, visible }: BubbleStackProps): ReactElemen
   const tabStyle = useAnimatedStyle(() => ({
     transform: [{ translateY: y.get() + BUBBLE_SIZE / 2 - BUBBLE_TAB_HEIGHT / 2 }],
   }));
+  // With the keyboard up, a low bubble rides above it, clear of the composer.
+  const liftStyle = useAnimatedStyle(() => ({
+    transform: [
+      {
+        translateY:
+          dragging.get() === 1 ? 0 : bubbleKeyboardLift(y.get(), height, -keyboard.height.get()),
+      },
+    ],
+  }));
   const layerStyle = useAnimatedStyle(() => ({
     opacity: withTiming(visible ? 1 : 0, FOLD),
   }));
@@ -418,58 +450,60 @@ export function BubbleStack({ bubbles, visible }: BubbleStackProps): ReactElemen
             bottom={closeBottom}
             onLayout={handleCloseLayout}
           />
-          {tucked === null
-            ? Array.from({ length: behindCount }, (_, index) => behindCount - index).map(depth => (
-                <BubbleBehind key={depth} depth={depth} trail={trail} spread={spread} />
-              ))
-            : null}
-          {listShown ? (
-            <BubbleList
-              parked={parked}
-              placement={list}
-              screenWidth={width}
-              onOpen={open}
-              onRemove={removeOne}
-              onClearAll={putAllDown}
-              onClose={closeList}
-            />
-          ) : null}
-          {front ? (
-            <GestureDetector gesture={bubbleGesture}>
-              <Animated.View
-                accessible
-                accessibilityRole='button'
-                accessibilityLabel={`${label}${status}`}
-                accessibilityHint={
-                  parked.length === 1 ? 'Opens the thread' : 'Lists the parked threads'
-                }
-                accessibilityState={parked.length > 1 ? { expanded: listShown } : {}}
-                accessibilityActions={[
-                  { name: 'activate' },
-                  { name: 'clear', label: 'Close all parked threads' },
-                ]}
-                onAccessibilityAction={event => {
-                  if (event.nativeEvent.actionName === 'activate') tapBubble();
-                  if (event.nativeEvent.actionName === 'clear') putAllDown();
-                }}
-                style={[styles.bubble, bubbleStyle]}
-              >
-                {/* Its own view: the entering scale would replace the position's transform.
+          <Animated.View style={[StyleSheet.absoluteFill, liftStyle]} pointerEvents='box-none'>
+            {tucked === null
+              ? Array.from({ length: behindCount }, (_, index) => behindCount - index).map(
+                  depth => <BubbleBehind key={depth} depth={depth} trail={trail} spread={spread} />,
+                )
+              : null}
+            {listShown ? (
+              <BubbleList
+                parked={parked}
+                placement={list}
+                screenWidth={width}
+                onOpen={openFromList}
+                onRemove={removeOne}
+                onClearAll={putAllDown}
+                onClose={closeList}
+              />
+            ) : null}
+            {front ? (
+              <GestureDetector gesture={bubbleGesture}>
+                <Animated.View
+                  accessible
+                  accessibilityRole='button'
+                  accessibilityLabel={`${label}${status}`}
+                  accessibilityHint={
+                    parked.length === 1 ? 'Opens the thread' : 'Lists the parked threads'
+                  }
+                  accessibilityState={parked.length > 1 ? { expanded: listShown } : {}}
+                  accessibilityActions={[
+                    { name: 'activate' },
+                    { name: 'clear', label: 'Close all parked threads' },
+                  ]}
+                  onAccessibilityAction={event => {
+                    if (event.nativeEvent.actionName === 'activate') tapBubble();
+                    if (event.nativeEvent.actionName === 'clear') putAllDown();
+                  }}
+                  style={[styles.bubble, bubbleStyle]}
+                >
+                  {/* Its own view: the entering scale would replace the position's transform.
                     Keyed by the front thread, so every newly parked thread pops in. */}
-                <Animated.View key={front.threadId} entering={BUBBLE_TRANSITION.entering}>
-                  <BubbleThread faceIds={front.faceIds} agent={frontAgent} />
+                  <Animated.View key={front.threadId} entering={BUBBLE_TRANSITION.entering}>
+                    <BubbleThread faceIds={front.faceIds} agent={frontAgent} />
+                  </Animated.View>
                 </Animated.View>
-              </Animated.View>
-            </GestureDetector>
-          ) : null}
-          {tucked !== null ? (
-            <BubbleEdgeTab
-              side={tucked}
-              style={tabStyle}
-              gesture={tabGesture}
-              onActivate={() => untuck(tucked)}
-            />
-          ) : null}
+              </GestureDetector>
+            ) : null}
+            {tucked !== null ? (
+              <BubbleEdgeTab
+                side={tucked}
+                style={tabStyle}
+                gesture={tabGesture}
+                onActivate={() => untuck(tucked)}
+              />
+            ) : null}
+          </Animated.View>
           {toast && visible ? (
             <BubbleAnswerToast
               key={toast.threadId}

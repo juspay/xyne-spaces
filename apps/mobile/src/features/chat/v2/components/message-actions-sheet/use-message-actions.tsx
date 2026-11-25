@@ -52,6 +52,7 @@ import type { ChatInputEditingMessage } from '@/src/components/input-composer/in
 
 import type { MessageAction, MessageActionsTarget } from './message-actions-target';
 import { decodeBasicEntitiesExact, HTML_TAG_OR_EMPTY, stripHtmlTags } from '@/src/utils/htmlText';
+import { threadRoutePathname } from '@/src/features/conversation/thread-route';
 
 const EMOJI_IMG_RE = /<img[^>]*data-emoji="true"[^>]*>/i;
 const DESTRUCTIVE_COLOR = '#dc2626';
@@ -231,7 +232,7 @@ export const useMessageActions = ({
     const { channelId, conversationId } = target;
     closeActionSheet(() => {
       router.push({
-        pathname: '/chat/[channelId]/[threadId]',
+        pathname: threadRoutePathname(),
         params: {
           channelId,
           threadId: conversationId,

@@ -1,5 +1,5 @@
-import { memo, useMemo, type ReactElement } from 'react';
-import { Pressable, Text } from 'react-native';
+import { memo, useCallback, useEffect, useMemo, useRef, type ReactElement } from 'react';
+import { Pressable, Text, type View } from 'react-native';
 import { ChevronRight } from 'lucide-react-native';
 import { useCSSVariable } from 'uniwind';
 
@@ -18,6 +18,7 @@ import {
 } from '../constants';
 import { useSelfFace } from '../hooks/use-self-face';
 import { replyCountLabel, stripRepliers, stripTime } from '../model/thread-strip';
+import { openFromThreadCardSource, registerThreadCardOpener } from '../thread-card-source';
 import { OverlappingAvatars } from './overlapping-avatars';
 
 type ThreadStripProps = {
@@ -44,11 +45,25 @@ export const ThreadStrip = memo(function ThreadStrip({
 
   const time = stripTime(lastActivityAt, Date.now());
 
+  // The thread card grows out of the strip, so it notes where it is before
+  // opening the thread.
+  const stripRef = useRef<View>(null);
+  const threadId = paintRow.conversationId;
+  useEffect(() => {
+    const node = stripRef.current;
+    return node ? registerThreadCardOpener(threadId, node) : undefined;
+  }, [threadId]);
+  const handlePress = useCallback(
+    (): void => openFromThreadCardSource(stripRef.current, onPress, THREAD_STRIP_RADIUS),
+    [onPress],
+  );
+
   return (
     <Pressable
       accessibilityRole='button'
+      ref={stripRef}
       accessibilityLabel={`Open thread, ${replyCountLabel(count)}`}
-      onPress={onPress}
+      onPress={handlePress}
       className='flex-row items-center border border-spaces-outline bg-spaces-background'
       style={{
         boxShadow: ROW_SHADOW,

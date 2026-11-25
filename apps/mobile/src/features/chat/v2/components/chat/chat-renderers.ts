@@ -43,6 +43,8 @@ export type ThreadMessageRowProps = {
   previousPaint?: ChatPaintRow | undefined;
   /** The conversation behind `previousPaint`. */
   previousConversation?: ConversationItem | undefined;
+  /** This message is open in the composer for editing. */
+  isEditing?: boolean | undefined;
 };
 
 export type ChatRowRenderers = {

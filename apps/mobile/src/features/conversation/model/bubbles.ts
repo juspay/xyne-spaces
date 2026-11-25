@@ -1,9 +1,11 @@
 import {
   BUBBLE_BEHIND_STEP,
   BUBBLE_CLEAR_ALL_HEIGHT,
+  BUBBLE_CLOSE_REACH_ABOVE,
   BUBBLE_CLOSE_SLOP,
   BUBBLE_EDGE_INSET,
   BUBBLE_FLING_PROJECTION,
+  BUBBLE_KEYBOARD_CLEARANCE,
   BUBBLE_LIST_GAP,
   BUBBLE_LIST_ROW_HEIGHT,
   BUBBLE_SIZE,
@@ -179,6 +181,21 @@ export function clampBubbleY(y: number, minY: number, maxY: number): number {
   return Math.min(Math.max(y, minY), Math.max(minY, maxY));
 }
 
+/**
+ * How far a bubble at `y` rides up while the keyboard is `keyboardHeight` tall:
+ * a low bubble sits clear of the composer above it, a high one stays put.
+ */
+export function bubbleKeyboardLift(
+  y: number,
+  screenHeight: number,
+  keyboardHeight: number,
+): number {
+  'worklet';
+  if (keyboardHeight <= 0) return 0;
+  const highest = screenHeight - keyboardHeight - BUBBLE_KEYBOARD_CLEARANCE - BUBBLE_SIZE;
+  return Math.min(0, highest - y);
+}
+
 /** Cards behind sit below the bubble, or above it once it is in the bottom half. */
 export function behindDirection(y: number, screenHeight: number): 1 | -1 {
   'worklet';
@@ -187,7 +204,10 @@ export function behindDirection(y: number, screenHeight: number): 1 | -1 {
 
 export type ScreenRect = Readonly<{ x: number; y: number; width: number; height: number }>;
 
-/** Whether the dragged bubble's centre is over the close target, give or take its slop. */
+/**
+ * Whether the dragged bubble's centre is over the close target, give or take
+ * its slop, which reaches further above it.
+ */
 export function isOverCloseTarget(x: number, y: number, target: ScreenRect): boolean {
   'worklet';
   const centreX = x + BUBBLE_SIZE / 2;
@@ -195,7 +215,7 @@ export function isOverCloseTarget(x: number, y: number, target: ScreenRect): boo
   return (
     centreX > target.x - BUBBLE_CLOSE_SLOP &&
     centreX < target.x + target.width + BUBBLE_CLOSE_SLOP &&
-    centreY > target.y - BUBBLE_CLOSE_SLOP &&
+    centreY > target.y - BUBBLE_CLOSE_REACH_ABOVE &&
     centreY < target.y + target.height + BUBBLE_CLOSE_SLOP
   );
 }
@@ -289,8 +309,41 @@ export function bubbleListPlacement(
  * the gap above it, but never under one row, so a cramped list still shows one.
  */
 export function bubbleListRowsMaxHeight(maxHeight: number): number {
-  return Math.max(
-    maxHeight - BUBBLE_CLEAR_ALL_HEIGHT - BUBBLE_LIST_GAP,
-    BUBBLE_LIST_ROW_HEIGHT,
-  );
+  return Math.max(maxHeight - BUBBLE_CLEAR_ALL_HEIGHT - BUBBLE_LIST_GAP, BUBBLE_LIST_ROW_HEIGHT);
+}
+
+/**
+ * Route segments the bubbles stay hidden under: a thread (the card is the
+ * thread itself), calls (native and the web call), recordings, the web
+ * canvases, and full-screen viewers and flows.
+ */
+const BUBBLE_HIDDEN_SEGMENTS: ReadonlySet<string> = new Set([
+  '[threadId]',
+  'native-call',
+  'call-prejoin',
+  '[callId]',
+  '[recordingId]',
+  'canvas',
+  'channel-canvas',
+  'rca',
+  'attachments-viewer',
+  'quick-look',
+  'create-workspace',
+  'share-target',
+]);
+
+/**
+ * Whether parked bubbles float over the screen at `segments`. A ticket screen
+ * showing a parked thread (`shownThreadId`) is that thread, so they hide there too.
+ */
+export function bubblesShowOver(
+  segments: readonly string[],
+  shownThreadId?: string | null,
+  parkedThreadIds: readonly string[] = [],
+): boolean {
+  if (segments.some(segment => BUBBLE_HIDDEN_SEGMENTS.has(segment))) return false;
+  if (segments.includes('[ticketId]') && shownThreadId && parkedThreadIds.includes(shownThreadId)) {
+    return false;
+  }
+  return true;
 }

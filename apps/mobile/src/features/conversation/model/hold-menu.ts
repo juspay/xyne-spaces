@@ -32,7 +32,19 @@ const FIGMA_LABELS = new Map<string, string | ((classicLabel: string) => string)
   ],
   ['copy-message', 'Copy text'],
   ['ask-ai', 'Ask Xyne about this'],
+  ['edit-in-chat', 'Edit message'],
 ]);
+
+/** What the menu confirms after a copy row, which otherwise only buzzes. */
+const COPIED_NOTICES = new Map<string, string>([
+  ['copy-message', 'Copied'],
+  ['copy-link', 'Link copied'],
+  ['copy-image', 'Image copied'],
+]);
+
+export function holdMenuCopiedNotice(id: string): string | null {
+  return COPIED_NOTICES.get(id) ?? null;
+}
 
 export function holdMenuLabel(id: string, classicLabel: string): string {
   const mapped = FIGMA_LABELS.get(id);

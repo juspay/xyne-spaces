@@ -48,6 +48,7 @@ import { COMPOSER_INLINE_EMOJI_RENDER_SIZE } from '@/src/features/chat/v2/compon
 
 import { useChatRenderTokens } from './message-row';
 import { useReactionsSheet } from './reactions-sheet-host';
+import { threadRoutePathname } from '@/src/features/conversation/thread-route';
 
 const TICKET_ID_BADGE_LIGHT_TEXT = '#6f4700';
 const TICKET_ID_BADGE_DARK_TEXT = '#f6d46b';
@@ -642,7 +643,7 @@ const PaintParentPreview = memo(function PaintParentPreview({
   const openThread = useCallback((): void => {
     if (!row.channelId || !row.parentConversationId) return;
     router.push({
-      pathname: '/chat/[channelId]/[threadId]',
+      pathname: threadRoutePathname(),
       params: {
         channelId: row.channelId,
         threadId: row.parentConversationId,

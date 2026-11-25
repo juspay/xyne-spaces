@@ -22,6 +22,8 @@ type LinkPreviewCardProps = {
     mutedColor: string;
     accentColor: string;
   };
+  /** Replaces the other-person fill, for a card drawn outside any bubble. */
+  surfaceClassName?: string;
 };
 
 type LinkPreviewResponse = {
@@ -145,6 +147,7 @@ const LinkPreviewCardComponent = ({
   mutedForeground,
   accentColor,
   currentUserColors,
+  surfaceClassName,
 }: LinkPreviewCardProps): ReactElement | null => {
   const resolvedPreview = useResolvedLinkPreview(preview);
   const youtubeVideoId = useMemo(
@@ -174,7 +177,7 @@ const LinkPreviewCardComponent = ({
       className={cn(
         'mb-2.5 flex-row overflow-hidden rounded-[8px]',
         isCurrentUser && !currentColors ? 'bg-conversation-composer-forwarded-bg-user' : '',
-        !isCurrentUser ? 'bg-conversation-composer-forwarded-bg-other' : '',
+        !isCurrentUser ? (surfaceClassName ?? 'bg-conversation-composer-forwarded-bg-other') : '',
       )}
       style={[
         { minHeight: 86 },

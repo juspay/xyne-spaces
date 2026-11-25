@@ -6,6 +6,7 @@ import { getAvatarAccentColor, useUserSnapshot } from '@/src/components/ui/avata
 import { forgetProfilePictureUri, useProfilePictureUri } from '@/src/hooks/useProfilePictureUri';
 
 import { avatarRadius } from './avatar.geometry';
+import { isGeneratedInitialsPicture } from './avatar.picture';
 import type { AvatarFallbackUser } from './avatar.types';
 
 /**
@@ -48,7 +49,8 @@ export const AvatarFace = memo(function AvatarFace({
   const user = useUserSnapshot(userId);
   const displayName =
     user?.displayName || user?.name || fallbackUser?.displayName || fallbackUser?.name || '';
-  const picture = user ? user.picture : fallbackUser?.picture;
+  const rawPicture = user ? user.picture : fallbackUser?.picture;
+  const picture = isGeneratedInitialsPicture(rawPicture) ? undefined : rawPicture;
   const pictureUri = useProfilePictureUri(userId, picture);
   const imageKey = `${userId}:${picture ?? 'none'}`;
   const [failedImageKey, setFailedImageKey] = useState<string | null>(null);

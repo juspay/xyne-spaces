@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { BackHandler, Keyboard } from 'react-native';
+import { useIsFocused } from 'expo-router/react-navigation';
 
 import { useSearchNavigation } from '@/src/features/global-search/hooks/use-search-navigation';
 import {
@@ -62,15 +63,18 @@ export function useChannelFind(
   }, []);
   const { openResult } = useSearchNavigation(leave);
 
-  // Android back closes find before it leaves the room.
+  // Android back closes find before it leaves the room. Only while the room is
+  // in front: a thread card over it takes back for itself, and the listener is
+  // added again (so it is the newest) when the room comes back to the front.
+  const isFocused = useIsFocused();
   useEffect(() => {
-    if (!isOpen) return undefined;
+    if (!isOpen || !isFocused) return undefined;
     const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
       close();
       return true;
     });
     return (): void => subscription.remove();
-  }, [close, isOpen]);
+  }, [close, isFocused, isOpen]);
 
   // A channel switch keeps the screen mounted; find belongs to the room it was opened in.
   useEffect(() => leave, [channelId, leave]);

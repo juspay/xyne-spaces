@@ -4,6 +4,7 @@ import type { MessageDeepLinkPayload } from '@/src/utils/messageDeepLink';
 import type { ResolvedChatLocation } from './resolveChatLink';
 import { isCurrentChatTarget, isCurrentMainConversation } from './routeSnapshot';
 import { baseChatRouteSingular, TICKET_ROUTE } from './chatRoutePolicy';
+import { THREAD_CARD_ROUTE, threadRoutePathname } from '@/src/features/conversation/thread-route';
 import { getBaseConversationSurfacePath } from '../baseConversationSurface';
 import {
   restorePersistedChatWindow,
@@ -218,7 +219,7 @@ export const buildChatOpenRoute = (intent: ChatOpenIntent, chatOpenAttemptId?: s
         };
       }
       return {
-        pathname: '/chat/[channelId]/[threadId]',
+        pathname: threadRoutePathname(),
         params: { ...commonParams, threadId: intent.hint.threadId },
       };
     }
@@ -290,6 +291,9 @@ const getPersistedChatWindowTarget = (intent: ChatOpenIntent): PersistedChatWind
   };
 };
 
+const isThreadCardRoute = (route: Href): boolean =>
+  typeof route === 'object' && route.pathname === THREAD_CARD_ROUTE;
+
 export type ChatOpenExecutionOptions = {
   mode?: 'push' | 'replace';
 };
@@ -332,6 +336,12 @@ export const executeChatOpenIntent = (
       return true;
     }
 
+    // The root thread card is not a chat-stack entry: the stack's singular id
+    // would make the push replace whatever chat sits beneath the card.
+    if (isThreadCardRoute(route)) {
+      router.push(route);
+      return true;
+    }
     router.push(route, { dangerouslySingular: baseChatRouteSingular });
     return true;
   } catch (error) {
@@ -383,7 +393,7 @@ export const buildResolvedChatRoute = (
 
   if (location.destination === 'thread' && location.threadId) {
     return {
-      pathname: '/chat/[channelId]/[threadId]',
+      pathname: threadRoutePathname(),
       params: { ...params, threadId: location.threadId },
     };
   }

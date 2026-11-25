@@ -7,7 +7,7 @@ import { messageScopeParams } from '@/src/features/xyne-ai/model/askAIParams';
 import { stateMachineActor } from '@/src/machines/stateMachine';
 
 import { isAgentUserType } from '../model/agent';
-import { parkThread, unparkThread } from '../model/bubble-store';
+import { markBubbleSeen, parkThread, unparkThread } from '../model/bubble-store';
 import { bubbleFaceIds } from '../model/bubbles';
 import { useBubbleScope } from './use-bubbles';
 
@@ -29,9 +29,11 @@ function isAgentId(userId: string): boolean {
 }
 
 /**
- * The thread header's "−": parks the open thread as a bubble over the room,
- * from what the header has already loaded, then leaves it. An open thread is
- * never parked, so opening one (from its bubble or the room) lets it go.
+ * The thread header's "−": parks the open thread as a bubble, from what the
+ * header has already loaded, then leaves it. Opening a thread from the room
+ * lets its bubble go; one opened from its bubble keeps it (hidden while the
+ * card is up), so collapsing the card puts it back in the bubble it grew
+ * out of, as a chat head does. A bubble is put down by dropping it on Close.
  */
 export function useParkThread({
   channelId,
@@ -42,9 +44,17 @@ export function useParkThread({
   onBack,
 }: ParkThreadSource): () => void {
   const scope = useBubbleScope();
-  const { surface, scopeType } = useLocalSearchParams<{ surface?: string; scopeType?: string }>();
+  const { surface, scopeType, bubble } = useLocalSearchParams<{
+    surface?: string;
+    scopeType?: string;
+    bubble?: string;
+  }>();
+  const fromBubble = bubble === '1';
 
-  useEffect(() => unparkThread(threadId), [threadId]);
+  useEffect(() => {
+    if (fromBubble) markBubbleSeen(threadId);
+    else unparkThread(threadId);
+  }, [fromBubble, threadId]);
 
   return useCallback((): void => {
     if (scope !== null) {

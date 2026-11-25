@@ -56,6 +56,7 @@ import type {
   ChatChannelMessageActionsControllerHandle,
   ScrollToBottomButtonControllerHandle,
 } from './chat-channel-controllers';
+import { threadRoutePathname } from '@/src/features/conversation/thread-route';
 
 const RICH_HYDRATION_AFTER_TRANSITION_DELAY_MS = 420;
 const runAfterFirstPaint = (callback: () => void): { cancel: () => void } => {
@@ -813,7 +814,7 @@ export function useChatChannelController(
       }
 
       router.push({
-        pathname: '/chat/[channelId]/[threadId]',
+        pathname: threadRoutePathname(),
         params: {
           channelId: conversation.channelId || channelId || '',
           threadId: routeThreadId,

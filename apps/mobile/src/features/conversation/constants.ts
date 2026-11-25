@@ -537,6 +537,57 @@ export const THREAD_CARD_BOTTOM = 26;
  */
 export const FLOATING_CARD_NAV_BAR_GAP = 8;
 export const THREAD_CARD_RADIUS = 40;
+/** The iOS sheet curve (Vaul and Ionic match it): fast out, long settle. */
+export const THREAD_CARD_SHEET_EASING = [0.32, 0.72, 0, 1] as const;
+export const THREAD_CARD_ENTER_MS = 500;
+/**
+ * A thread opened to reply focuses its field once the card is in: the sheet
+ * entrance (it has no strip to grow from), plus a beat.
+ */
+export const THREAD_REPLY_FOCUS_DELAY_MS = 560;
+/** Closing is quicker than opening: the user is done with it. */
+export const THREAD_CARD_EXIT_MS = 300;
+/** The scrim fades in this long, whatever the card does. */
+export const THREAD_CARD_SCRIM_MS = 220;
+/** Drag to close: past this far (or a quarter of the card), or a flick this fast. */
+export const THREAD_CARD_DISMISS_DISTANCE = 160;
+export const THREAD_CARD_DISMISS_VELOCITY = 900;
+/** Dragging up past rest gives at most this much, on a rubber band. */
+export const THREAD_CARD_OVERDRAG_LIMIT = 24;
+/** A drag starts after this much vertical travel, so header taps still land. */
+export const THREAD_CARD_DRAG_SLOP = 8;
+/** A sideways move this far first gives the drag up, so horizontal swipes inside still work. */
+export const THREAD_CARD_DRAG_FAIL_X = 24;
+/** A drag let go short of closing springs back to rest on this. */
+export const THREAD_CARD_SETTLE_SPRING = { duration: 380, dampingRatio: 0.9 } as const;
+/** Grown from a strip: how long the strip takes to grow into the card, and to shrink back. */
+export const THREAD_CARD_MORPH_ENTER_MS = 460;
+export const THREAD_CARD_MORPH_EXIT_MS = 380;
+/**
+ * Morph: the shrink eases in and out, so it neither snaps off the card nor
+ * crawls the last stretch into the strip.
+ */
+export const THREAD_CARD_MORPH_EXIT_EASING = [0.4, 0, 0.2, 1] as const;
+/** Morph: the grow waits for the thread's rows, but never longer than this. */
+export const THREAD_CARD_MORPH_START_TIMEOUT_MS = 300;
+
+/** Morph: the share of the grow over which the card fades in over the strip. */
+export const THREAD_CARD_MORPH_FADE_SHARE = 0.2;
+/**
+ * Morph: the thread inside shows from this point of the grow, over the span
+ * after it (and goes the same way on the shrink), well before the card fades.
+ */
+export const THREAD_CARD_MORPH_CONTENT_FROM = 0.3;
+export const THREAD_CARD_MORPH_CONTENT_SPAN = 0.3;
+/** Morph: a strip tapped longer ago than this is not where the card came from. */
+export const THREAD_CARD_SOURCE_MAX_AGE_MS = 2000;
+
+/**
+ * A thread of at most this many rows (parent, divider, replies, date rows)
+ * opens at its parent and reads down from the top; a longer one opens at its
+ * latest reply. Roughly what fits in the card.
+ */
+export const THREAD_CARD_START_AT_TOP_MAX_ROWS = 8;
 /** The 20% black behind the thread card and the "+" tray. */
 export const SCRIM_COLOR = 'rgba(0, 0, 0, 0.2)';
 /**
@@ -720,9 +771,12 @@ export const OFFLINE_BANNER_HIT_SLOP = 8;
 export const BUBBLE_SIZE = 58;
 export const BUBBLE_RADIUS = 20;
 export const BUBBLE_EDGE_INSET = 14;
-export const BUBBLE_LAND_TOP = 120;
+/** Where a first bubble lands: below the screen headers and Activity's filter chips. */
+export const BUBBLE_LAND_TOP = 200;
 /** Settled low, it stays this far above the screen bottom, clear of the typing bar. */
 export const BUBBLE_BOTTOM_CLEARANCE = 112;
+/** With the keyboard up, the bubble keeps this far above it, clear of the composer. */
+export const BUBBLE_KEYBOARD_CLEARANCE = 72;
 /** Figma "Shadow / Float": 0 / 1 blur 3 at 7% and 0 / 6 blur 18 at 10%, #12141C. */
 export const BUBBLE_SHADOW =
   '0px 1px 3px 0px rgba(18, 20, 28, 0.07), 0px 6px 18px 0px rgba(18, 20, 28, 0.1)';
@@ -732,6 +786,8 @@ export const BUBBLE_SPRING = { damping: 24, stiffness: 260 } as const;
 export const BUBBLE_FLING_PROJECTION = 0.1;
 /** Held this long, the close target appears without a drag. */
 export const BUBBLE_HOLD_MS = 380;
+/** A second tap this soon after opening a thread does nothing, so two cards never stack. */
+export const BUBBLE_OPEN_GUARD_MS = 800;
 /** Pushed this far past a side edge, it tucks away into a tab. */
 export const BUBBLE_TUCK_DISTANCE = 36;
 /** Each card behind sits 10 further along than the one ahead; at most six trail a drag. */
@@ -745,6 +801,8 @@ export const BUBBLE_BEHIND_DEPTHS = [
 ] as const;
 /** The share of its gap a trailing card closes each 60 Hz frame. */
 export const BUBBLE_TRAIL_FOLLOW = 0.35;
+/** The bubble moved less than this since the last frame: it is at rest, and the trail may stop. */
+export const BUBBLE_HEAD_STILL = 0.05;
 /** Cards behind fade out and back as a drag starts and ends. */
 export const BUBBLE_FOLD_MS = 180;
 /** "Working": a 29 x 20 plate, radius 10, on the bottom-left corner; three 3 dots, 2 apart, stepping. */
@@ -813,6 +871,11 @@ export const BUBBLE_CLOSE_GAP = 6;
 export const BUBBLE_CLOSE_ICON_SIZE = 16;
 export const BUBBLE_CLOSE_BOTTOM = 34;
 export const BUBBLE_CLOSE_SLOP = 24;
+/**
+ * Above the target the zone reaches further: a bubble let go just over the tab
+ * bar or the composer means Close, not a snap back to the side.
+ */
+export const BUBBLE_CLOSE_REACH_ABOVE = 72;
 export const BUBBLE_CLOSE_OVER_SCALE = 1.1;
 export const BUBBLE_CLOSE_GLASS_OPACITY = 0.5;
 export const BUBBLE_CLOSE_OVER_OPACITY = 0.78;

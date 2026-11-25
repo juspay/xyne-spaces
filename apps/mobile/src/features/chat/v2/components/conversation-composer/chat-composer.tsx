@@ -14,6 +14,7 @@ import { useChatRenderTokens } from '@/src/features/chat/v2/components/chat/mess
 import { hasBlockMarkdown } from './utils/parseInlineRich';
 import { hasMarkdownTable } from '@/src/utils/markdownTable';
 import { isFlowJsonHtml } from '@/src/utils/flowJsonMarkdown';
+import { threadRoutePathname } from '@/src/features/conversation/thread-route';
 
 const hasAnyAttachment = (item: ConversationItem): boolean =>
   (item.initialMessageAttachments ?? []).length > 0;
@@ -163,7 +164,7 @@ const ChatComposerPressable = ({
       return;
     }
     router.push({
-      pathname: '/chat/[channelId]/[threadId]',
+      pathname: threadRoutePathname(),
       params: {
         channelId: item.channelId,
         threadId: item.conversationId,

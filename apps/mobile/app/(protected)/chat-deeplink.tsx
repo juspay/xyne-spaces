@@ -30,6 +30,12 @@ import ChatChannelScreenV2 from '@/src/features/chat/v2/screens/ChatChannelScree
 import ChatThreadScreenV2 from '@/src/features/chat/v2/screens/ChatThreadScreen';
 import ChatChannelScreenV3 from '@/src/features/chat/v3/screens/ChatChannelScreen';
 import ChatThreadScreenV3 from '@/src/features/chat/v3/screens/ChatThreadScreen';
+import { isFlagOn } from '@/src/flags';
+import {
+  ConversationChannelScreen,
+  ConversationThreadScreen,
+  isConversationThreadCard,
+} from '@/src/features/conversation';
 
 // The destination screen stays mounted for the whole lookup. While `resolving`
 // is set the list holds its missing-anchor and load-error surfaces; release
@@ -81,8 +87,14 @@ export default function ChatDeeplinkScreen(): ReactElement {
 }
 
 function ChatDeeplinkV2(): ReactElement {
-  const ChatChannelScreen = ChatChannelScreenV2;
-  const ChatThreadScreen = ChatThreadScreenV2;
+  // The same screens the chat routes pick, so a notification, Search result or
+  // message link lands on the redesigned room or thread when that is on.
+  const ChatChannelScreen = useRef(
+    isFlagOn('ui.conversation') ? ConversationChannelScreen : ChatChannelScreenV2,
+  ).current;
+  const ChatThreadScreen = useRef(
+    isConversationThreadCard() ? ConversationThreadScreen : ChatThreadScreenV2,
+  ).current;
   const router = useRouter();
   const zero = useZero();
   const committedLocationKeyRef = useRef<string | null>(null);

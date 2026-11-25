@@ -32,6 +32,7 @@ import { isScheduledCallJoinable } from '@/src/components/call-log/callHistoryIt
 import { AppBottomSheet } from '@/src/components/ui/app-bottom-sheet';
 import { cn } from '@/src/utils/cn';
 import { useBubbleAccent } from '@/src/theme/useBubbleAccent';
+import { threadRoutePathname } from '@/src/features/conversation/thread-route';
 
 interface CallDetailsSheetProps {
   call: CallDisplayData | null;
@@ -227,7 +228,7 @@ const CallDetailsSheet: React.FC<CallDetailsSheetProps> = ({
         params: { channelId },
       });
       router.push({
-        pathname: '/chat/[channelId]/[threadId]',
+        pathname: threadRoutePathname(),
         params: {
           channelId,
           threadId,

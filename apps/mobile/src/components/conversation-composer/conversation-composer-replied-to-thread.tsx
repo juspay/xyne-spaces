@@ -11,6 +11,7 @@ import { DebugBoundary } from './utils/debug-boundary';
 import { cn } from '@/src/utils/cn';
 import { getParentMessagePreviewText } from '@/src/utils/conversationMessageHelpers';
 import { getParentMessagePreviewMarkdown } from '@/src/features/chat/v2/components/conversation-composer/utils/htmlToMD';
+import { threadRoutePathname } from '@/src/features/conversation/thread-route';
 
 type RepliedToThreadProps = {
   className?: string;
@@ -57,7 +58,7 @@ const RepliedToThread = memo(({ className }: RepliedToThreadProps): ReactElement
   const openThread = useCallback((): void => {
     if (!threadId || !item.channelId) return;
     router.push({
-      pathname: '/chat/[channelId]/[threadId]',
+      pathname: threadRoutePathname(),
       params: {
         channelId: item.channelId,
         threadId,

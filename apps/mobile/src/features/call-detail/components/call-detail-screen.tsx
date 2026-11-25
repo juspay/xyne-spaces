@@ -52,6 +52,7 @@ import { RecordingPlayerSheet } from './recording-player-sheet';
 import { SummaryPanel } from './summary-panel';
 import { TemplatePickerSheet, useSummaryTemplateOptions } from './template-picker-sheet';
 import { TranscriptSheet, type TranscriptTarget } from './transcript-sheet';
+import { threadRoutePathname } from '@/src/features/conversation/thread-route';
 
 const SHEET_TOP_RADIUS = 28;
 
@@ -203,7 +204,7 @@ export function CallDetailScreen({ callId }: { callId: string }): ReactElement {
       if (!data.messageChannelId || !data.conversationId) return;
       setSheet(null);
       router.push({
-        pathname: '/chat/[channelId]/[threadId]',
+        pathname: threadRoutePathname(),
         params: {
           channelId: data.messageChannelId,
           threadId: data.conversationId,
@@ -623,7 +624,7 @@ export function CallDetailScreen({ callId }: { callId: string }): ReactElement {
                 if (!entry.post) return;
                 setSheet(null);
                 router.push({
-                  pathname: '/chat/[channelId]/[threadId]',
+                  pathname: threadRoutePathname(),
                   params: { channelId: entry.post.channelId, threadId: entry.post.conversationId },
                 });
               }}

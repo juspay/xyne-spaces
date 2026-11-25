@@ -34,6 +34,7 @@ export const ConversationThreadMessageRow = memo(function ConversationThreadMess
   onTicketPress,
   previousPaint,
   previousConversation,
+  isEditing = false,
 }: ThreadMessageRowProps): ReactElement {
   const { plan, isClassicFlow } = useRowFlow(useInitialMessageFacts(conversation));
   const sendStatus = usePendingStatusByMessageId(paintRow.messageId ?? '');
@@ -66,7 +67,11 @@ export const ConversationThreadMessageRow = memo(function ConversationThreadMess
 
   return (
     // The thread list insets its rows by 12; the flat message carries its own padding.
-    <View style={{ marginHorizontal: -THREAD_LIST_INSET }}>
+    // A message open in the composer for editing is tinted, so it is clear which one changes.
+    <View
+      className={isEditing ? 'bg-spaces-mention-surface' : ''}
+      style={{ marginHorizontal: -THREAD_LIST_INSET }}
+    >
       <FlatMessage
         {...flatProps}
         rowRef={rowRef}

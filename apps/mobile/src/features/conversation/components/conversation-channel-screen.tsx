@@ -1,12 +1,14 @@
 import { useCallback, type ReactElement } from 'react';
 import { Text, Pressable, View } from 'react-native';
 import { KeyboardGestureArea } from 'react-native-keyboard-controller';
+import { ChannelVisibility } from '@xyne/shared';
 import { useSharedValue } from 'react-native-reanimated';
 
 import { ChatList } from '@/src/features/chat/v2/components/chat/chat-list';
 import { ChatComposerDock } from '@/src/features/chat/v2/components/chat/chat-composer-dock';
 import { ChatUserProfileActionsSheetProvider } from '@/src/features/chat/v2/components/chat/chat-user-profile-actions-sheet';
 import { JoinChannelCard } from '@/src/components/chat/join-channel-card';
+import { useAuthContextValues } from '@/src/contexts/AuthContext';
 import {
   CHAT_KEYBOARD_GESTURE_INTERPOLATOR,
   CHAT_KEYBOARD_GESTURE_OFFSET,
@@ -17,7 +19,7 @@ import {
 } from '@/src/features/chat/v2/screens/chat-channel-controllers';
 import { useChatChannelController } from '@/src/features/chat/v2/screens/useChatChannelController';
 
-import { composerPlaceholder, roomKindOf, roomTitle } from '../model/room-title';
+import { composerPlaceholder, isSelfDmName, roomKindOf, roomTitle } from '../model/room-title';
 import { clearHoldSource } from '../model/hold-source-store';
 import { getRoomTypingBarMinimumHeight } from '../model/typing-bar';
 import { CONVERSATION_RENDERERS } from '../renderers';
@@ -40,6 +42,7 @@ const FLEX_STYLE = { flex: 1 } as const;
  * lays find-in-this-channel results over the list while find is open.
  */
 export const ConversationChannelScreen = (): ReactElement => {
+  const { userID } = useAuthContextValues();
   const {
     channelId,
     conversationId,
@@ -110,11 +113,16 @@ export const ConversationChannelScreen = (): ReactElement => {
     handleActionsSheetDismiss();
   }, [handleActionsSheetDismiss]);
 
+  const roomKind = isDM ? 'dm' : roomKindOf(channelType);
+  const isPrivateRoom =
+    roomKind === 'channel' && activeChannel?.visibility === ChannelVisibility.PRIVATE;
+  const isSelfDm = roomKind === 'dm' && isSelfDmName(activeChannel?.name, userID);
+
   return (
     <View className='flex-1 bg-spaces-background'>
       <ChannelFindProvider
         channelId={channelId ?? ''}
-        channelLabel={roomTitle(displayName, roomKindOf(channelType))}
+        channelLabel={roomTitle(displayName, roomKind, isPrivateRoom)}
       >
         <RoomHeader
           channelId={channelId ?? ''}
@@ -238,7 +246,10 @@ export const ConversationChannelScreen = (): ReactElement => {
             onSend={handleSend}
             editingMessage={editingTarget}
             onCancelEdit={handleCancelEdit}
-            placeholder={composerPlaceholder(displayName, isDM ? 'dm' : roomKindOf(channelType))}
+            placeholder={composerPlaceholder(displayName, roomKind, {
+              isPrivate: isPrivateRoom,
+              isSelfDm,
+            })}
           />
         )}
       </ChatComposerDock>

@@ -6,10 +6,16 @@ import {
   useCallback,
   useContext,
   useMemo,
+  useRef,
   type ReactElement,
   type ReactNode,
+  type RefObject,
 } from 'react';
 import { Pressable, Text, View } from 'react-native';
+import {
+  activityTargetOpensThread,
+  openFromThreadCardSource,
+} from '@/src/features/conversation/thread-card-source';
 
 import { formatDmTimestamp } from '@/src/features/dms/model/timestamp';
 import { todayStart$ } from '@/src/features/dms/state/day-clock';
@@ -202,9 +208,11 @@ function Body(): ReactElement | null {
  * being marked read repaints its background and re-renders none of its content.
  */
 function Surface({
+  surfaceRef,
   onPress,
   children,
 }: {
+  surfaceRef: RefObject<View | null>;
   onPress: () => void;
   children: ReactNode;
 }): ReactElement {
@@ -213,6 +221,7 @@ function Surface({
 
   return (
     <Pressable
+      ref={surfaceRef}
       accessibilityRole='button'
       onPress={onPress}
       className={cn(
@@ -253,6 +262,8 @@ type ActivityRowProps = {
 function ActivityRowComponent({ id, children }: ActivityRowProps): ReactElement {
   const zero = useZero();
   const row$ = useMemo(() => activityRow$(id), [id]);
+  // A thread opened from here grows out of the row as the thread card.
+  const surfaceRef = useRef<View>(null);
 
   const handlePress = useCallback(() => {
     const row = row$.peek();
@@ -262,12 +273,17 @@ function ActivityRowComponent({ id, children }: ActivityRowProps): ReactElement 
     if (row.isUnread) {
       void zero.mutate(mutators.activities.markAsRead({ activityId: id }));
     }
-    openActivityTarget(row.target);
+    const open = (): void => openActivityTarget(row.target);
+    if (activityTargetOpensThread(row.target))
+      openFromThreadCardSource(surfaceRef.current, open, 0);
+    else open();
   }, [id, row$, zero]);
 
   return (
     <ActivityRowContext.Provider value={row$}>
-      <Surface onPress={handlePress}>{children}</Surface>
+      <Surface surfaceRef={surfaceRef} onPress={handlePress}>
+        {children}
+      </Surface>
     </ActivityRowContext.Provider>
   );
 }

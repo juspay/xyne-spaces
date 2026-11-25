@@ -67,6 +67,7 @@ import {
 } from './message-row-style';
 import { PullRequestCard } from './pull-request-card';
 import { ReactionChips } from './reaction-chips';
+import { SendFailedNote } from './send-failed-note';
 import { ThreadStrip } from './thread-strip';
 import { TicketCard } from './ticket-card';
 
@@ -350,6 +351,7 @@ function FlatMessageLayout({
                 {DELETED_ATTACHMENT_PLACEHOLDER}
               </Text>
             ) : null}
+            <SendFailedNote messageId={paintRow.messageId} marginTop={MESSAGE_EXTRAS_GAP} />
             {hasReactions ? (
               <View style={{ marginTop: MESSAGE_EXTRAS_GAP }}>
                 <ReactionChips

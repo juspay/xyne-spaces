@@ -1,4 +1,4 @@
-import { memo, type ReactElement, type ReactNode } from 'react';
+import { memo, useRef, type ReactElement, type ReactNode } from 'react';
 import { Text, View, type StyleProp, type ViewStyle } from 'react-native';
 import { useCSSVariable } from 'uniwind';
 import { ListRowPressable } from '@/src/components/ui/list-row-pressable';
@@ -12,6 +12,10 @@ import {
   type ActivityRowVM,
 } from '@/src/features/activity/presentation/activityRowAssembler';
 import type { ActivityWithRelated } from '@/src/types/activity';
+import {
+  activityTargetOpensThread,
+  openFromThreadCardSource,
+} from '@/src/features/conversation/thread-card-source';
 
 type ActivityV2CardProps = {
   activity: ActivityWithRelated;
@@ -61,11 +65,9 @@ const ActivityV2CardInner = ({
   const activityDivider = useCSSVariable('--color-activity-divider') as string;
   const activityCardBg = useCSSVariable('--color-activity-v2-card-bg') as string;
   const activityCardUnreadBg = useCSSVariable('--color-activity-v2-card-unread-bg') as string;
-  const handlePress = (): void => {
-    // No tap haptic here — ListRowPressable already fires one on press-in.
-    if (resolvedRowVm.isUnread) {
-      void zero.mutate(mutators.activities.markAsRead({ activityId: resolvedRowVm.id }));
-    }
+  // A thread opened from here grows out of the row as the thread card.
+  const rowRef = useRef<View>(null);
+  const openTarget = (): void => {
     if (onPress) {
       onPress();
       return;
@@ -73,67 +75,80 @@ const ActivityV2CardInner = ({
 
     navigateToActivityTarget(resolvedRowVm.navigationTarget);
   };
+  const handlePress = (): void => {
+    // No tap haptic here — ListRowPressable already fires one on press-in.
+    if (resolvedRowVm.isUnread) {
+      void zero.mutate(mutators.activities.markAsRead({ activityId: resolvedRowVm.id }));
+    }
+    if (activityTargetOpensThread(resolvedRowVm.navigationTarget)) {
+      openFromThreadCardSource(rowRef.current, openTarget, 0);
+    } else {
+      openTarget();
+    }
+  };
 
   const isUnread = resolvedRowVm.isUnread;
 
   return (
-    <ListRowPressable
-      onPress={handlePress}
-      className='px-4 pt-2'
-      backgroundColor={isUnread ? activityCardUnreadBg : activityCardBg}
-    >
-      <View className='flex-row items-start gap-2 pb-2'>
-        {/* Left — action badge */}
-        <View className='relative shrink-0'>
-          <View
-            className={cn(
-              'w-7 h-7 rounded-full items-center justify-center',
-              badgeColorClass ?? 'bg-card',
-            )}
-            style={badgeStyle}
-          >
-            {badgeIcon}
-          </View>
-        </View>
-
-        {/* Right — actor avatar + title row + content */}
-        <View className='flex-1 gap-0.5'>
-          {resolvedActorName ? (
-            <View className='rounded-lg overflow-hidden self-start'>
-              <Avatar
-                userIds={resolvedActorId ? [resolvedActorId] : []}
-                size={32}
-                rounded={false}
-              />
-            </View>
-          ) : null}
-
-          <View className='flex-row items-start justify-between gap-2'>
-            <Text
-              className='flex-1 text-[14px]'
-              style={{ lineHeight: 20 }}
-              numberOfLines={2}
-              ellipsizeMode='tail'
+    <View ref={rowRef} collapsable={false}>
+      <ListRowPressable
+        onPress={handlePress}
+        className='px-4 pt-2'
+        backgroundColor={isUnread ? activityCardUnreadBg : activityCardBg}
+      >
+        <View className='flex-row items-start gap-2 pb-2'>
+          {/* Left — action badge */}
+          <View className='relative shrink-0'>
+            <View
+              className={cn(
+                'w-7 h-7 rounded-full items-center justify-center',
+                badgeColorClass ?? 'bg-card',
+              )}
+              style={badgeStyle}
             >
-              <Text className='font-semibold text-activity-heading'>{resolvedActorName}</Text>
-              <Text className='font-medium text-activity-heading'>{` ${resolvedDescription}`}</Text>
-              {!hideChannel && displayChannelName ? (
-                <Text className='font-semibold text-activity-heading'>{` #${displayChannelName}`}</Text>
-              ) : null}
-            </Text>
-            <Text className='shrink-0 text-[12px] font-medium text-activity-time'>
-              {resolvedRowVm.timeLabel}
-            </Text>
+              {badgeIcon}
+            </View>
           </View>
-          <View className='w-full'>{children}</View>
+
+          {/* Right — actor avatar + title row + content */}
+          <View className='flex-1 gap-0.5'>
+            {resolvedActorName ? (
+              <View className='rounded-lg overflow-hidden self-start'>
+                <Avatar
+                  userIds={resolvedActorId ? [resolvedActorId] : []}
+                  size={32}
+                  rounded={false}
+                />
+              </View>
+            ) : null}
+
+            <View className='flex-row items-start justify-between gap-2'>
+              <Text
+                className='flex-1 text-[14px]'
+                style={{ lineHeight: 20 }}
+                numberOfLines={2}
+                ellipsizeMode='tail'
+              >
+                <Text className='font-semibold text-activity-heading'>{resolvedActorName}</Text>
+                <Text className='font-medium text-activity-heading'>{` ${resolvedDescription}`}</Text>
+                {!hideChannel && displayChannelName ? (
+                  <Text className='font-semibold text-activity-heading'>{` #${displayChannelName}`}</Text>
+                ) : null}
+              </Text>
+              <Text className='shrink-0 text-[12px] font-medium text-activity-time'>
+                {resolvedRowVm.timeLabel}
+              </Text>
+            </View>
+            <View className='w-full'>{children}</View>
+          </View>
         </View>
-      </View>
-      <View
-        pointerEvents='none'
-        className='absolute left-0 right-0 bottom-0 h-px'
-        style={{ backgroundColor: activityDivider }}
-      />
-    </ListRowPressable>
+        <View
+          pointerEvents='none'
+          className='absolute left-0 right-0 bottom-0 h-px'
+          style={{ backgroundColor: activityDivider }}
+        />
+      </ListRowPressable>
+    </View>
   );
 };
 

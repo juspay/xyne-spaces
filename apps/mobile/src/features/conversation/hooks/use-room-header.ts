@@ -33,7 +33,6 @@ export function useRoomHeader(channelId: string, enabled: boolean): RoomHeaderMo
     displayName,
     isTitlePending,
     isDM,
-    isChannel,
     isPrivateChannel,
     dmProfileUserId,
     isOnline,
@@ -53,14 +52,17 @@ export function useRoomHeader(channelId: string, enabled: boolean): RoomHeaderMo
     void handleCallPress();
   }, [handleCallPress]);
 
+  // Group chats are private by nature; only a private channel shows the lock.
+  const isPrivate = kind === 'channel' && isPrivateChannel;
+
   return {
     isTitlePending,
     kind,
-    title: roomTitle(displayName, kind),
+    title: roomTitle(displayName, kind, isPrivate),
     subtitle: !isDM && memberCount > 0 ? `${memberCount} ${memberLabel}` : null,
     dmUserId: isDM ? dmProfileUserId : null,
     isOnline,
-    isPrivateChannel: isChannel && isPrivateChannel,
+    isPrivateChannel: isPrivate,
     onOpenInfo: handleOpenInfo,
     onAskAI: handleAskAI,
     onCall,

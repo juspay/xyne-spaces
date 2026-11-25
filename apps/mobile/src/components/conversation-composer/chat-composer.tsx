@@ -11,6 +11,7 @@ import { reactionsMdToRawReactions } from '@/src/utils/conversationMessageHelper
 import { DebugBoundary } from './utils/debug-boundary';
 import type { ChatPaintRow } from '@/src/features/chat/paint/chatPaint.types';
 import { chatOpenProfiler } from '@/src/features/chat/chatOpenProfiler';
+import { threadRoutePathname } from '@/src/features/conversation/thread-route';
 
 const hasAnyAttachment = (item: ConversationItem): boolean =>
   (item.initialMessageAttachments ?? []).length > 0;
@@ -113,7 +114,7 @@ const ChatComposerPressable = ({ onLongPress }: ChatComposerPressableProps): Rea
       return;
     }
     router.push({
-      pathname: '/chat/[channelId]/[threadId]',
+      pathname: threadRoutePathname(),
       params: { channelId: item.channelId, threadId: item.conversationId },
     });
   };

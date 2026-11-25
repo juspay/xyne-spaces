@@ -49,6 +49,7 @@ import {
   TYPING_BAR_PLUS_SIZE,
   TYPING_BAR_REPLY_PADDING_Y,
 } from '../constants';
+import { ThreadReplyFocus } from './thread-reply-focus';
 import { useBarAnchor } from '../hooks/use-bar-anchor';
 import { useRoomDictationControls, useRoomDictationStatus } from '../hooks/use-room-dictation';
 import { openPlusTray, PLUS_TRAY_CLOSED, type PlusTrayState } from '../model/plus-tray';
@@ -287,6 +288,7 @@ function RoomTypingBarComponent({
         }}
       >
         <ChatInput.KeyboardLifecycle />
+        {reply ? <ThreadReplyFocus /> : null}
 
         <RoomAlsoSendRow />
         <ChatInput.EmojiPicker />

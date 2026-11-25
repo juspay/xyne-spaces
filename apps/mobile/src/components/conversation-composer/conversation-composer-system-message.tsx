@@ -13,6 +13,7 @@ import { DebugBoundary } from './utils/debug-boundary';
 import { htmlToMD } from './utils/htmlToMD';
 import { useMentionPress } from './utils/useMentionPress';
 import { buildComposerMarkdownStyle } from './utils/markdownStyle';
+import { threadRoutePathname } from '@/src/features/conversation/thread-route';
 
 type CallMetadata = {
   callId?: string;
@@ -51,7 +52,7 @@ const CallStub = memo((): ReactElement | null => {
     (isTranscript: boolean = false): void => {
       if (!item.channelId || !item.conversationId) return;
       router.push({
-        pathname: '/chat/[channelId]/[threadId]',
+        pathname: threadRoutePathname(),
         params: {
           channelId: item.channelId,
           threadId: item.conversationId,

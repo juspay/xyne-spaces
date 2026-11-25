@@ -30,6 +30,7 @@ import { useLatestRef } from '@/src/components/input-composer/utils/use-latest-r
 import type { MessageActionsViewProps } from '@/src/features/chat/v2/components/message-actions-sheet';
 import { QUICK_REACTIONS } from '@/src/features/chat/v2/components/message-actions-sheet';
 import { haptics } from '@/src/utils/haptics';
+import { showMessageToast } from '@/src/utils/toast';
 
 import {
   HOLD_ANDROID_Z_INDEX,
@@ -55,7 +56,12 @@ import {
   HOLD_SIDE_INSET,
   TRAY_SHADOW,
 } from '../constants';
-import { computeHoldLayout, orderHoldMenuActions, type HoldRect } from '../model/hold-menu';
+import {
+  computeHoldLayout,
+  holdMenuCopiedNotice,
+  orderHoldMenuActions,
+  type HoldRect,
+} from '../model/hold-menu';
 import { claimHoldHaptic, clearHoldSource, getHoldSource } from '../model/hold-source-store';
 import { colorOf } from '../model/token-color';
 import { ConversationOverlayLayer, type AndroidOverlayLayer } from './conversation-overlay-layer';
@@ -378,7 +384,11 @@ export function HoldMenu({
                           ref={!firstIsRail && index === 0 ? firstItemRef : undefined}
                           accessibilityRole='button'
                           accessibilityLabel={action.menuLabel}
-                          onPress={action.onPress}
+                          onPress={() => {
+                            action.onPress();
+                            const notice = holdMenuCopiedNotice(action.id);
+                            if (notice) showMessageToast(notice);
+                          }}
                           className='flex-row items-center active:bg-spaces-surface'
                           style={styles.menuRow}
                         >
