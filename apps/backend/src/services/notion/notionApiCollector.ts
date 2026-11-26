@@ -255,8 +255,8 @@ export class NotionApiCollector {
     for (let i = 0; i < queue.length; i++) {
       const item = queue[i];
       const file = path.join(dir, relFile(item.id)!);
-      await fs.mkdir(path.dirname(file), { recursive: true });
       try {
+        await fs.mkdir(path.dirname(file), { recursive: true });
         if (item.kind === 'database') {
           await fs.writeFile(file, await this.databaseCsv(item, row => adopt(bare(row.id), 'page', item.id, row)));
         } else {
@@ -270,7 +270,8 @@ export class NotionApiCollector {
         }
       } catch (error) {
         this.failures.push({ what: item.kind, title: item.title, reason: errorText(error), pageId: item.id });
-        await fs.writeFile(file, `# ${item.title}\n\n> ⚠️ This page could not be collected from Notion.\n`);
+        await fs.mkdir(path.dirname(file), { recursive: true }).catch(() => undefined);
+        await fs.writeFile(file, `# ${item.title}\n\n> ⚠️ This page could not be collected from Notion.\n`).catch(() => undefined);
       }
       await this.stopIfAuthLost(dir);
       done++;
@@ -546,7 +547,16 @@ interface RenderCtx {
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error));
 const bare = (id: string) => id.replace(/-/g, '');
-const safeName = (s: string) => (s || 'Untitled').replace(/[/\\:*?"<>|\n\r]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120) || 'Untitled';
+/** File-system-safe name, at most 150 bytes (names are limited to 255 bytes, and a CJK character is 3). */
+const safeName = (s: string) => truncateBytes((s || 'Untitled').replace(/[/\\:*?"<>|\n\r]/g, ' ').replace(/\s+/g, ' ').trim(), 150).trim() || 'Untitled';
+const truncateBytes = (s: string, max: number) => {
+  let out = '';
+  for (const ch of s) {
+    if (Buffer.byteLength(out + ch) > max) break;
+    out += ch;
+  }
+  return out;
+};
 const relHref = (fromDir: string, toFile: string) => path.relative(fromDir, toFile).split(path.sep).map(seg => mdUrl(encodeURIComponent(seg))).join('/');
 /** Notion text is text: escape what Markdown would read as links or formatting (a typed "[x](../..)" stays text). */
 const mdText = (s: string) => s.replace(/[\\`*_~[\]<>]/g, '\\$&');
