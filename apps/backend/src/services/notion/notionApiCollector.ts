@@ -19,7 +19,7 @@ import path from 'path';
 import { logger } from '@/utils/logger';
 
 const API = 'https://api.notion.com/v1';
-const NOTION_VERSION = '2022-06-28';
+export const NOTION_VERSION = '2022-06-28';
 const MIN_GAP_MS = 350;
 
 type Json = any; // Notion's payloads are wide unions; this collector reads them defensively.
@@ -87,7 +87,7 @@ export class NotionApiCollector {
   // -------------------------------------------------------------------------------------------
   // HTTP
   // -------------------------------------------------------------------------------------------
-  private async request(method: 'GET' | 'POST' | 'PATCH', pathname: string, body?: unknown): Promise<Json> {
+  private async request(method: 'GET' | 'POST', pathname: string, body?: unknown): Promise<Json> {
     for (let attempt = 0; attempt < 6; attempt++) {
       const wait = this.lastRequestAt + MIN_GAP_MS - Date.now();
       if (wait > 0) await sleep(wait);
@@ -360,26 +360,28 @@ export class NotionApiCollector {
     if (!['child_page', 'child_database', 'column_list', 'column'].includes(block.type)) {
       ctx.blocks.push({ id: bare(block.id), text: plain(v.rich_text ?? []).slice(0, 200) });
     }
-    const text = () => richText(v.rich_text ?? [], ctx);
+    const text = () => richText(v.rich_text ?? []);
     const nested = async () => this.childrenOf(block, ctx, depth + 1);
     switch (block.type) {
       case 'paragraph': return `${pad}${text()}\n\n${await this.childrenOf(block, ctx, depth)}`;
-      case 'heading_1': return `# ${text()}\n\n${await this.childrenOf(block, ctx, depth)}`;
-      case 'heading_2': return `## ${text()}\n\n${await this.childrenOf(block, ctx, depth)}`;
-      case 'heading_3': return `### ${text()}\n\n${await this.childrenOf(block, ctx, depth)}`;
+      case 'heading_1':
+      case 'heading_2':
+      case 'heading_3':
+        return `${'#'.repeat(Number(block.type.slice(-1)))} ${text()}\n\n${await this.childrenOf(block, ctx, depth)}`;
       case 'bulleted_list_item': return `${pad}- ${text()}\n${await nested()}`;
       case 'numbered_list_item': return `${pad}${n}. ${text()}\n${await nested()}`;
       case 'to_do': return `${pad}- [${v.checked ? 'x' : ' '}] ${text()}\n${await nested()}`;
-      case 'toggle': return `<details>\n<summary>${text()}</summary>\n\n${await this.childrenOf(block, ctx, 0)}</details>\n\n`;
+      case 'toggle': return `**▸ ${text().trim()}**\n\n${(await this.childrenOf(block, ctx, 0)).trim()}\n\n`;
       case 'quote': return `> ${text().replace(/\n/g, '\n> ')}\n\n${await this.childrenOf(block, ctx, depth)}`;
       case 'callout': {
         const icon = v.icon?.emoji ?? '💡';
-        return `<aside>\n${icon} ${text()}\n${await this.childrenOf(block, ctx, 0)}</aside>\n\n`;
+        const body = `${icon} ${text()}\n${await this.childrenOf(block, ctx, 0)}`;
+        return `${body.trim().split('\n').map(line => `> ${line.trim()}`).join('\n')}\n\n`;
       }
       case 'code': return `\`\`\`${(v.language ?? '').replace('plain text', '')}\n${plain(v.rich_text)}\n\`\`\`\n\n`;
       case 'equation': return `$$\n${v.expression}\n$$\n\n`;
       case 'divider': return '---\n\n';
-      case 'table': return this.renderTable(block, ctx);
+      case 'table': return this.renderTable(block);
       case 'column_list':
       case 'column':
         return this.childrenOf(block, ctx, depth);
@@ -391,20 +393,21 @@ export class NotionApiCollector {
       }
       case 'child_page':
       case 'child_database': {
-        const rel = ctx.relFile(bare(block.id)) ?? await ctx.adopt(bare(block.id), block.type === 'child_page' ? 'page' : 'database');
+        const id = bare(block.id);
+        // Adopting queues a sub-page search missed; it's linked by id either way.
+        const known = ctx.relFile(id) ?? await ctx.adopt(id, block.type === 'child_page' ? 'page' : 'database');
         const title = block.type === 'child_page' ? v.title : v.title || 'Database';
-        if (rel) return `[${title}](${relHref(ctx.fileDir, path.join(ctx.dir, rel))})\n\n`;
-        if (block.type === 'child_database') {
+        if (!known && block.type === 'child_database') {
           // Linked database views point at a database elsewhere; if that one isn't shared we can't read it.
           this.warnings.push(`A database view ("${v.title || 'linked view'}") points to a database not shared with the integration`);
           return `> 🗂️ Notion database view${v.title ? ` "${v.title}"` : ''} — its source database wasn't shared with the import, so it wasn't migrated.\n\n`;
         }
-        return `${title}\n\n`;
+        return `[${title}](${notionRef(id)})\n\n`;
       }
       case 'link_to_page': {
         const id = bare(v.page_id ?? v.database_id ?? '');
-        const rel = ctx.relFile(id);
-        return rel ? `[${ctx.items.get(id)?.title ?? 'Linked page'}](${relHref(ctx.fileDir, path.join(ctx.dir, rel))})\n\n` : '';
+        if (!id) return '';
+        return `[${ctx.items.get(id)?.title ?? 'Linked page'}](${notionRef(id)})\n\n`;
       }
       case 'image':
       case 'file':
@@ -431,9 +434,9 @@ export class NotionApiCollector {
     }
   }
 
-  private async renderTable(block: Json, ctx: RenderCtx): Promise<string> {
+  private async renderTable(block: Json): Promise<string> {
     const rows = await this.paginate('GET', `/blocks/${bare(block.id)}/children`);
-    const cells = rows.map(r => (r.table_row?.cells ?? []).map((c: Json[]) => richText(c, ctx).replace(/\|/g, '\\|').replace(/\n/g, ' ')));
+    const cells = rows.map(r => (r.table_row?.cells ?? []).map((c: Json[]) => richText(c).replace(/\|/g, '\\|').replace(/\n/g, ' ')));
     if (cells.length === 0) return '';
     const width = Math.max(...cells.map((r: string[]) => r.length));
     const line = (r: string[]) => `| ${Array.from({ length: width }, (_, i) => r[i] ?? '').join(' | ')} |`;
@@ -494,15 +497,14 @@ function isPeopleDirectory(r: Json): boolean {
   return titleOf(r).trim().toLowerCase() === 'people';
 }
 
-function richText(rt: Json[], ctx: RenderCtx): string {
+function richText(rt: Json[]): string {
   return (rt ?? []).map((t: Json) => {
     let s: string = t.plain_text ?? '';
     if (!s) return '';
     if (t.type === 'mention') {
       const m = t.mention;
       const id = bare(m.page?.id ?? m.database?.id ?? '');
-      const rel = id ? ctx.relFile(id) : undefined;
-      if (rel) return `[${s}](${relHref(ctx.fileDir, path.join(ctx.dir, rel))})`;
+      if (id) return `[${s}](${notionRef(id)})`;
       if (m.type === 'user' && m.user?.id) return userMentionToken(bare(m.user.id));
       return s; // @date and other mentions come through as their display text
     }
@@ -519,9 +521,24 @@ function richText(rt: Json[], ctx: RenderCtx): string {
       }
       s = lead + core + trail;
     }
-    const href = t.href ?? t.text?.link?.url;
+    const href = notionPageHref(t.href ?? t.text?.link?.url);
     return href ? `[${s}](${href})` : s;
   }).join('');
+}
+
+/**
+ * Every reference to a Notion page or database (mention, sub-page, "link to page", text link) is
+ * written as `notion-page:<id>` and turned into an internal Spaces route at ingest — its canvas
+ * when one exists, else a route that shows "not found". Never a link back to Notion.
+ */
+export const NOTION_REF_PREFIX = 'notion-page:';
+const notionRef = (id: string) => `${NOTION_REF_PREFIX}${bare(id).toLowerCase()}`;
+
+/** A text link to a Notion page ("/<id>", "https://www.notion.so/Title-<id>") is a page reference; other links stay. */
+function notionPageHref(href: string | undefined): string | undefined {
+  if (!href || !(/^\/[0-9a-f]{32}\b/i.test(href) || /^https?:\/\/([\w-]+\.)?notion\.(so|site)\//i.test(href))) return href;
+  const id = href.split(/[?#]/)[0]!.match(/([0-9a-f]{32})$/i)?.[1];
+  return id ? notionRef(id) : href; // a Notion URL with no page in it (e.g. the help centre) stays
 }
 
 function propertyText(p: Json): string {
@@ -552,4 +569,3 @@ function propertyText(p: Json): string {
   }
 }
 
-/** Database row pages carry their properties above the body, like Notion's export does. */

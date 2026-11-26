@@ -39,11 +39,11 @@ import { buildMentionProps, CanvasMentionContext } from '../CanvasMentionSpec';
 import { useCanvasBlockShortcuts, withBlockShortcutBadges } from '../canvasBlockShortcuts';
 import { withHeadingsTogether, withUnifiedUpload } from '../canvasSlashMenu';
 import { CanvasLinkToolbar, CanvasPastedLinkToolbar } from '../CanvasLinkToolbar';
-import { useCanvasInAppLinks } from '../useCanvasInAppLinks';
 import { CanvasFilePanel } from '../CanvasFilePanel/CanvasFilePanel';
 import {
   canvasSchema,
   canvasTableOptions,
+  canvasLinkOptions,
   canvasTiptapOptions,
   knownCanvasBlockTypes,
 } from '../canvasSchema';
@@ -181,6 +181,7 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
         resolveFileUrl,
         dictionary: canvasDictionary,
         tables: canvasTableOptions,
+        links: canvasLinkOptions,
         _tiptapOptions: canvasTiptapOptions,
       };
       try {
@@ -421,9 +422,6 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
     const [isSearchOpen, setIsSearchOpen] = useState(false);
 
     useCanvasTableFilters(containerRef);
-
-    // Links to another canvas (or any page of this app) open in place, not in a new browser tab.
-    useCanvasInAppLinks(containerRef);
 
     const getCanvasCommentEditor = useCallback(
       () => (editor ? asBlockNoteEditorForView(editor) : null),

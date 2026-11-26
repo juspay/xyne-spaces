@@ -9,7 +9,6 @@ import {
   type NotionSectionChoice,
 } from '../api/notionMigrationApi';
 import AppNavigator from '../components/AppNavigator/AppNavigator';
-import { inAppPath } from '../components/Canvas/canvasInAppLink';
 import Badge from '../components/ui/Badge';
 import Button from '../components/ui/Button';
 import Input from '../components/ui/Input';
@@ -17,6 +16,7 @@ import { cn } from '../utils/classNames';
 import { openLink } from '../utils/openLink';
 
 const POLL_MS = 2000;
+const MINE_QUERY_KEY = ['notion-migration', 'mine'];
 const CONSENT_WAIT_MS = 10 * 60 * 1000;
 const TOKEN_PATTERN = /^(ntn_|secret_).{4,}/;
 
@@ -69,11 +69,14 @@ const CHOICE_LABEL: Record<NotionSectionChoice, string> = {
 const defaultChoice = (s: NotionSection): NotionSectionChoice =>
   s.spacesOwner ? 'private-owner' : 'private-me';
 
+const defaultChoices = (sections: NotionSection[]): Record<string, NotionSectionChoice> =>
+  Object.fromEntries(sections.map(s => [s.key, defaultChoice(s)]));
+
 function ReviewPanel({ job }: { job: NotionImportJob }): React.JSX.Element {
   const queryClient = useQueryClient();
   const sections = job.sections ?? [];
   const [choices, setChoices] = useState<Record<string, NotionSectionChoice>>(() =>
-    Object.fromEntries(sections.map(s => [s.key, defaultChoice(s)])),
+    defaultChoices(sections),
   );
   const [channel, setChannel] = useState(job.channel ?? '');
   const [busy, setBusy] = useState(false);
@@ -88,7 +91,7 @@ function ReviewPanel({ job }: { job: NotionImportJob }): React.JSX.Element {
         channel: channel.trim() || undefined,
         sections: choices,
       });
-      await queryClient.invalidateQueries({ queryKey: ['notion-migration', 'mine'] });
+      await queryClient.invalidateQueries({ queryKey: MINE_QUERY_KEY });
     } catch (e) {
       setError(errorMessage(e, 'Approval failed'));
     } finally {
@@ -112,9 +115,7 @@ function ReviewPanel({ job }: { job: NotionImportJob }): React.JSX.Element {
         </button>
         <button
           className='rounded-md border border-border px-2 py-1 hover:bg-accent'
-          onClick={() =>
-            setChoices(Object.fromEntries(sections.map(s => [s.key, defaultChoice(s)])))
-          }
+          onClick={() => setChoices(defaultChoices(sections))}
           data-track-category='NOTION_MIGRATION'
           data-track-name='REVIEW_ALL_PRIVATE'
         >
@@ -381,7 +382,7 @@ function HistoryRow({
                   )}
                 >
                   <span className='text-[hsl(142_60%_40%)]'>✓</span>
-                  <Link to={inAppPath(c.url) ?? c.url} className='truncate hover:underline'>
+                  <Link to={c.url} className='truncate hover:underline'>
                     {c.title}
                   </Link>
                   <span className='truncate text-muted-foreground'>{c.ownerEmail ?? '—'}</span>
@@ -449,7 +450,7 @@ const NotionMigration = (): React.JSX.Element => {
   };
 
   const { data, isLoading } = useQuery({
-    queryKey: ['notion-migration', 'mine'],
+    queryKey: MINE_QUERY_KEY,
     queryFn: notionMigrationApi.listMine,
     refetchInterval: query =>
       waitingForNotion || query.state.data?.jobs.some(isRunning) ? POLL_MS : false,
@@ -534,9 +535,7 @@ const NotionMigration = (): React.JSX.Element => {
 
           {!isLoading && (
             <WorkspaceImportCard
-              onStarted={() =>
-                queryClient.invalidateQueries({ queryKey: ['notion-migration', 'mine'] })
-              }
+              onStarted={() => queryClient.invalidateQueries({ queryKey: MINE_QUERY_KEY })}
             />
           )}
 

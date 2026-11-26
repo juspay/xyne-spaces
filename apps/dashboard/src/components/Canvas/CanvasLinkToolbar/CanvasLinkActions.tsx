@@ -9,7 +9,7 @@ import { ArrowUpRight, ExternalLink, LayoutTemplate, Pencil, Unlink } from 'luci
 import { useNavigate } from 'react-router-dom';
 import { type FC, type ReactElement, type ReactNode, useEffect, useState } from 'react';
 import { editorView } from '../canvasEditorView';
-import { inAppPath } from '../canvasInAppLink';
+import { toSafeAppUrl } from '../../../utils/safeNavUrl';
 import { findLinkRange, insertEmbedBlock, replaceLinkWithEmbed } from '../canvasEmbedActions';
 import { CANVAS_LINK_ACTION_EVENT, LINK_SHORTCUTS, linkUnderMenu } from '../canvasLinkShortcuts';
 
@@ -49,7 +49,8 @@ export const CanvasLinkActions: FC<LinkToolbarProps> = (props): ReactElement | n
   const navigate = useNavigate();
   const [activeRow, setActiveRow] = useState(-1);
   // Links to another canvas (or any page of this app) open in place; external links get a new tab.
-  const appPath = inAppPath(props.url);
+  const safeUrl = toSafeAppUrl(props.url, '');
+  const appPath = safeUrl.startsWith('/') ? safeUrl : null;
 
   // The keys act on the link at the caret. Opened by hover the caret is usually
   // somewhere else entirely, so there is nothing for them to act on and showing

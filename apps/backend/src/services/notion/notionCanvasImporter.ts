@@ -25,7 +25,7 @@ import { v4 as uuidv4 } from 'uuid';
 import type { Prisma } from '@prisma/client';
 import { AttachmentEntityType, CanvasRole, CanvasVisibility, DocType } from '@xyne/shared';
 import { DatabaseClient } from '@/database/client';
-import { newConnectId } from '@/database/connectGroup';
+import { newConnectId, resolveCanvasConnectId } from '@/database/connectGroup';
 import { createCanvasWithConnectGroupTx } from '@/bypassAcl/transactions/connectGroupEntities';
 import { convertMarkdownToBlockNote, getCanvasUrl } from '@/services/canvasService';
 import { getStorageService } from '@/services/storage';
@@ -35,8 +35,10 @@ import { vespaQueue } from '@/queues/vespaQueue';
 import { enqueueCanvasPermissionRefresh } from '@/services/canvasPermissionSync';
 import { fileSchema, SubApp } from '@/vespa/src/types';
 import { config } from '@/config/env';
+import { toJsonSafeValue } from '@/services/jsonSafe';
+import mime from 'mime';
 import { logger } from '@/utils/logger';
-import { NOTION_MANIFEST_FILE, USER_MENTION_TOKEN, type NotionComment, type NotionManifest } from './notionApiCollector';
+import { NOTION_MANIFEST_FILE, NOTION_REF_PREFIX, USER_MENTION_TOKEN, type NotionComment, type NotionManifest } from './notionApiCollector';
 
 const NOTION_ID = /\s([0-9a-f]{32})$/i;
 const IMAGE_EXT = /\.(png|jpe?g|gif|webp|svg|bmp|avif)$/i;
@@ -142,12 +144,20 @@ export async function resolveNotionImportTarget(input: { email: string; channelN
 // ---------------------------------------------------------------------------------------------
 // Review: the top-level pages an admin decides access for, with their owners mapped.
 // ---------------------------------------------------------------------------------------------
-export async function listNotionSections(root: string, workspaceId: string): Promise<NotionSection[]> {
-  const nodes = buildTree(root, await walk(root));
+/** What both the review step and the import read from a staged collect: the page tree, the manifest and the owners. */
+async function loadStaged(root: string, workspaceId: string) {
   const manifest = await readManifest(root);
-  const owners = await resolveOwners(manifest, workspaceId);
-  const createdBy = new Map(manifest?.items.map(i => [i.id, i.createdById]) ?? []);
-  const usersById = new Map(manifest?.users.map(u => [u.id, u]) ?? []);
+  return {
+    nodes: buildTree(root, await walk(root)),
+    owners: await resolveOwners(manifest, workspaceId),
+    createdBy: new Map(manifest?.items.map(i => [i.id, i.createdById]) ?? []),
+    commentsByPage: new Map(manifest?.items.map(i => [i.id, i.comments ?? []]) ?? []),
+    usersById: new Map(manifest?.users.map(u => [u.id, u]) ?? []),
+  };
+}
+
+export async function listNotionSections(root: string, workspaceId: string): Promise<NotionSection[]> {
+  const { nodes, owners, createdBy, usersById } = await loadStaged(root, workspaceId);
 
   const sections = new Map<string, NotionSection>();
   for (const node of nodes) {
@@ -212,12 +222,7 @@ function buildTree(root: string, files: string[]): NotionNode[] {
 // Import: pass 1 creates every canvas (so links can resolve), pass 2 writes content.
 // ---------------------------------------------------------------------------------------------
 export async function importNotionTree(root: string, target: NotionImportTarget, plan?: NotionImportPlan): Promise<NotionImportSummary> {
-  const allNodes = buildTree(root, await walk(root));
-  const manifest = await readManifest(root);
-  const owners = await resolveOwners(manifest, target.workspaceId);
-  const createdBy = new Map(manifest?.items.map(i => [i.id, i.createdById]) ?? []);
-  const commentsByPage = new Map(manifest?.items.map(i => [i.id, i.comments ?? []]) ?? []);
-  const notionUsers = new Map(manifest?.users.map(u => [u.id, u]) ?? []);
+  const { nodes: allNodes, owners, createdBy, commentsByPage, usersById: notionUsers } = await loadStaged(root, target.workspaceId);
   const summary: NotionImportSummary = {
     created: 0, updated: 0, joined: 0, skipped: 0, folders: 0, attachments: 0, comments: 0, accessRemoved: [], warnings: [], unresolvedUsers: [], canvases: [],
   };
@@ -228,7 +233,7 @@ export async function importNotionTree(root: string, target: NotionImportTarget,
   const commentAuthors = [...commentsByPage.values()].flat().map(c => c.authorId);
   for (const id of new Set([...createdBy.values(), ...commentAuthors])) {
     if (id && !owners.has(id)) {
-      const u = manifest?.users.find(x => x.id === id);
+      const u = notionUsers.get(id);
       if (u) unresolved.set(id, { name: u.name, email: u.email });
     }
   }
@@ -248,7 +253,7 @@ export async function importNotionTree(root: string, target: NotionImportTarget,
   for (const row of nodes) {
     if (!row.rowOf) continue;
     const dbKey = byPath.get(row.rowOf)?.key;
-    if (dbKey) commentsByPage.set(dbKey, [...(commentsByPage.get(dbKey) ?? []), ...(commentsByPage.get(row.key) ?? [])]);
+    if (dbKey) commentsByPage.set(dbKey, (commentsByPage.get(dbKey) ?? []).concat(commentsByPage.get(row.key) ?? []));
   }
 
   const placementOf = (node: NotionNode): Placement => {
@@ -293,6 +298,7 @@ export async function importNotionTree(root: string, target: NotionImportTarget,
 
   // Links to a row land on its database's canvas.
   for (const row of nodes) if (row.rowOf) row.canvasId = byPath.get(row.rowOf)?.canvasId;
+  const resolveRef = notionRefResolver(nodes, target.workspaceId);
 
   for (const node of canvasNodes) {
     const canvasId = node.canvasId!;
@@ -308,8 +314,8 @@ export async function importNotionTree(root: string, target: NotionImportTarget,
     try {
       const raw = await fs.readFile(path.join(root, node.relPath), 'utf8');
       let markdown = node.kind === 'database'
-        ? await databaseToMarkdown(raw, node, nodes, root, byPath, canvasId, target, summary)
-        : await pageToMarkdown(raw, node, root, byPath, canvasId, target, summary);
+        ? await databaseToMarkdown(raw, node, nodes, root, resolveRef, canvasId, target, summary)
+        : await pageToMarkdown(raw, node, root, resolveRef, canvasId, target, summary);
 
       const parent = node.parentRelPath ? byPath.get(node.parentRelPath) : undefined;
       if (parent?.canvasId) {
@@ -318,10 +324,13 @@ export async function importNotionTree(root: string, target: NotionImportTarget,
 
       const parsed = await convertMarkdownToBlockNote(markdown);
       resolveMentionTokens(parsed as unknown[], id => owners.get(id), id => notionUsers.get(id)?.name ?? 'Unknown');
-      const blocks = sanitizeForJson(parsed) as Prisma.InputJsonValue;
+      const blocks = toJsonSafeValue(parsed) as unknown as Prisma.InputJsonValue;
       const previous = (await db.canvas.findUnique({ where: { id: canvasId }, select: { metadata: true } }))?.metadata as
         { notionImport?: { commentThreads?: Record<string, string>; commentIds?: string[]; seenBy?: string[] } } | null;
       const seenBy = uniqueIds([...(previous?.notionImport?.seenBy ?? []), plan?.member?.userId]);
+      const notionMeta = (comments: { commentThreads: Record<string, string>; commentIds: string[] }) => ({
+        notionImport: { key: node.key, path: node.relPath, kind: node.kind, access: placement.access, checksum: sha(markdown), importedAt: new Date().toISOString(), seenBy, ...comments },
+      });
       await db.canvas.update({
         where: { id: canvasId },
         data: {
@@ -329,7 +338,7 @@ export async function importNotionTree(root: string, target: NotionImportTarget,
           content: blocks,
           lastEditedBy: placement.ownerIds[0],
           lastEditedAt: new Date(),
-          metadata: { notionImport: { key: node.key, path: node.relPath, kind: node.kind, access: placement.access, checksum: sha(markdown), importedAt: new Date().toISOString(), seenBy, commentThreads: previous?.notionImport?.commentThreads ?? {}, commentIds: previous?.notionImport?.commentIds ?? [] } },
+          metadata: notionMeta({ commentThreads: previous?.notionImport?.commentThreads ?? {}, commentIds: previous?.notionImport?.commentIds ?? [] }),
         },
       });
       const commentState = await importComments({
@@ -350,9 +359,7 @@ export async function importNotionTree(root: string, target: NotionImportTarget,
           where: { id: canvasId },
           data: {
             content: blocks, // now carries the comment highlights (marked by importComments)
-            metadata: {
-              notionImport: { key: node.key, path: node.relPath, kind: node.kind, access: placement.access, checksum: sha(markdown), importedAt: new Date().toISOString(), seenBy, ...commentState },
-            },
+            metadata: notionMeta(commentState),
           },
         });
       }
@@ -446,35 +453,27 @@ async function pageToMarkdown(
   raw: string,
   node: NotionNode,
   root: string,
-  byPath: Map<string, NotionNode>,
+  resolveRef: (notionId: string) => Promise<string>,
   canvasId: string,
   target: NotionImportTarget,
   summary: NotionImportSummary,
 ): Promise<string> {
-  let md = raw.replace(/^﻿/, '');
-  md = md.replace(/^#\s+.*\n+/, ''); // leading "# Title" is the canvas title already
-
-  md = md.replace(/<aside>\s*([\s\S]*?)\s*<\/aside>/g, (_m, body: string) =>
-    body.trim().split('\n').map(l => `> ${l.trim()}`).join('\n') + '\n');
-  md = md.replace(/<details>\s*<summary>([\s\S]*?)<\/summary>([\s\S]*?)<\/details>/g, (_m, s: string, b: string) =>
-    `**▸ ${s.trim()}**\n\n${b.trim()}\n`);
-
+  let md = raw.replace(/^#\s+.*\n+/, ''); // leading "# Title" is the canvas title already
   const dir = path.dirname(node.relPath);
   const replacements: Array<[string, string]> = [];
   for (const m of md.matchAll(/(!?)\[([^\]]*)\]\(([^)\s]+)\)/g)) {
     const [whole, bang, label, href] = m;
-    if (/^(https?:|mailto:|#)/i.test(href)) continue;
-    const resolved = path.normalize(path.join(dir, safeDecode(href)));
-    const linked = byPath.get(resolved) ?? byPath.get(resolved.replace(/_all\.csv$/, '.csv'));
-    if (linked?.canvasId) {
-      replacements.push([whole, `[${label || linked.title}](${canvasPath(linked.canvasId, target.workspaceId)})`]);
+    // Notion page references → always an internal route.
+    if (href.startsWith(NOTION_REF_PREFIX)) {
+      replacements.push([whole, `[${label}](${await resolveRef(href.slice(NOTION_REF_PREFIX.length))})`]);
       continue;
     }
-    const abs = path.join(root, resolved);
-    if (!(await exists(abs)) || resolved.endsWith('.md') || resolved.endsWith('.csv')) {
-      // Points at a page that isn't part of this import (skipped, or not shared) — keep the text.
-      replacements.push([whole, label || path.basename(resolved)]);
-      if (!(await exists(abs))) summary.warnings.push(`"${node.title}": could not resolve link ${href}`);
+    if (/^(https?:|mailto:|#)/i.test(href)) continue;
+    // Anything else relative is a file the collector downloaded next to the page.
+    const abs = path.join(root, path.normalize(path.join(dir, safeDecode(href))));
+    if (!(await exists(abs))) {
+      replacements.push([whole, label || path.basename(abs)]);
+      summary.warnings.push(`"${node.title}": could not resolve link ${href}`);
       continue;
     }
     const attachmentId = await uploadAttachment(abs, canvasId, target, summary);
@@ -484,8 +483,30 @@ async function pageToMarkdown(
       : `[${label || path.basename(abs)}](/api/attachments/${encodeURIComponent(attachmentId)}/download)`]);
   }
   for (const [from, to] of replacements) md = md.split(from).join(to);
-  return md.replace(/ [0-9a-f]{32}\b/gi, '');
+  return md;
 }
+
+/**
+ * Notion page id → Spaces route: its canvas from this import, else one imported earlier into this
+ * workspace (looked up once per id), else the canvas route for an id that doesn't exist — "not
+ * found", never a link out to Notion.
+ */
+function notionRefResolver(nodes: NotionNode[], workspaceId: string): (notionId: string) => Promise<string> {
+  const inImport = new Map(nodes.filter(n => n.canvasId).map(n => [n.key, n.canvasId!]));
+  const earlier = new Map<string, Promise<string | undefined>>();
+  return async notionId => {
+    let canvasId = inImport.get(notionId);
+    if (!canvasId) {
+      if (!earlier.has(notionId)) {
+        earlier.set(notionId, db.canvas.findFirst({ where: { workspaceId, ...byNotionKey(notionId) }, select: { id: true } }).then(c => c?.id));
+      }
+      canvasId = await earlier.get(notionId);
+    }
+    return canvasPath(canvasId ?? `notion-${notionId}`, workspaceId);
+  };
+}
+
+const byNotionKey = (key: string) => ({ metadata: { path: ['notionImport', 'key'], equals: key } });
 
 /**
  * A database as one canvas: the table of rows (a static snapshot of its properties), then each
@@ -496,7 +517,7 @@ async function databaseToMarkdown(
   node: NotionNode,
   nodes: NotionNode[],
   root: string,
-  byPath: Map<string, NotionNode>,
+  resolveRef: (notionId: string) => Promise<string>,
   canvasId: string,
   target: NotionImportTarget,
   summary: NotionImportSummary,
@@ -525,7 +546,7 @@ async function databaseToMarkdown(
     } catch {
       continue;
     }
-    const content = demoteHeadings((await pageToMarkdown(rowRaw, row, root, byPath, canvasId, target, summary)).trim());
+    const content = demoteHeadings((await pageToMarkdown(rowRaw, row, root, resolveRef, canvasId, target, summary)).trim());
     if (content) sections.push(`## ${row.title}\n\n${content}`);
   }
   return [...table, ...(sections.length ? ['', '---', '', sections.join('\n\n')] : [])].join('\n');
@@ -612,7 +633,7 @@ async function importComments(input: {
   if (fresh.length === 0) {
     return earlierThreadIds.length ? { commentThreads: input.threads, commentIds: [...input.importedIds] } : null;
   }
-  const canvas = await db.canvas.findUnique({ where: { id: input.canvasId }, select: { connectId: true } });
+  const connectId = await resolveCanvasConnectId(db, input.canvasId);
 
   const threads = { ...input.threads };
   const byDiscussion = new Map<string, NotionComment[]>();
@@ -637,7 +658,7 @@ async function importComments(input: {
           status: 'OPEN',
           createdBy: input.authorOf(first.authorId) ?? input.fallbackUserId,
           createdAt: new Date(first.createdTime),
-          ...(canvas?.connectId ? { canvasConnectId: canvas.connectId } : {}),
+          ...(connectId ? { canvasConnectId: connectId } : {}),
         },
       });
       threads[discussionId] = threadId;
@@ -658,7 +679,7 @@ async function importComments(input: {
           isInitial: isNewThread && i === 0,
           createdBy: author ?? input.fallbackUserId,
           createdAt: new Date(c.createdTime),
-          ...(canvas?.connectId ? { canvasConnectId: canvas.connectId } : {}),
+          ...(connectId ? { canvasConnectId: connectId } : {}),
         },
       });
       if (isNewThread && i === 0) initialId = id;
@@ -799,7 +820,7 @@ async function findOrCreateCanvas(
   memberUserId?: string,
 ): Promise<{ id: string; created: boolean; joinedOnly?: boolean }> {
   const existing = await db.canvas.findFirst({
-    where: { workspaceId: t.workspaceId, metadata: { path: ['notionImport', 'key'], equals: node.key } },
+    where: { workspaceId: t.workspaceId, ...byNotionKey(node.key) },
     select: { id: true, visibility: true, createdBy: true },
   });
 
@@ -858,7 +879,7 @@ async function findOrCreateCanvas(
 }
 
 async function ensureOwners(canvasId: string, userIds: string[], workspaceId: string, role: CanvasRole = CanvasRole.OWNER): Promise<void> {
-  const canvas = await db.canvas.findUnique({ where: { id: canvasId }, select: { connectId: true } });
+  const connectId = await resolveCanvasConnectId(db, canvasId);
   await db.canvasParticipant.createMany({
     data: uniqueIds(userIds).map(userId => ({
       id: uuidv4(),
@@ -868,7 +889,7 @@ async function ensureOwners(canvasId: string, userIds: string[], workspaceId: st
       joinedAt: new Date(),
       updatedAt: new Date(),
       workspaceId,
-      ...(canvas?.connectId ? { canvasConnectId: canvas.connectId } : {}),
+      ...(connectId ? { canvasConnectId: connectId } : {}),
     })),
     skipDuplicates: true,
   });
@@ -891,7 +912,7 @@ async function uploadAttachment(absPath: string, canvasId: string, t: NotionImpo
   });
   if (existing) return existing.id;
 
-  const contentType = mimeFor(filename);
+  const contentType = mime.getType(filename) ?? 'application/octet-stream';
   const uploaded = await getStorageService().uploadFile(buffer, {
     filename,
     contentType,
@@ -950,23 +971,6 @@ function parseCsv(text: string): string[][] {
   row.push(field);
   if (row.some(v => v !== '')) rows.push(row);
   return rows;
-}
-
-function mimeFor(name: string): string {
-  const ext = path.extname(name).toLowerCase().slice(1);
-  const map: Record<string, string> = {
-    png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', svg: 'image/svg+xml',
-    pdf: 'application/pdf', csv: 'text/csv', txt: 'text/plain', json: 'application/json', zip: 'application/zip',
-    mp4: 'video/mp4', mov: 'video/quicktime', mp3: 'audio/mpeg',
-  };
-  return map[ext] ?? 'application/octet-stream';
-}
-
-function sanitizeForJson(value: unknown): unknown {
-  if (value === undefined) return null;
-  if (Array.isArray(value)) return value.map(sanitizeForJson);
-  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, sanitizeForJson(v)]));
-  return value;
 }
 
 async function walk(dir: string): Promise<string[]> {
