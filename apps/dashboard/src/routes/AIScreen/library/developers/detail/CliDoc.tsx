@@ -75,6 +75,16 @@ const SURFACES: { name: string; description: string }[] = [
   { name: 'channel', description: "A tab in a channel's navbar. The app is told which channel." },
   { name: 'library', description: "Agent Hub → Apps → the app's own page. Full screen." },
   { name: 'chat', description: 'An artifact shown inside a conversation.' },
+  {
+    name: 'overlay',
+    description:
+      'Drawn over the whole window, on top of any theme. Clicks pass through. Overlay apps only: spaces app init --surface overlay.',
+  },
+  {
+    name: 'widget',
+    description:
+      'A small floating card the viewer can move. Widget apps only: spaces app init --surface widget.',
+  },
 ];
 
 export function CliDoc(): ReactElement {
@@ -85,7 +95,7 @@ export function CliDoc(): ReactElement {
       <StatRow
         stats={[
           { value: '1', label: 'command to scaffold an app' },
-          { value: '5', label: 'places an app can live' },
+          { value: '7', label: 'places an app can live' },
           { value: '0', label: 'lines of sign-in code' },
           { value: `v${CLI_NPM_MAJOR}`, label: 'latest release on npm' },
         ]}
@@ -238,7 +248,8 @@ spaces app publish       # ship it to your workspace`}
         intro={
           <>
             The app reads its surface from <InlineCode>useXyneContext()</InlineCode> and can lay
-            itself out for each.
+            itself out for each. <InlineCode>surfaces</InlineCode> in xyne.json decides where it may
+            open; every app also opens in the Agent Hub.
           </>
         }
       >

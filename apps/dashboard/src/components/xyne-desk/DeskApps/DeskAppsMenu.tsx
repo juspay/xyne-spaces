@@ -171,6 +171,8 @@ export const DeskAppsMenu = ({
             full: 'This desk already has the maximum number of apps. Switch one off to add another.',
           }}
           trackCategory={TRACK}
+          // Desk apps open as the desk channel's tab.
+          surface='channel'
         />
       )}
     </>

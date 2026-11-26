@@ -2,6 +2,7 @@ import { FC, ReactElement, ReactNode, useEffect, useMemo, useRef, useState } fro
 import {
   X,
   Palette,
+  Layers,
   Bell,
   PauseCircle,
   Mic,
@@ -113,6 +114,7 @@ import { MessageBarPreview } from './MessageBarPreview';
 import { MESSAGE_BAR_ACTIONS } from '../../Chat/HoverActionsToolbar/messageBarActions';
 import { MAX_MESSAGE_BAR_ACTIONS } from '../../../constants/settings';
 import { BrowserSection } from './BrowserSection';
+import { OverlaysAndWidgetsSection } from '../../ArtifactSurfaces/OverlaysAndWidgetsSection';
 import { searchSettings, findSettingElement, type SettingsSearchEntry } from './settingsSearch';
 import { SettingsSearchInput } from './SettingsSearchInput';
 import { SettingsSearchResults, settingsSearchOptionId } from './SettingsSearchResults';
@@ -124,6 +126,12 @@ import { toast } from 'sonner';
 // ─── Constants ──────────────────────────────────────────────────────────────
 const NAV_ITEMS: NavItem[] = [
   { id: 'appearance', label: 'Appearance', icon: <Palette className='size-4' /> },
+  {
+    id: 'overlays',
+    label: 'Overlays & widgets',
+    icon: <Layers className='size-4' />,
+    desktopOnly: true,
+  },
   { id: 'notifications', label: 'Notifications', icon: <Bell className='size-4' /> },
   { id: 'availability', label: 'Availability', icon: <PauseCircle className='size-4' /> },
   { id: 'voice', label: 'Voice', icon: <Mic className='size-4' /> },
@@ -1411,6 +1419,7 @@ const ToolbarSection: FC<{ state: PreferencesState }> = () => {
 
   return (
     <BarCustomizer
+      appSurface='toolbar'
       title='Toolbar'
       subtitle='Choose what appears in your sidebar and in what order. Hidden items stay available under “More”.'
       store={store}
@@ -1422,6 +1431,7 @@ const ToolbarSection: FC<{ state: PreferencesState }> = () => {
 
 const InboxSection: FC<{ state: PreferencesState }> = () => (
   <BarCustomizer
+    appSurface='inbox'
     title='Inbox'
     subtitle='The shortcuts above your channel list in Chat.'
     store={inboxItemsStore}
@@ -1584,6 +1594,7 @@ const ChannelTabsSection: FC<{ state: PreferencesState }> = () => {
       // Remounts on a channel change, so nothing (an open app picker, a drag in
       // flight) carries over from the channel being left.
       key={selected.id}
+      appSurface='channel'
       title='Channel tabs'
       subtitle='Tabs are per channel — what you choose here applies to you, in this channel only. Apps a channel admin published show for everyone; you can still remove them for yourself. DMs and group DMs are customized from their own tab bar: drag tabs to rearrange or hide them, and use + to add.'
       store={store}
@@ -1614,6 +1625,7 @@ const MessageActionsSection: FC<{ state: PreferencesState }> = () => (
 // ─── Section registry ───────────────────────────────────────────────────────
 const SECTIONS: Record<PreferenceSection, FC<{ state: PreferencesState }>> = {
   appearance: AppearanceSection,
+  overlays: OverlaysAndWidgetsSection,
   notifications: NotificationsSection,
   availability: AvailabilitySection,
   voice: VoiceSection,

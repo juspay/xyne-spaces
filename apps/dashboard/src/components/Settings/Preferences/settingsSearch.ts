@@ -26,6 +26,22 @@ export const SETTINGS_INDEX: SettingsSearchEntry[] = [
     anchors: ['Summer Breeze'],
   },
 
+  // Overlays & widgets
+  {
+    section: 'overlays',
+    label: 'Overlay',
+    description: 'Run an app over Spaces, like seasonal decorations',
+    keywords: ['decorations', 'halloween', 'holiday', 'festive', 'apps', 'artifact'],
+    anchors: ['Choose an overlay'],
+  },
+  {
+    section: 'overlays',
+    label: 'Widgets',
+    description: 'Small floating apps you can use while you work',
+    keywords: ['floating', 'agent status', 'apps', 'artifact'],
+    anchors: ['Add widgets'],
+  },
+
   // Notifications
   {
     section: 'notifications',

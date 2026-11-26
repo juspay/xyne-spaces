@@ -18,6 +18,7 @@ import { Button } from '../../ui/Button/Button';
 import { AppIcon } from '../../AppIcon/AppIcon';
 import { SortableBarRow } from './SortableBarRow';
 import { AppPickerDialog, type BarBuiltIn } from '../../BarCustomize';
+import type { BarSurface } from '../../ArtifactApp/appSurfaces';
 import type { AppPublishOptions } from '../../BarCustomize/useChannelAppPublishing';
 import {
   type BarItemsStore,
@@ -45,6 +46,9 @@ interface BarCustomizerProps {
   publishedAppIds?: ReadonlySet<string>;
   maxShown?: number;
   apps?: boolean;
+  /** Which bar this is; the app picker lists only apps that open there.
+   *  Required whenever `apps` is not false. */
+  appSurface?: BarSurface;
 }
 
 /**
@@ -65,6 +69,7 @@ export const BarCustomizer = ({
   publishedAppIds,
   maxShown,
   apps = true,
+  appSurface,
 }: BarCustomizerProps): ReactElement => {
   const ids = store.useItems();
   const snapshots = useAppSnapshots();
@@ -296,6 +301,7 @@ export const BarCustomizer = ({
               store.add(appItemId(app.id));
             }}
             trackCategory={trackCategory}
+            surface={appSurface ?? 'toolbar'}
             {...(publish ? { publish } : {})}
           />
         </>

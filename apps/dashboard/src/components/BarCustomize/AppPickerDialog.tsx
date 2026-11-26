@@ -9,6 +9,7 @@ import { listArtifactApps, type ArtifactAppSummary } from '../../services/claw/a
 import { MAX_APPS_PER_BAR } from '../../hooks/barItems';
 import { cn } from '../../utils/classNames';
 import type { AppPublishOptions } from './useChannelAppPublishing';
+import { canOpenOn, type ArtifactAppSurface } from '../ArtifactApp/appSurfaces';
 
 interface AppPickerDialogProps {
   open: boolean;
@@ -22,6 +23,12 @@ interface AppPickerDialogProps {
   /** `next` is the membership the row is being toggled to. */
   onToggle: (app: ArtifactAppSummary, next: boolean) => void;
   trackCategory: string;
+  /**
+   * Where the picked app will open. Only apps whose author declared this
+   * surface are listed: a widget app is offered for widgets only, an overlay
+   * app for the overlay only, and bar apps for the bars they name.
+   */
+  surface: ArtifactAppSurface;
   /** Only rows this accepts are listed, e.g. a desk takes workspace-published apps only. */
   appFilter?: (app: ArtifactAppSummary) => boolean;
   /** Replaces the default "saved or published" line under the title. */
@@ -55,6 +62,7 @@ export const AppPickerDialog = ({
   publishedAppIds,
   onToggle,
   trackCategory,
+  surface,
   appFilter,
   description = DEFAULT_DESCRIPTION,
   limitNote,
@@ -81,13 +89,14 @@ export const AppPickerDialog = ({
     }
     const q = query.trim().toLowerCase();
     return Array.from(byId.values())
+      .filter(a => canOpenOn(a.manifest, surface))
       .filter(a => !appFilter || appFilter(a))
       .filter(
         a =>
           !q || `${a.title} ${a.description ?? ''} ${a.ownerName ?? ''}`.toLowerCase().includes(q),
       )
       .sort((a, b) => a.title.localeCompare(b.title));
-  }, [mine.data, workspace.data, query, appFilter]);
+  }, [mine.data, workspace.data, query, appFilter, surface]);
 
   const isLoading = mine.isLoading || workspace.isLoading;
   const isError = mine.isError || workspace.isError;
@@ -131,7 +140,13 @@ export const AppPickerDialog = ({
               <p className='p-4 text-sm text-destructive'>Couldn&apos;t load apps.</p>
             ) : apps.length === 0 ? (
               <p className='p-4 text-sm text-muted-foreground'>
-                {query ? 'No matching apps.' : 'No apps yet — save one from an AI chat first.'}
+                {query
+                  ? 'No matching apps.'
+                  : surface === 'widget'
+                    ? 'No widget apps yet. Build one with `spaces app init --surface widget`.'
+                    : surface === 'overlay'
+                      ? 'No overlay apps yet. Build one with `spaces app init --surface overlay`.'
+                      : 'No apps yet — save one from an AI chat first.'}
               </p>
             ) : (
               <ul className='divide-y divide-border'>

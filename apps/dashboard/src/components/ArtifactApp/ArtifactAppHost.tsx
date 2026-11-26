@@ -16,6 +16,8 @@ import {
 import { clawErrorText } from '../../services/claw/clawRequest';
 import { copyTextToClipboard } from '../../utils/clipboardUtils';
 import { appFolderName, appInitCommand, appPushCommand } from './appInitCommand';
+import { canOpenOn, describeSurfaces, libraryAppPath } from './appSurfaces';
+import { useNavigate } from '../../hooks/useWorkspaceNavigate';
 import type { XyneAppContext, XyneContextChannel } from '../AIScreen/ReactArtifact';
 
 /**
@@ -74,6 +76,7 @@ export const ArtifactAppHost = ({
   showPayloadTitle = false,
 }: ArtifactAppHostProps): ReactElement => {
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const { workspaceId } = useParams<{ workspaceId: string }>();
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -300,6 +303,31 @@ export const ArtifactAppHost = ({
               </>
             )}
           </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Its author declared where it opens (a widget, an overlay, or some bars), and
+  // this bar is not one of them. Every app still opens in the Agent Hub.
+  if (shown && !canOpenOn(shown.manifest, placement.surface)) {
+    return (
+      <div className='flex h-full flex-col'>
+        {header}
+        <div className='flex flex-1 flex-col items-center justify-center gap-2 px-6 text-center'>
+          <p className='text-sm font-medium text-foreground'>This app doesn&apos;t open here</p>
+          <p className='max-w-sm text-xs text-muted-foreground'>
+            {app.title} opens in {describeSurfaces(shown.manifest)}, and on its page in the Agent
+            Hub.
+          </p>
+          <Button
+            variant='secondary'
+            onClick={() => void navigate(libraryAppPath(app.id))}
+            data-track-category='AskAI'
+            data-track-name='ArtifactAppOpenInLibrary'
+          >
+            Open in Agent Hub
+          </Button>
         </div>
       </div>
     );
