@@ -468,7 +468,7 @@ router.get(
           const appToken = decryptStoredField(agent.spacesAppToken);
           sources.push({
             label: "apps-route",
-            url: `${CONFIG.spacesInternalUrl}/api/apps/attachments/${encodeURIComponent(attachmentId)}/download`,
+            url: `${CONFIG.spacesInternalUrl}/api/apps/files/download/${encodeURIComponent(attachmentId)}`,
             headers: { Authorization: `Bearer ${appToken}` },
           });
         } catch (error) {

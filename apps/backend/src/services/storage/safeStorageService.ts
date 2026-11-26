@@ -18,9 +18,10 @@ import { createWriteStream } from 'fs';
 import { Readable } from 'stream';
 import { pipeline } from 'stream/promises';
 import { currentWorkspaceId } from '@/database/tenant/context';
-import { clientFileCaller } from '@/middleware/clientFileEncryption';
+import { clientFileCaller, isUnencryptedFileWrite } from '@/middleware/clientFileEncryption';
 import { getEncryptionProvider, type TransitCaller } from '@/services/encryption';
-import { collect, openFileForTransit, sealFile } from './fileContainerStream';
+import { collect, MAX_HEADER_LENGTH, openFileForTransit, openFileRangeForTransit, sealFile } from './fileContainerStream';
+import { FILE_CHUNK_OVERHEAD, filePlaintextLength, parseFileHeader, type FileContainerHeader } from '@xyne/shared';
 
 /** Custom-metadata keys that say how an object is encrypted. */
 const META_VERSION = 'enc-v';
@@ -40,6 +41,15 @@ type SafeStorageOptions = {
   decryptReads: boolean;
   /** Plaintext bytes per chunk of a newly encrypted file. */
   chunkSize: number;
+};
+
+/** Where an encrypted object's plaintext lies, for range reads. */
+export type EncryptedLayout = {
+  header: FileContainerHeader;
+  /** Bytes in storage: the container. */
+  storedSize: number;
+  plaintextSize: number;
+  totalChunks: number;
 };
 
 type StoredAs =
@@ -76,28 +86,28 @@ export class SafeStorageService implements StorageService {
   ) {}
 
   async uploadFile(buffer: Buffer, options: UploadOptions): Promise<UploadResult> {
-    if (!this.options.encryptWrites) return this.inner.uploadFile(buffer, options);
+    if (!this.encrypts()) return this.inner.uploadFile(buffer, options);
     const { bytes, plaintextBytes } = await this.sealBuffer(buffer);
     const result = await this.inner.uploadFile(bytes, { ...options, encryption: CONTAINER_ENCRYPTION });
     return { ...result, size: plaintextBytes };
   }
 
   async uploadStream(stream: NodeJS.ReadableStream, options: UploadOptions): Promise<UploadResult> {
-    if (!this.options.encryptWrites) return this.inner.uploadStream(stream, options);
+    if (!this.encrypts()) return this.inner.uploadStream(stream, options);
     const sealed = this.sealStream(stream);
     const result = await this.inner.uploadStream(sealed.stream, { ...options, encryption: CONTAINER_ENCRYPTION });
     return { ...result, size: await sealed.plaintextBytes };
   }
 
   async uploadFileV2(buffer: Buffer, options: UploadV2Options): Promise<UploadResult> {
-    if (!this.options.encryptWrites) return this.inner.uploadFileV2(buffer, options);
+    if (!this.encrypts()) return this.inner.uploadFileV2(buffer, options);
     const { bytes, plaintextBytes } = await this.sealBuffer(buffer);
     const result = await this.inner.uploadFileV2(bytes, { ...options, encryption: CONTAINER_ENCRYPTION });
     return { ...result, size: plaintextBytes };
   }
 
   async uploadStreamToPath(stream: NodeJS.ReadableStream, options: UploadToPathOptions): Promise<UploadResult> {
-    if (!this.options.encryptWrites) return this.inner.uploadStreamToPath(stream, options);
+    if (!this.encrypts()) return this.inner.uploadStreamToPath(stream, options);
     const sealed = this.sealStream(stream);
     const result = await this.inner.uploadStreamToPath(sealed.stream, { ...options, encryption: CONTAINER_ENCRYPTION });
     return { ...result, size: await sealed.plaintextBytes };
@@ -188,6 +198,11 @@ export class SafeStorageService implements StorageService {
     return this.inner.buildStorageUri(path);
   }
 
+  /** Whether a write now is encrypted: on, unless the request's route stores files unencrypted. */
+  private encrypts(): boolean {
+    return this.options.encryptWrites && !isUnencryptedFileWrite();
+  }
+
   private sealStream(source: NodeJS.ReadableStream): ReturnType<typeof sealFile> {
     return sealFile(source as AsyncIterable<Buffer>, {
       workspaceId: requireWorkspaceId(),
@@ -207,6 +222,46 @@ export class SafeStorageService implements StorageService {
     return openFileForTransit((await this.inner.createReadStream(path)) as AsyncIterable<Buffer>, {
       workspaceId: requireWorkspaceId(),
       caller,
+    });
+  }
+
+  /**
+   * The layout of an encrypted (`enc-v: 2`) object, read from its header; null for any other
+   * object. For range reads, which address the file's plaintext.
+   */
+  async encryptedLayout(path: string): Promise<EncryptedLayout | null> {
+    if ((await this.storedAs(path)).kind !== 'container') return null;
+    const storedSize = Number((await this.inner.headObject(path))?.size ?? 0);
+    const head = await collect(await this.inner.createReadStream(path, { start: 0, end: MAX_HEADER_LENGTH - 1 }));
+    const header = parseFileHeader(head);
+    if (!header) throw new Error(`Encrypted file header is truncated: ${path}`);
+    const plaintextSize = filePlaintextLength(header.bytes.length, header.chunkSize, storedSize);
+    if (plaintextSize === null) throw new Error(`Encrypted file has an invalid length: ${path}`);
+    return {
+      header,
+      storedSize,
+      plaintextSize,
+      totalChunks: Math.max(1, Math.ceil(plaintextSize / header.chunkSize)),
+    };
+  }
+
+  /**
+   * Chunks `first`..`last` of an encrypted object, re-encrypted for the request's client: a
+   * transit container header followed by those chunks. Only they are read from storage.
+   */
+  async openContainerChunks(path: string, layout: EncryptedLayout, first: number, last: number): Promise<Readable> {
+    const caller = readerCaller(path);
+    const headerLength = layout.header.bytes.length;
+    const record = layout.header.chunkSize + FILE_CHUNK_OVERHEAD;
+    const start = headerLength + first * record;
+    const end = Math.min(headerLength + (last + 1) * record, layout.storedSize) - 1;
+    const stored = await this.inner.createReadStream(path, { start, end });
+    return openFileRangeForTransit(stored as AsyncIterable<Buffer>, {
+      workspaceId: requireWorkspaceId(),
+      caller,
+      header: layout.header,
+      firstIndex: first,
+      totalChunks: layout.totalChunks,
     });
   }
 

@@ -28,11 +28,15 @@ export function ThreadCitationChip({
   chunkIndex,
   toolNumber,
   toolInvocations,
+  tooltipClassName,
+  onSourceOpen,
 }: {
   toolCallId: string;
   chunkIndex: number;
   toolNumber: number;
   toolInvocations: ToolInvocation[] | undefined;
+  tooltipClassName?: string;
+  onSourceOpen?: () => void;
 }): ReactElement {
   const citation = findCitationForChunk(toolInvocations, toolCallId, chunkIndex);
   const url = citation ? buildClawCitationUrl(citation) : null;
@@ -68,6 +72,7 @@ export function ThreadCitationChip({
         newTab={citationOpensInNewTab(citation)}
         className={chipClass}
         ariaLabel={tooltip}
+        {...(onSourceOpen && { onClick: onSourceOpen })}
       >
         {chipInner}
       </CitationLink>
@@ -78,7 +83,13 @@ export function ThreadCitationChip({
     );
 
   return (
-    <Tooltip content={tooltip} side='top' delayDuration={200} sideOffset={4}>
+    <Tooltip
+      content={tooltip}
+      side='top'
+      delayDuration={200}
+      sideOffset={4}
+      {...(tooltipClassName && { className: tooltipClassName })}
+    >
       {trigger}
     </Tooltip>
   );

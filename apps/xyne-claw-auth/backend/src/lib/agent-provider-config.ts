@@ -42,7 +42,7 @@ export const KNOWN_PROVIDERS = new Set(["codex", "claude", "copilot", "openroute
 
 /**
  * Per-agent setting controlling which provider a SUBAGENT runs on when it has no
- * explicit per-subagent override (`userSubagentConfig`):
+ * explicit agent-configured or per-run subagent override:
  *
  *  - `"spaces"` (DEFAULT): subagents run on the Spaces platform default (LiteLLM)
  *    — cheaper/faster, and what nearly every agent already does today (premium

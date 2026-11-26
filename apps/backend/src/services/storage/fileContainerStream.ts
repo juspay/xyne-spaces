@@ -1,11 +1,11 @@
 import { PassThrough, type Readable } from 'stream';
-import { FILE_CHUNK_OVERHEAD, parseFileHeader, type FileContainerHeader } from '@xyne/shared';
+import { FILE_CHUNK_OVERHEAD, hasFileContainerMagic, parseFileHeader, type FileContainerHeader } from '@xyne/shared';
 import { getEncryptionProvider, type FileChunk, type TransitCaller } from '@/services/encryption';
 
 /** Input bytes per encryption-service call: base64 of it stays well under its 10 MB limit. */
 const BATCH_BYTES = 4 * 1024 * 1024;
 /** magic (4) + key id length (1) + key id (≤255) + chunk size (4) + file id (16). */
-const MAX_HEADER_LENGTH = 280;
+export const MAX_HEADER_LENGTH = 280;
 
 type Source = AsyncIterable<Buffer | string | Uint8Array>;
 
@@ -91,13 +91,23 @@ async function readContainer(source: Source): Promise<{ header: FileContainerHea
   return { header, chunks };
 }
 
-/** Plaintext cut into `chunkSize` pieces; an empty input is one empty last chunk. */
-function plaintextChunks(source: Source, chunkSize: number): AsyncGenerator<FileChunk> {
-  return records(new ByteQueue(), source[Symbol.asyncIterator](), chunkSize, () => ({
+/**
+ * Plaintext cut into `chunkSize` pieces; an empty input is one empty last chunk. Bytes that are
+ * already a container were sent encrypted to a route that does not take client-encrypted
+ * files: encrypting them again would store a file nobody can read, so they are refused.
+ */
+async function* plaintextChunks(source: Source, chunkSize: number): AsyncGenerator<FileChunk> {
+  const chunks = records(new ByteQueue(), source[Symbol.asyncIterator](), chunkSize, () => ({
     index: 0,
     last: true,
     data: Buffer.alloc(0),
   }));
+  for await (const chunk of chunks) {
+    if (chunk.index === 0 && hasFileContainerMagic(chunk.data)) {
+      throw new Error('Upload is an encrypted file container on a route that does not take one');
+    }
+    yield chunk;
+  }
 }
 
 async function* batches(chunks: AsyncIterable<FileChunk>): AsyncGenerator<FileChunk[]> {
@@ -220,28 +230,69 @@ export type OpenOptions = {
   caller: TransitCaller;
 };
 
+/** Chunks of a stored container (`header`'s) written as a transit container for the caller. */
+async function writeTransitChunks(
+  write: (bytes: Buffer) => Promise<void>,
+  header: FileContainerHeader,
+  chunks: AsyncIterable<FileChunk>,
+  options: OpenOptions,
+): Promise<void> {
+  const provider = getEncryptionProvider();
+  const storageHeader = Buffer.from(header.bytes).toString('base64');
+  let transitHeader: string | undefined;
+  for await (const batch of batches(chunks)) {
+    const opened = await provider.openFileChunksForTransit({
+      ...options.caller,
+      workspaceId: options.workspaceId,
+      header: storageHeader,
+      ...(transitHeader ? { transitHeader } : {}),
+      chunks: batch,
+    });
+    if (!transitHeader) {
+      transitHeader = opened.header;
+      await write(Buffer.from(opened.header, 'base64'));
+    }
+    for (const chunk of opened.chunks) await write(chunk);
+  }
+}
+
 /** A stored container (`source`) re-encrypted chunk by chunk for the caller's transit key. */
 export function openFileForTransit(source: Source, options: OpenOptions): Readable {
-  const provider = getEncryptionProvider();
   return produce(async (write) => {
     const container = await readContainer(source);
-    const header = Buffer.from(container.header.bytes).toString('base64');
-    let transitHeader: string | undefined;
-    for await (const batch of batches(container.chunks)) {
-      const opened = await provider.openFileChunksForTransit({
-        ...options.caller,
-        workspaceId: options.workspaceId,
-        header,
-        ...(transitHeader ? { transitHeader } : {}),
-        chunks: batch,
-      });
-      if (!transitHeader) {
-        transitHeader = opened.header;
-        await write(Buffer.from(opened.header, 'base64'));
-      }
-      for (const chunk of opened.chunks) await write(chunk);
-    }
+    await writeTransitChunks(write, container.header, container.chunks, options);
   }, (err) => destroySource(source, err));
+}
+
+export type OpenRangeOptions = OpenOptions & {
+  /** The stored container's header (`source` holds only chunk bytes). */
+  header: FileContainerHeader;
+  /** Index of the first chunk in `source`. */
+  firstIndex: number;
+  /** Chunks in the whole file: the last one is sealed as such. */
+  totalChunks: number;
+};
+
+/**
+ * A run of a stored container's chunks (`source`: their bytes, from chunk `firstIndex`, as a
+ * range read of the object returns them) re-encrypted for the caller's transit key: a transit
+ * container header followed by those chunks, under their own indexes.
+ */
+export function openFileRangeForTransit(source: Source, options: OpenRangeOptions): Readable {
+  return produce(async (write) => {
+    const record = options.header.chunkSize + FILE_CHUNK_OVERHEAD;
+    const chunks = records(new ByteQueue(), source[Symbol.asyncIterator](), record, () => {
+      throw new Error('Encrypted file range is empty');
+    });
+    await writeTransitChunks(write, options.header, renumber(chunks, options.firstIndex, options.totalChunks), options);
+  }, (err) => destroySource(source, err));
+}
+
+async function* renumber(chunks: AsyncIterable<FileChunk>, firstIndex: number, totalChunks: number): AsyncGenerator<FileChunk> {
+  for await (const chunk of chunks) {
+    const index = chunk.index + firstIndex;
+    yield { index, last: index === totalChunks - 1, data: chunk.data };
+  }
 }
 
 export async function collect(stream: AsyncIterable<Buffer | string | Uint8Array>): Promise<Buffer> {

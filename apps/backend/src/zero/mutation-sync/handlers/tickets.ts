@@ -3,11 +3,11 @@ import {
   Schema,
   serializeTicketMd,
   updateParentSubTicketsMdFromZero,
-  syncTicketRelativesFromZero,
 } from '@xyne/shared';
 import type { TicketCardSummary } from '@xyne/shared';
 import { zql } from '../../queries';
 import { BaseMutationSyncHandler } from '../base-handler';
+import { syncTicketRelatives } from '../composeMd';
 
 type TicketArgs = {
   id?: string;
@@ -87,5 +87,5 @@ const updateTicketMd = async (args: unknown, tx: Transaction<Schema>): Promise<v
     ticket_md: ticketMd,
   });
 
-  await syncTicketRelativesFromZero(tx, zql, ticket.id);
+  await syncTicketRelatives(tx, ticket.id);
 };

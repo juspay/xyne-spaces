@@ -71,3 +71,14 @@
 
 # Mobile app
 /apps/mobile/ @juspay/xyne-mobile-guardians
+
+# ---------------------------------------------------------------------------
+# File encryption.
+#
+# PLAINTEXT_FILE_ROUTES decides which routes' files skip end-to-end encryption:
+# every route not listed there has its files encrypted by default, so adding a
+# route to it (or changing the container format) needs this team's approval.
+#
+# NOTE: the @juspay/xyne-encryption-guardians team needs at least read access to
+# this repository for this rule to take effect.
+/packages/shared/src/crypto/file-container.ts @juspay/xyne-encryption-guardians

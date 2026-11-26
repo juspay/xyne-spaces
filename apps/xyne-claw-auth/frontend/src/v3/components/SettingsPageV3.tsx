@@ -1,7 +1,4 @@
 import { useState, useEffect, useCallback } from "react";
-import { Select } from "@base-ui-components/react/select";
-import { ChevronDown, Check } from "lucide-react";
-import { cn } from "../../lib/utils";
 import { PageHeader } from "./ui/PageHeader";
 import { PageLayout } from "./ui/PageLayout";
 import { Button } from "./ui/Button";
@@ -14,12 +11,8 @@ import { LinkNumberPanel } from "./LinkNumberPanel";
 import { MessagingChannelsCard } from "./MessagingChannelsCard";
 import {
   listProviderCredentials,
-  listSubagentRouting,
-  getAvailableTools,
   upsertProviderCredential,
   deleteProviderCredential,
-  upsertSubagentRouting,
-  deleteSubagentRouting,
   initiateCopilotGitHubLogin,
   pollCopilotGitHubLogin,
   listCopilotModelsForUser,
@@ -31,7 +24,6 @@ import {
   shareMyProviderCredential,
   listAgents,
   type ProviderCredential,
-  type SubagentRouting,
   type GitHubDeviceCode,
   type ClaudeModelInfo,
 } from "../../lib/api";
@@ -41,7 +33,6 @@ import {
   CodeIcon,
   CheckCircleIcon,
   SpinnerGapIcon,
-  RobotIcon,
   ArrowRightIcon,
   GearSixIcon,
   CopyIcon,
@@ -81,14 +72,6 @@ const PROVIDER_META: Record<
   },
 };
 
-const SUBAGENT_NAMES: Record<string, string> = {
-  spaces: "Spaces Agent",
-  bitbucket: "Bitbucket Agent",
-  grafana: "Grafana Agent",
-  deepwiki: "DeepWiki Agent",
-  context7: "Context7 Agent",
-};
-
 /* =================================================================== */
 /*  MAIN COMPONENT                                                      */
 /* =================================================================== */
@@ -97,33 +80,16 @@ export function SettingsPageV3() {
   const auth = useAuth();
 
   const [creds, setCreds] = useState<ProviderCredential[]>([]);
-  const [routing, setRouting] = useState<SubagentRouting[]>([]);
-  const [subagents, setSubagents] = useState<string[]>([
-    "spaces",
-    "bitbucket",
-    "grafana",
-    "deepwiki",
-    "context7",
-  ]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [saving, setSaving] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
 
   const load = useCallback(async () => {
     if (auth.status !== "authenticated") return;
     setLoading(true);
     try {
-      const [c, r, available] = await Promise.all([
-        listProviderCredentials(auth.user.id),
-        listSubagentRouting(auth.user.id),
-        getAvailableTools().catch(() => null),
-      ]);
+      const c = await listProviderCredentials(auth.user.id);
       setCreds(c);
-      setRouting(r);
-      if (available?.subagents && available.subagents.length > 0) {
-        setSubagents(available.subagents.map((s) => s.name));
-      }
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load settings");
@@ -137,18 +103,9 @@ export function SettingsPageV3() {
   }, [load]);
 
   const credMap = new Map(creds.map((c) => [c.provider, c]));
-  const routingMap = new Map(routing.map((r) => [r.subagentName, r.provider]));
 
   const connectedProviders = Array.from(credMap.values()).filter((c) => c.hasApiKey);
   const defaultProvider = connectedProviders[0]?.provider ?? null;
-
-  const availableProvidersForSelect = [
-    { value: "default", label: "Uses Main Agent Model" },
-    ...connectedProviders.map((c) => ({
-      value: c.provider,
-      label: PROVIDER_META[c.provider]?.name ?? c.provider,
-    })),
-  ];
 
   if (auth.status === "loading") {
     return (
@@ -165,7 +122,7 @@ export function SettingsPageV3() {
 
   return (
     <PageLayout
-      header={<PageHeader title="Settings" description="Configure AI providers and agent model assignments" />}
+      header={<PageHeader title="Settings" description="Configure AI providers" />}
       body={
         <div className="space-y-8 max-w-[860px] mx-auto w-full px-[20px]">
           {error && (
@@ -181,20 +138,6 @@ export function SettingsPageV3() {
             userId={auth.status === "authenticated" ? auth.user.id : ""}
             onMutate={() => setRefreshKey((k) => k + 1)}
             onError={(msg) => setError(msg)}
-          />
-
-          <AgentAssignmentSection
-            subagents={subagents}
-            routingMap={routingMap}
-            defaultProvider={defaultProvider}
-            availableProviders={availableProvidersForSelect}
-            providerMeta={PROVIDER_META}
-            loading={loading}
-            saving={saving}
-            userId={auth.status === "authenticated" ? auth.user.id : ""}
-            onMutate={() => setRefreshKey((k) => k + 1)}
-            onError={(msg) => setError(msg)}
-            onSaving={(key) => setSaving(key)}
           />
 
           {/* Both halves of "WhatsApp is mine", and both are per-user config:
@@ -1097,230 +1040,6 @@ function AuthMethodOption({
       <span className="text-[13px] font-medium text-xyne-fg-primary">{label}</span>
       <span className="text-[11px] text-xyne-fg-muted">{sublabel}</span>
     </button>
-  );
-}
-
-/* =================================================================== */
-/*  AGENT ASSIGNMENT SECTION                                            */
-/* =================================================================== */
-
-function AgentAssignmentSection({
-  subagents,
-  routingMap,
-  defaultProvider,
-  availableProviders,
-  providerMeta,
-  loading,
-  saving,
-  userId,
-  onMutate,
-  onError,
-  onSaving,
-}: {
-  subagents: string[];
-  routingMap: Map<string, string>;
-  defaultProvider: string | null;
-  availableProviders: Array<{ value: string; label: string }>;
-  providerMeta: typeof PROVIDER_META;
-  loading: boolean;
-  saving: string | null;
-  userId: string;
-  onMutate: () => void;
-  onError: (msg: string) => void;
-  onSaving: (key: string | null) => void;
-}) {
-  return (
-    <section>
-      <div className="mb-4">
-        <div className="flex items-center gap-2">
-          <RobotIcon size={16} className="text-xyne-fg-secondary" />
-          <h2 className="text-sm font-[550] text-xyne-fg-primary">Agent Model Assignment</h2>
-        </div>
-        <p className="mt-0.5 text-[13px] text-xyne-fg-muted">Choose which AI model powers specific agents.</p>
-      </div>
-
-      {loading ? (
-        <div className="divide-y divide-xyne-border rounded-xl border border-xyne-border bg-xyne-surface">
-          {[1, 2, 3].map((i) => (
-            <div key={i} className="flex items-center justify-between gap-4 px-4 py-3.5">
-              <div className="flex items-center gap-3">
-                <div className="h-8 w-8 animate-pulse rounded-md bg-xyne-surface-subtle" />
-                <div className="space-y-1.5">
-                  <div className="h-4 w-32 animate-pulse rounded bg-xyne-surface-subtle" />
-                  <div className="h-3 w-48 animate-pulse rounded bg-xyne-surface-subtle" />
-                </div>
-              </div>
-              <div className="h-8 w-40 animate-pulse rounded bg-xyne-surface-subtle" />
-            </div>
-          ))}
-        </div>
-      ) : (
-        <div className="divide-y divide-xyne-border rounded-xl border border-xyne-border bg-xyne-surface">
-          {subagents.map((name) => {
-            const current = routingMap.get(name) ?? "default";
-            return (
-              <AgentAssignmentRow
-                key={name}
-                name={name}
-                displayName={SUBAGENT_NAMES[name] ?? `${name.charAt(0).toUpperCase() + name.slice(1)} Agent`}
-                currentProvider={current}
-                defaultProviderName={defaultProvider ? providerMeta[defaultProvider]?.name ?? defaultProvider : null}
-                availableProviders={availableProviders}
-                providerMeta={providerMeta}
-                disabled={saving === `sa:${name}`}
-                onChange={async (provider) => {
-                  onSaving(`sa:${name}`);
-                  try {
-                    if (provider === "default") {
-                      await deleteSubagentRouting(userId, name);
-                    } else {
-                      await upsertSubagentRouting(userId, name, provider);
-                    }
-                    onMutate();
-                  } catch (err) {
-                    onError(err instanceof Error ? err.message : "Save failed");
-                  } finally {
-                    onSaving(null);
-                  }
-                }}
-              />
-            );
-          })}
-        </div>
-      )}
-    </section>
-  );
-}
-
-function AgentAssignmentRow({
-  name,
-  displayName,
-  currentProvider,
-  defaultProviderName,
-  availableProviders,
-  providerMeta,
-  disabled,
-  onChange,
-}: {
-  name: string;
-  displayName: string;
-  currentProvider: string;
-  defaultProviderName: string | null;
-  availableProviders: Array<{ value: string; label: string }>;
-  providerMeta: typeof PROVIDER_META;
-  disabled: boolean;
-  onChange: (provider: string) => void;
-}) {
-  const isInherited = currentProvider === "default";
-  const selectedProvider = isInherited ? null : providerMeta[currentProvider];
-
-  return (
-    <div
-      data-id={`agent-row-${name}`}
-      className={`flex items-center justify-between gap-4 px-4 py-3.5 transition-colors ${
-        isInherited ? "bg-transparent" : "bg-xyne-brand-ghost/30"
-      }`}
-    >
-      <div className="flex items-center gap-3 min-w-0 flex-1">
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-xyne-surface-subtle text-xyne-fg-muted">
-          <RobotIcon size={16} />
-        </div>
-        <div className="min-w-0">
-          <p className="text-sm font-medium text-xyne-fg-primary truncate">{displayName}</p>
-          {isInherited && defaultProviderName && (
-            <p className="flex items-center gap-1 text-[12px] text-xyne-fg-muted">
-              <ArrowRightIcon size={12} />
-              Inherited from Main Agent
-              <span className="font-medium text-xyne-fg-secondary">({defaultProviderName})</span>
-            </p>
-          )}
-          {!isInherited && selectedProvider && (
-            <p className="flex items-center gap-1 text-[12px] text-xyne-brand">
-              <CheckCircleIcon size={12} />
-              Uses <span className="font-medium">{selectedProvider.name}</span>
-            </p>
-          )}
-          {isInherited && !defaultProviderName && (
-            <p className="text-[12px] text-xyne-fg-muted">No default provider connected</p>
-          )}
-        </div>
-      </div>
-
-      {/* Base UI Select — non-searchable, fully styleable dropdown.
-          Earlier attempts:
-            1. SelectField → searchable Combobox with "No results" state,
-               unnecessary friction for a fixed 3–4 option list.
-            2. Native <select> → opens with OS-themed option list which
-               we can't style (Safari's pink highlight, Chrome's blue, etc).
-          Base UI Select renders its own popup, so the option list inherits
-          our design tokens and matches the rest of the V3 surface. */}
-      <div className="w-52 shrink-0">
-        <Select.Root
-          value={currentProvider}
-          onValueChange={(v) => { if (v) onChange(v); }}
-          disabled={disabled}
-        >
-          <Select.Trigger
-            className={cn(
-              "flex h-9 w-full items-center justify-between gap-2",
-              "rounded-[var(--comp-input-radius)] border border-xyne-border bg-xyne-surface",
-              "px-3 text-[13px] text-xyne-fg-primary",
-              "transition-[border-color] duration-[var(--comp-duration-normal)] ease-in",
-              "hover:border-xyne-border-strong",
-              "data-[popup-open]:border-xyne-border-focus",
-              "focus-visible:outline-none focus-visible:border-xyne-border-focus",
-              "disabled:cursor-not-allowed disabled:opacity-60",
-            )}
-          >
-            <Select.Value className="truncate text-left" />
-            <Select.Icon className="shrink-0 text-xyne-fg-muted data-[popup-open]:rotate-180 transition-transform duration-[var(--comp-duration-normal)]">
-              <ChevronDown size={14} />
-            </Select.Icon>
-          </Select.Trigger>
-          <Select.Portal>
-            <Select.Positioner
-              side="bottom"
-              sideOffset={4}
-              alignItemWithTrigger={false}
-              className="z-[350] w-[var(--anchor-width)]"
-            >
-              <Select.Popup
-                className={cn(
-                  "w-full overflow-hidden",
-                  "rounded-xl border border-xyne-border bg-xyne-surface",
-                  "shadow-[var(--comp-shadow-lg)]",
-                  "origin-[var(--transform-origin)]",
-                  "transition-[transform,opacity] duration-[var(--comp-duration-normal)]",
-                  "data-[ending-style]:opacity-0 data-[ending-style]:scale-95",
-                  "data-[starting-style]:opacity-0 data-[starting-style]:scale-95",
-                )}
-              >
-                <div className="max-h-56 overflow-y-auto py-1">
-                  {availableProviders.map((opt) => (
-                    <Select.Item
-                      key={opt.value}
-                      value={opt.value}
-                      className={cn(
-                        "flex cursor-pointer items-center gap-2 px-3 py-1.5",
-                        "text-[13px] text-xyne-fg-primary outline-none",
-                        "data-[highlighted]:bg-xyne-surface-subtle",
-                        "data-[selected]:font-medium",
-                        "transition-colors duration-75",
-                      )}
-                    >
-                      <Select.ItemIndicator className="w-3.5 shrink-0">
-                        <Check size={12} className="text-xyne-fg-primary" />
-                      </Select.ItemIndicator>
-                      <Select.ItemText className="flex-1 truncate">{opt.label}</Select.ItemText>
-                    </Select.Item>
-                  ))}
-                </div>
-              </Select.Popup>
-            </Select.Positioner>
-          </Select.Portal>
-        </Select.Root>
-      </div>
-    </div>
   );
 }
 

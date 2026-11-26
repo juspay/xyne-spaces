@@ -23,6 +23,60 @@ export const FILE_CONTAINER_MAGIC = 'XEF1';
  */
 export const FILE_ENCRYPTION_HEADER = 'x-file-encryption';
 export const FILE_ENCRYPTION_HEADER_VALUE = FILE_CONTAINER_MAGIC;
+
+/**
+ * Routes whose files stay plaintext. Everywhere else, files travel as transit containers when
+ * the request carries FILE_ENCRYPTION_HEADER: the dashboard encrypts the files of every
+ * multipart upload and asks for every file download as a container, and the backend marks
+ * requests by this same list, so the two cannot disagree. A route belongs here when the
+ * backend reads the file's content itself, or the browser loads it by address (`<img src>`)
+ * where nothing could add the header or decrypt. Paths are written without the `/api`
+ * prefix; `:name` matches one path segment and a trailing `/*` any rest of the path; method
+ * `*` matches every method.
+ */
+export const PLAINTEXT_FILE_ROUTES: ReadonlyArray<{ method: string; path: string }> = [
+  // Read by the backend: transcription, conversion, email sending, ingestion, imports.
+  { method: 'POST', path: '/voice-input/transcribe' },
+  { method: 'POST', path: '/office-conversion/pdf' },
+  { method: 'POST', path: '/email/:conversationId/upload-attachments' },
+  { method: 'POST', path: '/email/channels/:channelId/upload-attachments' },
+  { method: 'POST', path: '/collections/:collectionId/upload' },
+  { method: 'POST', path: '/collections/items/:itemId/versions' },
+  { method: 'POST', path: '/users/me/voice-signature' },
+  { method: 'POST', path: '/automations/attachments' },
+  { method: '*', path: '/workflows-v2/*' },
+  { method: '*', path: '/migration/*' },
+  // Loaded by address, where nothing could add the header or decrypt.
+  { method: 'POST', path: '/emojis' },
+  { method: 'POST', path: '/calls/admin/backgrounds' },
+  { method: 'POST', path: '/canvas/upload' },
+  { method: 'POST', path: '/canvas/claw/upload' },
+];
+
+const PLAINTEXT_FILE_PATTERNS = PLAINTEXT_FILE_ROUTES.map(({ method, path }) => ({
+  method,
+  pattern: new RegExp(
+    `^${path.replace(/\/\*$/, '').replace(/:[A-Za-z]+/g, '[^/]+')}${path.endsWith('/*') ? '(?:/.*)?' : ''}$`,
+  ),
+}));
+
+/** `pathname` without `/api`, a trailing slash or a query. */
+function routePath(pathname: string): string {
+  return pathname.split('?')[0]!.replace(/^\/api(?=\/)/, '').replace(/\/+$/, '') || '/';
+}
+
+/** Whether `method` + `pathname` (with or without `/api`) is one of PLAINTEXT_FILE_ROUTES. */
+export function isPlaintextFileRoute(method: string, pathname: string): boolean {
+  const path = routePath(pathname);
+  const verb = method.toUpperCase();
+  return PLAINTEXT_FILE_PATTERNS.some(r => (r.method === '*' || r.method === verb) && r.pattern.test(path));
+}
+
+/** Whether files to and from `method` + `pathname` travel as transit containers: every route but PLAINTEXT_FILE_ROUTES. */
+export function isClientEncryptedFileRoute(method: string, pathname: string): boolean {
+  return !isPlaintextFileRoute(method, pathname);
+}
+
 export const FILE_ID_LENGTH = 16;
 export const FILE_CHUNK_IV_LENGTH = 12;
 export const FILE_CHUNK_TAG_LENGTH = 16;

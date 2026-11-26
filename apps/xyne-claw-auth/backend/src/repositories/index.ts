@@ -28,7 +28,6 @@ export { generatedContentRepository, DAILY_BRIEF_KIND } from "./generatedContent
 export { userProviderCredentialsRepository } from "./userProviderCredentialsRepository.js";
 export { agentProviderCredentialsRepository } from "./agentProviderCredentialsRepository.js";
 export { sharedProviderCredentialRepository } from "./sharedProviderCredentialRepository.js";
-export { userSubagentConfigRepository } from "./userSubagentConfigRepository.js";
 export { localHarnessRepository } from "./localHarnessRepository.js";
 export { localHarnessSessionRepository } from "./localHarnessSessionRepository.js";
 export { userRepository } from "./userRepository.js";

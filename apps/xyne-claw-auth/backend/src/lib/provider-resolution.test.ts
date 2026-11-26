@@ -10,13 +10,14 @@ const state = {
   userCreds: [] as Record<string, unknown>[],
   agentCreds: [] as Record<string, unknown>[],
   subagentConfigs: [] as { subagentName: string; provider: string }[],
+  listSubagentConfigs: vi.fn(),
 };
 
 vi.mock("../repositories/index.js", () => ({
   userAgentConfigRepository: { findByUserAndAgent: async () => state.userAgentConfig },
   userProviderCredentialsRepository: { listByUser: async () => state.userCreds, upsert: async () => {} },
   agentProviderCredentialsRepository: { listByAgent: async () => state.agentCreds },
-  userSubagentConfigRepository: { listByUser: async () => state.subagentConfigs },
+  userSubagentConfigRepository: { listByUser: async () => { state.listSubagentConfigs(); return state.subagentConfigs; } },
   sharedProviderCredentialRepository: { persistBundle: async () => {} },
 }));
 vi.mock("./claude-oauth-refresh.js", () => ({ getValidClaudeBearer: async () => "fresh-claude" }));
@@ -59,6 +60,7 @@ beforeEach(() => {
   state.userCreds = [];
   state.agentCreds = [];
   state.subagentConfigs = [];
+  vi.clearAllMocks();
 });
 
 describe("resolveProvidersForDispatch", () => {
@@ -148,10 +150,11 @@ describe("resolveProvidersForDispatch", () => {
     expect(r.providerConfigs["codex"]?.apiKey).toBe("fresh-codex");
   });
 
-  it("passes through subagent overrides and mode", async () => {
+  it("ignores legacy Settings overrides and preserves the agent mode", async () => {
     state.subagentConfigs = [{ subagentName: "researcher", provider: "codex" }];
     const r = await run({ config: { subagentProviderMode: "parent" } });
-    expect(r.subagentProviders).toEqual({ researcher: "codex" });
+    expect(r).not.toHaveProperty("subagentProviders");
+    expect(state.listSubagentConfigs).not.toHaveBeenCalled();
     expect(r.subagentProviderMode).toBe("parent");
   });
 });

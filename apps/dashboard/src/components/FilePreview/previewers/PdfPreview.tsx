@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { useMountedStylesheet } from '../../../hooks/useMountedStylesheet';
 import { getAttachmentStreamUrl } from '../../../services/clients/apiClient';
+import { useDecryptedAttachment } from '../useDecryptedAttachment';
 import { streamSourceOf } from '../streamSource';
 import { cn } from '../../../utils/classNames';
 import {
@@ -584,9 +585,35 @@ export function PdfDocumentView({ source }: { source: PdfSource }): ReactElement
   );
 }
 
-/** A stored PDF, read from the address the app serves it at. */
+/**
+ * A stored PDF, read from the address the app serves it at, or downloaded whole and decrypted
+ * while file encryption is on.
+ */
 export default function PdfPreview(props: PreviewerProps): ReactElement {
-  return <PdfDocumentView source={streamSourceOf(props.file, getAttachmentStreamUrl)} />;
+  const decrypted = useDecryptedAttachment(props.file);
+  const [bytes, setBytes] = useState<Uint8Array>();
+  useEffect(() => {
+    let live = true;
+    setBytes(undefined);
+    void decrypted.blob?.arrayBuffer().then(buffer => {
+      if (live) setBytes(new Uint8Array(buffer));
+    });
+    return () => {
+      live = false;
+    };
+  }, [decrypted.blob]);
+
+  if (!decrypted.decrypting) {
+    return <PdfDocumentView source={streamSourceOf(props.file, getAttachmentStreamUrl)} />;
+  }
+  if (!bytes) {
+    return (
+      <div className='flex h-full items-center justify-center text-sm text-muted-foreground'>
+        {decrypted.failed ? 'Could not open this file' : 'Loading…'}
+      </div>
+    );
+  }
+  return <PdfDocumentView source={bytes} />;
 }
 
 function ZoomOption(props: {

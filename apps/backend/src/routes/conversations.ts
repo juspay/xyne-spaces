@@ -3,7 +3,6 @@ import { replyToConversationClient } from '@xyne/shared';
 import { ConversationController } from '../controllers/conversationController';
 import { uploadMultiple } from '../middleware/upload';
 import { encryptedRoute } from '../middleware/encryptedRoute';
-import { clientFileEncryption } from '../middleware/clientFileEncryption';
 
 const router = Router();
 const conversationController = new ConversationController();
@@ -23,7 +22,7 @@ router.get('/recent-visited', conversationController.getRecentVisitedConversatio
 // Keep replyToConversation for file upload handling
 // encryptedRoute runs after multer (it fills req.body); see middleware/encryptedRoute.ts for
 // the request (CEK → DEK) and response (DEK → CEK) steps.
-router.post('/:conversationId/messages', clientFileEncryption, uploadMultiple, ...encryptedReply, conversationController.replyToConversation);
+router.post('/:conversationId/messages', uploadMultiple, ...encryptedReply, conversationController.replyToConversation);
 
 // Get a single conversation message by conversationId + messageId (for mobile background prefetch)
 router.get('/:conversationId/message/:messageId', conversationController.getConversationMessage);

@@ -48,6 +48,7 @@ import {
   type ClawRunRequest,
   type ClawChatProjectInput,
 } from '@/services/clawAgentService';
+import { buildCmdkAnswerContext } from '@/services/cmdkAnswer/context';
 import { attachXyneAiFlowToken } from '@/apps/core/flowToken';
 import { resolveAuthorizedSdlcLinkedContext } from '@/sdlc/SdlcLinkedContextResolver';
 import {
@@ -580,6 +581,17 @@ export class XyneAIControllerV2 {
       });
 
       try {
+        const cmdkAnswerContext =
+          agentSlug === CMDK_ANSWER_AGENT_SLUG && req.user?.workspaceId
+            ? await buildCmdkAnswerContext(query, tab ?? 'all', {
+                userId,
+                workspaceId: req.user.workspaceId,
+                ...(req.user.role && { role: req.user.role }),
+                ...(req.user.orgRole && { orgRole: req.user.orgRole }),
+                ...(req.user.memberId && { memberId: req.user.memberId }),
+              })
+            : null;
+
         // Build the ClawRunRequest
         const runReq: ClawRunRequest = {
           userId,
@@ -606,8 +618,8 @@ export class XyneAIControllerV2 {
           webSearchEnabled,
           deepResearchEnabled,
           instant,
-          // cmd+K scopes the agent's own search to the tab the answer is shown on.
-          ...(agentSlug === CMDK_ANSWER_AGENT_SLUG && { answerScope: tab ?? 'all' }),
+          // cmd+K: claw's answer-context searches for the tab the answer is shown on, run here as the user.
+          ...(cmdkAnswerContext && { answerScope: cmdkAnswerContext.scope, answerContext: cmdkAnswerContext }),
           ...(thinkingLevel ? { thinkingLevel } : {}),
           ...(speed ? { speed } : {}),
           ...(approvedAction ? { approvedAction } : {}),
