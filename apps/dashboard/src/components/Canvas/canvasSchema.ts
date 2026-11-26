@@ -301,9 +301,11 @@ export const canvasLinkOptions = {
   onClick: (event: MouseEvent): boolean => {
     const anchor = (event.target as HTMLElement | null)?.closest<HTMLAnchorElement>('a[href]');
     if (!anchor) return false;
-    if (anchor.origin !== window.location.origin && !TRUSTED_ORIGINS.includes(anchor.origin)) {
-      openLink(anchor.href, event);
-    }
+    const external =
+      anchor.origin !== window.location.origin && !TRUSTED_ORIGINS.includes(anchor.origin);
+    // An /api/ link (an attachment download) is a file, not a page of the app: open it, don't route it.
+    const apiFile = !external && anchor.pathname.startsWith('/api/');
+    if (external || apiFile) openLink(anchor.href, event);
     return true;
   },
 };

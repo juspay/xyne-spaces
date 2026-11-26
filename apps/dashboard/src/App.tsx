@@ -98,6 +98,9 @@ const App = (): ReactElement => {
         return;
       }
 
+      // Same-origin /api/ links are files (e.g. attachment downloads), not app routes: leave them to the browser.
+      if (anchor.origin === window.location.origin && anchor.pathname.startsWith('/api/')) return;
+
       // Check origin directly from anchor element
       if (anchor.origin === window.location.origin || TRUSTED_ORIGINS.includes(anchor.origin)) {
         event.preventDefault();
