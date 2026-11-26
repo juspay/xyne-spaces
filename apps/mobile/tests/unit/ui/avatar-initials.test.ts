@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
-import { initialsOf } from '@/src/features/conversation/model/initials';
+import { initialsOf } from '@/src/ui/avatar/avatar.initials';
 
 describe('initialsOf', () => {
   it('takes the first letters of the first two words', () => {
