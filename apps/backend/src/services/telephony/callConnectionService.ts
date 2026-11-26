@@ -1,7 +1,6 @@
 import { randomBytes } from 'node:crypto';
-import type { ExternalSource } from '@prisma/client';
+import type { ExternalSource, Prisma } from '@prisma/client';
 import { ChannelType } from '@xyne/shared';
-import { findWorkspaceDeskIds } from '@/bypassAcl/callConnectionServices';
 import { config } from '@/config/env';
 import { db } from '@/database/client';
 import { WORKSPACE_LEVEL } from '@/integrations/core/sourceScope';
@@ -156,13 +155,14 @@ async function migrateLegacyTicketRules(
 
   // Every app desk had the toolbar call button while the workspace had a toolbar URL.
   const hadSoftphone = provider.softphoneUrl(stored) !== null;
+  const deskIds = async (where: Prisma.ChannelWhereInput): Promise<string[]> =>
+    (await db.channel.findMany({ where: { workspaceId: source.workspaceId, ...where }, select: { id: true } })).map(
+      channel => channel.id,
+    );
+  // Runs inside the backfill's service scope, so private desks are included.
   const [validCallDesks, appDesks] = await Promise.all([
-    callDesks.size > 0
-      ? findWorkspaceDeskIds(source.workspaceId, { type: ChannelType.CALL, ids: [...callDesks.keys()] })
-      : Promise.resolve([]),
-    hadSoftphone
-      ? findWorkspaceDeskIds(source.workspaceId, { type: ChannelType.APP })
-      : Promise.resolve([]),
+    callDesks.size > 0 ? deskIds({ type: ChannelType.CALL, id: { in: [...callDesks.keys()] } }) : Promise.resolve([]),
+    hadSoftphone ? deskIds({ type: ChannelType.APP }) : Promise.resolve([]),
   ]);
 
   const phoneFieldNames = uniqueTrimmed([...(rules.phoneFieldNames ?? []), rules.customerPhoneFieldName]);
@@ -363,28 +363,17 @@ export const callConnectionService = {
     };
   },
 
-  /** Deactivates the connection; refused while a live desk still uses it. */
+  /** Deactivates the connection; refused while a desk still uses it. */
   async remove(workspaceId: string, connectionId: string): Promise<void> {
     const existing = await this.get(workspaceId, connectionId);
     if (!existing) throw new CallConfigError('Call connection not found', 404);
-    const bound = await deskCallSettingsService.listForConnection(workspaceId, connectionId);
-    // Archived or deleted desks can't be unbound from the UI, so only live desks block removal.
-    const desks =
-      bound.length > 0
-        ? (
-            await findWorkspaceDeskIds(workspaceId, {
-              ids: bound.map(desk => desk.channelId),
-              excludeArchived: true,
-            })
-          ).length
-        : 0;
+    const desks = (await deskCallSettingsService.listForConnection(workspaceId, connectionId)).length;
     if (desks > 0) {
       throw new CallConfigError(
         `${desks} desk${desks === 1 ? ' uses' : 's use'} this connection. Move ${desks === 1 ? 'it' : 'them'} to another connection first.`,
         409,
       );
     }
-    await deskCallSettingsService.removeForConnection(workspaceId, connectionId);
     await db.externalSource.update({ where: { id: existing.id }, data: { isActive: false } });
     logger.info(`${TAG} removed`, { workspaceId, connectionId });
   },
