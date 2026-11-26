@@ -67,17 +67,20 @@ const VARIANTS = {
     androidReleaseStoreFile: '../../assets/secrets/xynespaces-release.keystore',
     androidReleaseKeyAlias: 'xynespacesrelease',
   },
+  // Sandbox has its own package, signing key and Google project, so its Sign-In clients never
+  // clash with prod's. Its Android client is matched by package name + the sandbox keystore's
+  // SHA-1 (see withAndroidProductFlavors), so no Android client ID appears here.
   sandbox: {
     key: 'sandbox',
-    androidApplicationId: 'net.juspay.xynespaces',
+    androidApplicationId: 'net.juspay.xynespaces.sandbox',
     iosBundleIdentifier: 'net.juspay.xynespaces.sandbox',
     displayName: 'Xyne Spaces Sandbox',
     googleSignInIosUrlScheme:
-      'com.googleusercontent.apps.244924431232-gr3qaadt651729c1d2gg1n527j53ef8s',
+      'com.googleusercontent.apps.1073805738448-j6d245o0sblg9trg5irhho4c0lhnoseo',
     googleSignInIosClientId:
-      '244924431232-gr3qaadt651729c1d2gg1n527j53ef8s.apps.googleusercontent.com',
+      '1073805738448-j6d245o0sblg9trg5irhho4c0lhnoseo.apps.googleusercontent.com',
     googleSignInWebClientId:
-      '244924431232-5og3nosfdr8bl2huvrqg9hfrvveva9ea.apps.googleusercontent.com',
+      '1073805738448-n4kq752prp125f6gpmnjo7s1tfam0gb4.apps.googleusercontent.com',
     googleServicesRelDir: 'assets/configs/sandbox',
     usesCleartextTraffic: false,
     androidReleaseStoreFile: '../../assets/secrets/xynespaces-release.keystore',
