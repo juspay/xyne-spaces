@@ -157,8 +157,10 @@ export async function resolveNotionImportTarget(input: { userId: string; workspa
 /** What both the review step and the import read from a staged collect: the page tree, the manifest and the owners. */
 async function loadStaged(root: string, workspaceId: string) {
   const manifest = await readManifest(root);
+  // With a manifest, only the pages it lists are pages: a downloaded .md/.csv attachment is a file.
+  const files = manifest ? manifest.items.map(i => path.join(root, i.relPath)) : await walk(root);
   return {
-    nodes: buildTree(root, await walk(root)),
+    nodes: buildTree(root, files),
     owners: await resolveOwners(manifest, workspaceId),
     createdBy: new Map(manifest?.items.map(i => [i.id, i.createdById]) ?? []),
     commentsByPage: new Map(manifest?.items.map(i => [i.id, i.comments ?? []]) ?? []),
@@ -503,8 +505,16 @@ async function pageToMarkdown(
       continue;
     }
     if (/^(https?:|mailto:|#)/i.test(href)) continue;
-    // Anything else relative is a file the collector downloaded next to the page.
-    const abs = path.join(root, path.normalize(path.join(dir, safeDecode(href))));
+    // Anything else relative is a file the collector downloaded next to the page — and only that:
+    // never a path outside the staging folder, and never the manifest (it lists people's emails).
+    const abs = path.resolve(root, dir, safeDecode(href));
+    const inside = path.relative(path.resolve(root), abs);
+    const staysInside = inside !== '' && !inside.startsWith('..') && !path.isAbsolute(inside);
+    if (!staysInside || path.basename(abs) === NOTION_MANIFEST_FILE) {
+      replacements.push([whole, label || path.basename(abs)]);
+      summary.warnings.push(`"${node.title}": ignored a link that isn't a file from this page (${href})`);
+      continue;
+    }
     if (!(await exists(abs))) {
       replacements.push([whole, label || path.basename(abs)]);
       summary.warnings.push(`"${node.title}": could not resolve link ${href}`);
