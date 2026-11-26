@@ -29,7 +29,10 @@ const ZeroProvider: React.FC<ZeroProviderProps> = ({ children }): ReactElement |
   // Zero filters its local store, so encrypted fields are decrypted as they arrive (the wire
   // still carries ciphertext). Declared before the effect that creates Zero, so it runs first.
   useEffect(() => {
-    installSyncDecryption(() => (encryptionConfig?.clientEncryptionEnabled ? keyring : 'disabled'));
+    installSyncDecryption(
+      () => (encryptionConfig?.clientEncryptionEnabled ? keyring : 'disabled'),
+      () => encryptionConfig?.encryptedFields ?? {},
+    );
   }, [encryptionConfig, keyring]);
 
   useEffect(() => {
