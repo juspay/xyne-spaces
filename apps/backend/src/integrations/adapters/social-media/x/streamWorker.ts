@@ -35,6 +35,9 @@ const LEASE_RENEW_MS = 20_000;
 const RECONCILE_MS = 30_000;
 /** No byte (not even a keep-alive) for this long ⇒ the connection is dead; X keep-alives are ≤ ~20 s. */
 const STALL_MS = 90_000;
+/** A connection attempt X has not answered by now is abandoned (separate from the stall watchdog). */
+const CONNECT_TIMEOUT_MS = 30_000;
+
 const MAX_PENDING_LINE = 5 * 1024 * 1024;
 
 export interface XAppGroup {
@@ -57,10 +60,10 @@ export interface XStreamDeps {
   getBearer(app: XAppCredentials): Promise<string>;
   openStream(bearer: string, signal: AbortSignal): Promise<Response>;
   ingest(sourceId: string, item: XInboundItem): Promise<void>;
-  /** A window in which events may have been missed. `since` undefined ⇒ first connect this process. */
   /**
-   * Repairs what the stream may have missed. Polled items go back through `enqueue`, the stream's
-   * own queue, so each account has one writer (see repairSourceGap).
+   * Repairs a window in which events may have been missed (`since` undefined ⇒ first connect in this
+   * process). Polled items go back through `enqueue`, the stream's own queue, so each account has
+   * one writer (see repairSourceGap).
    */
   onGap(group: XAppGroup, since: Date | undefined, enqueue: XEnqueue): Promise<void>;
   now(): number;
@@ -115,6 +118,8 @@ export class XAppStream {
   private connection: AbortController | null = null;
   private wake: (() => void) | null = null;
   private lastByteAt = 0;
+  /** True only while X has answered and the body is being read; the stall watchdog ignores attempts. */
+  private streamOpen = false;
   private lastHealthyAt: number | undefined;
   private attempts: Record<XStreamFailure, number> = { network: 0, http: 0, rate_limited: 0, credits: 0 };
   private ingestChain: Promise<void> = Promise.resolve();
@@ -164,7 +169,8 @@ export class XAppStream {
         });
     }, LEASE_RENEW_MS);
     const watchdog = setInterval(() => {
-      if (this.connection && this.lastByteAt && this.deps.now() - this.lastByteAt > STALL_MS) {
+      // Only a stream X has answered can stall; an attempt still waiting is bounded by its own timeout.
+      if (this.connection && this.streamOpen && this.deps.now() - this.lastByteAt > STALL_MS) {
         logger.warn(`${TAG} Stream stalled — reconnecting`, { appKey: this.group.appKey, silentMs: this.deps.now() - this.lastByteAt });
         this.connection.abort();
       }
@@ -208,13 +214,17 @@ export class XAppStream {
     const bearer = await this.deps.getBearer(this.group.app);
     const connection = new AbortController();
     this.connection = connection;
+    const connectTimer = setTimeout(() => connection.abort(), CONNECT_TIMEOUT_MS);
+    connectTimer.unref?.();
     try {
       const res = await this.deps.openStream(bearer, connection.signal);
+      clearTimeout(connectTimer);
       if (!res.ok || !res.body) throw await responseError(res);
 
       logger.info(`${TAG} x_stream_connected`, { appKey: this.group.appKey, accounts: this.group.accounts.size });
       this.attempts = { network: 0, http: 0, rate_limited: 0, credits: 0 };
       this.lastByteAt = this.deps.now();
+      this.streamOpen = true;
       // Anything between the last healthy byte and now may be missing.
       const since = this.lastHealthyAt !== undefined ? new Date(this.lastHealthyAt) : undefined;
       void this.deps.onGap(this.group, since, (sourceId, item) => this.enqueue(sourceId, item, 'gap-repair')).catch((error) =>
@@ -229,6 +239,8 @@ export class XAppStream {
         if (parser.pendingLength > MAX_PENDING_LINE) throw new Error('Unterminated stream line exceeded 5 MB');
       }
     } finally {
+      clearTimeout(connectTimer);
+      this.streamOpen = false;
       this.connection = null;
     }
   }
