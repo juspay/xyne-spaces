@@ -62,7 +62,7 @@ export interface NotionImportPlan {
    * creator (when they have a Spaces account), and each member whose import contains it is added.
    * A page an admin already made public stays public — the member is just added.
    */
-  member?: { userId: string };
+  member?: { userId: string; notionWorkspaceId?: string };
 }
 
 export interface SpacesUserRef {
@@ -115,6 +115,7 @@ interface NotionNode {
   canvasId?: string;
   created?: boolean;
   joinedOnly?: boolean; // member import over a canvas that isn't theirs — leave it as it is
+  notYours?: boolean; // token import over someone else's canvas — not touched at all
   rowOf?: string; // a database row: written into its database's canvas (this relPath), not a canvas of its own
 }
 
@@ -311,6 +312,7 @@ export async function importNotionTree(root: string, target: NotionImportTarget,
     node.canvasId = result.id;
     node.created = result.created;
     node.joinedOnly = result.joinedOnly;
+    node.notYours = result.notYours;
   }
 
   // Links to a row land on its database's canvas.
@@ -321,6 +323,11 @@ export async function importNotionTree(root: string, target: NotionImportTarget,
     const canvasId = node.canvasId!;
     const placement = placementOf(node);
     const ownerEmail = owners.get(createdBy.get(node.key) ?? '')?.email;
+    if (node.notYours) {
+      summary.skipped++;
+      summary.warnings.push(`"${node.title}" is already in Spaces and isn't yours to change, so it was left as it was`);
+      continue;
+    }
     if (node.joinedOnly) {
       // The canvas isn't rewritten, but a person was just added — keep search access in step.
       await enqueueCanvasPermissionRefresh(canvasId).catch(err => summary.warnings.push(`Search access refresh failed for "${node.title}": ${String(err)}`));
@@ -334,7 +341,7 @@ export async function importNotionTree(root: string, target: NotionImportTarget,
     if (partial && !node.created) {
       kept.add(node.key);
       for (const row of nodes) if (row.rowOf === node.relPath) kept.add(row.key);
-      if (plan?.member) await markSeenBy(canvasId, plan.member.userId); // still visible to them in Notion
+      await mergeNotionMeta(canvasId, importMeta(placement, plan)); // still visible to them in Notion
       summary.skipped++;
       continue;
     }
@@ -353,10 +360,13 @@ export async function importNotionTree(root: string, target: NotionImportTarget,
       resolveMentionTokens(parsed as unknown[], id => owners.get(id), id => notionUsers.get(id)?.name ?? 'Unknown');
       const blocks = toJsonSafeValue(parsed) as unknown as Prisma.InputJsonValue;
       const previous = (await db.canvas.findUnique({ where: { id: canvasId }, select: { metadata: true } }))?.metadata as
-        { notionImport?: { commentThreads?: Record<string, string>; commentIds?: string[]; seenBy?: string[] } } | null;
-      const seenBy = uniqueIds([...(previous?.notionImport?.seenBy ?? []), plan?.member?.userId]);
+        { notionImport?: StoredNotionMeta } | null;
+      const stored = previous?.notionImport ?? {};
       const notionMeta = (comments: { commentThreads: Record<string, string>; commentIds: string[] }) => ({
-        notionImport: { key: node.key, path: node.relPath, kind: node.kind, access: placement.access, checksum: sha(markdown), importedAt: new Date().toISOString(), seenBy, ...comments },
+        notionImport: {
+          ...stored, key: node.key, path: node.relPath, kind: node.kind, access: placement.access, checksum: sha(markdown),
+          importedAt: new Date().toISOString(), ...mergedMeta(stored, importMeta(placement, plan)), ...comments,
+        },
       });
       await db.canvas.update({
         where: { id: canvasId },
@@ -443,12 +453,43 @@ export async function importNotionTree(root: string, target: NotionImportTarget,
   return summary;
 }
 
-/** Record that a member's Notion still shows this page (what a later re-import's access check reads). */
-async function markSeenBy(canvasId: string, userId: string): Promise<void> {
+/** What an import records on a canvas: who saw it in Notion, which access it granted, and from which Notion workspace. */
+interface StoredNotionMeta {
+  key?: string;
+  checksum?: string;
+  seenBy?: string[];
+  granted?: string[]; // user ids this import added as participants (the only access an import may later take away)
+  notionWorkspaceId?: string;
+  commentThreads?: Record<string, string>;
+  commentIds?: string[];
+}
+
+function importMeta(placement: Placement, plan?: NotionImportPlan): Pick<StoredNotionMeta, 'seenBy' | 'granted' | 'notionWorkspaceId'> {
+  return {
+    seenBy: uniqueIds([plan?.member?.userId]),
+    granted: uniqueIds([...placement.ownerIds, ...placement.editorIds]),
+    ...(plan?.member?.notionWorkspaceId ? { notionWorkspaceId: plan.member.notionWorkspaceId } : {}),
+  };
+}
+
+/** Member imports add to what's recorded; a token import's review replaces the access it grants. */
+function mergedMeta(stored: StoredNotionMeta, add: ReturnType<typeof importMeta>): Pick<StoredNotionMeta, 'seenBy' | 'granted' | 'notionWorkspaceId'> {
+  const isMember = Boolean(add.seenBy?.length);
+  return {
+    seenBy: uniqueIds([...(stored.seenBy ?? []), ...(add.seenBy ?? [])]),
+    granted: isMember ? uniqueIds([...(stored.granted ?? []), ...(add.granted ?? [])]) : add.granted,
+    ...(add.notionWorkspaceId ?? stored.notionWorkspaceId ? { notionWorkspaceId: add.notionWorkspaceId ?? stored.notionWorkspaceId } : {}),
+  };
+}
+
+async function mergeNotionMeta(canvasId: string, add: ReturnType<typeof importMeta>): Promise<void> {
   const meta = ((await db.canvas.findUnique({ where: { id: canvasId }, select: { metadata: true } }))?.metadata ?? {}) as
-    { notionImport?: { seenBy?: string[] } & Record<string, unknown> } & Record<string, unknown>;
-  const seenBy = uniqueIds([...(meta.notionImport?.seenBy ?? []), userId]);
-  await db.canvas.update({ where: { id: canvasId }, data: { metadata: toJsonSafeValue({ ...meta, notionImport: { ...meta.notionImport, seenBy } }) as unknown as Prisma.InputJsonValue } });
+    { notionImport?: StoredNotionMeta } & Record<string, unknown>;
+  const stored = meta.notionImport ?? {};
+  await db.canvas.update({
+    where: { id: canvasId },
+    data: { metadata: toJsonSafeValue({ ...meta, notionImport: { ...stored, ...mergedMeta(stored, add) } }) as unknown as Prisma.InputJsonValue },
+  });
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -862,31 +903,39 @@ async function findOrCreateCanvas(
   p: Placement,
   t: NotionImportTarget,
   memberUserId?: string,
-): Promise<{ id: string; created: boolean; joinedOnly?: boolean }> {
+): Promise<{ id: string; created: boolean; joinedOnly?: boolean; notYours?: boolean }> {
   const existing = await db.canvas.findFirst({
     where: { workspaceId: t.workspaceId, ...byNotionKey(node.key) },
-    select: { id: true, visibility: true, createdBy: true },
+    select: { id: true, visibility: true, createdBy: true, metadata: true },
   });
 
   if (existing && memberUserId) {
-    // Same Notion page, another person who can see it: add them, and make sure its Notion creator
-    // owns it — correcting canvases first created with whoever imported first as the owner.
-    if (p.creatorKnown && existing.visibility === CanvasVisibility.PRIVATE && existing.createdBy !== p.ownerIds[0]) {
-      await db.canvas.update({ where: { id: existing.id }, data: { createdBy: p.ownerIds[0], folderId } });
+    // A public canvas (an admin's import) stays exactly as it is — everyone can already open it.
+    if (existing.visibility === CanvasVisibility.PUBLIC) return { id: existing.id, created: false, joinedOnly: true };
+    // Same Notion page, another person who can see it. Only its known Notion creator becomes (or stays)
+    // owner — correcting canvases first created with whoever imported first; the importer joins as editor.
+    if (p.creatorKnown) {
+      if (existing.createdBy !== p.ownerIds[0]) await db.canvas.update({ where: { id: existing.id }, data: { createdBy: p.ownerIds[0], folderId } });
+      await ensureOwners(existing.id, p.ownerIds, t.workspaceId);
     }
-    await ensureOwners(existing.id, p.ownerIds, t.workspaceId);
-    await ensureOwners(existing.id, p.editorIds, t.workspaceId, CanvasRole.EDITOR);
-    // An admin's public import stays exactly as the admin set it; a private one gets fresh content.
-    return existing.visibility === CanvasVisibility.PUBLIC
-      ? { id: existing.id, created: false, joinedOnly: true }
-      : { id: existing.id, created: false };
+    if (!(p.creatorKnown && p.ownerIds[0] === memberUserId)) await ensureOwners(existing.id, [memberUserId], t.workspaceId, CanvasRole.EDITOR);
+    return { id: existing.id, created: false };
   }
 
   if (existing) {
-    // The latest review decides placement (e.g. promoting an earlier private copy to public).
+    // A token import may re-place only a canvas the importer owns (or any, as an admin).
+    const mayPlace = t.isAdmin || existing.createdBy === t.userId || (await db.canvasParticipant.count({
+      where: { canvasId: existing.id, userId: t.userId, role: CanvasRole.OWNER },
+    })) > 0;
+    if (!mayPlace) return { id: existing.id, created: false, notYours: true };
+    // The latest review decides placement, so take back access an earlier review granted and this one doesn't.
+    const granted = ((existing.metadata ?? {}) as { notionImport?: { granted?: string[] } }).notionImport?.granted ?? [];
+    const keep = new Set([...p.ownerIds, ...p.editorIds]);
+    const drop = granted.filter(id => !keep.has(id));
+    if (drop.length) await db.canvasParticipant.deleteMany({ where: { canvasId: existing.id, userId: { in: drop } } });
     await db.canvas.update({
       where: { id: existing.id },
-      data: { folderId, channelId: p.channelId, projectId: p.projectId, visibility: p.visibility },
+      data: { folderId, channelId: p.channelId, projectId: p.projectId, visibility: p.visibility, createdBy: p.ownerIds[0] },
     });
     await ensureOwners(existing.id, p.ownerIds, t.workspaceId);
     return { id: existing.id, created: false };
