@@ -157,7 +157,10 @@ function areGooglePlayApplicationsValid(applications: GooglePlayApplicationInput
 
 export type SocialProvider = 'GOOGLE_PLAY' | 'APP_STORE' | 'INSTAGRAM' | 'FACEBOOK' | 'X';
 
-/** Providers connected by an OAuth redirect: no extra fields here and the board is optional. */
+/**
+ * Providers connected by an OAuth redirect: the board is optional. Instagram and Facebook need no
+ * extra fields; X also needs the customer's own app keys (validated separately).
+ */
 export const isOAuthSocialProvider = (provider: SocialProvider | undefined): boolean =>
   provider === 'INSTAGRAM' || provider === 'FACEBOOK' || provider === 'X';
 
@@ -556,7 +559,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
         socialProvider === 'X' &&
         !isXAppKeysComplete(xAppKeys)
       )
-        return 'Enter all four X app keys';
+        return 'Enter all four X app keys in full (each is at least 10 characters)';
       if (deskType === DeskType.SOCIAL_MEDIA && socialProvider === 'APP_STORE') {
         if (!APP_STORE_KEY_ID_PATTERN.test(appStoreKeyId.trim()))
           return 'Enter the Key ID from App Store Connect';

@@ -131,11 +131,7 @@ export class XConnectionService {
    */
   async removeSubscriptions(creds: Pick<XCredentials, 'app' | 'xUserId'>): Promise<boolean> {
     try {
-      const bearer = await this.client.getAppBearer(creds.app);
-      const subs = await this.client.listSubscriptions(bearer, creds.xUserId);
-      for (const sub of subs.filter((s) => !s.tag || s.tag.startsWith('xyne:'))) {
-        await this.client.deleteSubscription(bearer, sub.subscription_id);
-      }
+      await this.client.removeXyneSubscriptions(creds.app, creds.xUserId);
       return true;
     } catch (error) {
       logger.warn(`${TAG} Failed to remove X subscriptions`, { xUserId: creds.xUserId, error: String(error) });

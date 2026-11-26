@@ -314,6 +314,18 @@ export class XApiClient {
   async deleteSubscription(appBearer: string, subscriptionId: string): Promise<void> {
     await this.request('DELETE', `/2/activity/subscriptions/${encodeURIComponent(subscriptionId)}`, appBearer);
   }
+
+  /**
+   * Deletes our subscriptions for an account (tagged `xyne:`, or untagged) so X stops delivering and
+   * billing its events. Uses only the app keys, so it works after the user token has died.
+   */
+  async removeXyneSubscriptions(app: XAppCredentials, xUserId: string): Promise<void> {
+    const bearer = await this.getAppBearer(app);
+    const subs = await this.listSubscriptions(bearer, xUserId);
+    for (const sub of subs.filter((s) => !s.tag || s.tag.startsWith('xyne:'))) {
+      await this.deleteSubscription(bearer, sub.subscription_id);
+    }
+  }
 }
 
 export const xApiClient = new XApiClient();

@@ -1,7 +1,7 @@
 import { ReactElement, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { SOCIAL_MEDIA_SOURCE_TYPE } from '@xyne/shared';
-import { Lock, LockOpen, Plug, Plus, Unplug } from 'lucide-react';
+import { Lock, LockOpen } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   addXAccount,
@@ -21,13 +21,15 @@ import {
 } from '../../../hooks/useChannelConnectedEmail';
 import { useConfirmDialog } from '../../../hooks/useConfirmDialog';
 import { getApiErrorMessage } from '../../../utils/apiError';
+import { oauthPlatform, openOAuthUrl } from '../../../utils/oauthRedirect';
+import { xErrorMessage } from '../../../utils/xErrors';
 import { Dialog } from '../../ui/Dialog';
 import Button from '../../ui/Button';
+import { Checkbox } from '../../ui/Checkbox/Checkbox';
 import Input from '../../ui/Input';
-import { DeskConnectionCard } from './DeskConnectionCard';
+import { MultiAccountDeskCard } from './MultiAccountDeskCard';
 import {
   EMPTY_X_APP_KEYS,
-  X_ERROR_MESSAGES,
   XAppKeysFields,
   isXAppKeysComplete,
   trimXAppKeys,
@@ -40,22 +42,6 @@ const XCHAT_ERROR_MESSAGES: Record<string, string> = {
     'XChat is not set up on this X account. Open Chat in the X app, create a passcode, then try again.',
   xchat_unlock_failed: 'Could not reach X to unlock XChat. Please try again in a moment.',
 };
-
-function openAuthUrl(authUrl: string): void {
-  if (window.electronAPI?.openExternal) {
-    window.electronAPI.openExternal(authUrl);
-  } else {
-    window.location.href = authUrl;
-  }
-}
-
-const oauthPlatform = (): 'web' | 'electron' =>
-  typeof window.electronAPI?.openExternal === 'function' ? 'electron' : 'web';
-
-function xErrorMessage(error: unknown, fallback: string): string {
-  const code = getXErrorCode(error);
-  return (code && X_ERROR_MESSAGES[code]) || getApiErrorMessage(error, fallback);
-}
 
 function formatSyncedAt(iso: string | null): string | null {
   if (!iso) {
@@ -73,6 +59,10 @@ interface XDeskIntegrationCardProps {
   canManage: boolean;
 }
 
+/**
+ * X on the shared multi-account card, plus what only X has: the customer's own app keys (asked
+ * for when adding or reconnecting with different keys) and per-account XChat.
+ */
 export const XDeskIntegrationCard = ({
   channelId,
   canManage,
@@ -83,7 +73,12 @@ export const XDeskIntegrationCard = ({
   const isXDesk = sourceType === SOCIAL_MEDIA_SOURCE_TYPE.X && hasSource && canManage;
 
   const accountsQueryKey = ['x-accounts', channelId];
-  const { data: accountsData } = useQuery({
+  const {
+    data: accountsData,
+    isError: accountsFailed,
+    refetch: refetchAccounts,
+    isFetching: accountsLoading,
+  } = useQuery({
     queryKey: accountsQueryKey,
     queryFn: () => getXAccounts(channelId),
     enabled: isXDesk,
@@ -99,8 +94,6 @@ export const XDeskIntegrationCard = ({
   const [xchatError, setXchatError] = useState<string | null>(null);
   const [isEnablingXChat, setIsEnablingXChat] = useState(false);
 
-  const [accountAction, setAccountAction] = useState<string | null>(null);
-
   if (!isXDesk) {
     return null;
   }
@@ -112,12 +105,13 @@ export const XDeskIntegrationCard = ({
     clearChannelConnectedEmailCache(channelId);
     void queryClient.invalidateQueries({ queryKey: accountsQueryKey });
   };
-  const accountLabel = (displayName: string | null, fallback: string | null): string =>
-    displayName ? `@${displayName}` : (fallback ?? 'X account');
 
   const openKeysDialog = (dialog: Exclude<KeysDialog, null>): void => {
     setKeys(EMPTY_X_APP_KEYS);
-    setUseNewKeys(false);
+    // Reconnecting an account with no stored keys needs new ones up front.
+    const storedKeys =
+      dialog.mode === 'reconnect' ? statusById.get(dialog.sourceId)?.hasAppKeys : true;
+    setUseNewKeys(storedKeys === false);
     setKeysDialog(dialog);
   };
   const closeKeysDialog = (): void => {
@@ -137,7 +131,7 @@ export const XDeskIntegrationCard = ({
           ? await addXAccount(channelId, oauthPlatform(), app)
           : await reconnectXAccount(channelId, keysDialog.sourceId, oauthPlatform(), app);
       closeKeysDialog();
-      openAuthUrl(authUrl);
+      openOAuthUrl(authUrl);
     } catch (error) {
       if (getXErrorCode(error) === 'x_keys_required') {
         setUseNewKeys(true);
@@ -145,42 +139,6 @@ export const XDeskIntegrationCard = ({
       toast.error(xErrorMessage(error, 'Failed to start X authorization.'));
     } finally {
       setIsRedirecting(false);
-    }
-  };
-
-  const handleDisconnectAll = async (): Promise<void> => {
-    try {
-      for (const account of deskApps.filter(a => a.isActive)) {
-        await disconnectXAccount(channelId, account.id);
-      }
-      refresh();
-      toast.success('X accounts disconnected. Existing tickets are kept.');
-    } catch (error) {
-      toast.error(getApiErrorMessage(error, 'Failed to disconnect — please try again.'));
-      throw error;
-    }
-  };
-
-  const handleDisconnect = async (sourceId: string, label: string): Promise<void> => {
-    const confirmed = await confirm({
-      title: `Disconnect ${label}`,
-      description:
-        'New mentions, replies and DMs for this account will stop creating tickets. Its XChat keys are deleted and its X tokens revoked. Existing tickets are kept.',
-      confirmLabel: 'Disconnect',
-      cancelLabel: 'Cancel',
-    });
-    if (!confirmed) {
-      return;
-    }
-    setAccountAction(`disconnect:${sourceId}`);
-    try {
-      await disconnectXAccount(channelId, sourceId);
-      refresh();
-      toast.success(`${label} disconnected.`);
-    } catch (error) {
-      toast.error(getApiErrorMessage(error, `Failed to disconnect ${label}.`));
-    } finally {
-      setAccountAction(null);
     }
   };
 
@@ -229,7 +187,7 @@ export const XDeskIntegrationCard = ({
     }
   };
 
-  const handleDisableXChat = async (sourceId: string, label: string): Promise<void> => {
+  const disableXChatFor = async (sourceId: string, label: string): Promise<void> => {
     const confirmed = await confirm({
       title: `Turn off XChat for ${label}`,
       description:
@@ -240,137 +198,99 @@ export const XDeskIntegrationCard = ({
     if (!confirmed) {
       return;
     }
-    setAccountAction(`xchat:${sourceId}`);
-    try {
-      await disableXChat(channelId, sourceId);
-      refresh();
-      toast.success(`XChat turned off for ${label}.`);
-    } catch (error) {
-      toast.error(getApiErrorMessage(error, 'Failed to turn off XChat.'));
-    } finally {
-      setAccountAction(null);
-    }
+    await disableXChat(channelId, sourceId);
+    refresh();
+    toast.success(`XChat turned off for ${label}.`);
   };
 
   const canContinueToX = !useNewKeys || isXAppKeysComplete(keys);
-  // The rows below name each account, so the header only summarises; its desk-wide disconnect
-  // only appears when there is more than one account (with one, the row button does the same).
-  const activeCount = deskApps.filter(account => account.isActive).length;
-  const summary =
-    deskApps.length === 0
-      ? null
-      : `${activeCount} of ${deskApps.length} account${deskApps.length === 1 ? '' : 's'} connected`;
 
   return (
-    <div className='flex flex-col gap-3'>
-      <DeskConnectionCard
-        label='Connected X accounts'
-        value={
-          activeCount === deskApps.length
-            ? `${activeCount} account${activeCount === 1 ? '' : 's'} connected`
-            : summary
-        }
-        isConnected={isConnected}
-        onDisconnect={handleDisconnectAll}
-        disconnectLabel='Disconnect all'
-        hideDisconnect={activeCount < 2}
-        disconnectTitle='Disconnect X integration'
-        disconnectPrompt='Disconnect all X accounts from this desk?'
-        disconnectBullets={[
+    <MultiAccountDeskCard
+      trackCategory={TRACK}
+      provider='x'
+      accounts={deskApps}
+      isConnected={isConnected}
+      noun={{ one: 'X account', many: 'X accounts' }}
+      handlePrefix='@'
+      accountSlug='x-account'
+      disconnectAll={{
+        title: 'Disconnect X integration',
+        bullets: [
           'New mentions, replies and DMs will stop creating tickets immediately.',
           'Stored XChat keys are deleted and X tokens revoked.',
           'Existing tickets on this desk are kept.',
           'You can reconnect the same accounts later.',
-        ]}
-        trackCategory={TRACK}
-        provider='x'
-      />
-
-      {deskApps.length > 0 && (
-        <div className='flex flex-col gap-2'>
-          {deskApps.map(account => {
-            const label = accountLabel(account.displayName, account.externalIdentifier);
-            const status = statusById.get(account.id);
-            const syncedAt = formatSyncedAt(status?.lastSyncedAt ?? null);
-            const details = account.isActive
-              ? [
-                  'Connected',
-                  status &&
-                    (status.xchatEnabled ? 'XChat on' : 'XChat off — encrypted DMs show as locked'),
-                  syncedAt && `Last synced ${syncedAt}`,
-                ]
-              : ['Disconnected'];
-            return (
-              <div
-                key={account.id}
-                className='flex flex-wrap items-center justify-between gap-3 rounded-md border border-border p-3'
-              >
-                <div className='min-w-0'>
-                  <p className='truncate text-sm font-medium text-foreground'>{label}</p>
-                  <p className='truncate text-xs text-muted-foreground'>
-                    {details.filter(Boolean).join(' · ')}
-                  </p>
-                </div>
-                <div className='flex shrink-0 flex-wrap gap-2'>
-                  {account.isActive && status && (
-                    <Button
-                      type='button'
-                      variant='outline'
-                      size='sm'
-                      loading={accountAction === `xchat:${account.id}`}
-                      disabled={accountAction !== null}
-                      onClick={() =>
-                        status.xchatEnabled
-                          ? void handleDisableXChat(account.id, label)
-                          : openXChatDialog(account.id, label)
-                      }
-                      data-track-category={TRACK}
-                      data-track-name={status.xchatEnabled ? 'disable-xchat' : 'enable-xchat'}
-                    >
-                      {status.xchatEnabled ? <Lock size={14} /> : <LockOpen size={14} />}
-                      {status.xchatEnabled ? 'Turn off XChat' : 'Enable XChat'}
-                    </Button>
-                  )}
-                  <Button
-                    type='button'
-                    variant='outline'
-                    size='sm'
-                    loading={accountAction === `disconnect:${account.id}`}
-                    disabled={accountAction !== null}
-                    onClick={() =>
-                      account.isActive
-                        ? void handleDisconnect(account.id, label)
-                        : openKeysDialog({ mode: 'reconnect', sourceId: account.id, label })
-                    }
-                    data-track-category={TRACK}
-                    data-track-name='toggle-x-account-connection'
-                  >
-                    {account.isActive ? <Unplug size={14} /> : <Plug size={14} />}
-                    {account.isActive ? 'Disconnect' : 'Reconnect'}
-                  </Button>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {isConnected && (
-        <div className='flex flex-wrap gap-2'>
+        ],
+        successMessage: 'X accounts disconnected. Existing tickets are kept.',
+      }}
+      disconnect={sourceId => disconnectXAccount(channelId, sourceId)}
+      confirmDisconnect={label =>
+        confirm({
+          title: `Disconnect ${label}`,
+          description:
+            'New mentions, replies and DMs for this account will stop creating tickets. Its XChat keys are deleted and its X tokens revoked. Existing tickets are kept.',
+          confirmLabel: 'Disconnect',
+          cancelLabel: 'Cancel',
+        })
+      }
+      onReconnect={(account, label) =>
+        openKeysDialog({ mode: 'reconnect', sourceId: account.id, label })
+      }
+      onAdd={() => openKeysDialog({ mode: 'add' })}
+      onChanged={refresh}
+      accountDetails={account => {
+        const status = statusById.get(account.id);
+        const syncedAt = formatSyncedAt(status?.lastSyncedAt ?? null);
+        return [
+          status && (status.xchatEnabled ? 'XChat on' : 'XChat off — encrypted DMs show as locked'),
+          syncedAt && `Last synced ${syncedAt}`,
+        ];
+      }}
+      accountActions={(account, label, { busyKey, run }) => {
+        const status = statusById.get(account.id);
+        if (!account.isActive || !status) {
+          return null;
+        }
+        return (
           <Button
             type='button'
             variant='outline'
             size='sm'
-            onClick={() => openKeysDialog({ mode: 'add' })}
+            loading={busyKey === `xchat:${account.id}`}
+            disabled={busyKey !== null}
+            onClick={() =>
+              status.xchatEnabled
+                ? void run(`xchat:${account.id}`, () => disableXChatFor(account.id, label))
+                : openXChatDialog(account.id, label)
+            }
             data-track-category={TRACK}
-            data-track-name='add-x-account'
+            data-track-name={status.xchatEnabled ? 'disable-xchat' : 'enable-xchat'}
           >
-            <Plus size={14} />
-            Add X account
+            {status.xchatEnabled ? <Lock size={14} /> : <LockOpen size={14} />}
+            {status.xchatEnabled ? 'Turn off XChat' : 'Enable XChat'}
           </Button>
-        </div>
-      )}
-
+        );
+      }}
+      notice={
+        accountsFailed && (
+          <div className='flex items-center justify-between gap-3 rounded-md border border-border p-3 text-xs text-muted-foreground'>
+            <span>Could not load XChat and sync status for these accounts.</span>
+            <Button
+              type='button'
+              variant='outline'
+              size='sm'
+              loading={accountsLoading}
+              onClick={() => void refetchAccounts()}
+              data-track-category={TRACK}
+              data-track-name='retry-x-accounts'
+            >
+              Retry
+            </Button>
+          </div>
+        )
+      }
+    >
       <Dialog
         open={keysDialog !== null}
         onOpenChange={open => !open && closeKeysDialog()}
@@ -389,24 +309,21 @@ export const XDeskIntegrationCard = ({
             </p>
           </div>
 
-          <label className='flex items-start gap-2 text-sm text-foreground'>
-            <input
-              type='checkbox'
-              className='mt-0.5'
+          <div className='flex flex-col gap-1'>
+            <Checkbox
               checked={useNewKeys}
-              onChange={event => setUseNewKeys(event.target.checked)}
+              onChange={setUseNewKeys}
+              label='Use different X app keys'
+              size='sm'
               data-track-category={TRACK}
               data-track-name='toggle-x-new-keys'
             />
-            <span>
-              Use different X app keys
-              <span className='block text-xs text-muted-foreground'>
-                {keysDialog?.mode === 'reconnect'
-                  ? 'Only needed if you regenerated the keys in the X Developer Console.'
-                  : "Leave unchecked to use this desk's X app."}
-              </span>
+            <span className='pl-6 text-xs text-muted-foreground'>
+              {keysDialog?.mode === 'reconnect'
+                ? 'Only needed if you regenerated the keys in the X Developer Console.'
+                : "Leave unchecked to use this desk's X app."}
             </span>
-          </label>
+          </div>
 
           {useNewKeys && (
             <XAppKeysFields
@@ -503,6 +420,6 @@ export const XDeskIntegrationCard = ({
       </Dialog>
 
       <ConfirmDialog />
-    </div>
+    </MultiAccountDeskCard>
   );
 };

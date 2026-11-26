@@ -46,12 +46,30 @@ export class XPoller {
 
   async poll(source: ExternalSource, window: XPollWindow): Promise<XPollResult> {
     const creds = parseXCredentials(source.credentials);
-    const parts = await Promise.all([
+    // Each part keeps what it fetched even if another fails (e.g. the DM endpoint's 15-per-15-min
+    // limit returns 429): a failed part only makes the run incomplete, so the cursor stays put.
+    const names = ['mentions', 'dms', 'chats'] as const;
+    const settled = await Promise.allSettled([
       this.mentions(source, creds.xUserId, window),
       this.dms(source, creds.xUserId, window),
       this.chats(source, creds.xUserId, window),
     ]);
-    const result = { items: parts.flatMap((p) => p.items), complete: parts.every((p) => p.complete) };
+    const parts: XPollResult[] = [];
+    const failures: unknown[] = [];
+    settled.forEach((outcome, i) => {
+      if (outcome.status === 'fulfilled') {
+        parts.push(outcome.value);
+        return;
+      }
+      failures.push(outcome.reason);
+      logger.warn(`${TAG} Poll part failed`, { sourceId: source.id, part: names[i], error: String(outcome.reason) });
+    });
+    // Nothing worked at all: surface it rather than report an empty, "successful" sync.
+    if (parts.length === 0) throw failures[0];
+    const result = {
+      items: parts.flatMap((p) => p.items),
+      complete: failures.length === 0 && parts.every((p) => p.complete),
+    };
     logger.info(`${TAG} Polled`, {
       sourceId: source.id,
       start: window.start.toISOString(),
@@ -113,22 +131,28 @@ export class XPoller {
     );
     const items: XInboundItem[] = [];
     let quiet = 0;
-    let complete = !conversations.meta?.has_more;
+    let reachedEnd = !conversations.meta?.has_more;
+    let truncated = false;
     for (const conversation of conversations.data ?? []) {
       if (conversation.type !== 'direct') continue;
       const page = await this.tokens.withUserToken(source, (t) => this.client.getChatEvents(t, conversation.id, { maxResults: 50 }));
       const fresh = (page.data ?? []).filter(
         (e) => e.encoded_event && e.sender_id !== xUserId && e.created_at && inWindow(new Date(e.created_at), window),
       );
+      // One page per conversation: if it is entirely inside the window and X has more, older
+      // messages in the window were not read.
+      const events = page.data ?? [];
+      const oldest = events[events.length - 1]?.created_at;
+      if (page.meta?.next_token && oldest && new Date(oldest) >= window.start) truncated = true;
       if (fresh.length === 0) {
         if (++quiet >= X_POLL_LIMITS.chatQuietStop) {
-          complete = true; // assumes most-recent-first ordering (observed, not documented)
+          reachedEnd = true; // assumes most-recent-first ordering (observed, not documented)
           break;
         }
         continue;
       }
       quiet = 0;
-      const messages = await this.xchat.decrypt(account, [
+      const { messages } = await this.xchat.decrypt(account, [
         ...(page.meta?.conversation_key_events ?? []),
         ...fresh.map((e) => e.encoded_event as string),
       ]);
@@ -144,7 +168,7 @@ export class XPoller {
         })),
       );
     }
-    return { items, complete };
+    return { items, complete: reachedEnd && !truncated };
   }
 }
 

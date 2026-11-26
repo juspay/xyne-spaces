@@ -221,7 +221,6 @@ import {
   startInstagramOAuth,
   startFacebookOAuth,
   startXOAuth,
-  getXErrorCode,
   type XAppKeys,
 } from '../../services/clients/socialMediaDeskApi';
 import { InstagramCustomerHistory } from '../../components/xyne-desk/InstagramCustomerHistory/InstagramCustomerHistory';
@@ -271,7 +270,8 @@ import {
   clearChannelConnectedEmailCache,
   fetchConnectedEmail,
 } from '../../hooks/useChannelConnectedEmail';
-import { X_ERROR_MESSAGES } from '../../components/xyne-desk/DeskIntegrationCard/XAppKeysFields';
+import { xErrorMessage, xRedirectErrorMessage } from '../../utils/xErrors';
+import { openOAuthUrl } from '../../utils/oauthRedirect';
 import AddChannelForm, {
   isOAuthSocialProvider,
   type SocialProvider,
@@ -1974,7 +1974,7 @@ const SupportScreen = (): ReactElement => {
         { replace: true },
       );
     } else if (socialMediaError && socialMediaProvider === 'x') {
-      toast.error(X_ERROR_MESSAGES[socialMediaError] ?? 'X connection error. Please try again.');
+      toast.error(xRedirectErrorMessage(socialMediaError));
       setSearchParams(
         prev => {
           const p = new URLSearchParams(prev);
@@ -2857,68 +2857,52 @@ const SupportScreen = (): ReactElement => {
         return;
       }
 
-      // X: the customer's own app keys are checked by the backend before the redirect.
+      // OAuth providers: start sign-in, then hand the browser to the provider. Starting can take
+      // seconds (X validates the customer's app keys against X first), so the form is blocked
+      // meanwhile.
+      const startOAuthDesk = (
+        start: () => Promise<string>,
+        errorMessage: (error: unknown) => string,
+      ): void => {
+        setIsConnectingReviewDesk(true);
+        void start()
+          .then(authUrl => {
+            setShowCreateChannelModal(false);
+            openOAuthUrl(authUrl);
+          })
+          .catch(error => toast.error(errorMessage(error)))
+          .finally(() => setIsConnectingReviewDesk(false));
+      };
+      const oauthDeskInput = {
+        channelName: rest.name,
+        projectId: rest.projectId,
+        ...(rest.boardId ? { boardId: rest.boardId } : {}),
+        ...(rest.assigneeUserGroupId && { assigneeUserGroupId: rest.assigneeUserGroupId }),
+        visibility: rest.visibility === 'public' ? ('PUBLIC' as const) : ('PRIVATE' as const),
+        platform: isElectron ? ('electron' as const) : ('web' as const),
+      };
+
       if (socialProvider === 'X') {
         if (!xApp) {
           toast.error('Enter all four X app keys');
           return;
         }
-        void startXOAuth({
-          channelName: rest.name,
-          projectId: rest.projectId,
-          ...(rest.boardId ? { boardId: rest.boardId } : {}),
-          ...(rest.assigneeUserGroupId && {
-            assigneeUserGroupId: rest.assigneeUserGroupId,
-          }),
-          visibility: rest.visibility === 'public' ? 'PUBLIC' : 'PRIVATE',
-          platform: isElectron ? 'electron' : 'web',
-          app: xApp,
-        })
-          .then(authUrl => {
-            setShowCreateChannelModal(false);
-            if (isElectron && window.electronAPI?.openExternal) {
-              window.electronAPI.openExternal(authUrl);
-            } else {
-              window.location.href = authUrl;
-            }
-          })
-          .catch(error => {
-            const code = getXErrorCode(error);
-            toast.error(
-              (code && X_ERROR_MESSAGES[code]) ||
-                getApiErrorMessage(error, 'Failed to start X authorization'),
-            );
-          });
+        startOAuthDesk(
+          () => startXOAuth({ ...oauthDeskInput, app: xApp }),
+          error => xErrorMessage(error, 'Failed to start X authorization'),
+        );
         return;
       }
 
       if (socialProvider === 'INSTAGRAM' || socialProvider === 'FACEBOOK') {
         const isFacebook = socialProvider === 'FACEBOOK';
-        void (isFacebook ? startFacebookOAuth : startInstagramOAuth)({
-          channelName: rest.name,
-          projectId: rest.projectId,
-          ...(rest.boardId ? { boardId: rest.boardId } : {}),
-          ...(rest.assigneeUserGroupId && {
-            assigneeUserGroupId: rest.assigneeUserGroupId,
-          }),
-          visibility: rest.visibility === 'public' ? 'PUBLIC' : 'PRIVATE',
-          platform: isElectron ? 'electron' : 'web',
-        })
-          .then(authUrl => {
-            setShowCreateChannelModal(false);
-            if (isElectron && window.electronAPI?.openExternal) {
-              window.electronAPI.openExternal(authUrl);
-            } else {
-              window.location.href = authUrl;
-            }
-          })
-          .catch(error => {
-            toast.error(
-              error instanceof Error
-                ? error.message
-                : `Failed to start ${isFacebook ? 'Facebook' : 'Instagram'} authorization`,
-            );
-          });
+        startOAuthDesk(
+          () => (isFacebook ? startFacebookOAuth : startInstagramOAuth)(oauthDeskInput),
+          error =>
+            error instanceof Error
+              ? error.message
+              : `Failed to start ${isFacebook ? 'Facebook' : 'Instagram'} authorization`,
+        );
         return;
       }
     }
@@ -6933,7 +6917,10 @@ export const SupportTicketDetail = ({
                         ? { maxLength: 2000 }
                         : channelIntegrationInfo.sourceType === SOCIAL_MEDIA_SOURCE_TYPE.GOOGLE_PLAY
                           ? { maxLength: 350 }
-                          : {})}
+                          : channelIntegrationInfo.sourceType === SOCIAL_MEDIA_SOURCE_TYPE.X
+                            ? // X's DM limit; posts (280, weighted) are checked by the backend per thread.
+                              { maxLength: 10_000 }
+                            : {})}
                     trackingCategory='social-media-composer'
                   />
                 ) : null

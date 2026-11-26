@@ -77,6 +77,10 @@ export function transformXInbound(item: XReadyItem, source: Pick<ExternalSource,
 
   const handle = item.sender?.username ? `@${item.sender.username}` : item.senderId;
   const isXChat = item.channel === 'xchat';
+  // A readable XChat message replaces a locked/unreadable placeholder stored earlier under the same
+  // id (the decrypted id equals the event's payload.id, live-verified); otherwise ingest would see a
+  // duplicate and keep the placeholder forever. Placeholders themselves never overwrite anything.
+  const replacesPlaceholder = isXChat && item.text !== XCHAT_LOCKED_TEXT && item.text !== XCHAT_UNREADABLE_TEXT;
   return {
     externalId: xDmExternalId(source.id, item.id),
     externalThreadId: xDmThreadId(item.conversationId),
@@ -88,6 +92,7 @@ export function transformXInbound(item: XReadyItem, source: Pick<ExternalSource,
       to: brand,
       type: EmailType.DEFAULT,
       skipBlockingCheck: true,
+      ...(replacesPlaceholder && { updateExisting: true }),
     },
     metadata: {
       eventType: SOCIAL_MEDIA_INTERACTION_TYPES.DM,
@@ -148,8 +153,12 @@ export async function decryptXChatPayload(payload: XChatPayload, source: Externa
     return [placeholder(XCHAT_LOCKED_TEXT)];
   }
   try {
-    const messages = await xchatService.decrypt(account, [payload.conversation_key_change_event ?? '', payload.encoded_event]);
-    if (messages.length === 0) return [placeholder(XCHAT_UNREADABLE_TEXT)];
+    const { messages, failed } = await xchatService.decrypt(account, [
+      payload.conversation_key_change_event ?? '',
+      payload.encoded_event,
+    ]);
+    // Decrypted fine but not a text message (reaction, edit, delete, key change): nothing to show.
+    if (messages.length === 0) return failed > 0 ? [placeholder(XCHAT_UNREADABLE_TEXT)] : [];
     return messages.map((m) => ({
       kind: 'dm' as const,
       id: m.id,

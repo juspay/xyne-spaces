@@ -17,7 +17,7 @@ import { getBackendUrl, getFrontendUrl } from '@/utils/publicUrls';
 import { logger } from '@/utils/logger';
 import { buildSupportPath, postOAuthRedirect } from '../urlHelpers';
 import { ExternalSourcePlatform } from '../../core/types';
-import { isXCreditsDepleted, isXNetworkError } from '../../adapters/social-media/x/client';
+import { isXCreditsDepleted, isXNetworkError, xApiClient } from '../../adapters/social-media/x/client';
 import {
   XConnectError,
   buildXAuthorizeUrl,
@@ -25,7 +25,13 @@ import {
   xConnectionService,
 } from '../../adapters/social-media/x/connection';
 import { xOAuthStateService, type XOAuthState } from '../../adapters/social-media/x/oauthStateService';
-import { parseXAppCredentials, parseXCredentials, xTokenService } from '../../adapters/social-media/x/tokenService';
+import {
+  parseXAppCredentials,
+  parseXCredentials,
+  replaceXCredentials,
+  updateXCredentials,
+  xTokenService,
+} from '../../adapters/social-media/x/tokenService';
 import { XChatUnlockError, xchatService } from '../../adapters/social-media/x/xchat';
 import { acquireLeadership, releaseLock } from '@/utils/distributedLock';
 import type { XAppCredentials, XCredentials } from '../../adapters/social-media/x/types';
@@ -287,8 +293,15 @@ router.get('/x/oauth/callback', async (req: Request, res: Response): Promise<voi
       return;
     }
     if (state.mode !== 'reconnect') {
+      // Same workspace, or (the source name is globally unique) another workspace. Checked before
+      // subscribing, so an account owned elsewhere never gets subscriptions on this app.
       const existing = await db.externalSource.findFirst({
-        where: { workspaceId: state.workspaceId, sourceType: ExternalSourcePlatform.X, externalIdentifier: creds.xUserId },
+        where: {
+          OR: [
+            { workspaceId: state.workspaceId, sourceType: ExternalSourcePlatform.X, externalIdentifier: creds.xUserId },
+            { name: xSourceName(creds.xUserId) },
+          ],
+        },
         select: { id: true },
       });
       if (existing) {
@@ -308,11 +321,35 @@ router.get('/x/oauth/callback', async (req: Request, res: Response): Promise<voi
     };
 
     if (state.mode === 'reconnect' && state.sourceId) {
-      const updated = await db.externalSource.updateMany({
+      const target = await db.externalSource.findFirst({
         where: { id: state.sourceId, workspaceId: state.workspaceId, sourceType: ExternalSourcePlatform.X },
-        data: { credentials: encryptedCredentials, displayName: creds.username, isActive: true },
+        select: { id: true },
       });
-      redirectToDesk(req, res, updated.count === 0 ? { ...back, error: 'x_connection_failed' } : back);
+      if (!target) {
+        redirectToDesk(req, res, { ...back, error: 'x_connection_failed' });
+        return;
+      }
+      let previousApp: XAppCredentials | undefined;
+      // Under the credentials lock, on a fresh read: keep the XChat keys (they belong to the account,
+      // not the app; a disconnect already deleted them), and never race a token refresh.
+      await replaceXCredentials(target.id, (previous) => {
+        previousApp = previous?.app;
+        return { ...creds, ...(previous?.xchat?.keys && { xchat: previous.xchat }) };
+      });
+      await db.externalSource.update({
+        where: { id: target.id },
+        data: { displayName: creds.username, isActive: true },
+      });
+      xchatService.forget(target.id);
+      // Reconnected with a different app: the old app would keep delivering (and billing) events.
+      if (previousApp && previousApp.consumerKey !== creds.app.consumerKey) {
+        await xApiClient
+          .removeXyneSubscriptions(previousApp, creds.xUserId)
+          .catch((error: unknown) =>
+            logger.warn(`${TAG} Could not remove old app's subscriptions after reconnect`, { sourceId: target.id, error: String(error) }),
+          );
+      }
+      redirectToDesk(req, res, back);
       return;
     }
     if (state.mode === 'add-account' && state.channelId) {
@@ -354,16 +391,14 @@ router.get('/x/oauth/callback', async (req: Request, res: Response): Promise<voi
   }
 });
 
-/** Stops X delivery for a source and blanks its tokens (app keys kept for reconnect). */
-export async function teardownXSource(source: { id: string; credentials: string }): Promise<string> {
-  if (!source.credentials) return '';
-  let creds: XCredentials;
-  try {
-    creds = parseXCredentials(source.credentials);
-  } catch {
-    return source.credentials; // already torn down — tokens blank
-  }
-  return encrypt(JSON.stringify(await xConnectionService.teardown(creds)));
+/**
+ * Stops X delivery for a source, revokes and blanks its tokens and deletes its XChat keys (app keys
+ * kept for reconnect). Runs on a fresh read under the credentials lock, so it revokes the current
+ * refresh token rather than one a concurrent refresh already rotated. No-op if already torn down.
+ */
+export async function teardownXSource(sourceId: string): Promise<void> {
+  await updateXCredentials(sourceId, (creds) => xConnectionService.teardown(creds));
+  xchatService.forget(sourceId);
 }
 
 // POST /:channelId/x/:sourceId/disconnect
@@ -383,9 +418,7 @@ router.post('/:channelId/x/:sourceId/disconnect', authMiddleware.authenticate, a
     }
     // Deactivate first so the stream worker stops ingesting even if X cleanup is slow or fails.
     await db.externalSource.update({ where: { id: sourceId }, data: { isActive: false } });
-    const credentials = await teardownXSource(source);
-    await db.externalSource.update({ where: { id: sourceId }, data: { credentials } });
-    xchatService.forget(sourceId);
+    await teardownXSource(sourceId);
     res.json({ message: 'X account disconnected' });
   } catch (error) {
     logger.error(`${TAG} Failed to disconnect X account`, { error: String(error) });
@@ -471,13 +504,13 @@ router.post('/:channelId/x/:sourceId/xchat', authMiddleware.authenticate, async 
     const keys = await xTokenService.withUserToken(source, (token) =>
       xchatService.unlockKeys(token, creds.xUserId, parsed.data.passcode),
     );
-    // Re-read: a token refresh during the unlock rotated the stored tokens.
-    const fresh = await db.externalSource.findUnique({ where: { id: sourceId }, select: { credentials: true } });
-    const current = fresh?.credentials ? parseXCredentials(fresh.credentials) : creds;
-    await db.externalSource.update({
-      where: { id: sourceId },
-      data: { credentials: encrypt(JSON.stringify({ ...current, xchat: keys })) },
-    });
+    // Merge only the keys into a fresh read under the credentials lock: a token refresh during the
+    // unlock (seconds) rotated the stored tokens, and those must not be overwritten.
+    const saved = await updateXCredentials(sourceId, (current) => ({ ...current, xchat: keys }));
+    if (!saved) {
+      res.status(409).json({ error: 'This X account was disconnected while XChat was being enabled' });
+      return;
+    }
     xchatService.forget(sourceId);
     logger.info(`${TAG} XChat enabled`, { sourceId });
     res.json({ message: 'XChat enabled', xchatEnabled: true });
@@ -502,8 +535,8 @@ router.delete('/:channelId/x/:sourceId/xchat', authMiddleware.authenticate, asyn
     if (!(await authorizeSocialMediaManager(channelId, req.user!.id, workspaceId, res))) return;
     const source = await loadActiveXSource(channelId, sourceId, workspaceId, res);
     if (!source) return;
-    const creds = { ...parseXCredentials(source.credentials), xchat: undefined }; // undefined is dropped by JSON
-    await db.externalSource.update({ where: { id: sourceId }, data: { credentials: encrypt(JSON.stringify(creds)) } });
+    // undefined is dropped by JSON; fresh read under the lock keeps any just-rotated tokens.
+    await updateXCredentials(sourceId, (current) => ({ ...current, xchat: undefined }));
     xchatService.forget(sourceId);
     res.json({ message: 'XChat disabled', xchatEnabled: false });
   } catch (error) {

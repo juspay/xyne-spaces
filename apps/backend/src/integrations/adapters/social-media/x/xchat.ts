@@ -41,6 +41,12 @@ export class XChatUnlockError extends Error {
   }
 }
 
+export interface XChatDecryptResult {
+  messages: XChatMessage[];
+  /** Events of the batch that did not decrypt. */
+  failed: number;
+}
+
 /** A decrypted one-to-one XChat message. */
 export interface XChatMessage {
   id: string;
@@ -154,9 +160,11 @@ export class XChatService {
 
   /**
    * Decrypts `chat.received` (or history) events. Key-change events must come before the
-   * messages they unlock. Returns the one-to-one text messages from other users.
+   * messages they unlock. Returns the one-to-one text messages from other users, and how many
+   * events failed: a batch that decrypted cleanly but held no text (reaction, edit, delete,
+   * key change) has `messages: []` and `failed: 0`, which is not a failure.
    */
-  async decrypt(account: XChatAccount, events: string[]): Promise<XChatMessage[]> {
+  async decrypt(account: XChatAccount, events: string[]): Promise<XChatDecryptResult> {
     const chat = await this.chatFor(account);
     const result = await chat.decryptEventsAsync({ events: events.filter(Boolean) });
     const failed = Object.keys(result.errors ?? {}).length;
@@ -184,7 +192,7 @@ export class XChatService {
         createdAt: event.createdAtMsec ? new Date(Number(event.createdAtMsec)) : new Date(),
       });
     }
-    return messages;
+    return { messages, failed };
   }
 
   /** Encrypts and sends a text message; returns its message id. */

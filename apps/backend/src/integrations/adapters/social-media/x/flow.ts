@@ -28,8 +28,30 @@ export function xPollWindow(source: ExternalSource, options: IngestionOptions | 
 }
 
 /**
+ * Whether a finished run may move the cursor, and to where. The cursor means "everything up to here
+ * has been read", so a run may only extend it contiguously: it must have read its whole window, that
+ * window must start at or before the current cursor (no hole in between), and it must reach the
+ * present. A cursor-based run always qualifies. A manual 24 h fetch or a gap repair qualifies only
+ * when it overlaps the cursor; e.g. after a 3-day outage a 24 h fetch leaves the cursor alone, so
+ * the next cursor run still reads the hole.
+ */
+export function xCursorAdvance(
+  source: Pick<ExternalSource, 'lastSyncCursor'>,
+  window: XPollWindow,
+  complete: boolean,
+  syncStartedAt: Date,
+): boolean {
+  if (!complete) return false;
+  if (window.end && window.end.getTime() < syncStartedAt.getTime() - X_SYNC_OVERLAP_MS) return false;
+  const cursor = source.lastSyncCursor ? Date.parse(source.lastSyncCursor) : Number.NaN;
+  // No cursor yet: the run started at or after connect time (xPollWindow never reads earlier), so
+  // nothing before it is owed.
+  return !Number.isFinite(cursor) || window.start.getTime() <= cursor;
+}
+
+/**
  * Stream items pass straight through. With no payload (manual sync, gap repair) the flow polls X.
- * The cursor only advances when the run covered its whole window.
+ * The cursor only moves when the run extends it without a gap (see xCursorAdvance).
  */
 export class XFlow extends BaseFlow {
   private readonly coverage = new Map<string, boolean>();
@@ -41,8 +63,9 @@ export class XFlow extends BaseFlow {
   async preprocess(rawPayload: unknown, source?: ExternalSource, options?: IngestionOptions): Promise<unknown> {
     if (rawPayload !== undefined) return rawPayload;
     if (!source) throw new Error('X source is required for polling');
-    const { items, complete } = await this.poller.poll(source, xPollWindow(source, options));
-    this.coverage.set(source.id, complete);
+    const window = xPollWindow(source, options);
+    const { items, complete } = await this.poller.poll(source, window);
+    this.coverage.set(source.id, xCursorAdvance(source, window, complete, new Date()));
     return items;
   }
 

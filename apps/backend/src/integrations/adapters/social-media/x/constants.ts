@@ -31,3 +31,14 @@ export const X_POST_LINK_FIELD = 'X Post Link';
 /** Thread-id prefixes. The reply sender branches on these. */
 export const X_POST_THREAD_PREFIX = 'post:';
 export const X_DM_THREAD_PREFIX = 'dm:';
+
+/** Code-point ranges X counts as 1 (twitter-text v3 config); everything else counts as 2. */
+export const X_LIGHT_RANGES: Array<[number, number]> = [
+  [0, 4351],
+  [8192, 8205],
+  [8208, 8223],
+  [8242, 8247],
+];
+/** X shortens every URL to a t.co link and counts it as this many characters. */
+export const X_URL_LENGTH = 23;
+export const URL_PATTERN = /https?:\/\/\S+/gi;

@@ -7,8 +7,8 @@ import {
 import type { NormalizedData } from '@/integrations/core/types';
 import { SOCIAL_MEDIA_INTERACTION_TYPES } from '@/integrations/social-media/constants';
 import { db } from '@/database/client';
-import { isXCreditsDepleted, isXRateLimited, isXReplyNotPermitted, xApiClient, type XApiClient } from './client';
-import { X_DM_THREAD_PREFIX, X_MAX_DM_LENGTH, X_MAX_POST_LENGTH, X_POST_THREAD_PREFIX } from './constants';
+import { XApiError, isXCreditsDepleted, isXRateLimited, isXReplyNotPermitted, xApiClient, type XApiClient } from './client';
+import { URL_PATTERN, X_DM_THREAD_PREFIX, X_LIGHT_RANGES, X_MAX_DM_LENGTH, X_MAX_POST_LENGTH, X_POST_THREAD_PREFIX, X_URL_LENGTH } from './constants';
 import { dmCounterparty } from './normalizer';
 import { parseXCredentials, XConnectionLostError, xchatAccountFor, xTokenService, type XTokenService } from './tokenService';
 import { xDmExternalId, xPostExternalId, xPostUrl } from './transformer';
@@ -32,8 +32,25 @@ export function pickReplyTargetPostId(sourceId: string, inboundExternalIds: stri
   return best?.toString();
 }
 
-/** X weights some characters double; this is the conservative code-point count. */
-const postLength = (text: string) => Array.from(text).length;
+
+
+/**
+ * Post length as X counts it: URLs count 23; CJK, emoji and other characters outside the light
+ * ranges count 2. Emoji sequences are counted per code point, so they may count high: this errs
+ * towards rejecting here rather than at X. X's own rejection is still mapped, as a fallback.
+ */
+export function xPostLength(text: string): number {
+  let length = 0;
+  const withoutUrls = text.replace(URL_PATTERN, () => {
+    length += X_URL_LENGTH;
+    return '';
+  });
+  for (const ch of withoutUrls) {
+    const cp = ch.codePointAt(0)!;
+    length += X_LIGHT_RANGES.some(([lo, hi]) => cp >= lo && cp <= hi) ? 1 : 2;
+  }
+  return length;
+}
 
 function toReplyError(error: unknown): never {
   if (error instanceof XConnectionLostError) throw new InteractionReplyValidationError(error.message);
@@ -48,6 +65,10 @@ function toReplyError(error: unknown): never {
     );
   }
   if (isXRateLimited(error)) throw new InteractionReplyValidationError('X rate limit reached — try again in a few minutes');
+  // Anything else X refused about the content itself (e.g. too long, duplicate post): show X's reason.
+  if (error instanceof XApiError && (error.status === 400 || error.status === 403)) {
+    throw new InteractionReplyValidationError(`X rejected the reply: ${error.detail ?? error.title ?? `HTTP ${error.status}`}`);
+  }
   throw error;
 }
 
@@ -85,7 +106,7 @@ export class XReplySender extends BaseInteractionReplySender {
     });
 
     if (externalThreadId.startsWith(X_POST_THREAD_PREFIX)) {
-      if (postLength(body) > X_MAX_POST_LENGTH) {
+      if (xPostLength(body) > X_MAX_POST_LENGTH) {
         throw new InteractionReplyValidationError(`Reply exceeds X's ${X_MAX_POST_LENGTH}-character limit`);
       }
       const inbound = await db.externalMessage.findMany({

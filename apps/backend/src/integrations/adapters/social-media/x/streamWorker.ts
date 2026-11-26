@@ -15,7 +15,6 @@ import crypto from 'node:crypto';
 import type { ExternalSource } from '@prisma/client';
 import { db } from '@/database/client';
 import { ingestExternalSource } from '@/bypassAcl/webhookIngestServices';
-import { repairXStreamGap } from '@/bypassAcl/emailFetchServices';
 import { acquireLeadership, releaseLock, renewLock, type LockHandle } from '@/utils/distributedLock';
 import { logger } from '@/utils/logger';
 import { ExternalSourcePlatform } from '@/integrations/core/types';
@@ -27,7 +26,8 @@ import { parseXCredentials } from './tokenService';
 import type { XAppCredentials, XInboundItem } from './types';
 import { xAdapter } from './index';
 import { xchatService } from './xchat';
-import { X_SYNC_OVERLAP_MS } from './flow';
+import { X_SYNC_OVERLAP_MS, xCursorAdvance, xPollWindow } from './flow';
+import { xPoller } from './poller';
 
 const TAG = '[XStream]';
 const LEASE_TTL_S = 60;
@@ -46,6 +46,9 @@ export interface XAppGroup {
   accounts: Map<string, string>;
 }
 
+/** Queues an item behind everything already queued for the stream; resolves to whether it ingested. */
+export type XEnqueue = (sourceId: string, item: XInboundItem) => Promise<boolean>;
+
 export interface XStreamDeps {
   loadGroups(): Promise<XAppGroup[]>;
   acquireLease(appKey: string): Promise<LockHandle | null>;
@@ -55,7 +58,11 @@ export interface XStreamDeps {
   openStream(bearer: string, signal: AbortSignal): Promise<Response>;
   ingest(sourceId: string, item: XInboundItem): Promise<void>;
   /** A window in which events may have been missed. `since` undefined ⇒ first connect this process. */
-  onGap(group: XAppGroup, since: Date | undefined): Promise<void>;
+  /**
+   * Repairs what the stream may have missed. Polled items go back through `enqueue`, the stream's
+   * own queue, so each account has one writer (see repairSourceGap).
+   */
+  onGap(group: XAppGroup, since: Date | undefined, enqueue: XEnqueue): Promise<void>;
   now(): number;
 }
 
@@ -146,9 +153,15 @@ export class XAppStream {
 
   private startTimers(): void {
     const renew = setInterval(() => {
-      void this.deps.renewLease(this.lease).then((ok) => {
-        if (!ok) this.stop('lease lost');
-      });
+      this.deps
+        .renewLease(this.lease)
+        .then((ok) => {
+          if (!ok) this.stop('lease lost');
+        })
+        .catch((error: unknown) => {
+          // Not proof the lease is gone; the next renewal decides.
+          logger.warn(`${TAG} Lease renewal errored`, { appKey: this.group.appKey, error: String(error) });
+        });
     }, LEASE_RENEW_MS);
     const watchdog = setInterval(() => {
       if (this.connection && this.lastByteAt && this.deps.now() - this.lastByteAt > STALL_MS) {
@@ -204,7 +217,7 @@ export class XAppStream {
       this.lastByteAt = this.deps.now();
       // Anything between the last healthy byte and now may be missing.
       const since = this.lastHealthyAt !== undefined ? new Date(this.lastHealthyAt) : undefined;
-      void this.deps.onGap(this.group, since).catch((error) =>
+      void this.deps.onGap(this.group, since, (sourceId, item) => this.enqueue(sourceId, item, 'gap-repair')).catch((error) =>
         logger.error(`${TAG} Gap repair failed`, { appKey: this.group.appKey, error: String(error) }),
       );
 
@@ -238,13 +251,26 @@ export class XAppStream {
     const xUserId = event.filter?.user_id;
     const sourceId = xUserId ? this.group.accounts.get(xUserId) : undefined;
     if (!xUserId || !sourceId) return; // account not (or no longer) connected
-    for (const item of fromActivityEvent(event, xUserId)) {
-      this.ingestChain = this.ingestChain
-        .then(() => this.deps.ingest(sourceId, item))
-        .catch((error: unknown) => {
-          logger.error(`${TAG} Ingest failed`, { sourceId, eventType: event.event_type, error: String(error) });
-        });
-    }
+    for (const item of fromActivityEvent(event, xUserId)) void this.enqueue(sourceId, item, event.event_type);
+  }
+
+  /**
+   * The account's single ingest queue: streamed events and gap-repair items run strictly one after
+   * another, so core ingest's check-then-create never sees two copies of a message, or two new
+   * messages of one new thread, at the same moment.
+   */
+  enqueue(sourceId: string, item: XInboundItem, origin: string): Promise<boolean> {
+    const done = this.ingestChain
+      .then(() => this.deps.ingest(sourceId, item))
+      .then(
+        () => true,
+        (error: unknown) => {
+          logger.error(`${TAG} Ingest failed`, { sourceId, origin, error: String(error) });
+          return false;
+        },
+      );
+    this.ingestChain = done.then(() => undefined);
+    return done;
   }
 }
 
@@ -328,22 +354,22 @@ async function ingestXItem(sourceId: string, item: XInboundItem): Promise<void> 
  * Requests that arrive while a run is pending merge into the widest window.
  */
 export class XGapRepairer {
-  /** undefined since = cursor-based window (widest). */
-  private readonly pending = new Map<string, { since: Date | undefined }>();
+  /** undefined since = cursor-based window (widest). `enqueue` is the newest stream's queue. */
+  private readonly pending = new Map<string, { since: Date | undefined; enqueue: XEnqueue }>();
   private readonly active = new Set<string>();
   private readonly lastRunAt = new Map<string, number>();
 
   constructor(
-    private readonly run: (sourceId: string, since: Date | undefined) => Promise<void>,
+    private readonly run: (sourceId: string, since: Date | undefined, enqueue: XEnqueue) => Promise<void>,
     private readonly minSpacingMs = 2 * 60_000,
     private readonly now: () => number = Date.now,
     private readonly sleep: (ms: number) => Promise<void> = (ms) => new Promise((r) => setTimeout(r, ms).unref?.()),
   ) {}
 
-  request(sourceId: string, since: Date | undefined): Promise<void> {
+  async request(sourceId: string, since: Date | undefined, enqueue: XEnqueue): Promise<void> {
     const prev = this.pending.get(sourceId);
     const merged = !prev ? since : prev.since === undefined || since === undefined ? undefined : prev.since < since ? prev.since : since;
-    this.pending.set(sourceId, { since: merged });
+    this.pending.set(sourceId, { since: merged, enqueue });
     if (this.active.has(sourceId)) return Promise.resolve();
     this.active.add(sourceId);
     return this.drain(sourceId).finally(() => this.active.delete(sourceId));
@@ -357,7 +383,7 @@ export class XGapRepairer {
       this.pending.delete(sourceId);
       this.lastRunAt.set(sourceId, this.now());
       try {
-        await this.run(sourceId, job.since);
+        await this.run(sourceId, job.since, job.enqueue);
       } catch (error) {
         logger.error(`${TAG} Gap repair failed`, { sourceId, error: String(error) });
       }
@@ -365,12 +391,35 @@ export class XGapRepairer {
   }
 }
 
-async function repairSourceGap(sourceId: string, since: Date | undefined): Promise<void> {
-  const source = await db.externalSource.findUnique({ where: { id: sourceId }, select: { workspaceId: true, isActive: true } });
+/**
+ * Polls the window the stream may have missed and hands the items to the stream's own queue, so
+ * the account keeps a single writer: a message that is both streamed and polled, or two new
+ * messages of one new thread, are ingested one after the other and dedup / threading just work.
+ * Without `since` (first connect after a worker start) the source's cursor decides the window.
+ * The cursor moves only after every polled item ingested, by the same rule as manual sync.
+ */
+export async function repairSourceGap(sourceId: string, since: Date | undefined, enqueue: XEnqueue): Promise<void> {
+  const source = (await db.externalSource.findUnique({ where: { id: sourceId } })) as ExternalSource | null;
   if (!source?.isActive) return;
-  const window = since ? { startDate: new Date(since.getTime() - X_SYNC_OVERLAP_MS), endDate: new Date() } : undefined;
-  const synced = await repairXStreamGap(source.workspaceId, sourceId, window);
-  logger.info(`${TAG} Gap repaired`, { sourceId, since: since?.toISOString() ?? 'cursor', synced });
+  const startedAt = new Date();
+  const window = since
+    ? { start: new Date(since.getTime() - X_SYNC_OVERLAP_MS), end: startedAt }
+    : xPollWindow(source, undefined, startedAt);
+  const { items, complete } = await xPoller.poll(source, window);
+  const ingested = await Promise.all(items.map((item) => enqueue(sourceId, item)));
+  const failed = ingested.filter((ok) => !ok).length;
+  const advance = xCursorAdvance(source, window, complete && failed === 0, startedAt);
+  if (advance) {
+    await db.externalSource.update({ where: { id: sourceId }, data: { lastSyncCursor: startedAt.toISOString() } });
+  }
+  logger.info(`${TAG} Gap repaired`, {
+    sourceId,
+    since: since?.toISOString() ?? 'cursor',
+    polled: items.length,
+    failed,
+    complete,
+    cursorAdvanced: advance,
+  });
 }
 
 const gapRepairer = new XGapRepairer(repairSourceGap);
@@ -390,8 +439,8 @@ export const xStreamDeps: XStreamDeps = {
     fetch(`${X_API_BASE}/2/activity/stream`, { headers: { authorization: `Bearer ${bearer}` }, signal }),
   ingest: ingestXItem,
   // The stream cannot replay on self-serve, so every (re)connect polls what may have been missed.
-  onGap: async (group, since) => {
-    await Promise.all([...group.accounts.values()].map((sourceId) => gapRepairer.request(sourceId, since)));
+  onGap: async (group, since, enqueue) => {
+    await Promise.all([...group.accounts.values()].map((sourceId) => gapRepairer.request(sourceId, since, enqueue)));
   },
   now: () => Date.now(),
 };
