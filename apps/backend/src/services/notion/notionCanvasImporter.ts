@@ -38,7 +38,7 @@ import { config } from '@/config/env';
 import { toJsonSafeValue } from '@/services/jsonSafe';
 import mime from 'mime';
 import { logger } from '@/utils/logger';
-import { NOTION_MANIFEST_FILE, NOTION_REF_PREFIX, USER_MENTION_TOKEN, type NotionComment, type NotionManifest } from './notionApiCollector';
+import { NOTION_MANIFEST_FILE, NOTION_REF_PREFIX, USER_MENTION_TOKEN, type NotionCollectFailure, type NotionComment, type NotionManifest } from './notionApiCollector';
 
 const NOTION_ID = /\s([0-9a-f]{32})$/i;
 const IMAGE_EXT = /\.(png|jpe?g|gif|webp|svg|bmp|avif)$/i;
@@ -91,6 +91,7 @@ export interface NotionImportSummary {
   comments: number; // Notion comments imported as canvas comments this run
   accessRemoved: string[]; // member re-import: canvases this person can no longer see in Notion, so lost access to
   warnings: string[];
+  failed: Array<Omit<NotionCollectFailure, 'pageId'> & { kept?: boolean }>; // kept = existing canvas left as it was
   unresolvedUsers: Array<{ name: string; email?: string }>;
   canvases: Array<{
     title: string;
@@ -153,6 +154,7 @@ async function loadStaged(root: string, workspaceId: string) {
     createdBy: new Map(manifest?.items.map(i => [i.id, i.createdById]) ?? []),
     commentsByPage: new Map(manifest?.items.map(i => [i.id, i.comments ?? []]) ?? []),
     usersById: new Map(manifest?.users.map(u => [u.id, u]) ?? []),
+    failures: manifest?.failures ?? [],
   };
 }
 
@@ -222,10 +224,13 @@ function buildTree(root: string, files: string[]): NotionNode[] {
 // Import: pass 1 creates every canvas (so links can resolve), pass 2 writes content.
 // ---------------------------------------------------------------------------------------------
 export async function importNotionTree(root: string, target: NotionImportTarget, plan?: NotionImportPlan): Promise<NotionImportSummary> {
-  const { nodes: allNodes, owners, createdBy, commentsByPage, usersById: notionUsers } = await loadStaged(root, target.workspaceId);
+  const { nodes: allNodes, owners, createdBy, commentsByPage, usersById: notionUsers, failures } = await loadStaged(root, target.workspaceId);
   const summary: NotionImportSummary = {
-    created: 0, updated: 0, joined: 0, skipped: 0, folders: 0, attachments: 0, comments: 0, accessRemoved: [], warnings: [], unresolvedUsers: [], canvases: [],
+    created: 0, updated: 0, joined: 0, skipped: 0, folders: 0, attachments: 0, comments: 0, accessRemoved: [], warnings: [],
+    failed: failures.map(({ pageId: _page, ...f }) => f), unresolvedUsers: [], canvases: [],
   };
+  const incomplete = new Set(failures.flatMap(f => (f.pageId ? [f.pageId] : [])));
+  const kept = new Set<string>(); // Notion keys whose existing canvas was left untouched
   if (allNodes.length === 0) throw new Error('No pages found — nothing was shared with the integration.');
 
   // Report Notion creators with no Spaces account (they fall back to the importer as owner).
@@ -311,6 +316,16 @@ export async function importNotionTree(root: string, target: NotionImportTarget,
       summary.canvases.push({ title: node.title, url: getCanvasUrl(canvasId, target.workspaceId), status: 'joined', access: 'public', ownerEmail, sharedWith: await accessList(canvasId) });
       continue;
     }
+    // Notion didn't give us all of this page (or one of a database's rows): never overwrite an existing
+    // canvas with that — keep it as it was. A new canvas gets what we have, so links still land.
+    const partial = incomplete.has(node.key) || nodes.some(row => row.rowOf === node.relPath && incomplete.has(row.key));
+    if (partial && !node.created) {
+      kept.add(node.key);
+      for (const row of nodes) if (row.rowOf === node.relPath) kept.add(row.key);
+      if (plan?.member) await markSeenBy(canvasId, plan.member.userId); // still visible to them in Notion
+      summary.skipped++;
+      continue;
+    }
     try {
       const raw = await fs.readFile(path.join(root, node.relPath), 'utf8');
       let markdown = node.kind === 'database'
@@ -384,7 +399,7 @@ export async function importNotionTree(root: string, target: NotionImportTarget,
     } catch (error) {
       // One bad page must not stop the rest of the import.
       logger.error('[NotionImport] Failed to write canvas', error, { canvasId, title: node.title });
-      summary.warnings.push(`Failed to write "${node.title}": ${error instanceof Error ? error.message : String(error)}`);
+      summary.failed.push({ what: node.kind, title: node.title, reason: `Could not be written: ${error instanceof Error ? error.message : String(error)}` });
     }
   }
 
@@ -412,7 +427,16 @@ export async function importNotionTree(root: string, target: NotionImportTarget,
       await enqueueCanvasPermissionRefresh(c.id).catch(err => summary.warnings.push(`Search access refresh failed for "${c.title}": ${String(err)}`));
     }
   }
+  failures.forEach((f, i) => { if (f.pageId && kept.has(f.pageId)) summary.failed[i]!.kept = true; });
   return summary;
+}
+
+/** Record that a member's Notion still shows this page (what a later re-import's access check reads). */
+async function markSeenBy(canvasId: string, userId: string): Promise<void> {
+  const meta = ((await db.canvas.findUnique({ where: { id: canvasId }, select: { metadata: true } }))?.metadata ?? {}) as
+    { notionImport?: { seenBy?: string[] } & Record<string, unknown> } & Record<string, unknown>;
+  const seenBy = uniqueIds([...(meta.notionImport?.seenBy ?? []), userId]);
+  await db.canvas.update({ where: { id: canvasId }, data: { metadata: toJsonSafeValue({ ...meta, notionImport: { ...meta.notionImport, seenBy } }) as unknown as Prisma.InputJsonValue } });
 }
 
 // ---------------------------------------------------------------------------------------------

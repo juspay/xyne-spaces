@@ -16,8 +16,9 @@
  *
  *   GET /mine, GET /jobs/:id      → the signed-in user's imports
  *
- * Tokens are used only while collecting and never stored. Jobs are in-memory for now; the durable
- * queued job (like Slack migration) replaces this.
+ * Tokens are used only while collecting and never stored. Jobs live in Redis (History survives
+ * restarts; any pod answers /mine and Approve). Pages waiting for review are staged in the migration
+ * bucket. Collect and ingest still run inside the API process that started them.
  */
 import crypto from 'crypto';
 import fs from 'fs/promises';
@@ -27,62 +28,84 @@ import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
 import { escapeHtml as esc } from '@/utils/htmlEscape';
 import { runWithContext } from '@/database/tenant/context';
-import { NOTION_VERSION, NotionApiCollector } from '@/services/notion/notionApiCollector';
+import { NOTION_VERSION, NotionApiCollector, NotionAuthError, type NotionTokenSource } from '@/services/notion/notionApiCollector';
+import { NOTION_JOB_HEARTBEAT_MS, notionJobStore, type NotionImportJob } from '@/services/notion/notionJobStore';
+import { deleteStaging, downloadStaging, remoteStagingEnabled, uploadStaging } from '@/services/notion/notionStaging';
 import {
   importNotionTree,
   listNotionSections,
   resolveNotionImportTarget,
   type NotionImportPlan,
-  type NotionImportSummary,
-  type NotionSection,
   type SectionAccess,
 } from '@/services/notion/notionCanvasImporter';
 
-type JobStatus = 'collecting' | 'awaiting_review' | 'ingesting' | 'completed' | 'failed';
+/** A job while this process runs one of its phases; the local folder never leaves this process. */
+type ImportJob = NotionImportJob & { stagingDir?: string };
 
-interface ImportJob {
-  id: string;
-  kind: 'token' | 'member';
-  userId: string;
-  userEmail: string;
-  workspaceId: string;
-  status: JobStatus;
-  channel?: string;
-  notionWorkspace?: string;
-  log: string[];
-  sections?: NotionSection[]; // set when awaiting review
-  summary?: NotionImportSummary;
-  error?: string;
-  startedAt: number;
-  finishedAt?: number;
-  stagingDir?: string; // collected pages, kept until ingest
+/** What Redis keeps: everything but this process's local folder. */
+const stored = (job: ImportJob): NotionImportJob => {
+  const { stagingDir: _dir, ...view } = job;
+  return view;
+};
+
+/** What the dashboard sees: no storage locations. */
+const publicView = (job: NotionImportJob) => {
+  const { stagingDir: _dir, stagingPrefix: _prefix, ...view } = job as ImportJob;
+  return view;
+};
+
+const pendingSaves = new Map<string, NodeJS.Timeout>();
+/** Pages awaiting review on this pod's disk — only when the migration bucket isn't configured. */
+const localStaging = new Map<string, string>();
+
+/** Save to Redis — right away for state changes, otherwise at most once a second (progress lines). */
+async function persist(job: ImportJob, now = false): Promise<void> {
+  job.updatedAt = Date.now();
+  if (!now) {
+    if (!pendingSaves.has(job.id)) pendingSaves.set(job.id, setTimeout(() => void persist(job, true), 1000));
+    return;
+  }
+  clearTimeout(pendingSaves.get(job.id));
+  pendingSaves.delete(job.id);
+  await notionJobStore.save(stored(job)).catch(err =>
+    logger.error('[NotionMigration] Could not save job', err, { jobId: job.id }));
 }
 
-const jobs = new Map<string, ImportJob>();
+function addLog(job: ImportJob, line: string): void {
+  job.log.push(line);
+  void persist(job);
+}
+
+/** Keep `updatedAt` fresh during long steps, so a live job is never mistaken for an interrupted one. */
+async function withHeartbeat(job: ImportJob, run: () => Promise<void>): Promise<void> {
+  const timer = setInterval(() => void persist(job, true), NOTION_JOB_HEARTBEAT_MS);
+  try {
+    await run();
+  } finally {
+    clearInterval(timer);
+  }
+}
 
 /** Record a new import and start reading Notion in the background (the request doesn't wait). */
-function startJob(
+async function startJob(
   init: Pick<ImportJob, 'kind' | 'userId' | 'userEmail' | 'workspaceId'> & { notionWorkspace: string | undefined; firstLog: string },
-  accessToken: string,
-): ImportJob {
+  accessToken: string | NotionTokenSource,
+): Promise<ImportJob> {
   const { firstLog, notionWorkspace, ...rest } = init;
+  const now = Date.now();
   const job: ImportJob = {
     id: crypto.randomUUID(),
     ...rest,
     ...(notionWorkspace ? { notionWorkspace } : {}),
     status: 'collecting',
     log: [firstLog],
-    startedAt: Date.now(),
+    startedAt: now,
+    updatedAt: now,
   };
-  jobs.set(job.id, job);
+  await persist(job, true);
   void collect(job, accessToken);
   return job;
 }
-
-const publicView = (job: ImportJob) => {
-  const { stagingDir: _dir, ...view } = job;
-  return view;
-};
 
 const STATE_TTL_MS = 10 * 60 * 1000;
 const NOTION_AUTHORIZE = 'https://api.notion.com/v1/oauth/authorize';
@@ -100,6 +123,63 @@ function oauthConfig() {
   // From config, not process.env: in deployed environments the secret is KMS-encrypted in env.
   const { clientId, clientSecret, redirectUri } = config.notion;
   return clientId && clientSecret && redirectUri ? { clientId, clientSecret, redirectUri } : null;
+}
+
+interface NotionTokenResponse {
+  access_token?: string;
+  refresh_token?: string;
+  expires_in?: number; // not documented by Notion; used only if it's sent
+  workspace_name?: string;
+  owner?: { user?: { person?: { email?: string } } };
+  error?: string;
+}
+
+/** POST /v1/oauth/token with the app's credentials (code exchange and refresh). */
+async function notionTokenRequest(oauth: NonNullable<ReturnType<typeof oauthConfig>>, body: Record<string, unknown>) {
+  const res = await fetch(NOTION_TOKEN_URL, {
+    method: 'POST',
+    headers: {
+      Authorization: `Basic ${Buffer.from(`${oauth.clientId}:${oauth.clientSecret}`).toString('base64')}`,
+      'Content-Type': 'application/json',
+      'Notion-Version': NOTION_VERSION,
+    },
+    body: JSON.stringify(body),
+  });
+  return { ok: res.ok, status: res.status, token: (await res.json().catch(() => ({}))) as NotionTokenResponse };
+}
+
+const REFRESH_EARLY_MS = 5 * 60 * 1000;
+const expiryOf = (t: NotionTokenResponse) => (typeof t.expires_in === 'number' ? Date.now() + t.expires_in * 1000 : undefined);
+
+/**
+ * A member's OAuth tokens for one import, held in memory only (never stored). Refreshes ahead of
+ * time if Notion told us the expiry, and on a 401 otherwise. A refresh rotates both tokens, so the
+ * new pair replaces the old one before any request continues.
+ */
+function oauthTokenSource(oauth: NonNullable<ReturnType<typeof oauthConfig>>, initial: NotionTokenResponse & { access_token: string }): NotionTokenSource {
+  let accessToken = initial.access_token;
+  let refreshToken = initial.refresh_token;
+  let expiresAt = expiryOf(initial);
+  let inFlight: Promise<string> | null = null;
+
+  const refresh = (): Promise<string> => {
+    // One refresh at a time: a second caller waits for the same new token.
+    inFlight ??= (async () => {
+      if (!refreshToken) throw new NotionAuthError('Notion gave no refresh token');
+      const { ok, status, token } = await notionTokenRequest(oauth, { grant_type: 'refresh_token', refresh_token: refreshToken });
+      if (!ok || !token.access_token) throw new NotionAuthError(`token refresh failed (${token.error ?? status})`);
+      accessToken = token.access_token;
+      refreshToken = token.refresh_token ?? refreshToken;
+      expiresAt = expiryOf(token);
+      return accessToken;
+    })().finally(() => { inFlight = null; });
+    return inFlight;
+  };
+
+  return {
+    get: async () => (expiresAt && expiresAt - REFRESH_EARLY_MS <= Date.now() ? refresh() : accessToken),
+    refresh,
+  };
 }
 
 const signingKey = () => config.jwt.secret || config.encryptionKey;
@@ -156,17 +236,10 @@ router.get('/oauth/callback', async (req: Request, res: Response) => {
     return;
   }
   try {
-    const tokenRes = await fetch(NOTION_TOKEN_URL, {
-      method: 'POST',
-      headers: {
-        Authorization: `Basic ${Buffer.from(`${oauth.clientId}:${oauth.clientSecret}`).toString('base64')}`,
-        'Content-Type': 'application/json',
-        'Notion-Version': NOTION_VERSION,
-      },
-      body: JSON.stringify({ grant_type: 'authorization_code', code: req.query.code, redirect_uri: oauth.redirectUri }),
-    });
-    const token = await tokenRes.json() as { access_token?: string; workspace_name?: string; owner?: { user?: { person?: { email?: string } } }; error?: string };
-    if (!tokenRes.ok || !token.access_token) throw new Error(`Notion token exchange failed (${token.error ?? tokenRes.status})`);
+    const { ok, status, token } = await notionTokenRequest(oauth, { grant_type: 'authorization_code', code: req.query.code, redirect_uri: oauth.redirectUri });
+    if (!ok || !token.access_token) throw new Error(`Notion token exchange failed (${token.error ?? status})`);
+    const { access_token: accessToken } = token;
+    logger.info('[NotionMigration] OAuth token received', { hasRefreshToken: Boolean(token.refresh_token), expiresIn: token.expires_in ?? null });
 
     // Like Slack DM migration: you can only bring in the Notion account that is yours.
     const notionEmail = token.owner?.user?.person?.email?.toLowerCase();
@@ -175,10 +248,10 @@ router.get('/oauth/callback', async (req: Request, res: Response) => {
       return;
     }
 
-    startJob({
+    await startJob({
       kind: 'member', userId: state.u, userEmail: state.e, workspaceId: state.w, notionWorkspace: token.workspace_name,
       firstLog: `Connected to Notion workspace "${token.workspace_name ?? '?'}" as ${notionEmail}`,
-    }, token.access_token);
+    }, oauthTokenSource(oauth, { ...token, access_token: accessToken }));
     // The consent ran in a separate tab (web) or the system browser (desktop app), so don't send
     // that window to the dashboard — the app is still open and picks the new import up by itself.
     res.send(finishPage('Notion connected', `Importing from “${token.workspace_name ?? 'Notion'}”. Go back to Spaces to follow the progress — you can close this tab.`, true));
@@ -204,23 +277,19 @@ router.post('/token-import', express.json({ limit: '16kb' }), authMiddleware.aut
     return;
   }
   const user = req.user!;
-  const job = startJob({
+  const job = await startJob({
     kind: 'token', userId: user.id, userEmail: user.email, workspaceId: user.workspaceId!, notionWorkspace: me.workspace,
     firstLog: `Using integration "${me.name}" in Notion workspace "${me.workspace ?? '?'}" (token pasted by ${user.email})`,
   }, token);
   res.status(202).json(publicView(job));
 });
 
-router.get('/mine', authMiddleware.authenticate, (req: Request, res: Response) => {
-  const mine = [...jobs.values()]
-    .filter(j => j.userId === req.user!.id)
-    .sort((a, b) => b.startedAt - a.startedAt)
-    .map(publicView);
-  res.json({ jobs: mine });
+router.get('/mine', authMiddleware.authenticate, async (req: Request, res: Response) => {
+  res.json({ jobs: (await notionJobStore.listForUser(req.user!.workspaceId!, req.user!.id)).map(publicView) });
 });
 
-router.get('/jobs/:id', authMiddleware.authenticate, (req: Request, res: Response) => {
-  const job = jobs.get(req.params.id);
+router.get('/jobs/:id', authMiddleware.authenticate, async (req: Request, res: Response) => {
+  const job = await notionJobStore.get(req.params.id);
   if (!job || job.userId !== req.user!.id) {
     res.status(404).json({ error: 'NOT_FOUND' });
     return;
@@ -233,7 +302,7 @@ router.get('/jobs/:id', authMiddleware.authenticate, (req: Request, res: Respons
  * 'private-owner' needs the section's Notion owner to have a Spaces account.
  */
 router.post('/jobs/:id/approve', express.json({ limit: '1mb' }), authMiddleware.authenticate, async (req: Request, res: Response) => {
-  const job = jobs.get(req.params.id);
+  const job: ImportJob | null = await notionJobStore.get(req.params.id);
   if (!job || job.userId !== req.user!.id) {
     res.status(404).json({ error: 'NOT_FOUND' });
     return;
@@ -261,65 +330,100 @@ router.post('/jobs/:id/approve', express.json({ limit: '1mb' }), authMiddleware.
       return;
     }
   }
+  if (!(await notionJobStore.claim(job.id))) {
+    res.status(409).json({ error: 'INVALID_STATE', message: 'This import was already approved.' });
+    return;
+  }
   if (typeof req.body?.channel === 'string' && req.body.channel.trim()) job.channel = req.body.channel.trim().replace(/^#/, '');
   const count = (mode: SectionAccess['mode']) => Object.values(sections).filter(s => s.mode === mode).length;
   job.log.push(`Approved by ${job.userEmail}: ${count('public')} public, ${count('private')} private, ${count('skip')} skipped`);
   job.status = 'ingesting';
+  await persist(job, true);
   void ingest(job, { sections });
   res.json(publicView(job));
 });
 
-async function collect(job: ImportJob, accessToken: string): Promise<void> {
-  const log = (m: string) => { job.log.push(m); };
+async function collect(job: ImportJob, accessToken: string | NotionTokenSource): Promise<void> {
+  const log = (m: string) => addLog(job, m);
   try {
-    const collected = await new NotionApiCollector(accessToken).collect(log);
-    job.stagingDir = collected.dir; // removed when the import ends, whatever the outcome
-    log(`Collected ${collected.pages} pages, ${collected.databases} databases, ${collected.files} files, ${collected.manifest.users.length} Notion users`);
-    collected.warnings.forEach(w => log(`! ${w}`));
-    if (collected.pages + collected.databases === 0) {
-      throw new Error(job.kind === 'member'
-        ? 'No pages were selected in Notion’s page picker — connect again and tick your pages.'
-        : 'The integration can see no pages. In Notion, add the pages to it (integration settings → Content access), then start again.');
-    }
-    if (job.kind === 'member') {
-      await ingest(job, { sections: {}, member: { userId: job.userId } });
-      return;
-    }
-    job.sections = await runWithContext({ userId: job.userId, workspaceId: job.workspaceId }, () =>
-      listNotionSections(collected.dir, job.workspaceId));
-    job.status = 'awaiting_review';
-    log(`Waiting for review: ${job.sections.length} top-level pages`);
+    await withHeartbeat(job, () => collectAndStage(job, accessToken, log));
   } catch (error) {
-    fail(job, error);
+    await fail(job, error);
   }
+}
+
+async function collectAndStage(job: ImportJob, accessToken: string | NotionTokenSource, log: (m: string) => void): Promise<void> {
+  const collected = await new NotionApiCollector(accessToken).collect(log);
+  job.stagingDir = collected.dir; // removed when the import ends, whatever the outcome
+  log(`Collected ${collected.pages} pages, ${collected.databases} databases, ${collected.files} files, ${collected.manifest.users.length} Notion users`);
+  collected.warnings.forEach(w => log(`! ${w}`));
+  collected.failures.forEach(f => log(`✗ ${f.what} "${f.title}": ${f.reason}`));
+  if (collected.pages + collected.databases === 0) {
+    throw new Error(job.kind === 'member'
+      ? 'No pages were selected in Notion’s page picker — connect again and tick your pages.'
+      : 'The integration can see no pages. In Notion, add the pages to it (integration settings → Content access), then start again.');
+  }
+  if (job.kind === 'member') {
+    await ingest(job, { sections: {}, member: { userId: job.userId } });
+    return;
+  }
+  job.sections = await runWithContext({ userId: job.userId, workspaceId: job.workspaceId }, () =>
+    listNotionSections(collected.dir, job.workspaceId));
+  // The review can take days and Approve may reach another pod: keep the pages in the bucket.
+  if (remoteStagingEnabled()) {
+    job.stagingPrefix = await uploadStaging(collected.dir, job.id);
+    await removeLocalStaging(job);
+  } else {
+    localStaging.set(job.id, collected.dir); // without the bucket, Approve must reach this pod
+  }
+  job.status = 'awaiting_review';
+  log(`Waiting for review: ${job.sections.length} top-level pages`);
+  await persist(job, true);
 }
 
 async function ingest(job: ImportJob, plan: NotionImportPlan): Promise<void> {
   try {
     job.status = 'ingesting';
-    await runWithContext({ userId: job.userId, workspaceId: job.workspaceId }, async () => {
-      const target = await resolveNotionImportTarget({ email: job.userEmail, channelName: job.channel });
-      job.summary = await importNotionTree(job.stagingDir!, target, plan);
+    await persist(job, true);
+    await withHeartbeat(job, async () => {
+      job.stagingDir ??= localStaging.get(job.id);
+      if (!job.stagingDir && job.stagingPrefix) job.stagingDir = await downloadStaging(job.stagingPrefix);
+      if (!job.stagingDir) throw new Error('The collected pages are no longer available — start the import again.');
+      const dir = job.stagingDir;
+      await runWithContext({ userId: job.userId, workspaceId: job.workspaceId }, async () => {
+        const target = await resolveNotionImportTarget({ email: job.userEmail, channelName: job.channel });
+        job.summary = await importNotionTree(dir, target, plan);
+      });
     });
     job.status = 'completed';
     job.finishedAt = Date.now();
-  } catch (error) {
-    fail(job, error);
-  } finally {
     await removeStaging(job);
+    await persist(job, true);
+  } catch (error) {
+    await fail(job, error);
   }
 }
 
-function fail(job: ImportJob, error: unknown): void {
+async function fail(job: ImportJob, error: unknown): Promise<void> {
   job.status = 'failed';
   job.error = error instanceof Error ? error.message : String(error);
   job.finishedAt = Date.now();
   logger.error('[NotionMigration] Import failed', error, { jobId: job.id });
-  void removeStaging(job);
+  await removeStaging(job);
+  await persist(job, true);
 }
 
 /** The pages and files read from Notion are only needed until the import ends. */
 async function removeStaging(job: ImportJob): Promise<void> {
+  await removeLocalStaging(job);
+  if (!job.stagingPrefix) return;
+  const prefix = job.stagingPrefix;
+  delete job.stagingPrefix;
+  await deleteStaging(prefix).catch(err => logger.warn('[NotionMigration] Could not remove staged pages from the bucket', { jobId: job.id, err: String(err) }));
+}
+
+async function removeLocalStaging(job: ImportJob): Promise<void> {
+  localStaging.delete(job.id);
   if (!job.stagingDir) return;
   const dir = job.stagingDir;
   delete job.stagingDir;

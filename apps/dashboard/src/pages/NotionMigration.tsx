@@ -311,6 +311,7 @@ function HistoryRow({
   const status = STATUS[job.status];
   const name = `${job.kind === 'member' ? 'My Notion' : 'Workspace import'}${job.notionWorkspace ? ` · ${job.notionWorkspace}` : ''}`;
   const summary = job.summary;
+  const failed = summary?.failed ?? [];
   const notes = [
     summary?.comments ? `${summary.comments} comment${summary.comments === 1 ? '' : 's'}` : '',
     summary?.joined ? `${summary.joined} already in Spaces` : '',
@@ -335,8 +336,11 @@ function HistoryRow({
       >
         <span className='text-[11px] text-muted-foreground'>{open ? '▾' : '▸'}</span>
         <span className='truncate font-medium'>{name}</span>
-        <span>
+        <span className='flex items-center gap-1.5'>
           <Badge variant={status.variant}>{status.label}</Badge>
+          {failed.length > 0 && (
+            <span className='text-xs text-destructive'>{failed.length} failed</span>
+          )}
         </span>
         <span className='text-right tabular-nums'>{summary?.created ?? '—'}</span>
         <span className='text-right tabular-nums'>{summary?.updated ?? '—'}</span>
@@ -397,6 +401,22 @@ function HistoryRow({
             <div className='border-t border-border/60 px-[14px] py-2 pl-[46px] text-xs text-muted-foreground'>
               {notes.join(' · ')}
             </div>
+          )}
+          {failed.length > 0 && (
+            <details className='border-t border-border/60 px-[14px] py-2 pl-[46px] text-xs'>
+              <summary className='cursor-pointer text-destructive'>
+                {failed.length} could not be imported from Notion
+              </summary>
+              <ul className='mt-1 list-disc space-y-1 pl-5 text-muted-foreground'>
+                {failed.map((f, i) => (
+                  <li key={`${f.what}-${f.title}-${i}`} className='break-words'>
+                    <span className='font-medium text-foreground'>{f.title}</span> ({f.what}):{' '}
+                    {f.reason}
+                    {f.kept && ' — the existing canvas was kept as it was'}
+                  </li>
+                ))}
+              </ul>
+            </details>
           )}
           {summary && summary.warnings.length > 0 && (
             <details className='border-t border-border/60 px-[14px] py-2 pl-[46px] text-xs'>

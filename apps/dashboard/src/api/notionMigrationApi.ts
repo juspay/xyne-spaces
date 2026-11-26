@@ -43,6 +43,13 @@ export interface NotionImportJob {
     /** Canvases this person lost access to because they can no longer see the page in Notion. */
     accessRemoved: string[];
     warnings: string[];
+    /** What Notion didn't give us. `kept`: the canvas already existed and was left as it was. Absent on older imports. */
+    failed?: Array<{
+      what: 'page' | 'database' | 'file' | 'comments' | 'users';
+      title: string;
+      reason: string;
+      kept?: boolean;
+    }>;
     unresolvedUsers: Array<{ name: string; email?: string }>;
     canvases: Array<{
       title: string;

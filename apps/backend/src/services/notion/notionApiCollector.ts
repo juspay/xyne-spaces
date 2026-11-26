@@ -49,10 +49,22 @@ export interface NotionComment {
   anchorText?: string; // text of the block it was made on (none = page-level comment)
 }
 
+/**
+ * Something Notion didn't give us. `pageId` set = that page is incomplete (ingest won't overwrite an
+ * existing canvas with it); unset = it affects the whole import (e.g. comments or users unavailable).
+ */
+export interface NotionCollectFailure {
+  what: 'page' | 'database' | 'file' | 'comments' | 'users';
+  title: string;
+  reason: string;
+  pageId?: string;
+}
+
 /** Who created each staged page (+ its comments) — ingest maps people to Spaces users by email. */
 export interface NotionManifest {
   items: Array<{ id: string; kind: 'page' | 'database'; title: string; relPath: string; parentId: string | null; createdById?: string; lastEditedTime?: string; comments?: NotionComment[] }>;
   users: NotionUser[];
+  failures?: NotionCollectFailure[];
 }
 
 export const NOTION_MANIFEST_FILE = 'notion-manifest.json';
@@ -71,23 +83,45 @@ export interface NotionCollectResult {
   databases: number;
   files: number;
   warnings: string[];
+  failures: NotionCollectFailure[];
   manifest: NotionManifest;
+}
+
+/** Where the collector gets its access token. A plain string never changes (integration tokens). */
+export interface NotionTokenSource {
+  /** The current access token — refreshed first if it's known to expire within a few minutes. */
+  get(): Promise<string>;
+  /** After a 401: get a new token (and keep the rotated refresh token), or throw if access is gone. */
+  refresh(): Promise<string>;
+}
+
+/** Notion no longer accepts our token. Fatal: the whole collect stops rather than writing stub pages. */
+export class NotionAuthError extends Error {
+  constructor(detail = '') {
+    super(`Notion stopped accepting our access (expired or revoked)${detail ? `: ${detail}` : ''}. Nothing was imported — start the import again.`);
+    this.name = 'NotionAuthError';
+  }
 }
 
 export class NotionApiCollector {
   private lastRequestAt = 0;
+  /** Set on an unrecoverable 401; every later request fails fast and the collect stops. */
+  private authError: NotionAuthError | null = null;
   private readonly blockParentCache = new Map<string, string | null>();
   private readonly warnings: string[] = [];
+  private readonly failures: NotionCollectFailure[] = [];
   private files = 0;
   private commentsUnavailable = false;
   private readonly commentsByPage = new Map<string, NotionComment[]>();
 
-  constructor(private readonly token: string) {}
+  constructor(private readonly auth: string | NotionTokenSource) {}
 
   // -------------------------------------------------------------------------------------------
   // HTTP
   // -------------------------------------------------------------------------------------------
   private async request(method: 'GET' | 'POST', pathname: string, body?: unknown): Promise<Json> {
+    if (this.authError) throw this.authError;
+    let refreshed = false;
     for (let attempt = 0; attempt < 6; attempt++) {
       const wait = this.lastRequestAt + MIN_GAP_MS - Date.now();
       if (wait > 0) await sleep(wait);
@@ -95,7 +129,7 @@ export class NotionApiCollector {
       const res = await fetch(`${API}${pathname}`, {
         method,
         headers: {
-          Authorization: `Bearer ${this.token}`,
+          Authorization: `Bearer ${typeof this.auth === 'string' ? this.auth : await this.auth.get()}`,
           'Notion-Version': NOTION_VERSION,
           'Content-Type': 'application/json',
         },
@@ -105,6 +139,18 @@ export class NotionApiCollector {
         const retryAfter = Number(res.headers.get('retry-after')) || 2 ** attempt;
         logger.warn(`[NotionCollect] ${res.status} on ${pathname}, retrying in ${retryAfter}s`);
         await sleep(retryAfter * 1000);
+        continue;
+      }
+      if (res.status === 401) {
+        // Refresh once and resend the same request; a second 401 (or no way to refresh) is fatal.
+        if (refreshed || typeof this.auth === 'string') throw (this.authError = new NotionAuthError(`401 on ${pathname}`));
+        refreshed = true;
+        try {
+          await this.auth.refresh();
+        } catch (error) {
+          throw (this.authError = error instanceof NotionAuthError ? error : new NotionAuthError(error instanceof Error ? error.message : String(error)));
+        }
+        logger.info('[NotionCollect] Access token refreshed after a 401, retrying');
         continue;
       }
       const json = (await res.json()) as Json;
@@ -137,8 +183,8 @@ export class NotionApiCollector {
   // Collect
   // -------------------------------------------------------------------------------------------
   async collect(onProgress?: (msg: string) => void): Promise<NotionCollectResult> {
-    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'notion-api-'));
     const results = await this.paginate('POST', '/search', {});
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'notion-api-'));
     const items = new Map<string, Item>();
     for (const r of results) {
       if (r.archived || r.in_trash) continue;
@@ -215,20 +261,24 @@ export class NotionApiCollector {
           await fs.writeFile(file, await this.databaseCsv(item, row => adopt(bare(row.id), 'page', item.id, row)));
         } else {
           const ctx: RenderCtx = {
-            dir, fileDir: path.dirname(file), assetDir: path.join(dir, relBase.get(item.id)!), items, relFile, blocks: [],
+            pageId: item.id, dir, fileDir: path.dirname(file), assetDir: path.join(dir, relBase.get(item.id)!), items, relFile, blocks: [],
             adopt: (id, kind) => adopt(id, kind, item.id),
           };
           const body = await this.renderChildren(item.id, ctx, 0);
           await fs.writeFile(file, `# ${item.title}\n\n${body}`);
-          await this.collectComments(item.id, ctx.blocks);
+          await this.collectComments(item, ctx.blocks);
         }
       } catch (error) {
-        this.warnings.push(`Failed to collect "${item.title}": ${error instanceof Error ? error.message : String(error)}`);
+        this.failures.push({ what: item.kind, title: item.title, reason: errorText(error), pageId: item.id });
         await fs.writeFile(file, `# ${item.title}\n\n> ⚠️ This page could not be collected from Notion.\n`);
       }
+      await this.stopIfAuthLost(dir);
       done++;
       onProgress?.(`Collected ${done}/${queue.length}: ${item.title}`);
     }
+
+    const users = await this.listUsers();
+    await this.stopIfAuthLost(dir);
 
     const manifest: NotionManifest = {
       items: [...items.values()].map(item => ({
@@ -241,7 +291,8 @@ export class NotionApiCollector {
         lastEditedTime: item.raw.last_edited_time,
         comments: this.commentsByPage.get(item.id),
       })),
-      users: await this.listUsers(),
+      users,
+      failures: this.failures,
     };
     await fs.writeFile(path.join(dir, NOTION_MANIFEST_FILE), JSON.stringify(manifest, null, 2));
 
@@ -251,6 +302,7 @@ export class NotionApiCollector {
       databases: [...items.values()].filter(i => i.kind === 'database').length,
       files: this.files,
       warnings: this.warnings,
+      failures: this.failures,
       manifest,
     };
   }
@@ -260,8 +312,9 @@ export class NotionApiCollector {
    * capability — without it this is skipped with one warning). One request per block, so pages
    * cost about twice as many requests with comments on.
    */
-  private async collectComments(pageId: string, blocks: Array<{ id: string; text: string }>): Promise<void> {
+  private async collectComments(page: Item, blocks: Array<{ id: string; text: string }>): Promise<void> {
     if (this.commentsUnavailable) return;
+    const pageId = page.id;
     const out: NotionComment[] = [];
     for (const target of [{ id: pageId, text: '' }, ...blocks]) {
       let comments: Json[];
@@ -271,10 +324,10 @@ export class NotionApiCollector {
         const message = error instanceof Error ? error.message : String(error);
         if (/\b403\b|restricted_resource|insufficient/i.test(message)) {
           this.commentsUnavailable = true;
-          this.warnings.push('Comments were not imported: turn on "Read comments" for the Notion integration and run again.');
+          this.failures.push({ what: 'comments', title: 'All pages', reason: 'Comments were not imported: turn on "Read comments" for the Notion integration and run again.' });
           return;
         }
-        this.warnings.push(`Could not read comments on a block of page ${pageId}: ${message}`);
+        this.failures.push({ what: 'comments', title: page.title, reason: message, pageId });
         continue;
       }
       for (const c of comments) {
@@ -294,6 +347,13 @@ export class NotionApiCollector {
   }
 
   /** Workspace people with emails (needs the "read user information including emails" capability). */
+  /** Per-page errors are caught and noted, but a lost token must end the whole collect. */
+  private async stopIfAuthLost(dir: string): Promise<void> {
+    if (!this.authError) return;
+    await fs.rm(dir, { recursive: true, force: true });
+    throw this.authError;
+  }
+
   private async listUsers(): Promise<NotionUser[]> {
     try {
       const users = await this.paginate('GET', '/users');
@@ -301,7 +361,7 @@ export class NotionApiCollector {
         .filter(u => u.type === 'person')
         .map(u => ({ id: bare(u.id), name: u.name ?? 'Unknown', email: u.person?.email?.toLowerCase() }));
     } catch (error) {
-      this.warnings.push(`Could not list Notion users (owners won't be mapped): ${error instanceof Error ? error.message : String(error)}`);
+      this.failures.push({ what: 'users', title: 'Notion users', reason: `Owners won't be mapped: ${errorText(error)}` });
       return [];
     }
   }
@@ -459,7 +519,7 @@ export class NotionApiCollector {
       this.files++;
       return target;
     } catch (error) {
-      this.warnings.push(`File download failed (${name || url}): ${error instanceof Error ? error.message : String(error)}`);
+      this.failures.push({ what: 'file', title: name || url.split('?')[0].split('/').pop() || 'file', reason: errorText(error), pageId: ctx.pageId });
       return null;
     }
   }
@@ -469,6 +529,7 @@ export class NotionApiCollector {
 // helpers
 // ---------------------------------------------------------------------------------------------
 interface RenderCtx {
+  pageId: string; // the page being rendered (failures are recorded against it)
   dir: string; // staging root
   fileDir: string; // directory of the .md being written (links are relative to it)
   assetDir: string; // where this page's downloaded files go
@@ -479,6 +540,7 @@ interface RenderCtx {
 }
 
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error));
 const bare = (id: string) => id.replace(/-/g, '');
 const safeName = (s: string) => (s || 'Untitled').replace(/[/\\:*?"<>|\n\r]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120) || 'Untitled';
 const relHref = (fromDir: string, toFile: string) => path.relative(fromDir, toFile).split(path.sep).map(encodeURIComponent).join('/');
