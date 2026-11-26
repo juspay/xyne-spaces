@@ -1,4 +1,5 @@
 import { loopFromPayload, loopModeLog, resolveLoop, withLoopKind, type LoopKey } from "xyne-claw-shared";
+import { recordChatCompletion, withUsageScope } from "../llm-usage.js";
 import { randomUUID } from "node:crypto";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -1591,7 +1592,7 @@ export async function processTask(
   // Started here so the extractor overlaps session restore + MCP listing;
   // awaited once the tool palette exists. Never rejects (see prefetch.ts).
   const prefetchSpecPromise = prefetchEnabled(agentConfig) && !answerFromContext
-    ? startPrefetchExtraction(task)
+    ? withUsageScope({ runId: sessionId, userId, agentSlug, conversationId, ticketId: ticketIds?.[0] }, () => startPrefetchExtraction(task))
     : null;
   let mcpCleanup: (() => Promise<void>) | undefined;
   // Absolute paths of raw recordings staged into a CALLER-OWNED cwd. Ephemeral
@@ -4323,6 +4324,7 @@ export async function processTask(
     // compact too when the user asked for it.
     const runAttempt = (a: Attempt, forceCompactBeforeRun = compactBeforeRun === true) =>
       runTask({
+        usageTicketId: ticketIds?.[0],
         // Per-agent model settings. `model` is the Spaces/platform-default model
         // override — runTask only applies it on attempts with no provider
         // credential (the LiteLLM branch), so premium attempts keep the model
@@ -4550,7 +4552,7 @@ export async function processTask(
           ...lifecycle,
         }),
       );
-      return generateFollowUpSuggestions({
+      return withUsageScope({ runId: sessionId, userId, agentSlug, conversationId, ticketId: ticketIds?.[0] }, () => generateFollowUpSuggestions({
         task,
         finalResponse: result.text,
         agentContext: followUpAgentContext,
@@ -4570,7 +4572,7 @@ export async function processTask(
           }),
         );
         return settled;
-      });
+      }));
     };
     let followUpPromise:
       | Promise<{ generation: FollowUpGenerationResult; completedAt: string }>
@@ -5741,6 +5743,7 @@ router.post("/generate-prompt", validateS2SKey, async (req, res: Response) => {
     : `Generate a system prompt for an agent${agentName ? ` called "${agentName}"` : ""}. The user described it as:\n\n"${intent}"\n\nThe prompt should:\n- Define the agent's role and personality\n- List what the agent can and cannot do\n- Include guidelines for response style\n- Be concise but thorough (200-400 words)`;
 
   try {
+    const startedAt = Date.now();
     const llmRes = await fetch(litellmEndpoint("/v1/chat/completions"), {
       method: "POST",
       headers: {
@@ -5776,6 +5779,7 @@ router.post("/generate-prompt", validateS2SKey, async (req, res: Response) => {
     const data = (await llmRes.json()) as {
       choices?: Array<{ message?: { content?: string } }>;
     };
+    recordChatCompletion("prompt_tools", LITELLM.model, data, { startedAt });
     const prompt = data.choices?.[0]?.message?.content?.trim() ?? "";
 
     res.json({ success: true, data: { prompt } });
@@ -5960,6 +5964,7 @@ router.post(
     ].join("\n");
 
     try {
+      const startedAt = Date.now();
       const llmRes = await fetchLiteLLMWithRetry(
         litellmEndpoint("/v1/chat/completions"),
         {
@@ -5999,6 +6004,7 @@ router.post(
           };
         }>;
       };
+      recordChatCompletion("prompt_tools", LITELLM.model, data, { startedAt });
       const argsRaw =
         data.choices?.[0]?.message?.tool_calls?.[0]?.function?.arguments;
       if (!argsRaw) {
@@ -6180,6 +6186,7 @@ router.post("/suggest-tools", validateS2SKey, async (req, res: Response) => {
   ].join("\n");
 
   try {
+    const startedAt = Date.now();
     const llmRes = await fetch(litellmEndpoint("/v1/chat/completions"), {
       method: "POST",
       headers: {
@@ -6214,6 +6221,7 @@ router.post("/suggest-tools", validateS2SKey, async (req, res: Response) => {
     const data = (await llmRes.json()) as {
       choices?: Array<{ message?: { content?: string } }>;
     };
+    recordChatCompletion("prompt_tools", LITELLM.model, data, { startedAt });
     const raw = data.choices?.[0]?.message?.content?.trim() ?? "";
     let parsed: unknown;
     try {

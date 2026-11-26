@@ -16,6 +16,7 @@ import { getWorkspaceIdForUser } from "../lib/spaces-db.js";
 import { publicChannels } from "./spaces-scope.js";
 import { parseSlashCommand } from "../lib/parseSlashCommand.js";
 import { readGeneratedCard, type GeneratedCard } from "./config.js";
+import { usageHeaders } from "../lib/http.js";
 
 const log = createLogger("agent-proactivity-card");
 
@@ -150,6 +151,7 @@ export async function refreshRoutingCard(agentId: string, opts: { force?: boolea
     headers: {
       "Content-Type": "application/json",
       ...(CONFIG.xyneClawS2sKey ? { "x-s2s-key": CONFIG.xyneClawS2sKey } : {}),
+      ...usageHeaders({ agentSlug: agent.slug, orgId: agent.orgId }),
     },
     body: JSON.stringify({ ...source, asked }),
     signal: AbortSignal.timeout(240_000),

@@ -196,7 +196,7 @@ export const goalLoop: GoalSpec = {
           ...(ledger.attachmentsThisTurn && ledger.attachmentsThisTurn.length > 0
             ? { attachmentsThisTurn: ledger.attachmentsThisTurn }
             : {}),
-        });
+        }, { userId: ledger.goal.userId, agentSlug: ledger.goal.agentSlug, conversationId: ledger.goal.conversationId, orgId: ledger.goal.orgId });
         return { ledger: { ...ledger, verdict } };
       },
     },

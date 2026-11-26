@@ -1,4 +1,5 @@
 import { LITELLM, litellmEndpoint } from "./config.js";
+import { recordChatCompletion } from "./llm-usage.js";
 import { createLogger } from "./logger.js";
 
 const log = createLogger("chat-title");
@@ -87,6 +88,7 @@ export async function generateChatTitle(input: ChatTitleInput): Promise<string |
   }
 
   try {
+    const startedAt = Date.now();
     const response = await fetch(litellmEndpoint("/v1/chat/completions"), {
       method: "POST",
       headers: {
@@ -129,6 +131,7 @@ export async function generateChatTitle(input: ChatTitleInput): Promise<string |
         };
       }>;
     };
+    recordChatCompletion("title", LITELLM.fastModel, data, { startedAt });
     const message = data.choices?.[0]?.message;
     const title = [
       message?.content,

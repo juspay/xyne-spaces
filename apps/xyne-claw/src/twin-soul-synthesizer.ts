@@ -14,6 +14,7 @@
 import type { SynthesizeFileRequest, SynthesizeFileResult, SynthesizeFileTrace } from "xyne-claw-shared";
 import { postChatCompletion, tokenUsage, type ChatCompletionResponse } from "./litellm-chat.js";
 import { createLogger } from "./logger.js";
+import { recordChatCompletion } from "./llm-usage.js";
 
 const log = createLogger("twin-soul-synthesizer");
 
@@ -117,6 +118,7 @@ export async function synthesizeMemoryFile(req: SynthesizeFileRequest): Promise<
   if (!LITELLM_API_KEY) return { content: null, error: "no-api-key", trace: traced() };
 
   try {
+    const callStartedAt = Date.now();
     const res = await postChatCompletion(
       LITELLM_API_KEY,
       {
@@ -140,6 +142,7 @@ export async function synthesizeMemoryFile(req: SynthesizeFileRequest): Promise<
       return { content: null, error: `llm-http-${res.status}`, trace: traced({ rawOutput: body.slice(0, 20_000) }) };
     }
     const data = (await res.json()) as ChatCompletionResponse;
+    recordChatCompletion("curator", SYNTH_MODEL, data, { startedAt: callStartedAt });
     const rawOutput = data.choices?.[0]?.message?.content ?? "";
     let content = rawOutput.trim();
     const trace = traced({

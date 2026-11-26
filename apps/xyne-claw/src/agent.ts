@@ -90,6 +90,7 @@ import { isSafeId } from "./safe-id.js";
 import { createCommandGuard } from "./command-guard.js";
 import { writeSessionSkills, deleteSessionSkills } from "./session-skills.js";
 import { installLlmCallMetrics } from "./llm-call-metrics.js";
+import { withUsageScope } from "./llm-usage.js";
 import { LlmTurnRecorder, type LlmCallStat } from "./llm-turn-stats.js";
 import { installFastMode, isAdaptiveThinkingClaudeModel, type ModelSpeed } from "./model-speed.js";
 import { installToolBudget } from "./tool-budget.js";
@@ -1879,6 +1880,8 @@ export interface RunTaskOptions {
    *  RAW conversationId + agentSlug, threaded separately so /webhook/progress
    *  can fall back to it when a refired run minted a fresh sessionId. */
   progressMeta?: { conversationId?: string | null; agentSlug?: string | null } | undefined;
+  /** Ticket the run was started for; tags its LLM usage. */
+  usageTicketId?: string | undefined;
   /** Set on a fallback attempt following an EMPTY completion: compact the
    *  resumed session before prompting the next provider so it doesn't inherit
    *  the same over-window context that produced nothing (and overflow again). */
@@ -2059,6 +2062,21 @@ function latestFastModeActiveToolSet(sessionManager: SessionManager): string[] {
 }
 
 export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
+  const claudeOauth = opts.provider === "claude" && (opts.providerConfig as ClaudeConfig | undefined)?.authType === "oauth_token";
+  return withUsageScope(
+    {
+      runId: opts.sessionId,
+      userId: opts.userId,
+      agentSlug: opts.progressMeta?.agentSlug ?? undefined,
+      conversationId: opts.progressMeta?.conversationId ?? opts.conversationId,
+      ticketId: opts.usageTicketId,
+      claudeOauth,
+    },
+    () => runTaskInScope(opts),
+  );
+}
+
+async function runTaskInScope(opts: RunTaskOptions): Promise<RunResult> {
   const {
     userId,
     task,
@@ -2606,7 +2624,10 @@ export async function runTask(opts: RunTaskOptions): Promise<RunResult> {
       ? { requested: "fast", ...installFastMode(session.agent, model) }
       : { requested: "standard", applied: false, reason: "standard speed requested" }
     : undefined;
-  installLlmCallMetrics(session.agent, sessionId ?? conversationId ?? "unknown", { fastMode: fastMode === true });
+  installLlmCallMetrics(session.agent, sessionId ?? conversationId ?? "unknown", {
+    fastMode: fastMode === true,
+    usage: { purpose: "main", serviceTier: debugSpeed?.applied ? "fast" : "standard" },
+  });
 
   if (gracefulInterrupt) {
     gracefulInterrupt.registerSummaryRequest(async () => {

@@ -1,4 +1,4 @@
-import { ReactElement } from 'react';
+import { ReactElement, ReactNode } from 'react';
 import { cn } from '@/utils/classNames';
 import type { AgentMetrics, GlobalMetrics } from '@/services/claw/clawMetricsTypes';
 import {
@@ -15,35 +15,42 @@ const toneClass = (tone: MetricDelta['tone']): string => {
   return 'text-muted-foreground';
 };
 
-const Hero = ({
+export const Hero = ({
   label,
   value,
   help,
   delta,
+  action,
 }: {
   label: string;
   value: string;
   help: string;
-  delta: MetricDelta;
+  delta?: MetricDelta | null | undefined;
+  action?: ReactNode;
 }): ReactElement => (
   <div className='rounded-xl border border-border bg-card px-5 py-4 shadow-sm'>
-    <p className='text-xs font-medium uppercase tracking-wide text-muted-foreground'>{label}</p>
+    <div className='flex min-h-5 items-center justify-between gap-2'>
+      <p className='text-xs font-medium uppercase tracking-wide text-muted-foreground'>{label}</p>
+      {action}
+    </div>
     <div className='mt-1 flex items-baseline gap-3'>
       <span className='text-3xl font-semibold tabular-nums text-foreground'>{value}</span>
-      <span className={cn('text-xs font-medium', toneClass(delta.tone))}>{delta.label}</span>
+      {delta && (
+        <span className={cn('text-xs font-medium', toneClass(delta.tone))}>{delta.label}</span>
+      )}
     </div>
     <p className='mt-1 text-xs text-muted-foreground'>{help}</p>
   </div>
 );
 
-const Tile = ({
+export const Tile = ({
   label,
   value,
   detail,
   tone = 'flat',
 }: {
   label: string;
-  value: string;
+  value: ReactNode;
   detail: string;
   tone?: MetricDelta['tone'];
 }): ReactElement => (

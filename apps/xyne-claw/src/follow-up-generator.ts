@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { recordChatCompletion } from "./llm-usage.js";
 import { LITELLM, litellmEndpoint } from "./config.js";
 import { parseArgMarkup } from "./leaked-tool-call.js";
 import { createLogger } from "./logger.js";
@@ -438,6 +439,7 @@ export async function generateFollowUpSuggestions({
   }
 
   try {
+    const startedAt = Date.now();
     const response = await fetch(litellmEndpoint("/v1/chat/completions"), {
       method: "POST",
       headers: {
@@ -538,6 +540,7 @@ Call record_follow_up_suggestions exactly once with exactly three strings.`,
         };
       }>;
     };
+    recordChatCompletion("follow_up", LITELLM.fastModel, data, { startedAt });
     const message = data.choices?.[0]?.message;
     const finishReason = data.choices?.[0]?.finish_reason;
     const suggestions = [

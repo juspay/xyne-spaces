@@ -1210,7 +1210,13 @@ function makeSubagentTool(def: SubagentDefinition, tools: ToolDefinition[], skil
           resourceLoader: childResourceLoader,
         });
         sessionRef = session;
-        installLlmCallMetrics(session.agent, parentSessionId ?? `subagent-${def.name}`);
+        installLlmCallMetrics(session.agent, parentSessionId ?? `subagent-${def.name}`, {
+          usage: {
+            purpose: "subagent",
+            subagent: def.name,
+            claudeOauth: resolvedProvider?.provider === "claude" && (effectiveConfig as { authType?: string } | undefined)?.authType === "oauth_token",
+          },
+        });
         if (slowModelFallback) {
           installStreamModelFallback(session.agent, model, slowModelFallback, {
             label: def.name,

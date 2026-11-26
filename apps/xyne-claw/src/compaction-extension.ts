@@ -29,6 +29,7 @@ import { recordJudgeOutcome } from "./judge-trace.js";
 import { optEnabled } from "./optimizations.js";
 import { metric } from "./metrics.js";
 import { currentRunTask } from "./run-context.js";
+import { recordingStreamFn } from "./llm-usage.js";
 
 import { createLogger } from "./logger.js";
 const log = createLogger("compaction-extension");
@@ -266,6 +267,8 @@ export const compactionExtension: ExtensionFactory = (pi) => {
           auth.headers ?? {},
           undefined,
           signal,
+          undefined,
+          recordingStreamFn({ purpose: "compaction" }),
         );
       } finally {
         // No session label: ExtensionContext carries no session id, so

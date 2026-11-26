@@ -26,6 +26,7 @@ import {
   FolderRemove,
   CheckTickSingle,
   SidebarLeftClose,
+  WalletDefault,
 } from '@xyne/icons';
 import { Download, Server, X } from 'lucide-react';
 import { usePlatform } from '../../hooks/usePlatform';
@@ -178,6 +179,13 @@ export const NAV_ITEMS: AINavItem[] = [
     description: 'AI usage metrics',
     icon: Piechart01 as NavIcon,
     to: '/ai/metrics',
+  },
+  {
+    key: 'control-panel',
+    label: 'Control panel',
+    description: 'AI usage and cost',
+    icon: WalletDefault as NavIcon,
+    to: '/ai/control-panel',
   },
   {
     key: 'settings',

@@ -2,6 +2,7 @@ import { createLogger } from "./logger.js";
 import { metric } from "./metrics.js";
 import { recordJudgeExchange } from "./judge-trace.js";
 import { llmJudgeConfig, llmJudgePost } from "./judge-llm.js";
+import { recordChatCompletion } from "./llm-usage.js";
 
 const log = createLogger("xor");
 
@@ -126,14 +127,17 @@ async function post(
   const needsOmni = images.length > 0 || Object.values(questions).some((q) => q.type === "value");
   const vision = needsOmni ? xorVisionConfig() : null;
   if (vision && !vision.url) throw new Error(images.length > 0 ? "no image-capable xor endpoint (set XOR_VISION_URL)" : "no value-capable xor endpoint (set XOR_VISION_URL)");
+  const model = modelOverride || (vision ? vision.model : cfg.model);
+  const startedAt = Date.now();
   const res = await fetch(vision ? vision.url : cfg.url, {
     method: "POST",
     signal,
     headers: { Authorization: `Bearer ${cfg.key}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ state, model: modelOverride || (vision ? vision.model : cfg.model), questions, ...(images.length > 0 ? { images } : {}) }),
+    body: JSON.stringify({ state, model, questions, ...(images.length > 0 ? { images } : {}) }),
   });
   if (!res.ok) throw new Error(`xor ${res.status}`);
   const body = (await res.json()) as { answers?: Record<string, XorAnswer> };
+  recordChatCompletion("xor", model, body, { startedAt });
   return normaliseScores(body.answers ?? {}, questions);
 }
 

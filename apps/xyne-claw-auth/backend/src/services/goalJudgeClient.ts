@@ -12,6 +12,7 @@
 import { CONFIG } from "../config.js";
 import { errMsg } from "../lib/errors.js";
 import { createLogger, createTraceId } from "../logger.js";
+import { usageHeaders, type UsageScope } from "../lib/http.js";
 
 const logger = createLogger("goal-judge-client", createTraceId());
 // Default 30 minutes — must match (or exceed) the inner judge timeout in
@@ -42,7 +43,7 @@ export interface GoalJudgeDecision {
   reason: string;
 }
 
-export async function judgeGoalViaClaw(req: GoalJudgeRequest): Promise<GoalJudgeDecision> {
+export async function judgeGoalViaClaw(req: GoalJudgeRequest, usage: UsageScope = {}): Promise<GoalJudgeDecision> {
   if (!CONFIG.xyneClawS2sKey) {
     logger.warn("[goal-judge-client] XYNE_CLAW_S2S_KEY not set — refusing call");
     return { done: false, reason: "judge_unavailable" };
@@ -51,7 +52,7 @@ export async function judgeGoalViaClaw(req: GoalJudgeRequest): Promise<GoalJudge
   try {
     const res = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "x-s2s-key": CONFIG.xyneClawS2sKey },
+      headers: { "Content-Type": "application/json", "x-s2s-key": CONFIG.xyneClawS2sKey, ...usageHeaders(usage) },
       body: JSON.stringify(req),
       signal: AbortSignal.timeout(JUDGE_TIMEOUT_MS),
     });

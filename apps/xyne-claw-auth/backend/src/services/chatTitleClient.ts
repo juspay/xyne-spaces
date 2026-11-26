@@ -6,6 +6,7 @@ import {
   chatConversationMetaRepository,
   chatMessageRepository,
 } from "../repositories/index.js";
+import { usageHeaders, type UsageScope } from "../lib/http.js";
 
 const logger = createLogger("chat-title-client", createTraceId());
 
@@ -18,7 +19,7 @@ export interface ChatTitleRequest {
   assistantReply?: string;
 }
 
-export async function generateChatTitleViaClaw(req: ChatTitleRequest): Promise<string | null> {
+export async function generateChatTitleViaClaw(req: ChatTitleRequest, usage: UsageScope = {}): Promise<string | null> {
   if (!CONFIG.xyneClawS2sKey) {
     logger.warn("[chat-title-client] XYNE_CLAW_S2S_KEY not set — refusing call");
     return null;
@@ -27,7 +28,7 @@ export async function generateChatTitleViaClaw(req: ChatTitleRequest): Promise<s
   try {
     const res = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "x-s2s-key": CONFIG.xyneClawS2sKey },
+      headers: { "Content-Type": "application/json", "x-s2s-key": CONFIG.xyneClawS2sKey, ...usageHeaders(usage) },
       body: JSON.stringify(req),
       signal: AbortSignal.timeout(CHAT_TITLE_TIMEOUT_MS),
     });
@@ -76,7 +77,7 @@ export async function maybeGenerateConversationTitle(args: {
   const title = await generateChatTitleViaClaw({
     firstUserMessage,
     ...(args.assistantReply?.trim() ? { assistantReply: args.assistantReply } : {}),
-  });
+  }, key);
   if (!title) return;
 
   const named = await chatConversationMetaRepository.fillTitleIfEmpty({

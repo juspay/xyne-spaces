@@ -1,4 +1,5 @@
 import type { XorAnswer, XorQuestion } from "./xor.js";
+import { recordChatCompletion } from "./llm-usage.js";
 
 const SYSTEM_PROMPT = [
   "You are a strict evaluator. You are given a STATE and a set of QUESTIONS about it.",
@@ -85,6 +86,7 @@ export async function llmJudgePost(
   signal: AbortSignal,
 ): Promise<Record<string, XorAnswer>> {
   const cfg = llmJudgeConfig();
+  const startedAt = Date.now();
   const res = await fetch(cfg.url, {
     method: "POST",
     signal,
@@ -101,5 +103,6 @@ export async function llmJudgePost(
   });
   if (!res.ok) throw new Error(`judge-llm ${res.status}`);
   const body = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
+  recordChatCompletion("judge", cfg.model, body, { startedAt });
   return parseLlmJudgeReply(body.choices?.[0]?.message?.content ?? "", questions);
 }

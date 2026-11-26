@@ -33,6 +33,7 @@ import { metric } from "./metrics.js";
 import { optEnabled } from "./optimizations.js";
 import { recordJudgeOutcome } from "./judge-trace.js";
 import { holdErrors, holdThreshold, passThreshold, precheckEnabled, runPrecheck, type PrecheckAsk } from "./verify-prefilter.js";
+import { recordChatCompletion } from "./llm-usage.js";
 const log = createLogger("verify-response");
 
 // Same rationale as the goal judge: LiteLLM can be slow under load and a
@@ -266,6 +267,7 @@ async function llmVerify(input: VerifyResponseInput): Promise<ResponseVerdict | 
   ].join("\n");
 
   try {
+    const startedAt = Date.now();
     const res = await fetch(litellmEndpoint("/v1/chat/completions"), {
       method: "POST",
       headers: {
@@ -294,6 +296,7 @@ async function llmVerify(input: VerifyResponseInput): Promise<ResponseVerdict | 
     const data = (await res.json()) as {
       choices?: Array<{ message?: { tool_calls?: Array<{ function?: { arguments?: string } }> } }>;
     };
+    recordChatCompletion("verify", LITELLM.model, data, { startedAt });
     const raw = data.choices?.[0]?.message?.tool_calls?.[0]?.function?.arguments;
     if (!raw) {
       log.warn("[verify-response] no tool_call in response — verifier unavailable");

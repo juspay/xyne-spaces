@@ -17,6 +17,7 @@ import { optEnabled } from "./optimizations.js";
 import { LITELLM, litellmEndpoint } from "./config.js";
 
 import { createLogger } from "./logger.js";
+import { recordChatCompletion } from "./llm-usage.js";
 const log = createLogger("goal-judge");
 
 // Default 30 minutes. LiteLLM can be very slow under load, and a timed-out
@@ -194,6 +195,7 @@ export async function judgeGoalProgressLlm(input: GoalJudgeInput): Promise<GoalJ
   ].join("\n");
 
   try {
+    const startedAt = Date.now();
     const res = await fetch(litellmEndpoint("/v1/chat/completions"), {
       method: "POST",
       headers: {
@@ -222,6 +224,7 @@ export async function judgeGoalProgressLlm(input: GoalJudgeInput): Promise<GoalJ
     const data = (await res.json()) as {
       choices?: Array<{ message?: { tool_calls?: Array<{ function?: { arguments?: string } }> } }>;
     };
+    recordChatCompletion("judge", LITELLM.fastModel, data, { startedAt });
     const raw = data.choices?.[0]?.message?.tool_calls?.[0]?.function?.arguments;
     if (!raw) {
       log.warn("[goal-judge] no tool_call in response — defaulting to continue");

@@ -7,6 +7,7 @@ import { LITELLM, litellmEndpoint } from "./config.js";
 import { xor, xorEnabled, xorThreshold } from "./xor.js";
 
 import { createLogger } from "./logger.js";
+import { recordChatCompletion } from "./llm-usage.js";
 const log = createLogger("chain-judge");
 
 const JEV_CONTINUE_THRESHOLD_ENV = "JEV_CHAIN_CONTINUE_THRESHOLD";
@@ -117,6 +118,7 @@ export async function judgeChainContinuation(
     const jevDecision = await judgeViaJev(userContent, sourceAgent, targetAgent, judgeContext);
     if (jevDecision) return jevDecision;
 
+    const startedAt = Date.now();
     const res = await fetch(litellmEndpoint("/v1/chat/completions"), {
       method: "POST",
       headers: {
@@ -207,6 +209,7 @@ You MUST call the \`decide\` tool — do not respond in plain text.`,
         };
       }>;
     };
+    recordChatCompletion("judge", LITELLM.model, data, { startedAt });
     const message = data.choices?.[0]?.message;
     // Prefer the forced tool call. If for some reason the model still emitted
     // plain text (Kimi token-drop, vLLM serving glitch, etc.), fall back to

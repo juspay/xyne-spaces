@@ -121,6 +121,24 @@ export function Table<TData extends Record<string, unknown>>({
               rowClassName={rowClassName}
             />
           )}
+
+          {showData && columns.some(col => col.renderFooter) && (
+            <tfoot
+              data-slot='table-footer-row'
+              className='border-t-2 border-foreground/25 bg-secondary'
+            >
+              <tr>
+                {columns.map(col => (
+                  <td
+                    key={col.field}
+                    className={cn('font-semibold text-foreground', col.className)}
+                  >
+                    {col.renderFooter?.()}
+                  </td>
+                ))}
+              </tr>
+            </tfoot>
+          )}
         </table>
       </div>
 
