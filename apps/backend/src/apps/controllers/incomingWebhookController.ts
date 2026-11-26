@@ -9,71 +9,24 @@ import {
   processAmazonSnsIncoming,
   processPingdomIncoming,
   processGcpIncoming,
-  processHubspotIncoming,
-} from '@/bypassAcl/appServices';
+  processHubspotIncoming } from '@/bypassAcl/appServices';
 import { logger } from '@/utils/logger';
-import { encrypt, decrypt } from '@/services/encryptionService';
-import {  AppIncomingWebhookAction, AppIncomingWebhookType } from '@xyne/shared';
+import { decrypt } from '@/services/encryptionService';
+import { AppIncomingWebhookType } from '@xyne/shared';
 import { assertWebhookUrlSafe, safeWebhookFetch, SsrfBlockedError } from '@/utils/ssrfGuard';
 import {
-  parseSnsEnvelope,
-} from './amazonSnsWebhookParser';
+  parseSnsEnvelope } from './amazonSnsWebhookParser';
 import {   parsePingdomPayload } from './pingdomWebhookParser';
 import {   parseGcpPayload } from './gcpWebhookParser';
 import { parseHubspotPayload } from './hubspotWebhookParser';
 
-const WEBHOOK_NAME_MAX_LENGTH = 84;
 type IncomingWebhookType = AppIncomingWebhookType;
-type IncomingWebhookAction = AppIncomingWebhookAction;
 type StoredIncomingWebhook = Prisma.AppIncomingWebhookGetPayload<{}>;
 
 const IncomingWebhookParamsSchema = z.object({
   workspaceId: z.string().min(1).trim(),
   appId: z.string().min(1).trim(),
-  secret: z.string().min(1).trim(),
-});
-
-const CreateWebhookBodySchema = z.object({
-  installedAppId: z.string().min(1),
-  channelId: z.string().min(1),
-  boardId: z.string().min(1).optional(),
-  name: z.string().min(1).max(WEBHOOK_NAME_MAX_LENGTH),
-  type: z.nativeEnum(AppIncomingWebhookType).default(AppIncomingWebhookType.SLACK),
-  action: z.nativeEnum(AppIncomingWebhookAction).default(AppIncomingWebhookAction.MESSAGE),
-});
-
-const UpdateWebhookBodySchema = z.object({
-  name: z.string().min(1).max(WEBHOOK_NAME_MAX_LENGTH),
-});
-
-const InstalledAppParamsSchema = z.object({
-  installedAppId: z.string().min(1).trim(),
-});
-
-const WebhookParamsSchema = z.object({
-  webhookId: z.string().min(1).trim(),
-});
-
-const BooleanQueryParamSchema = z.preprocess((value) => {
-  if (value === undefined) {
-    return false;
-  }
-  if (typeof value === 'string') {
-    if (value === 'true') {
-      return true;
-    }
-    if (value === 'false') {
-      return false;
-    }
-  }
-  return value;
-}, z.boolean());
-
-const ListWebhooksQuerySchema = z.object({
-  limit: z.coerce.number().int().min(1).max(100).default(3),
-  offset: z.coerce.number().int().min(0).default(0),
-  includeInactive: BooleanQueryParamSchema,
-});
+  secret: z.string().min(1).trim() });
 
 export type WebhookContext = {
   workspaceId: string;
@@ -123,8 +76,7 @@ class IncomingWebhookController {
         logger.warn('[Incoming-Webhook] Failed to parse buffered webhook body', {
           workspaceId,
           appId,
-          error,
-        });
+          error });
         return null;
       }
     }
@@ -138,8 +90,7 @@ class IncomingWebhookController {
         logger.warn('[Incoming-Webhook] Failed to parse text webhook body', {
           workspaceId,
           appId,
-          error,
-        });
+          error });
         return null;
       }
     }
@@ -155,8 +106,7 @@ class IncomingWebhookController {
     if (!paramsResult.success) {
       logger.warn('[Incoming-Webhook] Invalid incoming webhook params', {
         issues: paramsResult.error.issues,
-        expectedType,
-      });
+        expectedType });
       return null;
     }
 
@@ -167,8 +117,7 @@ class IncomingWebhookController {
     }
 
     const installedApp = await repositories.installedApps.findFirst({
-      where: { id: appId },
-    });
+      where: { id: appId } });
     if (!installedApp) {
       return null;
     }
@@ -198,8 +147,7 @@ class IncomingWebhookController {
         logger.warn('[Incoming-Webhook] Failed to decrypt webhook secret during incoming validation', {
           webhookId: webhook.id,
           installedAppId: installedApp.id,
-          error,
-        });
+          error });
       }
     }
 
@@ -214,8 +162,7 @@ class IncomingWebhookController {
         webhookId: matchedWebhook.id,
         installedAppId: installedApp.id,
         expectedType,
-        actualType: webhookType,
-      });
+        actualType: webhookType });
       return null;
     }
 
@@ -234,8 +181,7 @@ class IncomingWebhookController {
       installedApp,
       channelId,
       webhook: matchedWebhook,
-      body,
-    };
+      body };
   }
 
   handleIncoming = async (req: Request, res: Response): Promise<void> => {
@@ -246,14 +192,12 @@ class IncomingWebhookController {
         return;
       }
       logger.info('[INCOMING-WEBHOOK] BODY', {
-        body: context.body,
-      });
+        body: context.body });
 
       await processSlackIncoming(context, res);
     } catch (error) {
       logger.error('[Incoming-Webhook] Error handling incoming webhook', {
-        error,
-      });
+        error });
       res.status(500).send('rollup_error');
     }
   };
@@ -269,8 +213,7 @@ class IncomingWebhookController {
       await processSentinelIncoming(context, res);
     } catch (error) {
       logger.error('[Incoming-Webhook] Error handling SentinelOne webhook', {
-        error,
-      });
+        error });
       res.status(500).send('rollup_error');
     }
   };
@@ -287,8 +230,7 @@ class IncomingWebhookController {
       if (!envelope) {
         logger.warn('[Incoming-Webhook] Body is not an Amazon SNS envelope', {
           workspaceId: context.workspaceId,
-          appId: context.appId,
-        });
+          appId: context.appId });
         res.status(400).send('invalid_payload');
         return;
       }
@@ -299,8 +241,7 @@ class IncomingWebhookController {
       await processAmazonSnsIncoming(context, res, envelope);
     } catch (error) {
       logger.error('[Incoming-Webhook] Error handling Amazon SNS webhook', {
-        error,
-      });
+        error });
       res.status(500).send('rollup_error');
     }
   };
@@ -317,8 +258,7 @@ class IncomingWebhookController {
       if (!payload) {
         logger.warn('[Incoming-Webhook] Body is not a Pingdom check notification', {
           workspaceId: context.workspaceId,
-          appId: context.appId,
-        });
+          appId: context.appId });
         res.status(400).send('invalid_payload');
         return;
       }
@@ -329,8 +269,7 @@ class IncomingWebhookController {
       await processPingdomIncoming(context, res, payload);
     } catch (error) {
       logger.error('[Incoming-Webhook] Error handling Pingdom webhook', {
-        error,
-      });
+        error });
       res.status(500).send('rollup_error');
     }
   };
@@ -347,8 +286,7 @@ class IncomingWebhookController {
       if (!payload) {
         logger.warn('[Incoming-Webhook] Body is not a GCP Monitoring incident', {
           workspaceId: context.workspaceId,
-          appId: context.appId,
-        });
+          appId: context.appId });
         res.status(400).send('invalid_payload');
         return;
       }
@@ -360,8 +298,7 @@ class IncomingWebhookController {
       await processGcpIncoming(context, res, payload);
     } catch (error) {
       logger.error('[Incoming-Webhook] Error handling GCP Monitoring webhook', {
-        error,
-      });
+        error });
       res.status(500).send('rollup_error');
     }
   };
@@ -380,8 +317,7 @@ class IncomingWebhookController {
       if (!events) {
         logger.warn('[Incoming-Webhook] Body is not a HubSpot event batch', {
           workspaceId: context.workspaceId,
-          appId: context.appId,
-        });
+          appId: context.appId });
         res.status(400).send('invalid_payload');
         return;
       }
@@ -408,373 +344,14 @@ class IncomingWebhookController {
         // The 200 is already on the wire, so this can only be logged.
         logger.error('[Incoming-Webhook] Error processing HubSpot batch after ack', {
           eventCount: events.length,
-          error,
-        });
+          error });
       }
     } catch (error) {
       logger.error('[Incoming-Webhook] Error handling HubSpot webhook', {
-        error,
-      });
+        error });
       if (!res.headersSent) {
         res.status(500).send('rollup_error');
       }
-    }
-  };
-
-  createWebhook = async (req: Request, res: Response): Promise<void> => {
-    try {
-      const bodyResult = CreateWebhookBodySchema.safeParse(req.body);
-      if (!bodyResult.success) {
-        logger.warn('[Incoming-Webhook] Invalid create webhook payload', {
-          userId: req.user?.id,
-          issues: bodyResult.error.issues,
-        });
-        res.status(400).json({ error: 'Validation error', details: bodyResult.error.issues });
-        return;
-      }
-
-      const { installedAppId, channelId, boardId, name, type, action } = bodyResult.data;
-      const userId = req.user?.id;
-      if (!userId) {
-        logger.warn('[Incoming-Webhook] Missing authenticated user for create webhook', {
-          body: req.body,
-        });
-        res.status(401).json({ error: 'Unauthorized' });
-        return;
-      }
-
-      // Scope to the caller's workspace (via the bot user) so you can't create a webhook against
-      // another workspace's install. Guard workspaceId — an undefined filter would un-scope the query.
-      const workspaceId = req.user?.workspaceId;
-      if (!workspaceId) {
-        res.status(401).json({ error: 'Unauthorized' });
-        return;
-      }
-      const installedApp = await repositories.installedApps.findFirst({
-        where: { id: installedAppId, user: { workspaceId } },
-      });
-      if (!installedApp) {
-        res.status(404).json({ error: 'Installed app not found in this workspace' });
-        return;
-      }
-
-      const isParticipant = await repositories.channelParticipants.isParticipant(
-        channelId,
-        installedApp.userId,
-      );
-      if (!isParticipant) {
-        res.status(400).json({ error: 'Bot is not a member of this channel' });
-        return;
-      }
-
-      const isRequesterParticipant = await repositories.channelParticipants.isParticipant(
-        channelId,
-        userId,
-      );
-      if (!isRequesterParticipant) {
-        res.status(400).json({ error: 'User is not a member of this channel' });
-        return;
-      }
-
-      const channel = await repositories.channels.findById(channelId);
-      if (!channel) {
-        res.status(404).json({ error: 'Channel not found' });
-        return;
-      }
-
-      // Only SentinelOne supports ticket creation today; the other sources always
-      // post a message.
-      const messageOnlyTypes: IncomingWebhookType[] = [
-        AppIncomingWebhookType.SLACK,
-        AppIncomingWebhookType.AMAZON_SNS,
-        AppIncomingWebhookType.PINGDOM,
-        AppIncomingWebhookType.GCP,
-      ];
-      const normalizedAction: IncomingWebhookAction = messageOnlyTypes.includes(type)
-        ? AppIncomingWebhookAction.MESSAGE
-        : action;
-      const effectiveBoardId =
-        normalizedAction === AppIncomingWebhookAction.TICKET ? boardId : undefined;
-
-      let boardName: string | null = null;
-      if (normalizedAction === AppIncomingWebhookAction.TICKET && !effectiveBoardId) {
-        res.status(400).json({ error: 'Board is required for ticket webhooks' });
-        return;
-      }
-
-      if (effectiveBoardId) {
-        const board = await repositories.boards.findById(effectiveBoardId);
-        if (!board) {
-          res.status(404).json({ error: 'Board not found' });
-          return;
-        }
-
-        boardName = board.name;
-      }
-
-      const rawSecret = crypto.randomBytes(32).toString('hex');
-      const encryptedSecret = encrypt(rawSecret);
-
-      const webhook = await repositories.incomingWebhooks.create({
-        installedAppId,
-        channelId,
-        workspaceId,
-        ...(effectiveBoardId ? { boardId: effectiveBoardId } : {}),
-        name,
-        type,
-        action: normalizedAction,
-        secret: encryptedSecret,
-        createdBy: userId,
-      });
-
-      const botUser = await repositories.users.findById(installedApp.userId) as
-        (Awaited<ReturnType<typeof repositories.users.findById>> & { workspaceId?: string }) | null;
-
-      const webhookUrl = this.buildIncomingWebhookUrl(botUser?.workspaceId, installedAppId, rawSecret, type);
-
-      res.status(201).json({
-        id: webhook.id,
-        name: webhook.name,
-        channelId: webhook.channelId,
-        channelName: channel?.name ?? '',
-        channelVisibility: channel?.visibility ?? 'public',
-        boardId: webhook.boardId ?? null,
-        boardName,
-        type,
-        action: normalizedAction,
-        isActive: webhook.isActive,
-        createdAt: webhook.createdAt,
-        webhookUrl,
-      });
-    } catch (error) {
-      logger.error('[Incoming-Webhook] Error creating webhook', {
-        userId: req.user?.id,
-        body: req.body,
-        error,
-      });
-      res.status(500).json({ error: 'Internal server error' });
-    }
-  };
-
-  listWebhooks = async (req: Request, res: Response): Promise<void> => {
-    try {
-      const paramsResult = InstalledAppParamsSchema.safeParse(req.params);
-      if (!paramsResult.success) {
-        logger.warn('[Incoming-Webhook] Invalid list webhooks params', {
-          params: req.params,
-          issues: paramsResult.error.issues,
-        });
-        res.status(400).json({ error: 'Validation error', details: paramsResult.error.issues });
-        return;
-      }
-      const { installedAppId } = paramsResult.data;
-
-      const queryResult = ListWebhooksQuerySchema.safeParse(req.query);
-      if (!queryResult.success) {
-        logger.warn('[Incoming-Webhook] Invalid list webhooks query', {
-          installedAppId,
-          query: req.query,
-          issues: queryResult.error.issues,
-        });
-        res.status(400).json({ error: 'Validation error', details: queryResult.error.issues });
-        return;
-      }
-
-      const { limit, offset, includeInactive } = queryResult.data;
-      const activeOnly = !includeInactive;
-
-      // Scope to the caller's workspace — don't list another workspace's install's webhooks.
-      const workspaceId = req.user?.workspaceId;
-      if (!workspaceId) {
-        res.status(401).json({ error: 'Unauthorized' });
-        return;
-      }
-      const installedApp = await repositories.installedApps.findFirst({
-        where: { id: installedAppId, user: { workspaceId } },
-      });
-      if (!installedApp) {
-        res.status(404).json({ error: 'Installed app not found in this workspace' });
-        return;
-      }
-
-      const [webhooks, total] = await Promise.all([
-        repositories.incomingWebhooks.findByInstalledAppId(installedAppId, { skip: offset, take: limit, activeOnly }),
-        repositories.incomingWebhooks.countByInstalledAppId(installedAppId, activeOnly),
-      ]);
-
-      const botUser = await repositories.users.findById(installedApp.userId) as
-        (Awaited<ReturnType<typeof repositories.users.findById>> & { workspaceId?: string }) | null;
-
-      const result = webhooks.map(webhook => {
-        let webhookUrl = '';
-        if (webhook.isActive) {
-          try {
-            const rawSecret = decrypt(webhook.secret);
-            const webhookType =
-              (webhook.type as IncomingWebhookType | undefined) ?? AppIncomingWebhookType.SLACK;
-            webhookUrl = this.buildIncomingWebhookUrl(
-              botUser?.workspaceId,
-              installedAppId,
-              rawSecret,
-              webhookType,
-            );
-          } catch (error) {
-            logger.warn('[Incoming-Webhook] Failed to decrypt webhook secret while listing webhooks', {
-              webhookId: webhook.id,
-              installedAppId,
-              error,
-            });
-            webhookUrl = '';
-          }
-        }
-
-        return {
-          id: webhook.id,
-          name: webhook.name,
-          channelId: webhook.channelId,
-          channelName: webhook.channel.name,
-          channelVisibility: webhook.channel.visibility,
-          boardId: webhook.boardId ?? null,
-          boardName: webhook.board?.name ?? null,
-          type: (webhook.type as IncomingWebhookType | undefined) ?? AppIncomingWebhookType.SLACK,
-          action:
-            (webhook.action as IncomingWebhookAction | undefined) ??
-            AppIncomingWebhookAction.MESSAGE,
-          isActive: webhook.isActive,
-          createdAt: webhook.createdAt,
-          webhookUrl,
-        };
-      });
-
-      res.status(200).json({ webhooks: result, total, limit, offset });
-    } catch (error) {
-      logger.error('[Incoming-Webhook] Error listing webhooks', {
-        installedAppId: req.params.installedAppId,
-        query: req.query,
-        error,
-      });
-      res.status(500).json({ error: 'Internal server error' });
-    }
-  };
-
-  updateWebhook = async (req: Request, res: Response): Promise<void> => {
-    try {
-      const paramsResult = WebhookParamsSchema.safeParse(req.params);
-      if (!paramsResult.success) {
-        logger.warn('[Incoming-Webhook] Invalid update webhook params', {
-          params: req.params,
-          userId: req.user?.id,
-          issues: paramsResult.error.issues,
-        });
-        res.status(400).json({ error: 'Validation error', details: paramsResult.error.issues });
-        return;
-      }
-      const { webhookId } = paramsResult.data;
-
-      const bodyResult = UpdateWebhookBodySchema.safeParse(req.body);
-      if (!bodyResult.success) {
-        logger.warn('[Incoming-Webhook] Invalid update webhook payload', {
-          webhookId,
-          userId: req.user?.id,
-          issues: bodyResult.error.issues,
-        });
-        res.status(400).json({ error: 'Validation error', details: bodyResult.error.issues });
-        return;
-      }
-
-      const webhook = await repositories.incomingWebhooks.findById(webhookId);
-      if (!webhook) {
-        res.status(404).json({ error: 'Webhook not found' });
-        return;
-      }
-
-      // Scope to the caller's workspace — only act on webhooks of your own install.
-      const workspaceId = req.user?.workspaceId;
-      if (!workspaceId) {
-        res.status(401).json({ error: 'Unauthorized' });
-        return;
-      }
-      const ownInstall = await repositories.installedApps.findFirst({
-        where: { id: webhook.installedAppId, user: { workspaceId } },
-      });
-      if (!ownInstall) {
-        res.status(404).json({ error: 'Webhook not found' });
-        return;
-      }
-
-      if (!webhook.isActive) {
-        res.status(400).json({ error: 'Cannot update a revoked webhook' });
-        return;
-      }
-
-      await repositories.incomingWebhooks.update(webhookId, { name: bodyResult.data.name });
-
-      res.status(200).json({ success: true });
-    } catch (error) {
-      logger.error('[Incoming-Webhook] Error updating webhook', {
-        webhookId: req.params.webhookId,
-        userId: req.user?.id,
-        body: req.body,
-        error,
-      });
-      res.status(500).json({ error: 'Internal server error' });
-    }
-  };
-
-  revokeWebhook = async (req: Request, res: Response): Promise<void> => {
-    try {
-      const paramsResult = WebhookParamsSchema.safeParse(req.params);
-      if (!paramsResult.success) {
-        logger.warn('[Incoming-Webhook] Invalid revoke webhook params', {
-          params: req.params,
-          userId: req.user?.id,
-          issues: paramsResult.error.issues,
-        });
-        res.status(400).json({ error: 'Validation error', details: paramsResult.error.issues });
-        return;
-      }
-      const { webhookId } = paramsResult.data;
-
-      const userId = req.user?.id;
-      const workspaceId = req.user?.workspaceId;
-      if (!userId || !workspaceId) {
-        logger.warn('[Incoming-Webhook] Missing authenticated user for revoke webhook', {
-          webhookId,
-        });
-        res.status(401).json({ error: 'Unauthorized' });
-        return;
-      }
-
-      const webhook = await repositories.incomingWebhooks.findById(webhookId);
-      if (!webhook) {
-        res.status(404).json({ error: 'Webhook not found' });
-        return;
-      }
-
-      // Scope to the caller's workspace — only revoke webhooks of your own install.
-      const ownInstall = await repositories.installedApps.findFirst({
-        where: { id: webhook.installedAppId, user: { workspaceId } },
-      });
-      if (!ownInstall) {
-        res.status(404).json({ error: 'Webhook not found' });
-        return;
-      }
-
-      if (!webhook.isActive) {
-        res.status(400).json({ error: 'Webhook is already revoked' });
-        return;
-      }
-
-      await repositories.incomingWebhooks.revoke(webhookId, userId);
-
-      res.status(200).json({ success: true });
-    } catch (error) {
-      logger.error('[Incoming-Webhook] Error revoking webhook', {
-        webhookId: req.params.webhookId,
-        userId: req.user?.id,
-        error,
-      });
-      res.status(500).json({ error: 'Internal server error' });
     }
   };
 
@@ -816,8 +393,7 @@ class IncomingWebhookController {
       /^sns\.[a-z0-9-]+\.amazonaws\.com$/i.test(parsedSubscribeUrl.hostname);
     if (!isAmazonSnsHost) {
       logger.warn('[Incoming-Webhook] SNS confirm rejected: SubscribeURL is not an Amazon SNS https host', {
-        host: parsedSubscribeUrl.hostname,
-      });
+        host: parsedSubscribeUrl.hostname });
       return { type: 'ack' };
     }
     try {
@@ -837,8 +413,7 @@ class IncomingWebhookController {
         // A redirect would take this somewhere we never intended, so treat one
         // as a failure rather than following it.
         redirect: 'manual',
-        signal: AbortSignal.timeout(15_000),
-      });
+        signal: AbortSignal.timeout(15_000) });
 
       if (response.status === 200) {
         logger.info('[Incoming-Webhook] SNS subscription confirmed');

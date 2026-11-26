@@ -1,14 +1,10 @@
 import { Request, Response } from 'express';
 import { z } from 'zod';
 import { v4 as uuidv4 } from 'uuid';
-import { repositories } from '@/database/repositories';
 import {
   AppCommandRepository,
   CommandType,
-  CommandAccessibility,
-  CommandNameConflictError,
-  CommandNotFoundError,
-} from '@/database/repositories/appCommandRepository';
+  CommandAccessibility } from '@/database/repositories/appCommandRepository';
 import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { SsrfBlockedError, safeWebhookFetch } from '@/utils/ssrfGuard';
@@ -55,9 +51,7 @@ async function sendErrorNotice(opts: {
           isSent: true,
           visibleTo: userId,
           metadata: { messageSubtype: metadataSubtype, identifier },
-          workspaceId,
-        },
-      });
+          workspaceId } });
     } else {
       // Channel-level — create a new conversation so it appears in the channel feed
       const newConversationId = uuidv4();
@@ -73,9 +67,7 @@ async function sendErrorNotice(opts: {
           replyCount: 0,
           pinned: false,
           createdAt: new Date(now),
-          workspaceId,
-        },
-      });
+          workspaceId } });
 
       await db.message.create({
         data: {
@@ -92,9 +84,7 @@ async function sendErrorNotice(opts: {
           createdAt: new Date(now),
           visibleTo: userId,
           metadata: { messageSubtype: metadataSubtype, identifier },
-          workspaceId,
-        },
-      });
+          workspaceId } });
 
       // Add the requesting user as conversation participant so they see the notice
       await db.conversationParticipant.create({
@@ -106,9 +96,7 @@ async function sendErrorNotice(opts: {
           isSubscribed: true,
           joinedAt: new Date(now),
           channelId,
-          workspaceId,
-        },
-      });
+          workspaceId } });
     }
   } catch (err) {
     logger.error('[COMMAND-DISPATCH] Failed to send error notice', err);
@@ -117,33 +105,8 @@ async function sendErrorNotice(opts: {
 
 const appCommandRepository = new AppCommandRepository();
 
-const AppIdParamsSchema = z.object({
-  appId: z.string().min(1).trim(),
-});
-
-const CommandNameParamsSchema = z.object({
-  appId: z.string().min(1).trim(),
-  commandName: z.string().min(1).trim(),
-});
-
 const ChannelIdParamsSchema = z.object({
-  channelId: z.string().min(1).trim(),
-});
-
-const UpsertCommandBodySchema = z.object({
-  commandName: z
-    .string()
-    .min(1)
-    .max(32)
-    .regex(
-      /^[a-z0-9_-]+$/,
-      'Command name must be lowercase letters, numbers, underscores, or hyphens only',
-    )
-    .trim(),
-  description: z.string().min(1).max(200).trim(),
-  commandType: z.nativeEnum(CommandType),
-  commandAccessibility: z.nativeEnum(CommandAccessibility),
-});
+  channelId: z.string().min(1).trim() });
 
 const DispatchCommandBodySchema = z.object({
   commandName: z.string().min(1).trim(),
@@ -153,8 +116,7 @@ const DispatchCommandBodySchema = z.object({
   text: z.string().optional(),
   messageText: z.string().optional(),
   // messageId is sent for message shortcuts so the app knows which message was acted on
-  messageId: z.string().optional(),
-});
+  messageId: z.string().optional() });
 
 // ── Message-shortcut helpers ────────────────────────────────────────────────
 
@@ -211,270 +173,6 @@ function resolveMentionsFromHtml(html: string): string {
 }
 
 export class CommandController {
-  /**
-   * GET /api/apps/:appId/commands?commandType=COMMAND|SHORTCUT
-   * List all commands (or shortcuts) for an app (used by the admin UI).
-   * commandType query param is required.
-   */
-  getCommands = async (req: Request, res: Response): Promise<void> => {
-    const params = AppIdParamsSchema.safeParse(req.params);
-    if (!params.success) {
-      res.status(400).json({ error: 'Validation error', details: params.error.issues });
-      return;
-    }
-
-    const { commandType } = req.query;
-    if (!commandType || !Object.values(CommandType).includes(commandType as CommandType)) {
-      res.status(400).json({
-        error: 'Validation error',
-        details: [{ message: `commandType query param is required and must be one of: ${Object.values(CommandType).join(', ')}` }],
-      });
-      return;
-    }
-
-    try {
-      const commands = await appCommandRepository.findByAppId(
-        params.data.appId,
-        commandType as CommandType,
-      );
-      res.status(200).json(commands);
-    } catch (error) {
-      logger.error('[COMMANDS] getCommands error:', error);
-      res.status(500).json({ error: 'Internal server error' });
-    }
-  };
-
-  /**
-   * GET /api/apps/installed/:installedAppId/commands?commandType=COMMAND|SHORTCUT
-   * Read-only snapshot of the INSTALL's commands/shortcuts (installed_app_commands), scoped to
-   * the caller's workspace. The Installed edit screen shows these; they only change via Update.
-   */
-  getInstalledCommands = async (req: Request, res: Response): Promise<void> => {
-    const { installedAppId } = req.params;
-    const workspaceId = req.user?.workspaceId;
-    const { commandType } = req.query;
-    if (!installedAppId || !workspaceId) {
-      res.status(400).json({ error: 'installedAppId and workspace are required' });
-      return;
-    }
-    if (!commandType || !Object.values(CommandType).includes(commandType as CommandType)) {
-      res.status(400).json({
-        error: 'Validation error',
-        details: [{ message: `commandType query param is required and must be one of: ${Object.values(CommandType).join(', ')}` }],
-      });
-      return;
-    }
-    try {
-      // Ownership check: install must belong to the caller's workspace (via bot user).
-      const install = await repositories.installedApps.findFirst({
-        where: { id: installedAppId, user: { workspaceId } },
-      });
-      if (!install) {
-        res.status(404).json({ error: 'Installed app not found in this workspace' });
-        return;
-      }
-      const commands = await appCommandRepository.findInstalledByInstalledAppId(
-        installedAppId,
-        commandType as CommandType,
-      );
-      res.status(200).json(commands);
-    } catch (error) {
-      logger.error('[COMMANDS] getInstalledCommands error:', error);
-      res.status(500).json({ error: 'Internal server error' });
-    }
-  };
-
-  /**
-   * POST /api/apps/:appId/commands
-   * Create a NEW command or shortcut for an app. Fails with 409 if the name is already
-   * taken — adding never overwrites an existing command/shortcut.
-   * commandType is required in the body.
-   */
-  createCommand = async (req: Request, res: Response): Promise<void> => {
-    const parsed = this.parseUpsertRequest(req, res);
-    if (!parsed) return;
-    try {
-      const app = await repositories.apps.findById(parsed.appId);
-      if (!app) {
-        res.status(404).json({ error: 'App not found', code: 'APP_NOT_FOUND' });
-        return;
-      }
-      // Only the creator may edit the template (matches the apps.update mutator ACL).
-      if (app.createdBy !== req.user?.id) {
-        res.status(403).json({ error: 'Only the app creator can modify this app', code: 'FORBIDDEN' });
-        return;
-      }
-      const command = await appCommandRepository.create(parsed.appId, parsed.body);
-      // Template changed -> bump version so installs see an available Update.
-      await repositories.apps.bumpVersion(parsed.appId);
-      res.status(201).json(command);
-    } catch (error) {
-      if (error instanceof CommandNameConflictError) {
-        res.status(409).json({ error: error.code, message: error.message });
-        return;
-      }
-      logger.error('[COMMANDS] createCommand error:', error);
-      res.status(500).json({ error: 'Internal server error' });
-    }
-  };
-
-  /**
-   * PUT /api/apps/:appId/commands
-   * Update an EXISTING command or shortcut for an app (matched by name + type).
-   * 404 if it doesn't exist, 409 if the name belongs to the other type.
-   * commandType is required in the body.
-   */
-  updateCommand = async (req: Request, res: Response): Promise<void> => {
-    const parsed = this.parseUpsertRequest(req, res);
-    if (!parsed) return;
-    try {
-      const app = await repositories.apps.findById(parsed.appId);
-      if (!app) {
-        res.status(404).json({ error: 'App not found', code: 'APP_NOT_FOUND' });
-        return;
-      }
-      // Only the creator may edit the template (matches the apps.update mutator ACL).
-      if (app.createdBy !== req.user?.id) {
-        res.status(403).json({ error: 'Only the app creator can modify this app', code: 'FORBIDDEN' });
-        return;
-      }
-      const command = await appCommandRepository.update(parsed.appId, parsed.body);
-      // Template changed -> bump version so installs see an available Update.
-      await repositories.apps.bumpVersion(parsed.appId);
-      res.status(200).json(command);
-    } catch (error) {
-      if (error instanceof CommandNameConflictError) {
-        res.status(409).json({ error: error.code, message: error.message });
-        return;
-      }
-      if (error instanceof CommandNotFoundError) {
-        res.status(404).json({ error: error.code, message: error.message });
-        return;
-      }
-      logger.error('[COMMANDS] updateCommand error:', error);
-      res.status(500).json({ error: 'Internal server error' });
-    }
-  };
-
-  /**
-   * Shared validation for create/update: parses the appId param and body.
-   * Writes a 400 response and returns null on failure.
-   */
-  private parseUpsertRequest(
-    req: Request,
-    res: Response,
-  ): { appId: string; body: z.infer<typeof UpsertCommandBodySchema> } | null {
-    const params = AppIdParamsSchema.safeParse(req.params);
-    if (!params.success) {
-      res.status(400).json({ error: 'Validation error', details: params.error.issues });
-      return null;
-    }
-    const body = UpsertCommandBodySchema.safeParse(req.body);
-    if (!body.success) {
-      res.status(400).json({ error: 'Validation error', details: body.error.issues });
-      return null;
-    }
-    return { appId: params.data.appId, body: body.data };
-  }
-
-  /**
-   * DELETE /api/apps/:appId/commands/:commandName?commandType=COMMAND|SHORTCUT
-   * Delete a specific command or shortcut.
-   * commandType query param is required.
-   */
-  deleteCommand = async (req: Request, res: Response): Promise<void> => {
-    const params = CommandNameParamsSchema.safeParse(req.params);
-    if (!params.success) {
-      res.status(400).json({ error: 'Validation error', details: params.error.issues });
-      return;
-    }
-
-    const { commandType } = req.query;
-    if (!commandType || !Object.values(CommandType).includes(commandType as CommandType)) {
-      res.status(400).json({
-        error: 'Validation error',
-        details: [{ message: `commandType query param is required and must be one of: ${Object.values(CommandType).join(', ')}` }],
-      });
-      return;
-    }
-
-    try {
-      const app = await repositories.apps.findById(params.data.appId);
-      if (!app) {
-        res.status(404).json({ error: 'App not found', code: 'APP_NOT_FOUND' });
-        return;
-      }
-      // Only the creator may edit the template (matches the apps.update mutator ACL).
-      if (app.createdBy !== req.user?.id) {
-        res.status(403).json({ error: 'Only the app creator can modify this app', code: 'FORBIDDEN' });
-        return;
-      }
-      await appCommandRepository.deleteByAppIdNameAndType(
-        params.data.appId,
-        params.data.commandName,
-        commandType as CommandType,
-      );
-      // Template changed -> bump version so installs see an available Update.
-      await repositories.apps.bumpVersion(params.data.appId);
-      res.status(200).json({ message: 'Deleted' });
-    } catch (error) {
-      logger.error('[COMMANDS] deleteCommand error:', error);
-      res.status(500).json({ error: 'Internal server error' });
-    }
-  };
-
-  /**
-   * GET /api/apps/channel/:channelId/commands?commandType=COMMAND|SHORTCUT[&commandAccessibility=...]
-   * Fetch all commands or shortcuts available in a channel.
-   * commandType query param is required — prevents accidentally returning both.
-   * For shortcuts the response includes appName (used by the shortcut picker UI).
-   */
-  getChannelCommands = async (req: Request, res: Response): Promise<void> => {
-    const params = ChannelIdParamsSchema.safeParse(req.params);
-    if (!params.success) {
-      res.status(400).json({ error: 'Validation error', details: params.error.issues });
-      return;
-    }
-
-    const { commandType, commandAccessibility } = req.query;
-    if (!commandType || !Object.values(CommandType).includes(commandType as CommandType)) {
-      res.status(400).json({
-        error: 'Validation error',
-        details: [{ message: `commandType query param is required and must be one of: ${Object.values(CommandType).join(', ')}` }],
-      });
-      return;
-    }
-
-    const filter: { commandType: CommandType; commandAccessibility?: CommandAccessibility } = {
-      commandType: commandType as CommandType,
-    };
-    if (
-      commandAccessibility &&
-      Object.values(CommandAccessibility).includes(commandAccessibility as CommandAccessibility)
-    ) {
-      filter.commandAccessibility = commandAccessibility as CommandAccessibility;
-    }
-
-    try {
-      // Shortcuts need appName for the picker UI; commands don't
-      if (commandType === CommandType.SHORTCUT) {
-        const shortcuts = await appCommandRepository.findByChannelIdWithAppName(
-          params.data.channelId,
-          filter,
-        );
-        res.status(200).json(shortcuts);
-      } else {
-        const commands = await appCommandRepository.findByChannelId(
-          params.data.channelId,
-          filter,
-        );
-        res.status(200).json(commands);
-      }
-    } catch (error) {
-      logger.error('[COMMANDS] getChannelCommands error:', error);
-      res.status(500).json({ error: 'Internal server error' });
-    }
-  };
 
   /**
    * POST /api/apps/channel/:channelId/command
@@ -523,13 +221,11 @@ export class CommandController {
             commandType,
             identifier: commandName,
             reason: `${commandType === CommandType.COMMAND ? 'command' : 'shortcut'} not found in this channel`,
-            workspaceId: req.user!.workspaceId,
-          });
+            workspaceId: req.user!.workspaceId });
         }
         res.status(404).json({
           error: `${commandType === CommandType.COMMAND ? `Command "/${commandName}"` : `Shortcut "${commandName}"`} not found in this channel`,
-          code: commandType === CommandType.COMMAND ? 'COMMAND_NOT_FOUND' : 'SHORTCUT_NOT_FOUND',
-        });
+          code: commandType === CommandType.COMMAND ? 'COMMAND_NOT_FOUND' : 'SHORTCUT_NOT_FOUND' });
         return;
       }
 
@@ -543,13 +239,11 @@ export class CommandController {
             commandType,
             identifier: commandName,
             reason: 'app is not configured (no webhook URL set)',
-            workspaceId: req.user!.workspaceId,
-          });
+            workspaceId: req.user!.workspaceId });
         }
         res.status(400).json({
           error: `App for ${commandType === CommandType.COMMAND ? `command "/${commandName}"` : `shortcut "${commandName}"`} has no webhook URL configured`,
-          code: 'APP_NOT_CONFIGURED',
-        });
+          code: 'APP_NOT_CONFIGURED' });
         return;
       }
 
@@ -570,8 +264,7 @@ export class CommandController {
         channelId,
         conversationId: conversationId ?? null,
         userId,
-        messageId: messageId ?? null,
-      };
+        messageId: messageId ?? null };
 
       // For message shortcuts, fetch the target message and either send its
       // flowJSON (if it is a flow message) or resolved text with mentions.
@@ -583,8 +276,7 @@ export class CommandController {
         try {
           const message = await db.message.findUnique({
             where: { messageId },
-            select: { content: true },
-          });
+            select: { content: true } });
 
           if (message?.content) {
             const flowJSON = extractFlowJSONFromHtml(message.content);
@@ -614,22 +306,19 @@ export class CommandController {
         actionId: commandName,
         type: eventType,
         values: payloadValues,
-        context: contextPayload,
-      };
+        context: contextPayload };
 
       logger.info('[COMMAND-DISPATCH] Calling app webhook', {
         appId: match.appId,
         commandName,
         commandType,
         channelId,
-        eventType,
-      });
+        eventType });
 
       // Resolve INTERNAL apps to their in-cluster pod URL; EXTERNAL apps go through the SSRF guard.
       const dispatchHeaders: Record<string, string> = {
         'Content-Type': 'application/json',
-        'X-Xyne-Event': eventType,
-      };
+        'X-Xyne-Event': eventType };
       let dispatchUrl: string;
       let dispatchIsInternal = false;
       try {
@@ -640,13 +329,11 @@ export class CommandController {
         if (err instanceof SsrfBlockedError) {
           logger.warn('[COMMAND-DISPATCH] Blocked SSRF-unsafe webhook URL', {
             appId: match.appId,
-            reason: err.message,
-          });
+            reason: err.message });
         } else {
           logger.error('[COMMAND-DISPATCH] Could not resolve app webhook URL', {
             appId: match.appId,
-            error: err,
-          });
+            error: err });
         }
         throw new Error('App webhook URL is not allowed');
       }
@@ -658,8 +345,7 @@ export class CommandController {
         headers: dispatchHeaders,
         body: JSON.stringify(payload),
         redirect: 'manual',
-        signal: AbortSignal.timeout(30_000),
-      };
+        signal: AbortSignal.timeout(30_000) };
       const appResponse = dispatchIsInternal
         ? await fetch(dispatchUrl, dispatchInit)
         : await safeWebhookFetch(dispatchUrl, dispatchInit);
@@ -668,8 +354,7 @@ export class CommandController {
         const errorBody = await appResponse.text().catch(() => 'unknown error');
         logger.error('[COMMAND-DISPATCH] App webhook returned error', {
           status: appResponse.status,
-          body: errorBody.slice(0, 300),
-        });
+          body: errorBody.slice(0, 300) });
         if (userId) {
           await sendErrorNotice({
             channelId,
@@ -679,16 +364,14 @@ export class CommandController {
             commandType,
             identifier: commandName,
             reason: `the app returned an error (HTTP ${appResponse.status})`,
-            workspaceId: req.user!.workspaceId,
-          });
+            workspaceId: req.user!.workspaceId });
         }
         res.status(502).json({ error: `App backend error ${appResponse.status}` });
         return;
       }
 
       res.status(200).json({
-        message: commandType === CommandType.COMMAND ? 'Command dispatched' : 'Shortcut dispatched',
-      });
+        message: commandType === CommandType.COMMAND ? 'Command dispatched' : 'Shortcut dispatched' });
     } catch (error) {
       if (error instanceof Error && error.name === 'TimeoutError') {
         if (userId) {
@@ -700,8 +383,7 @@ export class CommandController {
             commandType,
             identifier: commandName,
             reason: 'the app took too long to respond',
-            workspaceId: req.user!.workspaceId,
-          });
+            workspaceId: req.user!.workspaceId });
         }
         res.status(504).json({ error: 'App backend timed out' });
         return;

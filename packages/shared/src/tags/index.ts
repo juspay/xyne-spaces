@@ -1,3 +1,4 @@
+import { z } from 'zod';
 export const TAG_SCRIPT_TIMEOUT_MAX_MS = 5 * 60 * 1000; // 300,000ms = 5 minutes
 
 /**
@@ -53,6 +54,37 @@ export const findDuplicateTags = (list: string[] | undefined): DuplicateTag[] =>
 };
 
 // Controlled classification vocabulary (thread types).
-export * from './vocabularies';
+export * from './vocabularies.js';
 // The applied-tag record and the one parser/serializer for the stored columns.
-export * from './appliedTags';
+export * from './appliedTags.js';
+
+/** One tag category of a tags config: how its tags are chosen and what they look like. */
+export const CategoryConfigSchema = z
+  .object({
+    method: z.enum(['manual', 'llm']),
+    color: z.string().regex(/^#[0-9a-fA-F]{6}$/, 'color must be a valid hex color (e.g. #0891b2)').optional(),
+    count: z.number().int().positive().optional(),
+    tags: z.array(z.string().regex(TAG_FORMAT_REGEX, TAG_FORMAT_MESSAGE)).optional(),
+    is_new_tag_allowed: z.boolean().optional(),
+    blacklist: z.array(z.string().regex(TAG_FORMAT_REGEX, TAG_FORMAT_MESSAGE)).optional(),
+    prompt: z.string().optional(),
+  })
+  .superRefine((category, ctx) => {
+    for (const { value, index } of findDuplicateTags(category.tags)) {
+      ctx.addIssue({ code: 'custom', path: ['tags', index], message: `tag "${value}" already exists` });
+    }
+    for (const { value, index } of findDuplicateTags(category.blacklist)) {
+      ctx.addIssue({ code: 'custom', path: ['blacklist', index], message: `tag "${value}" already exists` });
+    }
+  });
+
+/** A tags config: categories by name (each name in the tag format). Moved from the backend's tags/schema.ts. */
+export const TagsConfigShapeSchema = z.object({
+  categories: z.record(z.string(), CategoryConfigSchema).superRefine((categories, ctx) => {
+    for (const category of Object.keys(categories)) {
+      if (!TAG_FORMAT_REGEX.test(category)) {
+        ctx.addIssue({ code: 'custom', path: [category], message: `category ${TAG_FORMAT_MESSAGE}` });
+      }
+    }
+  }),
+});

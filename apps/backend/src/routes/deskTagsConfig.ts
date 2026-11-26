@@ -1,17 +1,17 @@
 import { Router } from 'express';
-import { authMiddleware } from '@/middleware/auth';
-import { DeskTagsConfigController } from '../controllers/deskTagsConfigController';
+import { API } from '@xyne/shared';
+import { api } from '@/framework/api';
+import { deskTagsAccess, getChannelTagsConfig, updateChannelTagsConfig } from '@/handlers/settings';
 
-const router = Router({ mergeParams: true }); // mergeParams to access :channelId from parent
-const controller = new DeskTagsConfigController();
+// Typed routes (API.channelTagsConfig), served by the API router behind the contract gate.
+api.routes(API.channelTagsConfig, (serve) => ({
+  get: serve('get', { access: { tags: deskTagsAccess({ manage: false }) }, handle: ({ params }) => getChannelTagsConfig({ params }) }),
+  update: serve('update', {
+    access: { tags: deskTagsAccess({ manage: true }) },
+    handle: ({ params, body, access }) => updateChannelTagsConfig({ params, body, caller: access.tags }),
+  }),
+}));
 
-router.get('/', authMiddleware.authenticate, controller.getConfig);
-router.patch('/', authMiddleware.authenticate, controller.updateConfig);
-// Disabled (LLM)
-// router.post('/preview', authMiddleware.authenticate, controller.previewTagGeneration);
-// router.get('/generated-tag-categories', authMiddleware.authenticate, controller.getGeneratedTagCategories);
-// router.get('/generated-tags/:tagCategory', authMiddleware.authenticate, controller.getGeneratedTagsByCategory);
-// router.get('/conversations-by-tags', authMiddleware.authenticate, controller.filterConversationsByTags);
-// router.get('/generated-tags-by-conversation', authMiddleware.authenticate, controller.getGeneratedTagsByConversation);
-
+// Nothing untyped left under /api/channels/:channelId/tags-config.
+const router = Router({ mergeParams: true });
 export default router;

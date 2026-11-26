@@ -30,50 +30,6 @@ export class FilesController {
   }
 
   /**
-   * Get file metadata by attachment ID
-   * GET /api/external-event/files/info/:attachmentId
-   */
-  getFileInfo = async (req: Request, res: Response): Promise<void> => {
-    try {
-      const { attachmentId } = req.params;
-      const userId = req.user?.id;
-      const workspaceId = req.user?.workspaceId;
-
-      if (!userId) {
-        res.status(401).json({ error: 'Unauthorized', code: 'UNAUTHORIZED' });
-        return;
-      }
-
-      const attachment = await this.messageAttachmentRepository.findById(attachmentId);
-      if (!attachment) {
-        res.status(404).json({ error: 'Attachment not found', code: 'NOT_FOUND' });
-        return;
-      }
-
-      const access = await assertAttachmentAccess(attachment, userId, workspaceId);
-      if (!access.ok) {
-        res.status(access.status).json(access.body);
-        return;
-      }
-
-      res.status(200).json({
-        id: attachment.id,
-        originalFilename: attachment.originalFilename,
-        mimetype: attachment.mimetype,
-        size: attachment.size,
-        width: attachment.width,
-        height: attachment.height,
-        thumbnailUrl: attachment.thumbnailUrl,
-        createdAt: attachment.createdAt,
-        conversationId: attachment.conversationId,
-      });
-    } catch (error) {
-      logger.error('Error fetching file info:', error);
-      res.status(500).json({ error: 'Internal server error' });
-    }
-  };
-
-  /**
    * Download a file by attachment ID (wrapper over internal attachment download logic)
    * GET /api/external-event/files/download/:attachmentId
    */

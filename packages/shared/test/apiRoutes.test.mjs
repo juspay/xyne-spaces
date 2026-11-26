@@ -224,3 +224,49 @@ test('compose slackChatContent: plain text (mrkdwn false), HTML, flow card, hand
   assert.match(card, /^<div data-flow-json="\{&quot;version&quot;:&quot;2.0&quot;,&quot;screenId&quot;:&quot;s1&quot;/);
   assert.equal(runComposeTemplate('slackChatContent', { ...base, text: null, mrkdwn: true }), '');
 });
+
+// A route with a :param must not be registered before a literal route it could capture
+// (`/apps/calls/:callId` before `/apps/calls/summary-templates`): routes match in the table's order.
+test('API table: no duplicate routes, and a generic route never comes before a literal one it captures', () => {
+  const all = routeContracts(API);
+  const keys = all.map((c) => c.key);
+  assert.deepEqual(keys.filter((k, i) => keys.indexOf(k) !== i), [], 'duplicate method + path');
+  const seg = (p) => p.split('/').filter(Boolean);
+  const sample = (p) => seg(p).map((s) => (s.startsWith(':') ? 'x' : s)).join('/');
+  const captures = (pattern, concrete) => {
+    const a = seg(pattern);
+    const b = seg(concrete);
+    return a.length === b.length && a.every((s, i) => s.startsWith(':') || s === b[i]);
+  };
+  for (const [i, generic] of all.entries()) {
+    for (const [j, literal] of all.entries()) {
+      if (i === j || generic.method !== literal.method || generic.path === literal.path) continue;
+      const params = (c) => seg(c.path).filter((s) => s.startsWith(':')).length;
+      if (captures(generic.path, sample(literal.path)) && params(generic) > params(literal)) {
+        assert.ok(j < i, `${literal.key} must come before ${generic.key} in the API table`);
+      }
+    }
+  }
+});
+
+test('Xyne Apps dashboard contracts: bodies keep the controllers\' rules', () => {
+  const d = API.apps.dashboard;
+  assert.equal(d.create.body.safeParse({ name: '' }).success, false, 'empty name');
+  assert.equal(d.configureWebhook.body.safeParse({ webhookUrl: 'not a url' }).success, false);
+  assert.equal(d.commandsCreate.body.safeParse({ commandName: 'Bad Name', description: 'd', commandType: 'COMMAND', commandAccessibility: 'CHAT' }).success, false);
+  assert.equal(d.commandsCreate.body.safeParse({ commandName: 'ok-name', description: 'd', commandType: 'COMMAND', commandAccessibility: 'CHAT' }).success, true);
+  assert.equal(d.commands.query.safeParse({}).success, false, 'commandType is required');
+  assert.equal(d.incomingWebhooksList.query.safeParse({}).data.includeInactive, false);
+  assert.equal(d.incomingWebhooksList.query.safeParse({ includeInactive: 'true', limit: '5' }).data.limit, 5);
+  assert.equal(d.incomingWebhooksCreate.body.safeParse({ installedAppId: 'i', channelId: 'c', name: 'n' }).data.type, 'SLACK');
+});
+
+test('settings contracts: alias, client-event and tags-config rules', () => {
+  assert.equal(API.activityAliases.create.body.safeParse({ eventName: 'e', eventCategory: 'c' }).success, false, 'alias names needed when not blacklisted');
+  assert.equal(API.activityAliases.create.body.safeParse({ eventName: 'e', eventCategory: 'c', isBlacklisted: true }).success, true);
+  assert.equal(API.clientEvents.post.body.safeParse({ userIds: [], event: 'reload' }).success, false, 'userIds must not be empty');
+  assert.equal(API.clientEvents.post.body.safeParse({ userIds: ['u'], event: 'explode' }).success, false, 'unknown event');
+  assert.equal(API.channelTagsConfig.update.body.safeParse({ categories: { 'Bad Name': { method: 'manual' } } }).success, false, 'category name format');
+  assert.equal(API.channelTagsConfig.update.body.safeParse({ categories: { sev: { method: 'manual', tags: ['a', 'a'] } } }).success, false, 'duplicate tags');
+  assert.equal(API.channelTagsConfig.update.body.safeParse({ categories: { sev: { method: 'llm', tags: ['p1', 'p2'] } } }).success, true);
+});

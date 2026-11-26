@@ -18,14 +18,12 @@ import { ExternalSourceRepository } from '@/database/repositories/externalSource
 import {
   AppFetchConfigSchema,
   AppFetchVariables,
-  buildDefaultFetchConfig,
   buildSignedFetchRequest,
   mapExportPage,
   parseFetchConfig,
   preserveRedactedSecrets,
   redactFetchConfig,
-  serializeFetchConfig,
-} from '../core/appFetchConfig';
+  serializeFetchConfig } from '../core/appFetchConfig';
 import { dispatchAppFetch, readCappedText } from '../core/appFetchDispatch';
 import { isInternalMappedHost } from '../core/appUrlResolver';
 
@@ -56,8 +54,7 @@ const TEST_BODY_PREVIEW_LIMIT = 2_000;
 
 const TestFetchBodySchema = z.object({
   /** Optional: test as a specific desk channel, so {{channel.*}} render for real. */
-  channelId: z.string().trim().min(1).optional(),
-});
+  channelId: z.string().trim().min(1).optional() });
 
 export class FetchConfigController {
   /**
@@ -67,70 +64,8 @@ export class FetchConfigController {
    */
   private async findOwnedInstall(installedAppId: string, workspaceId: string) {
     return await repositories.installedApps.findFirst({
-      where: { id: installedAppId, user: { workspaceId } },
-    });
+      where: { id: installedAppId, user: { workspaceId } } });
   }
-
-  /**
-   * GET /apps/installed/:installedAppId/fetch-config
-   *
-   * Returns the stored config, or a suggested default derived from the install's
-   * webhook URL when none is stored yet, so the form opens pre-filled rather than
-   * blank. `configured` tells the two apart.
-   */
-  getFetchConfig = async (req: Request, res: Response): Promise<void> => {
-    try {
-      const { installedAppId } = req.params;
-      const workspaceId = req.user?.workspaceId;
-      if (!installedAppId || !workspaceId) {
-        res.status(400).json({ error: 'installedAppId and workspace are required' });
-        return;
-      }
-
-      const install = await this.findOwnedInstall(installedAppId, workspaceId);
-      if (!install) {
-        res.status(404).json({
-          error: 'Installed app not found in this workspace',
-          code: 'INSTALLED_APP_NOT_FOUND',
-        });
-        return;
-      }
-
-      if (install.fetchConfig) {
-        // Parsed rather than passed through raw: a config stored before a schema
-        // change should surface as an error here, where someone can fix it, not
-        // at fetch time in a worker.
-        try {
-          res.status(200).json({
-            configured: true,
-            config: redactFetchConfig(parseFetchConfig(install.fetchConfig, 'This install')),
-          });
-        } catch (error) {
-          res.status(200).json({
-            configured: true,
-            config: null,
-            invalid: true,
-            error: error instanceof Error ? error.message : String(error),
-          });
-        }
-        return;
-      }
-
-      const suggested = install.webhookUrl?.trim()
-        ? (() => {
-            try {
-              return buildDefaultFetchConfig(install.webhookUrl!.trim());
-            } catch {
-              return null;
-            }
-          })()
-        : null;
-      res.status(200).json({ configured: false, config: suggested });
-    } catch (error) {
-      logger.error('Error reading app fetch config:', error);
-      res.status(500).json({ error: 'Internal server error' });
-    }
-  };
 
   /**
    * PUT /apps/installed/:installedAppId/fetch-config
@@ -154,9 +89,7 @@ export class FetchConfigController {
           code: 'VALIDATION_ERROR',
           issues: parsed.error.issues.map(i => ({
             path: i.path.join('.'),
-            message: i.message,
-          })),
-        });
+            message: i.message })) });
         return;
       }
 
@@ -164,8 +97,7 @@ export class FetchConfigController {
       if (!install) {
         res.status(404).json({
           error: 'Installed app not found in this workspace',
-          code: 'INSTALLED_APP_NOT_FOUND',
-        });
+          code: 'INSTALLED_APP_NOT_FOUND' });
         return;
       }
 
@@ -184,51 +116,17 @@ export class FetchConfigController {
               path: 'url',
               message:
                 `"${forbiddenHost}" is an internal service host and is not this app's own webhook host. ` +
-                'A history fetch may only reach the app it belongs to.',
-            },
-          ],
-        });
+                'A history fetch may only reach the app it belongs to.' },
+          ] });
         return;
       }
 
       const toStore = preserveRedactedSecrets(parsed.data, install.fetchConfig);
       await repositories.installedApps.update(install.id, {
-        fetchConfig: serializeFetchConfig(toStore),
-      });
+        fetchConfig: serializeFetchConfig(toStore) });
       res.status(200).json({ configured: true, config: redactFetchConfig(toStore) });
     } catch (error) {
       logger.error('Error saving app fetch config:', error);
-      res.status(500).json({ error: 'Internal server error' });
-    }
-  };
-
-  /**
-   * DELETE /apps/installed/:installedAppId/fetch-config
-   * Clearing the config disables history pulls for this install; live inbound
-   * delivery is a separate path and is unaffected.
-   */
-  deleteFetchConfig = async (req: Request, res: Response): Promise<void> => {
-    try {
-      const { installedAppId } = req.params;
-      const workspaceId = req.user?.workspaceId;
-      if (!installedAppId || !workspaceId) {
-        res.status(400).json({ error: 'installedAppId and workspace are required' });
-        return;
-      }
-
-      const install = await this.findOwnedInstall(installedAppId, workspaceId);
-      if (!install) {
-        res.status(404).json({
-          error: 'Installed app not found in this workspace',
-          code: 'INSTALLED_APP_NOT_FOUND',
-        });
-        return;
-      }
-
-      await repositories.installedApps.update(install.id, { fetchConfig: null });
-      res.status(200).json({ configured: false });
-    } catch (error) {
-      logger.error('Error clearing app fetch config:', error);
       res.status(500).json({ error: 'Internal server error' });
     }
   };
@@ -257,8 +155,7 @@ export class FetchConfigController {
       if (!install) {
         res.status(404).json({
           error: 'Installed app not found in this workspace',
-          code: 'INSTALLED_APP_NOT_FOUND',
-        });
+          code: 'INSTALLED_APP_NOT_FOUND' });
         return;
       }
 
@@ -276,8 +173,7 @@ export class FetchConfigController {
           res.status(400).json({
             error: 'Invalid fetch configuration',
             code: 'VALIDATION_ERROR',
-            issues: parsed.error.issues.map(i => ({ path: i.path.join('.'), message: i.message })),
-          });
+            issues: parsed.error.issues.map(i => ({ path: i.path.join('.'), message: i.message })) });
           return;
         }
         // Secrets arrive masked unless retyped, exactly as on save — otherwise a
@@ -289,21 +185,18 @@ export class FetchConfigController {
         } catch (error) {
           res.status(400).json({
             error: error instanceof Error ? error.message : String(error),
-            code: 'FETCH_CONFIG_MISSING',
-          });
+            code: 'FETCH_CONFIG_MISSING' });
           return;
         }
       }
 
       const app = await db.apps.findUnique({
         where: { id: install.appId },
-        select: { signingSecret: true },
-      });
+        select: { signingSecret: true } });
       if (!app?.signingSecret) {
         res.status(400).json({
           error: 'App has no signing secret — cannot authenticate the export request',
-          code: 'SIGNING_SECRET_MISSING',
-        });
+          code: 'SIGNING_SECRET_MISSING' });
         return;
       }
 
@@ -312,36 +205,31 @@ export class FetchConfigController {
         appId: install.appId,
         workspaceId,
         channelId: optionsResult.data.channelId,
-        pageSize: config.pageSize,
-      });
+        pageSize: config.pageSize });
 
       const request = buildSignedFetchRequest({
         config,
         vars,
-        signingSecret: decrypt(app.signingSecret),
-      });
+        signingSecret: decrypt(app.signingSecret) });
       // Echoed so the operator can see exactly what the app will receive —
       // headers are omitted, they carry the signature.
       const sent = {
         url: request.url,
         method: config.method,
-        body: typeof request.init.body === 'string' ? request.init.body : null,
-      };
+        body: typeof request.init.body === 'string' ? request.init.body : null };
 
       // globalThis-qualified: express's Response is imported into this module.
       let response: globalThis.Response;
       const startedAt = Date.now();
       try {
         response = await dispatchAppFetch(request, config.timeoutMs, {
-          ownWebhookUrl: install.webhookUrl,
-        });
+          ownWebhookUrl: install.webhookUrl });
       } catch (error) {
         res.status(200).json({
           ok: false,
           stage: 'transport',
           error: error instanceof Error ? error.message : String(error),
-          sent,
-        });
+          sent });
         return;
       }
       const durationMs = Date.now() - startedAt;
@@ -356,8 +244,7 @@ export class FetchConfigController {
           status: response.status,
           durationMs,
           error: error instanceof Error ? error.message : String(error),
-          sent,
-        });
+          sent });
         return;
       }
       const preview = text.slice(0, TEST_BODY_PREVIEW_LIMIT);
@@ -369,8 +256,7 @@ export class FetchConfigController {
           durationMs,
           error: `App returned ${response.status}`,
           responsePreview: preview,
-          sent,
-        });
+          sent });
         return;
       }
 
@@ -387,8 +273,7 @@ export class FetchConfigController {
           durationMs,
           error: 'Response was not valid JSON',
           responsePreview: preview,
-          sent,
-        });
+          sent });
         return;
       }
 
@@ -406,8 +291,7 @@ export class FetchConfigController {
           durationMs,
           error: error instanceof Error ? error.message : String(error),
           responsePreview: preview,
-          sent,
-        });
+          sent });
         return;
       }
 
@@ -420,8 +304,7 @@ export class FetchConfigController {
         ok: !mostlySkipped,
         ...(mostlySkipped && {
           stage: 'contract' as const,
-          error: `${skippedCount} of ${skippedCount + page.messages.length} rows could not be mapped`,
-        }),
+          error: `${skippedCount} of ${skippedCount + page.messages.length} rows could not be mapped` }),
         status: response.status,
         durationMs,
         messageCount: page.messages.length,
@@ -431,8 +314,7 @@ export class FetchConfigController {
         // The mapped message, so an operator sees what Xyne derived rather than
         // what the app sent — that is where a wrong mapping shows up.
         sampleMessage: page.messages[0] ?? null,
-        sent,
-      });
+        sent });
     } catch (error) {
       logger.error('Error testing app fetch config:', error);
       res.status(500).json({ error: 'Internal server error' });
@@ -477,14 +359,12 @@ export class FetchConfigController {
         // First page in either mode: no cursor, offset zero.
         cursor: '',
         offset: 0,
-        limit: pageSize,
-      },
+        limit: pageSize },
       channel: resolvedChannel,
       source: { id: sourceId },
       installedApp: { id: installedAppId },
       app: { id: appId },
-      workspace: { id: workspaceId },
-    };
+      workspace: { id: workspaceId } };
   }
 }
 

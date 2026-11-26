@@ -1,3 +1,38 @@
+import { API } from '@xyne/shared';
+import { api } from '@/framework/api';
+import { resourceAccess } from '@/framework/dashboardAccess';
+import {
+  activateInstalledPermissions,
+  appSigningSecret,
+  botChannels,
+  configureAppWebhook,
+  createApp,
+  createAppCommand,
+  createIncomingWebhook,
+  deleteAppCommand,
+  deleteFetchConfig,
+  getAppPermissions,
+  getFetchConfig,
+  getInstalledPermissions,
+  installAppHandler,
+  listAppCommands,
+  listAttachedResources,
+  listAvailablePermissions,
+  listChannelCommands,
+  listIncomingWebhooks,
+  listInstalledCommands,
+  orgNames,
+  projectBoards,
+  promoteApp,
+  regenerateAppJwt,
+  revokeIncomingWebhook,
+  setAppPermissions,
+  setAttachedResources,
+  setInstalledPermissions,
+  updateAppCommand,
+  updateIncomingWebhook,
+  updateInstalledApp,
+} from '../handlers/appsDashboard';
 import express, { Router } from 'express';
 import { AccessType } from '@xyne/shared';
 import { AppController } from '../controllers/appController';
@@ -21,8 +56,6 @@ import { authenticateApp } from '../middelware/authenticator';
 import { uploadMultiple, uploadConfig } from '@/middleware/upload';
 import { authMiddleware } from '@/middleware/auth';
 import { FlowController } from '../controllers/flowController';
-import { PermissionController } from '../controllers/permissionController';
-import { AppResourceController } from '../controllers/appResourceController';
 import { webhookLimiter } from '@/middleware/rateLimiters';
 import { PlatformAdapterRegistry } from '../platform-adapters/types';
 import { SlackAdapter } from '../platform-adapters/slack';
@@ -31,11 +64,114 @@ const router = Router();
 const appController = new AppController();
 const chatController = new ChatController();
 const flowController = new FlowController();
-const permissionController = new PermissionController();
-const appResourceController = new AppResourceController();
 const platformRegistry = new PlatformAdapterRegistry();
 
 platformRegistry.register(new SlackAdapter());
+
+// ─── Typed routes (contracts in @xyne/shared, API.apps.dashboard) ───────────────
+// The dashboard side: dashboard login, then XYNE-APPS access (resourceAccess). Served by the API
+// router behind the contract gate; handlers in apps/handlers/appsDashboard.ts. Registered here,
+// after the call / channel / user routes imported above, so those literal paths match first.
+/** The dashboard login plus access to the XYNE-APPS resource at `level`. */
+const xyneApps = (level: AccessType) => ({ access: { xyneApps: resourceAccess('XYNE-APPS', level) } });
+
+api.routes(API.apps.dashboard, (serve) => ({
+  create: serve('create', { ...xyneApps(AccessType.WRITE), successStatus: 201, handle: ({ body, user }) => createApp({ body, user }) }),
+  install: serve('install', { ...xyneApps(AccessType.ADMIN), successStatus: 201, handle: ({ params, user }) => installAppHandler({ params, user }) }),
+  promote: serve('promote', { ...xyneApps(AccessType.ADMIN), handle: ({ params, user }) => promoteApp({ params, user }) }),
+  configureWebhook: serve('configureWebhook', {
+    ...xyneApps(AccessType.WRITE),
+    handle: ({ params, body, user }) => configureAppWebhook({ params, body, user }),
+  }),
+  regenerateJwt: serve('regenerateJwt', { ...xyneApps(AccessType.WRITE), handle: ({ params, user }) => regenerateAppJwt({ params, user }) }),
+  signingSecret: serve('signingSecret', { ...xyneApps(AccessType.WRITE), handle: ({ params, user }) => appSigningSecret({ params, user }) }),
+  botChannels: serve('botChannels', { ...xyneApps(AccessType.READ), handle: ({ params, user }) => botChannels({ params, user }) }),
+  projectBoards: serve('projectBoards', { ...xyneApps(AccessType.READ), handle: ({ params, user }) => projectBoards({ params, user }) }),
+  orgNames: serve('orgNames', { ...xyneApps(AccessType.READ), handle: ({ body }) => orgNames({ body }) }),
+
+  // Per-install edits (Installed screen, workspace admin), scoped to the caller's workspace.
+  installedUpdate: serve('installedUpdate', {
+    ...xyneApps(AccessType.WRITE),
+    handle: ({ params, body, user }) => updateInstalledApp({ params, body, user }),
+  }),
+  installedPermissions: serve('installedPermissions', {
+    ...xyneApps(AccessType.READ),
+    handle: ({ params, user }) => getInstalledPermissions({ params, user }),
+  }),
+  installedPermissionsSet: serve('installedPermissionsSet', {
+    ...xyneApps(AccessType.WRITE),
+    handle: ({ params, body, user }) => setInstalledPermissions({ params, body, user }),
+  }),
+  installedPermissionsActivate: serve('installedPermissionsActivate', {
+    ...xyneApps(AccessType.WRITE),
+    handle: ({ params, user }) => activateInstalledPermissions({ params, user }),
+  }),
+  installedCommands: serve('installedCommands', {
+    ...xyneApps(AccessType.READ),
+    handle: ({ params, query, user }) => listInstalledCommands({ params, query, user }),
+  }),
+  installedResources: serve('installedResources', {
+    ...xyneApps(AccessType.READ),
+    handle: ({ params, user }) => listAttachedResources({ params, user }),
+  }),
+  installedResourcesSet: serve('installedResourcesSet', {
+    ...xyneApps(AccessType.ADMIN),
+    handle: ({ params, body, user }) => setAttachedResources({ params, body, user }),
+  }),
+  installedFetchConfig: serve('installedFetchConfig', {
+    ...xyneApps(AccessType.READ),
+    handle: ({ params, user }) => getFetchConfig({ params, user }),
+  }),
+  installedFetchConfigDelete: serve('installedFetchConfigDelete', {
+    ...xyneApps(AccessType.WRITE),
+    handle: ({ params, user }) => deleteFetchConfig({ params, user }),
+  }),
+
+  incomingWebhooksCreate: serve('incomingWebhooksCreate', {
+    ...xyneApps(AccessType.WRITE),
+    successStatus: 201,
+    handle: ({ body, user }) => createIncomingWebhook({ body, user }),
+  }),
+  incomingWebhooksList: serve('incomingWebhooksList', {
+    ...xyneApps(AccessType.READ),
+    handle: ({ params, query, user }) => listIncomingWebhooks({ params, query, user }),
+  }),
+  incomingWebhooksUpdate: serve('incomingWebhooksUpdate', {
+    ...xyneApps(AccessType.WRITE),
+    handle: ({ params, body, user }) => updateIncomingWebhook({ params, body, user }),
+  }),
+  incomingWebhooksRevoke: serve('incomingWebhooksRevoke', {
+    ...xyneApps(AccessType.WRITE),
+    handle: ({ params, user }) => revokeIncomingWebhook({ params, user }),
+  }),
+
+  // Commands (user auth) — the commands available in a channel; login only.
+  channelCommands: serve('channelCommands', { handle: ({ params, query }) => listChannelCommands({ params, query }) }),
+
+  // Permission management (user auth). The registry list is login only.
+  permissions: serve('permissions', { handle: () => listAvailablePermissions() }),
+  permissionsGet: serve('permissionsGet', { ...xyneApps(AccessType.READ), handle: ({ params }) => getAppPermissions({ params }) }),
+  permissionsSet: serve('permissionsSet', {
+    ...xyneApps(AccessType.WRITE),
+    handle: ({ params, body, user }) => setAppPermissions({ params, body, user }),
+  }),
+
+  // Commands (user auth), per app: last, so `/:appId/commands` never captures a literal path above.
+  commands: serve('commands', { ...xyneApps(AccessType.READ), handle: ({ params, query }) => listAppCommands({ params, query }) }),
+  commandsCreate: serve('commandsCreate', {
+    ...xyneApps(AccessType.WRITE),
+    successStatus: 201,
+    handle: ({ params, body, user }) => createAppCommand({ params, body, user }),
+  }),
+  commandsUpdate: serve('commandsUpdate', {
+    ...xyneApps(AccessType.WRITE),
+    handle: ({ params, body, user }) => updateAppCommand({ params, body, user }),
+  }),
+  commandsDelete: serve('commandsDelete', {
+    ...xyneApps(AccessType.WRITE),
+    handle: ({ params, query, user }) => deleteAppCommand({ params, query, user }),
+  }),
+}));
 
 // Type-prefixed webhook routes must stay ABOVE the 3-segment catch-all below,
 // otherwise the prefix is captured as :workspaceId.
@@ -50,37 +186,15 @@ router.post('/webhooks/hubspot/:workspaceId/:appId/:secret', express.text({ type
 router.post('/webhooks/:workspaceId/:appId/:secret', webhookLimiter, incomingWebhookController.handleIncoming);
 const commandController = new CommandController();
 
-router.post('/create', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.WRITE), appController.createApp);
-router.post('/install/:appId', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.ADMIN), appController.installApp);
-router.post('/promote/:appId', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.ADMIN), appController.promoteApp);
-router.post('/configureWebhook/:appId', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.WRITE), appController.configureWebhook);
-router.post('/regenerate-jwt/:appId', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.WRITE), appController.regenerateJwt);
-router.post('/signing-secret/:appId', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.WRITE), appController.getSigningSecret);
 router.post('/upload-picture/:appId', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.WRITE), uploadConfig.single('picture'), appController.uploadBotPicture);
-router.get('/bot-channels/:appId', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.READ), appController.getBotChannels);
-router.get('/project-boards/:projectId', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.READ), appController.getProjectBoards);
-router.post('/org-names', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.READ), appController.getOrgNames);
 
 // Per-install edits (Installed screen, workspace admin). Scoped to the caller's workspace.
-router.patch('/installed/:installedAppId', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.WRITE), appController.updateInstalledApp);
-router.get('/installed/:installedAppId/permissions', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.READ), permissionController.getInstalledGranted);
-router.post('/installed/:installedAppId/permissions', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.WRITE), permissionController.setInstalledPermissions);
-router.post('/installed/:installedAppId/permissions/activate', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.WRITE), permissionController.activateInstalledPermissions);
-router.get('/installed/:installedAppId/commands', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.READ), commandController.getInstalledCommands);
-router.get('/installed/:installedAppId/resources/:resourceType', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.READ), appResourceController.listAttached);
-router.patch('/installed/:installedAppId/resources/:resourceType', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.ADMIN), appResourceController.setAttached);
 
 // App Desk history fetch config. The test route makes a real outbound call on the
 // caller's behalf, so it is WRITE rather than READ.
-router.get('/installed/:installedAppId/fetch-config', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.READ), fetchConfigController.getFetchConfig);
 router.put('/installed/:installedAppId/fetch-config', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.WRITE), fetchConfigController.putFetchConfig);
-router.delete('/installed/:installedAppId/fetch-config', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.WRITE), fetchConfigController.deleteFetchConfig);
 router.post('/installed/:installedAppId/fetch-config/test', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.WRITE), webhookLimiter, fetchConfigController.testFetchConfig);
 
-router.post('/incoming-webhooks', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.WRITE), incomingWebhookController.createWebhook);
-router.get('/incoming-webhooks/:installedAppId', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.READ), incomingWebhookController.listWebhooks);
-router.patch('/incoming-webhooks/:webhookId', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.WRITE), incomingWebhookController.updateWebhook);
-router.post('/incoming-webhooks/:webhookId/revoke', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.WRITE), incomingWebhookController.revokeWebhook);
 
 // User-initiated app action dispatch (user auth, not app token)
 router.post("/chat/action", authMiddleware.authenticate, chatController.dispatchAction);
@@ -88,7 +202,6 @@ router.post("/chat/action", authMiddleware.authenticate, chatController.dispatch
 // Channel commands (user auth) — fetch available commands + dispatch when user presses Enter
 // These must be declared BEFORE router.use('/channel', authenticateApp, ...) to avoid
 // being intercepted by the app-token authenticateApp middleware.
-router.get('/channel/:channelId/commands', authMiddleware.authenticate, commandController.getChannelCommands);
 router.post('/channel/:channelId/command', authMiddleware.authenticate, commandController.dispatchCommand);
 
 // Channel routes
@@ -132,15 +245,8 @@ platformRegistry.mountAll(router);
 
 // ─── Permission management (user auth) ─────────────────────────────────────
 // matched as an appId param.
-router.get('/permissions', authMiddleware.authenticate, permissionController.listAvailable);
-router.get('/permissions/:appId', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.READ), permissionController.getGranted);
-router.post('/permissions/:appId', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.WRITE), permissionController.setPermissions);
 
 // Commands (user auth) — manage commands per app
-router.get('/:appId/commands', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.READ), commandController.getCommands);
-router.post('/:appId/commands', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.WRITE), commandController.createCommand);
-router.put('/:appId/commands', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.WRITE), commandController.updateCommand);
-router.delete('/:appId/commands/:commandName', authMiddleware.authenticate, authorize('XYNE-APPS', AccessType.WRITE), commandController.deleteCommand);
 
 
 // Channel commands user-auth routes are declared above, before authenticateApp middleware.

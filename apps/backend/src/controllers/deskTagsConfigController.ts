@@ -1,8 +1,7 @@
 import { Request, Response } from 'express';
-import { tagService, TagsConfigShapeSchema, invalidateTagConfigCache, DEFAULT_DESK_EMAIL_CONFIG } from '@/tags';
+import { tagService, TagsConfigShapeSchema, DEFAULT_DESK_EMAIL_CONFIG } from '@/tags';
 import { deskEmailConfigKey, DESK_EMAIL_SOURCE_TYPE } from '@/tags';
 import { getGroupedTagsWithConfig } from '@/tags/presentation';
-import type { TagsConfigShape } from '@/tags';
 import { logger } from '../utils/logger';
 import { TAG_FORMAT_REGEX, ChannelRole } from '@xyne/shared';
 import { ChannelParticipantRepository } from '@/database/repositories/channelParticipantRepository';
@@ -79,65 +78,6 @@ export class DeskTagsConfigController {
 
     return userId;
   }
-
-  /**
-   * GET /api/channels/:channelId/tags-config
-   * Returns the desk-email tag-generation categories configured for this channel.
-   */
-  getConfig = async (req: Request, res: Response): Promise<void> => {
-    const { channelId } = req.params;
-    const userId = await this.assertAccess(req, res, channelId);
-    if (!userId) return;
-
-    try {
-      const config = await tagService.getConfig(deskEmailConfigKey(channelId));
-      if (!config) {
-        res.status(200).json({ categories: DEFAULT_DESK_EMAIL_CONFIG.categories, isDefault: true });
-        return;
-      }
-      const parsed = TagsConfigShapeSchema.safeParse(config.config);
-      const categories = parsed.success ? parsed.data.categories : {};
-      res.status(200).json({ categories, isDefault: false });
-    } catch (error) {
-      logger.error('[DESK-TAGS-CONFIG] Failed to get config', { channelId, error });
-      res.status(500).json({ error: 'Failed to get tag generation config' });
-    }
-  };
-
-  /**
-   * PATCH /api/channels/:channelId/tags-config
-   * Replaces the desk-email tag-generation categories for this channel.
-   * Requires desk owner or channel admin.
-   */
-  updateConfig = async (req: Request, res: Response): Promise<void> => {
-    const { channelId } = req.params;
-    const userId = await this.assertAccess(req, res, channelId, true);
-    if (!userId) return;
-    const workspaceId = req.user?.workspaceId;
-    if (!workspaceId) return; // assertAccess already guaranteed this; satisfies TS
-
-    const { categories } = req.body as { categories?: unknown };
-
-    const parsed = TagsConfigShapeSchema.safeParse({ categories });
-    if (!parsed.success) {
-      res.status(400).json({ error: 'Invalid categories', issues: parsed.error.issues });
-      return;
-    }
-
-    const configKey = deskEmailConfigKey(channelId);
-    const shape: TagsConfigShape = parsed.data;
-
-    try {
-      await tagService.upsertConfig(configKey, DESK_EMAIL_SOURCE_TYPE, workspaceId, shape, userId);
-      // Evict the worker-side Redis cache so the pipeline picks up the new config
-      // on the very next job rather than waiting for the TTL to expire.
-      await invalidateTagConfigCache(configKey);
-      res.status(200).json({ categories: shape.categories });
-    } catch (error) {
-      logger.error('[DESK-TAGS-CONFIG] Failed to update config', { channelId, error });
-      res.status(500).json({ error: 'Failed to update tag generation config' });
-    }
-  };
 
   /**
    * POST /api/channels/:channelId/tags-config/preview

@@ -1,54 +1,14 @@
 import { z } from 'zod';
-import { TAG_FORMAT_MESSAGE, TAG_FORMAT_REGEX, findDuplicateTags, TagMethod } from '@xyne/shared';
+import { CategoryConfigSchema, TAG_FORMAT_MESSAGE, TAG_FORMAT_REGEX, TagMethod, TagsConfigShapeSchema } from '@xyne/shared';
 
 export const TagMethodSchema = z.nativeEnum(TagMethod);
 
 
 const TagNameSchema = z.string().regex(TAG_FORMAT_REGEX, TAG_FORMAT_MESSAGE);
 
-export const CategoryConfigSchema = z
-  .object({
-    method: z.enum(['manual', 'llm']),
-    color: z.string().regex(/^#[0-9a-fA-F]{6}$/, 'color must be a valid hex color (e.g. #0891b2)').optional(),
-    count: z.number().int().positive().optional(),
-    tags: z.array(TagNameSchema).optional(),
-    is_new_tag_allowed: z.boolean().optional(),
-    blacklist: z.array(TagNameSchema).optional(),
-    prompt: z.string().optional(),
-  })
-  .superRefine((category, ctx) => {
-    for (const { value, index } of findDuplicateTags(category.tags)) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['tags', index],
-        message: `tag "${value}" already exists`,
-      });
-    }
-
-    for (const { value, index } of findDuplicateTags(category.blacklist)) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['blacklist', index],
-        message: `tag "${value}" already exists`,
-      });
-    }
-  });
-
-export const TagsConfigShapeSchema = z.object({
-  categories: z
-    .record(z.string(), CategoryConfigSchema)
-    .superRefine((categories, ctx) => {
-      for (const category of Object.keys(categories)) {
-        if (!TAG_FORMAT_REGEX.test(category)) {
-          ctx.addIssue({
-            code: z.ZodIssueCode.custom,
-            path: [category],
-            message: `category ${TAG_FORMAT_MESSAGE}`,
-          });
-        }
-      }
-    }),
-});
+// CategoryConfigSchema and TagsConfigShapeSchema live in @xyne/shared (tags/index.ts), so the
+// typed route for a channel's tags config validates its body with them.
+export { CategoryConfigSchema, TagsConfigShapeSchema };
 
 export const GeneratedTagSchema = z.object({
   category: z.string().min(1),

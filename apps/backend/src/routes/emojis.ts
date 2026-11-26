@@ -2,6 +2,15 @@ import express, { Request, Response, NextFunction } from 'express';
 import { customEmojiController } from '../controllers/customEmojiController';
 import { uploadSingle } from '../middleware/upload';
 import { config } from '../config/env';
+import { API } from '@xyne/shared';
+import { api } from '@/framework/api';
+import { deleteEmoji, getEmoji, listEmojis } from '@/handlers/settings';
+
+api.routes(API.emojis, (serve) => ({
+  list: serve('list', { handle: () => listEmojis() }),
+  get: serve('get', { handle: ({ params }) => getEmoji({ params }) }),
+  delete: serve('delete', { handle: ({ params, user }) => deleteEmoji({ params, user }) }),
+}));
 
 const router = express.Router();
 
@@ -28,18 +37,16 @@ const setCrossOriginHeaders = (req: Request, res: Response, next: NextFunction):
   next();
 };
 
-// Custom emoji CRUD routes
-router.get('/', customEmojiController.getAllCustomEmojis);
+// Typed routes (API.emojis: list, get, delete) are served by the API router behind the contract gate.
+// The image stream and the upload (a file streamed to storage) stay here.
 // Stream emoji image - must come before /:emojiId to avoid route conflicts
 router.get(
   '/:emojiId/stream',
   setCrossOriginHeaders,
   customEmojiController.streamEmojiImage.bind(customEmojiController)
 );
-router.get('/:emojiId', customEmojiController.getCustomEmojiById);
 // Create emoji with file upload - upload middleware must come before auth
 // Note: auth is applied at app.ts level
 router.post('/', uploadSingle({ maxBytes: 256 * 1024 }), customEmojiController.createCustomEmoji);
-router.delete('/:emojiId', customEmojiController.deleteCustomEmoji);
 
 export default router;

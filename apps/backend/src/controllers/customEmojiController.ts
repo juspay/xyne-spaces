@@ -14,7 +14,7 @@ const storageService = getStorageService();
 /**
  * Transform a Prisma CustomEmoji to the frontend-friendly format
  */
-function transformEmoji(emoji: CustomEmojiWithRelations): any {
+export function transformEmoji(emoji: CustomEmojiWithRelations): any {
   return {
     id: emoji.id,
     name: emoji.name,
