@@ -1,38 +1,13 @@
 import type { Transaction } from '@rocicorp/zero';
-import { MessageType, Schema } from '@xyne/shared';
+import { Schema } from '@xyne/shared';
 import { zql } from '../../queries';
-import {
-  buildInitialMessageMd,
-  serializeParentMessageMd,
-} from '@xyne/shared';
-import type { ParentMessageSummary } from '@xyne/shared';
 import { BaseMutationSyncHandler } from '../base-handler';
+import { composeInitialMessageMd, composeParentMessageMd } from '../composeMd';
 
 export class ConversationsMutationSyncHandler extends BaseMutationSyncHandler {
   async onInsert(args: unknown, tx: Transaction<Schema>): Promise<void> {
     await handleConversationInsert(args, tx);
   }
-}
-
-
-function buildParentMessageSummary(
-  message: {
-    messageId: string;
-    conversationId: string;
-    senderId: string;
-    content: string;
-    msgType: MessageType;
-    createdAt: number;
-  },
-): ParentMessageSummary {
-  return {
-    messageId: message.messageId,
-    conversationId: message.conversationId,
-    senderId: message.senderId,
-    content: message.content,
-    msgType: message.msgType,
-    createdAt: message.createdAt,
-  };
 }
 
 async function handleConversationInsert(
@@ -61,10 +36,7 @@ async function handleConversationInsert(
     );
 
     if (message) {
-      await tx.mutate.conversations.update({
-        conversationId,
-        initial_message_md: buildInitialMessageMd(message),
-      });
+      await composeInitialMessageMd(tx, message, conversation);
     }
   }
 
@@ -75,10 +47,7 @@ async function handleConversationInsert(
     );
 
     if (parentMessage) {
-      await tx.mutate.conversations.update({
-        conversationId,
-        parent_message_md: serializeParentMessageMd(buildParentMessageSummary(parentMessage)),
-      });
+      await composeParentMessageMd(tx, parentMessage, conversation);
     }
   }
 }
