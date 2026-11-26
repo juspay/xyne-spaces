@@ -5427,7 +5427,7 @@ const KanbanBoardScreenContent: React.FC<Omit<BoardKanbanScreenProps, 'noun'>> =
       ) : layoutView === 'table' ? (
         <div
           ref={setTableScrollElement}
-          className='flex-1 overflow-y-auto p-4 space-y-4 bg-background pb-14'
+          className='flex-1 overflow-y-auto px-4 space-y-4 bg-background pb-14 before:block before:h-4'
         >
           {isTableEmpty && (
             <div className='rounded-lg border border-border bg-muted p-4 text-sm text-muted-foreground'>
