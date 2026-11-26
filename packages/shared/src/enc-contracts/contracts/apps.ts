@@ -1,6 +1,5 @@
 import { z } from 'zod';
-import { defineRequestContract, type RequestOf } from '../define.js';
-import { unreadableString } from '../unreadable-string.js';
+import { hasText, unreadableString } from '../unreadable-string.js';
 import { defineRoute } from '../api-route.js';
 import { MESSAGE_DELIVERY } from '../../validation/flowSchema.js';
 import { conversationsSendClient } from './conversations.js';
@@ -19,82 +18,11 @@ const slackTextFacts = {
 } as const;
 
 /**
- * Xyne Apps `POST /apps/chat/postMessage`, sent by bots through the transit proxy, which
- * encrypts `markdownText` under the apps transit keys; the handler stores the workspace-DEK
- * ciphertext as-is. The message's insert side effects read these facts instead of parsing the
- * content (mentions, `@channel` / `@here`, link preview, PR links, Meet links, bot command):
- * the same facts, under the same names, as the dashboard's `conversations.send`, because both
- * end in the same message insert job (`derived.fields.content`).
- * `text` is encrypted too: its Slack mentions are found by the encryption service
- * (`slackMention*` facts), looked up by the backend, and the HTML is built from the encrypted
- * text by the compose template slackMessageContent. `flow` and `attachments` stay plaintext
- * (the ingress proxy encrypts top-level strings only).
+ * The facts of a message's content (mentions, `@channel` / `@here`, link preview, PR links, Meet
+ * links, bot command): the same facts, under the same names, as the dashboard's
+ * `conversations.send`, because both end in the same message insert job.
  */
-export const appsChatPostMessageClient = defineRequestContract({
-  sourceToDerived: {
-    markdownText: conversationsSendClient.sourceToDerived.content,
-    // `text` is either Slack format (built into HTML by compose; the result's facts are derived
-    // then) or, with contentFormat markdown, the content itself: hence both sets of facts.
-    text: { ...conversationsSendClient.sourceToDerived.content, ...slackTextFacts },
-  },
-  schema: z.object({
-    channelId: z.string().optional(),
-    channelName: z.string().optional(),
-    conversationId: z.string().optional(),
-    text: unreadableString().optional(),
-    markdownText: unreadableString().optional(),
-    flow: z.unknown().optional(),
-    attachments: z.array(z.unknown()).optional(),
-  }),
-});
-
-export type AppsChatPostMessageRequest = RequestOf<typeof appsChatPostMessageClient>;
-
-/**
- * Xyne Apps `POST /apps/chat/updateMessage`: same treatment as postMessage. The ingress
- * proxy encrypts `markdownText`; the handler stores the workspace-DEK ciphertext as-is.
- * `text` is encrypted and built into HTML the same way; `flowJSON` stays plaintext.
- */
-export const appsChatUpdateMessageClient = defineRequestContract({
-  sourceToDerived: { markdownText: {}, text: slackTextFacts },
-  schema: z.object({
-    messageId: z.string(),
-    channelId: z.string().optional(),
-    channelName: z.string().optional(),
-    text: unreadableString().optional(),
-    markdownText: unreadableString().optional(),
-    flowJSON: z.unknown().optional(),
-    attachments: z.array(z.unknown()).optional(),
-  }),
-});
-
-export type AppsChatUpdateMessageRequest = RequestOf<typeof appsChatUpdateMessageClient>;
-
-/**
- * Xyne Apps `POST /apps/chat/postEphemeral`: the ingress proxy encrypts `markdownText`, and
- * the encryption service turns it into workspace-DEK ciphertext (MASTER_DEK), as for
- * postMessage, so the backend and Redis never hold it in the clear. The message is never
- * stored: the backend relays the ciphertext to the recipient's sockets, re-encrypting it per
- * socket for that tab's transit key (websocketService.handleUserEvent), and the browser
- * decrypts it (useEphemeralMessages). Nothing is derived from markdownText (no insert job reads
- * facts); `text` is encrypted and built into HTML as for postMessage. `flow` stays plaintext.
- */
-export const appsChatPostEphemeralClient = defineRequestContract({
-  sourceToDerived: { markdownText: {}, text: slackTextFacts },
-  schema: z.object({
-    channelId: z.string().optional(),
-    channelName: z.string().optional(),
-    conversationId: z.string().optional(),
-    user: z.string(),
-    messageDelivery: z.string().optional(),
-    text: unreadableString().optional(),
-    markdownText: unreadableString().optional(),
-    flow: z.unknown().optional(),
-    attachments: z.array(z.unknown()).optional(),
-  }),
-});
-
-export type AppsChatPostEphemeralRequest = RequestOf<typeof appsChatPostEphemeralClient>;
+const contentFacts = conversationsSendClient.sourceToDerived.content;
 
 // ─── Route contracts (method, address, body, response) ────────────────────────
 // The body schemas below were the chat controller's own (PostMessageBodySchema,
@@ -114,10 +42,13 @@ const appsUploadedFileSchema = z.object({
 
 /** Fields every chat message body has (postMessage, updateMessage). */
 const appsChatMessageFields = {
-  /** Plain text or Slack BlockKit, processed through the BlockKit parser. */
-  text: z.string().optional(),
-  /** Raw markdown (optional frontmatter), stored as-is. Encrypted by the ingress transit proxy. */
-  markdownText: z.string().optional(),
+  /**
+   * Plain text or Slack BlockKit. Encrypted (the ingress transit proxy, MASTER_DEK): the
+   * encryption service builds the message HTML from it (compose), the backend reads its facts.
+   */
+  text: unreadableString().optional(),
+  /** Raw markdown (optional frontmatter), stored as-is. Encrypted by the ingress transit proxy (MASTER_DEK). */
+  markdownText: unreadableString().optional(),
   attachments: z.array(z.any()).optional(),
   /** Message metadata (e.g. hasAppActions, appId). */
   metadata: z.record(z.string(), z.unknown()).optional(),
@@ -159,7 +90,7 @@ export const appsChatPostMessageFields = {
 export function refineAppsChatPostMessage<S extends z.ZodObject<typeof appsChatPostMessageFields>>(schema: S) {
   return schema
     .refine(
-      (data) => !!data.text || !!data.markdownText || !!data.flow || (!!data.attachments && data.attachments.length > 0),
+      (data) => hasText(data.text) || hasText(data.markdownText) || !!data.flow || (!!data.attachments && data.attachments.length > 0),
       { message: 'Either text, markdownText, flow, or attachments is required', path: ['text'] },
     )
     .refine((data) => !!data.channelId || !!data.channelName || !!data.conversationId, {
@@ -207,7 +138,7 @@ export const appsChatUpdateMessageBodySchema = z
     flowJSON: z.record(z.string(), z.unknown()).optional(),
   })
   .refine(
-    (data) => !!data.text || !!data.markdownText || !!data.flowJSON || (!!data.attachments && data.attachments.length > 0),
+    (data) => hasText(data.text) || hasText(data.markdownText) || !!data.flowJSON || (!!data.attachments && data.attachments.length > 0),
     { message: 'Either text, markdownText, flowJSON, or attachments is required', path: ['text'] },
   );
 
@@ -273,22 +204,25 @@ export const appsChatPostMessage = defineRoute({
   method: 'POST',
   path: '/apps/chat/postMessage',
   body: appsChatPostMessageBodySchema,
+  // `text` is Slack format (built into HTML by compose; the facts come from the result) or, with
+  // contentFormat markdown, the content itself: hence both sets of facts.
+  facts: { markdownText: contentFacts, text: { ...contentFacts, ...slackTextFacts } },
   response: appsChatActionResponseSchema,
-  encryption: appsChatPostMessageClient,
 });
 
 export const appsChatPostEphemeral = defineRoute({
   method: 'POST',
   path: '/apps/chat/postEphemeral',
   body: appsChatPostEphemeralBodySchema,
+  // Never stored: nothing reads facts of markdownText; `text` is built into HTML as for postMessage.
+  facts: { markdownText: {}, text: slackTextFacts },
   response: appsChatPostEphemeralResponseSchema,
-  encryption: appsChatPostEphemeralClient,
 });
 
 export const appsChatUpdateMessage = defineRoute({
   method: 'POST',
   path: '/apps/chat/updateMessage',
   body: appsChatUpdateMessageBodySchema,
+  facts: { markdownText: {}, text: slackTextFacts },
   response: appsChatActionResponseSchema,
-  encryption: appsChatUpdateMessageClient,
 });

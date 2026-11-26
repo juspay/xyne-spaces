@@ -1,7 +1,7 @@
 import express, { type NextFunction, type Request, type Response } from 'express';
 import request from 'supertest';
 import { z } from 'zod';
-import { defineRequestContract, defineRoute } from '@xyne/shared';
+import { defineRoute, unreadableString } from '@xyne/shared';
 
 const mockConfig = {
   env: 'test',
@@ -103,8 +103,6 @@ function makeApp(withGate = true) {
   return app;
 }
 
-const noteEncryption = defineRequestContract({ schema: z.object({ note: z.string().optional() }) });
-
 const echo = defineRoute({
   method: 'POST',
   path: '/test/echo/:id',
@@ -128,9 +126,9 @@ const appGroup = {
   post: defineRoute({
     method: 'POST',
     path: '/test/apps/post',
-    body: z.object({ channelId: z.string().min(1), note: z.string().optional() }),
+    body: z.object({ channelId: z.string().min(1), note: unreadableString().optional() }),
+    facts: { note: {} },
     response: z.object({ channel: z.string(), app: z.string().nullable(), facts: z.array(z.string()) }),
-    encryption: noteEncryption,
   }),
   fail: defineRoute({
     method: 'GET',
@@ -161,9 +159,9 @@ api.routes(appGroup, (serve) => ({
 const sessionEncrypted = defineRoute({
   method: 'PUT',
   path: '/test/session/note',
-  body: z.object({ note: z.string() }),
+  body: z.object({ note: unreadableString() }),
+  facts: { note: {} },
   response: z.object({ ok: z.boolean() }),
-  encryption: noteEncryption,
 });
 api.route(sessionEncrypted, {
   encryption: { resolveWorkspaceId: async () => 'ws-1' },
@@ -325,9 +323,9 @@ describe('with the ingress transit proxy deployed', () => {
     const contract = shared.defineRoute({
       method: 'POST',
       path: '/apps/test/proxied',
-      body: z.object({ note: z.string().optional() }),
+      body: z.object({ note: shared.unreadableString().optional() }),
+      facts: { note: {} },
       response: z.object({ facts: z.array(z.string()) }),
-      encryption: shared.defineRequestContract({ schema: z.object({ note: z.string().optional() }) }),
     });
     freshApi.route(contract, {
       auth: 'app',

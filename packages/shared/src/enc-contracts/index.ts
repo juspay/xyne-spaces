@@ -1,7 +1,7 @@
 export { EXTRACTORS, derive, derivedFactsSchema, fieldFactsSchema } from './extractors.js';
 export type { Derivable, ExtractorGroups, ExtractorName, ExtractorOutput, FieldFacts, DerivedFacts } from './extractors.js';
 export { defineRequestContract, makeUnreadable, sourceFieldNames, derivedNames } from './define.js';
-export { UnreadableString, reveal, unreadableString } from './unreadable-string.js';
+export { UnreadableString, hasText, reveal, unreadableString } from './unreadable-string.js';
 export { COMPOSE_TEMPLATES, defineComposeTemplate, forwardedMessageEditTemplate, forwardedMessageTemplate, isComposeTemplateName, runComposeTemplate, slackMessageContentTemplate, slackChatContentTemplate, markdownContentTemplate, slackMentionTargetsSchema } from './compose.js';
 export type { ComposeInputs, ComposeResult, ComposeTemplate, ComposeTemplateName } from './compose.js';
 export type { DerivedSpec, Encrypted, FieldDerived, RequestContract, RequestBody, RequestDerived, RequestOf, SourceToDerived, UnreadableBody } from './define.js';
@@ -26,10 +26,6 @@ export { sdlcCreateTrackClient, sdlcUpdateTrackClient, sdlcAddSdlcFolderItemClie
 export { draftCreateAttachmentsClient, markThreadActivitiesAsReadV2Client, markChannelAsViewedClient } from './contracts/drafts.js';
 export { recapSetCustomRecapPromptClient, userPresenceUpsertClient } from './contracts/presence.js';
 export { ticketUpdateClient } from './contracts/tickets.js';
-export { appsChatPostMessageClient, appsChatUpdateMessageClient } from './contracts/apps.js';
-export type { AppsChatPostMessageRequest, AppsChatUpdateMessageRequest } from './contracts/apps.js';
-export { appsChatPostEphemeralClient } from './contracts/apps.js';
-export type { AppsChatPostEphemeralRequest } from './contracts/apps.js';
 export {
   appsChatPostMessage,
   appsChatPostEphemeral,
@@ -49,10 +45,10 @@ export {
   appsFlowInputSchema,
   refineAppsChatPostMessage,
 } from './contracts/apps.js';
-export { ROUTE_METHODS, defineRoute, routeContracts, routeSpecProblems } from './api-route.js';
-export type { AnyRouteContract, RouteBody, RouteBodyInput, RouteContract, RouteDerived, RouteGroup, RouteMethod, RouteParams, RouteQuery, RouteResponse } from './api-route.js';
+export { ROUTE_METHODS, defineRoute, defineRouter, requestContractOf, routeContracts, routeSpecProblems } from './api-route.js';
+export type { AnyRouteContract, FactsFor, Prefixed, RouteBody, RouteBodyInput, RouteContract, RouteDerived, RouteGroup, RouteMethod, RouteParams, RouteQuery, RouteResponse, RouteTable, UnreadableKeys } from './api-route.js';
 export { API } from './api.js';
-export { appsSlackChatDelete, appsSlackChatDeleteBodySchema, appsSlackChatDeleteResponseSchema, appsSlackChatPostMessage, appsSlackChatPostEphemeral, appsSlackChatUpdate, appsSlackChatPostMessageClient, appsSlackChatPostEphemeralClient, appsSlackChatUpdateClient } from './contracts/appsSlack.js';
+export { appsSlackChatDelete, appsSlackChatDeleteBodySchema, appsSlackChatDeleteResponseSchema, appsSlackChatPostMessage, appsSlackChatPostEphemeral, appsSlackChatUpdate } from './contracts/appsSlack.js';
 export { appsChannelDeskConfig, appsChannelInfo, appsChannelList, appsChannelOpenDm, appsChannelUpdate } from './contracts/appsChannels.js';
 export { appsGuestsCreate, appsGuestsGet, appsGuestsToken, appsGuestsUpdate, appsUserGroupsList, appsUserInfo } from './contracts/appsUsers.js';
 export { appsCallsGet, appsCallsSummaryTemplate, appsCallsSummaryTemplates, appsTicketBoardStages, appsTicketBoards, appsTicketListBySender } from './contracts/appsCallsTickets.js';

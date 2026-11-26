@@ -47,6 +47,16 @@ export function reveal(wrapper: UnreadableString): string {
   return values.get(wrapper) as string;
 }
 
+/**
+ * Whether an optional text field carries any characters, for a contract's "one of these is
+ * required" checks: `!!value` would be true for every `UnreadableString`, even an empty one.
+ * Reads only the length, never the content (a ciphertext of "" is not empty, as before).
+ */
+export function hasText(value: string | UnreadableString | null | undefined): boolean {
+  if (value instanceof UnreadableString) return (values.get(value) ?? '').length > 0;
+  return !!value;
+}
+
 const unreadableSchemas = new WeakSet<object>();
 
 /**

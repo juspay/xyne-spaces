@@ -6,10 +6,13 @@ import {
   derivedNames,
   isCiphertextValue,
   makeUnreadable,
+  requestContractOf,
   reveal,
   UnreadableString,
   type AnyRouteContract,
   type RequestContract,
+  type RouteContract,
+  type SourceToDerived,
   type RouteBody,
   type RouteDerived,
   type RouteGroup,
@@ -108,12 +111,15 @@ export type HandlerInput<C, A extends AccessChecks> = CheckInput<C> & {
   userAgent: string | undefined;
 };
 
-type EncryptionImpl<C> = C extends { encryption: RequestContract }
-  ? {
-      /** Workspace whose DEK the encrypted fields are stored under. */
-      resolveWorkspaceId: (req: Request) => Promise<string>;
-    }
-  : never;
+type EncryptionImpl = {
+  /** Workspace whose DEK the encrypted fields are stored under. */
+  resolveWorkspaceId: (req: Request) => Promise<string>;
+};
+
+/** Whether the contract's body has encrypted fields (its `facts` is a map, not undefined). */
+type HasEncryptedFields<C> =
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  C extends RouteContract<any, any, any, any, any, any, infer F> ? (F extends SourceToDerived ? true : false) : false;
 
 export type RouteImpl<C extends AnyRouteContract, A extends AccessChecks = Record<never, never>> = {
   /** Default `session`. */
@@ -134,7 +140,7 @@ export type RouteImpl<C extends AnyRouteContract, A extends AccessChecks = Recor
    */
   invalidRequest?: () => ContractError;
   handle: (input: HandlerInput<C, A>) => Promise<RouteResponse<C>>;
-} & (C extends { encryption: RequestContract } ? { encryption: EncryptionImpl<C> } : { encryption?: never });
+} & (HasEncryptedFields<C> extends true ? { encryption: EncryptionImpl } : { encryption?: never });
 
 declare const mountedBrand: unique symbol;
 /** A route built for contract `C`, ready to mount. Only `api.routes` makes one. */
@@ -201,9 +207,17 @@ function validate(contract: AnyRouteContract, invalidRequest?: () => ContractErr
     const query = contract.query ? (contract.query as z.ZodType).safeParse(req.query) : undefined;
     if (query && !query.success) return refuse(query.error.issues);
     if (contract.body) {
-      const body = (contract.body as z.ZodType).safeParse(req.body ?? {});
+      const raw = (req.body ?? {}) as Record<string, unknown>;
+      const body = (contract.body as z.ZodType).safeParse(raw);
       if (!body.success) return refuse(body.error.issues);
-      req.body = body.data;
+      // The parsed body, except the encrypted fields: their value as sent (plaintext, or the
+      // client's ciphertext), which the encryption service transforms and the facts step reads.
+      // They are wrapped in UnreadableString after the encryption steps (makeUnreadable).
+      const parsed = body.data as Record<string, unknown>;
+      for (const field of requestContractOf(contract)?.unreadableFields ?? []) {
+        if (field in raw) parsed[field] = raw[field];
+      }
+      req.body = parsed;
     }
     checked.set(req, { params: params?.data, query: query?.data, access: {} });
     next();
@@ -304,9 +318,10 @@ function encryptionSteps(
   encryption: { resolveWorkspaceId: (req: Request) => Promise<string> } | undefined,
   auth: RouteAuth,
 ): RequestHandler[] {
-  if (!contract.encryption || !encryption) return [];
-  const fieldsAndFacts = contractFieldsAndFacts(contract.encryption as RequestContract);
-  const steps = encryptedRoute(contract.encryption as RequestContract, {
+  const requestContract = requestContractOf(contract);
+  if (!requestContract || !encryption) return [];
+  const fieldsAndFacts = contractFieldsAndFacts(requestContract);
+  const steps = encryptedRoute(requestContract, {
     resolveWorkspaceId: encryption.resolveWorkspaceId,
     transitProxyIngress: auth === 'app' || auth === 'slack-app',
     afterTransform: fieldsAndFacts,
@@ -336,7 +351,8 @@ function respond<C extends AnyRouteContract, A extends AccessChecks>(contract: C
     try {
       // Wrapped here as well as in encryptedRoute, so the handler gets UnreadableString
       // fields whether or not the encryption pipeline ran.
-      const body = contract.encryption ? makeUnreadable(contract.encryption as RequestContract, req.body ?? {}) : req.body;
+      const requestContract = requestContractOf(contract);
+      const body = requestContract ? makeUnreadable(requestContract, req.body ?? {}) : req.body;
       const files = req.files;
       const result = await impl.handle({
         ...(checkInput(req) as CheckInput<C>),

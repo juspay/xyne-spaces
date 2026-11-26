@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { z } from 'zod';
 
 // Imports the BUILT output on purpose, like the other tests here.
-import { API, defineRoute, derivedNames, routeContracts, routeSpecProblems, runComposeTemplate, sourceFieldNames } from '../dist/enc-contracts/index.js';
+import { API, UnreadableString, defineRoute, defineRouter, derive, derivedNames, hasText, requestContractOf, reveal, routeContracts, routeSpecProblems, runComposeTemplate, sourceFieldNames, unreadableString } from '../dist/enc-contracts/index.js';
 import { applySlackMentions, findSlackMentionIds, mergeSlackMentionIds } from '../dist/slack/mentions.js';
 
 const SLACK_TEXT_FACTS = ['slackMentionUserIds', 'slackMentionGroupIds', 'slackMentionChannels'];
@@ -39,28 +39,31 @@ test('apps chat routes: the encrypted fields are fields of the body, as the mani
   const { postMessage, updateMessage } = API.apps.chat;
   assert.equal(postMessage.key, 'POST /apps/chat/postMessage');
   assert.equal(updateMessage.key, 'POST /apps/chat/updateMessage');
-  assert.deepEqual(sourceFieldNames(postMessage.encryption), ['markdownText', 'text']);
-  assert.deepEqual(sourceFieldNames(updateMessage.encryption), ['markdownText', 'text']);
+  assert.deepEqual(sourceFieldNames(requestContractOf(postMessage)), ['markdownText', 'text']);
+  assert.deepEqual(sourceFieldNames(requestContractOf(updateMessage)), ['markdownText', 'text']);
   // text: Slack mention ids (for compose) and, for postMessage, the content facts (markdown mode).
   for (const fact of SLACK_TEXT_FACTS) {
-    assert.ok(derivedNames(postMessage.encryption).text.includes(fact), fact);
+    assert.ok(derivedNames(requestContractOf(postMessage)).text.includes(fact), fact);
   }
-  assert.deepEqual(derivedNames(updateMessage.encryption).text, SLACK_TEXT_FACTS);
-  // The encryption contract's own field list (what the encryption service compares with the
-  // rule) is unchanged: the body schema only adds fields around it.
-  assert.deepEqual(Object.keys(postMessage.encryption.schema.shape).sort(), [
-    'attachments', 'channelId', 'channelName', 'conversationId', 'flow', 'markdownText', 'text',
+  assert.deepEqual(derivedNames(requestContractOf(updateMessage)).text, SLACK_TEXT_FACTS);
+  // The field list the encryption service compares with the manifest rule: every body field (one
+  // schema), so the rule lists them all (postMessage rule revision 3).
+  assert.deepEqual(Object.keys(requestContractOf(postMessage).schema.shape).sort(), [
+    'attachments', 'channelId', 'channelName', 'contentFormat', 'conversationId', 'flow', 'markdownText', 'metadata', 'text', 'uploadedFiles',
+  ]);
+  assert.deepEqual(Object.keys(requestContractOf(updateMessage).schema.shape).sort(), [
+    'attachments', 'channelId', 'channelName', 'contentFormat', 'flowJSON', 'markdownText', 'messageId', 'metadata', 'text', 'uploadedFiles',
   ]);
 });
 
 test('apps postEphemeral: markdownText encrypted, nothing derived, fields as its manifest rule lists them', () => {
   const route = API.apps.chat.postEphemeral;
   assert.equal(route.key, 'POST /apps/chat/postEphemeral');
-  assert.deepEqual(sourceFieldNames(route.encryption), ['markdownText', 'text']);
-  assert.deepEqual(derivedNames(route.encryption), { markdownText: [], text: SLACK_TEXT_FACTS });
-  // Must equal the fields of the private rule (enc_contract_entries, POST /apps/chat/postEphemeral).
-  assert.deepEqual(Object.keys(route.encryption.schema.shape).sort(), [
-    'attachments', 'channelId', 'channelName', 'conversationId', 'flow', 'markdownText', 'messageDelivery', 'text', 'user',
+  assert.deepEqual(sourceFieldNames(requestContractOf(route)), ['markdownText', 'text']);
+  assert.deepEqual(derivedNames(requestContractOf(route)), { markdownText: [], text: SLACK_TEXT_FACTS });
+  // Must equal the fields of the private rule (enc_contract_entries, POST /apps/chat/postEphemeral, revision 2).
+  assert.deepEqual(Object.keys(requestContractOf(route).schema.shape).sort(), [
+    'attachments', 'channelId', 'channelName', 'contentFormat', 'conversationId', 'flow', 'markdownText', 'messageDelivery', 'metadata', 'text', 'uploadedFiles', 'user',
   ]);
 });
 
@@ -70,15 +73,18 @@ test('apps postEphemeral body keeps the controller checks', () => {
   assert.equal(body.safeParse({ channelId: 'c1', user: 'u1', text: 'hi', messageDelivery: 'OPENSCREEN' }).success, false, 'popup without flow');
   const ok = body.safeParse({ channelId: 'c1', user: ' u1 ', markdownText: 'hi' });
   assert.equal(ok.success, true);
-  assert.deepEqual(ok.data, { channelId: 'c1', user: 'u1', markdownText: 'hi', messageDelivery: 'EPHEMERAL' });
+  const { markdownText, ...plain } = ok.data;
+  assert.deepEqual(plain, { channelId: 'c1', user: 'u1', messageDelivery: 'EPHEMERAL' });
+  assert.ok(markdownText instanceof UnreadableString, 'an encrypted field comes out unreadable');
+  assert.equal(reveal(markdownText), 'hi');
 });
 
 test('apps deleteMessage and agentProgress: typed, no encryption contract', () => {
   const { deleteMessage, agentProgress } = API.apps.chat;
   assert.equal(deleteMessage.key, 'POST /apps/chat/deleteMessage');
   assert.equal(agentProgress.key, 'POST /apps/chat/agentProgress');
-  assert.equal(deleteMessage.encryption, undefined);
-  assert.equal(agentProgress.encryption, undefined);
+  assert.equal(requestContractOf(deleteMessage), undefined);
+  assert.equal(requestContractOf(agentProgress), undefined);
 });
 
 test('apps deleteMessage and agentProgress bodies keep the controller checks', () => {
@@ -96,7 +102,7 @@ test('apps deleteMessage and agentProgress bodies keep the controller checks', (
 test('Slack-compatible chat.delete: typed, no encryption, Slack arguments', () => {
   const route = API.apps.slack.chatDelete;
   assert.equal(route.key, 'POST /apps/slack/chat.delete');
-  assert.equal(route.encryption, undefined);
+  assert.equal(requestContractOf(route), undefined);
   assert.equal(route.body.safeParse({ channel: 'C1' }).success, false, 'no ts');
   // channel may be missing here: the channel check answers channel_not_found, as before.
   assert.equal(route.body.safeParse({ ts: '1' }).success, true);
@@ -109,14 +115,20 @@ test('apps postMessage body keeps the controller checks', () => {
   assert.equal(body.safeParse({ text: 'hi' }).success, false, 'no channel');
   const ok = body.safeParse({ channelId: ' c1 ', text: 'hi', unknown: 1 });
   assert.equal(ok.success, true);
-  assert.deepEqual(ok.data, { channelId: 'c1', text: 'hi' });
+  assert.equal(ok.data.channelId, 'c1');
+  assert.ok(ok.data.text instanceof UnreadableString);
+  assert.equal('unknown' in ok.data, false);
+  // An empty text is no content, as before (hasText reads the length, not the text).
+  assert.equal(body.safeParse({ channelId: 'c1', text: '' }).success, false, 'empty text');
+  assert.equal(body.safeParse({ channelId: 'c1', text: '', markdownText: 'x' }).success, true);
 });
 
 test('defineRoute keeps the spec', () => {
   const route = defineRoute({ method: 'GET', path: '/t/:id', response: z.object({ id: z.string() }) });
   assert.equal(route.kind, 'ROUTE');
   assert.equal(route.key, 'GET /t/:id');
-  assert.equal(route.encryption, undefined);
+  assert.equal(route.facts, undefined);
+  assert.equal(requestContractOf(route), undefined);
 });
 
 test('findSlackMentionIds: users, groups and channels, each once, channel names kept', () => {
@@ -169,13 +181,13 @@ test('compose slackMessageContent: mentions applied, then Block Kit to HTML', ()
 
 test('Slack chat.postMessage / postEphemeral / update: text encrypted, fields as the manifest rules list them', () => {
   const { chatPostMessage, chatPostEphemeral, chatUpdate } = API.apps.slack;
-  const keys = (c) => Object.keys(c.encryption.schema.shape).sort();
+  const keys = (c) => Object.keys(requestContractOf(c).schema.shape).sort();
   assert.deepEqual(keys(chatPostMessage), ['attachments', 'blocks', 'channel', 'metadata', 'mrkdwn', 'text', 'thread_ts', 'username']);
   assert.deepEqual(keys(chatPostEphemeral), ['attachments', 'blocks', 'channel', 'metadata', 'mrkdwn', 'text', 'thread_ts', 'user', 'username']);
   assert.deepEqual(keys(chatUpdate), ['attachments', 'blocks', 'channel', 'text', 'ts']);
   for (const route of [chatPostMessage, chatPostEphemeral, chatUpdate]) {
-    assert.deepEqual(sourceFieldNames(route.encryption), ['text']);
-    assert.deepEqual(derivedNames(route.encryption).text, [...SLACK_TEXT_FACTS, 'rawLength']);
+    assert.deepEqual(sourceFieldNames(requestContractOf(route)), ['text']);
+    assert.deepEqual(derivedNames(requestContractOf(route)).text, [...SLACK_TEXT_FACTS, 'rawLength']);
   }
 });
 
@@ -308,4 +320,43 @@ test('API table: no route has an open (z.unknown()) response unless it is a list
     .filter((key) => !PASSTHROUGH.has(key));
   assert.deepEqual(open, []);
   assert.equal(API.subTickets.link.body.safeParse({ ticketId: ' ', mappedTicketId: 'x' }).success, false, 'blank ticketId');
+});
+
+test('one body schema: unreadableString() fields are the encrypted ones, facts must name exactly them', () => {
+  const body = z.object({ channelId: z.string(), text: unreadableString().optional(), note: unreadableString().optional() });
+  const response = z.object({});
+  assert.deepEqual(routeSpecProblems({ method: 'POST', path: '/x', body, response, facts: { text: {}, note: {} } }), []);
+  assert.deepEqual(routeSpecProblems({ method: 'POST', path: '/x', body, response, facts: { text: {} } }), [
+    'encrypted fields without a facts entry: note',
+  ]);
+  assert.deepEqual(routeSpecProblems({ method: 'POST', path: '/x', body, response, facts: { text: {}, note: {}, channelId: {} } }), [
+    'facts for fields that are not unreadableString() in the body: channelId',
+  ]);
+  const route = defineRoute({ method: 'POST', path: '/x', body, response, facts: { text: { userIds: derive.userIds }, note: {} } });
+  const request = requestContractOf(route);
+  assert.deepEqual(request.unreadableFields, ['text', 'note']);
+  assert.deepEqual(derivedNames(request), { text: ['userIds'], note: [] });
+  assert.equal(requestContractOf(route), request, 'built once per contract');
+});
+
+test('hasText: true for a non-empty string or UnreadableString, false for empty or absent', () => {
+  assert.equal(hasText('a'), true);
+  assert.equal(hasText(''), false);
+  assert.equal(hasText(undefined), false);
+  assert.equal(hasText(null), false);
+  assert.equal(hasText(unreadableString().parse('a')), true);
+  assert.equal(hasText(unreadableString().parse('')), false);
+});
+
+test('defineRouter: prefixes compose into the full path and key, at any depth, in table order', () => {
+  const info = defineRoute({ method: 'GET', path: '/info', response: z.object({}) });
+  const list = defineRoute({ method: 'GET', path: '', response: z.object({}) });
+  const byId = defineRouter('/:channelId', { members: defineRoute({ method: 'GET', path: '/members', response: z.object({}) }) });
+  const apps = defineRouter('/apps', { channel: defineRouter('/channel', { list, info, byId }) });
+  assert.equal(apps.channel.info.path, '/apps/channel/info');
+  assert.equal(apps.channel.info.key, 'GET /apps/channel/info');
+  assert.equal(apps.channel.list.key, 'GET /apps/channel');
+  assert.equal(apps.channel.byId.members.key, 'GET /apps/channel/:channelId/members');
+  assert.deepEqual(routeContracts(apps).map((c) => c.key), ['GET /apps/channel', 'GET /apps/channel/info', 'GET /apps/channel/:channelId/members']);
+  assert.equal(info.path, '/info', 'the leaf itself is not changed');
 });

@@ -1,8 +1,7 @@
 import { z } from 'zod';
 import { defineRoute } from '../api-route.js';
-import { defineRequestContract } from '../define.js';
 import { derive } from '../extractors.js';
-import { unreadableString } from '../unreadable-string.js';
+import { hasText, unreadableString, type UnreadableString } from '../unreadable-string.js';
 
 // ─── Slack-compatible Xyne Apps API (/apps/slack/...) ─────────────────────────
 // Same actions as the native /apps/chat API, in Slack's wire format, for bots written against
@@ -58,8 +57,8 @@ const slackOptionalString = z
   .optional()
   .transform((value) => value ?? undefined);
 
-const hasContent = (data: { text?: string; blocks?: unknown[]; attachments?: unknown[] }): boolean =>
-  !!data.text || (!!data.blocks && data.blocks.length > 0) || (!!data.attachments && data.attachments.length > 0);
+const hasContent = (data: { text?: UnreadableString; blocks?: unknown[]; attachments?: unknown[] }): boolean =>
+  hasText(data.text) || (!!data.blocks && data.blocks.length > 0) || (!!data.attachments && data.attachments.length > 0);
 const contentRequired = { message: 'Either text, blocks, or attachments is required', path: ['text'] };
 
 /**
@@ -77,7 +76,8 @@ const slackChatTextFacts = {
 // `channel` is optional in the bodies: a missing one gets channel_not_found from the channel check.
 const postFields = {
   channel: z.string().optional(),
-  text: z.string().optional(),
+  /** Encrypted by the ingress transit proxy (MASTER_DEK). */
+  text: unreadableString().optional(),
   blocks: slackArray,
   attachments: slackArray,
   thread_ts: slackOptionalString,
@@ -94,53 +94,11 @@ export const appsSlackChatUpdateBodySchema = z
   .object({
     channel: z.string().optional(),
     ts: z.string().min(1, 'ts is required'),
-    text: z.string().optional(),
+    text: unreadableString().optional(),
     blocks: slackArray,
     attachments: slackArray,
   })
   .refine(hasContent, contentRequired);
-
-/**
- * The encryption contracts: `text` is encrypted by the ingress transit proxy (MASTER_DEK). The
- * field names are the manifest rule's (the encryption service checks they agree).
- */
-export const appsSlackChatPostMessageClient = defineRequestContract({
-  sourceToDerived: { text: slackChatTextFacts },
-  schema: z.object({
-    channel: z.string().optional(),
-    text: unreadableString().optional(),
-    blocks: z.unknown().optional(),
-    attachments: z.unknown().optional(),
-    thread_ts: z.unknown().optional(),
-    mrkdwn: z.unknown().optional(),
-    metadata: z.unknown().optional(),
-    username: z.unknown().optional(),
-  }),
-});
-export const appsSlackChatPostEphemeralClient = defineRequestContract({
-  sourceToDerived: { text: slackChatTextFacts },
-  schema: z.object({
-    channel: z.string().optional(),
-    user: z.string().optional(),
-    text: unreadableString().optional(),
-    blocks: z.unknown().optional(),
-    attachments: z.unknown().optional(),
-    thread_ts: z.unknown().optional(),
-    mrkdwn: z.unknown().optional(),
-    metadata: z.unknown().optional(),
-    username: z.unknown().optional(),
-  }),
-});
-export const appsSlackChatUpdateClient = defineRequestContract({
-  sourceToDerived: { text: slackChatTextFacts },
-  schema: z.object({
-    channel: z.string().optional(),
-    ts: z.string().optional(),
-    text: unreadableString().optional(),
-    blocks: z.unknown().optional(),
-    attachments: z.unknown().optional(),
-  }),
-});
 
 /** Slack's success answers carry more than `ok` (channel, ts, message…): only `ok` is pinned. */
 const slackOk = z.object({ ok: z.literal(true) });
@@ -149,22 +107,22 @@ export const appsSlackChatPostMessage = defineRoute({
   method: 'POST',
   path: '/apps/slack/chat.postMessage',
   body: appsSlackChatPostMessageBodySchema,
+  facts: { text: slackChatTextFacts },
   response: slackOk,
-  encryption: appsSlackChatPostMessageClient,
 });
 export const appsSlackChatPostEphemeral = defineRoute({
   method: 'POST',
   path: '/apps/slack/chat.postEphemeral',
   body: appsSlackChatPostEphemeralBodySchema,
+  facts: { text: slackChatTextFacts },
   response: slackOk,
-  encryption: appsSlackChatPostEphemeralClient,
 });
 export const appsSlackChatUpdate = defineRoute({
   method: 'POST',
   path: '/apps/slack/chat.update',
   body: appsSlackChatUpdateBodySchema,
+  facts: { text: slackChatTextFacts },
   response: slackOk,
-  encryption: appsSlackChatUpdateClient,
 });
 
 // ─── Slack-compatible reads (auth, conversations, users, usergroups) ──────────

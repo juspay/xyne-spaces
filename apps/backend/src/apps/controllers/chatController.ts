@@ -18,9 +18,10 @@ import {
   markdownContentTemplate,
   makeUnreadable,
   deriveFactsFromPlaintext,
-  appsChatPostMessageClient,
+  requestContractOf,
+  type RequestContract,
   type RouteBody,
-  type appsChatPostMessage,
+  appsChatPostMessage,
   type appsChatUpdateMessage,
   type appsChatPostEphemeral,
   UnreadableString,
@@ -68,6 +69,8 @@ const ChatActionBodySchema = z.object({
 const PostMessageBodySchema = refineAppsChatPostMessage(
   z.object({ ...appsChatPostMessageFields, userId: ChatActionBodySchema.shape.userId }),
 );
+/** postMessage's encrypted fields and their facts (from the route contract's one body schema). */
+const postMessageRequest = requestContractOf(appsChatPostMessage) as RequestContract;
 
 const ChannelHistoryQuerySchema = z.object({
   channelId: z.string().min(1, 'Channel ID is required').trim().optional(),
@@ -219,11 +222,16 @@ export class ChatController {
       return;
     }
     try {
-      // As the typed route's framework does: facts of the plaintext fields, then the encrypted
-      // fields made unreadable (appsChatPostMessageClient).
-      const derived = deriveFactsFromPlaintext(bodyResult.data, derivedNames(appsChatPostMessageClient));
+      // As the typed route's framework does: the encrypted fields keep their value as sent (the
+      // parse wrapped them), their facts are derived from it, then they are made unreadable.
+      const sent = req.body as Record<string, unknown>;
+      const checked = { ...(bodyResult.data as Record<string, unknown>) };
+      for (const field of postMessageRequest.unreadableFields) {
+        if (field in sent) checked[field] = sent[field];
+      }
+      const derived = deriveFactsFromPlaintext(checked, derivedNames(postMessageRequest));
       const result = await this.sendMessage({
-        body: makeUnreadable(appsChatPostMessageClient, bodyResult.data) as AppsChatPostMessageBody,
+        body: makeUnreadable(postMessageRequest, checked) as AppsChatPostMessageBody,
         markdownFacts: derived?.fields.markdownText,
         textFacts: derived?.fields.text,
         // App-token callers post as the authenticated bot user; the S2S postAsUser
