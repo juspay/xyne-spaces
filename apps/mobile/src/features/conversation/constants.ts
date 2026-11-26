@@ -312,6 +312,12 @@ export const TYPING_BAR_FORMAT_DIVIDER_HEIGHT = 20;
 export const TYPING_BAR_FORMAT_FADE_WIDTH = 16;
 /** Tools ⇄ formatting: the incoming row grows from 96% as it fades in. */
 export const TYPING_BAR_TOOLS_SWAP_MS = 150;
+/**
+ * Longest the emoji tool waits for the keyboard to go before opening the
+ * sheet: the wait can miss the hide and never settle, which would leave the
+ * button dead.
+ */
+export const TYPING_BAR_EMOJI_KEYBOARD_WAIT_MS = 350;
 export const TYPING_BAR_TOOLS_SWAP_SCALE = 0.96;
 
 /*

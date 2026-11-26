@@ -4,8 +4,16 @@ import { useCallback, useRef, type ReactElement } from 'react';
 import { useChatInputActions, useChatInputHandlers } from '@/src/components/input-composer';
 import { dismissKeyboardForSheet } from '@/src/utils/dismiss-keyboard-for-sheet';
 
-import { TYPING_BAR_ICON_SIZE, TYPING_BAR_TOOL_HIT_SLOP, TYPING_BAR_TOOL_SIZE } from '../constants';
+import {
+  TYPING_BAR_EMOJI_KEYBOARD_WAIT_MS,
+  TYPING_BAR_ICON_SIZE,
+  TYPING_BAR_TOOL_HIT_SLOP,
+  TYPING_BAR_TOOL_SIZE,
+} from '../constants';
 import { IconButton } from './icon-button';
+
+const keyboardWaitCap = (): Promise<void> =>
+  new Promise(resolve => setTimeout(resolve, TYPING_BAR_EMOJI_KEYBOARD_WAIT_MS));
 
 /**
  * Emoji in the focused card's tool row: puts the keyboard away and opens the
@@ -34,7 +42,8 @@ export function RoomEmojiTool({
       setIsFormattingVisibleState(false);
       setIsMentionOpenState(false);
       try {
-        await dismissKeyboardForSheet();
+        // Capped: the keyboard wait can miss the hide and never settle.
+        await Promise.race([dismissKeyboardForSheet(), keyboardWaitCap()]);
         setIsEmojiPickerOpenState(true);
       } finally {
         openingRef.current = false;

@@ -1,5 +1,5 @@
-import { useCallback, useMemo, useState, type ReactElement } from 'react';
-import { Pressable, Text } from 'react-native';
+import { useCallback, useEffect, useMemo, useState, type ReactElement } from 'react';
+import { BackHandler, Pressable, Text } from 'react-native';
 import { BottomSheetScrollView } from '@gorhom/bottom-sheet';
 import { useCSSVariable } from 'uniwind';
 
@@ -82,6 +82,16 @@ export function ReactionsSheet({
     }),
     [background],
   );
+
+  // Android's back closes the sheet first, not the thread card or room under it.
+  useEffect(() => {
+    if (!isOpen) return undefined;
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      onOpenChange(false);
+      return true;
+    });
+    return (): void => subscription.remove();
+  }, [isOpen, onOpenChange]);
 
   const handleRemove = useCallback(
     (emojiName: string): void => {
