@@ -1,6 +1,5 @@
 import { Prisma } from '@prisma/client';
 import { ChannelType, deskTypeForChannelType, EmailMergeMode } from '@xyne/shared';
-import { findWorkspaceDeskIds } from '@/bypassAcl/callConnectionServices';
 import { db } from '@/database/client';
 import { WORKSPACE_LEVEL } from '@/integrations/core/sourceScope';
 import { CallConfigError, type CallProvider } from './callProvider';
@@ -151,7 +150,7 @@ function newPreferenceRow(workspaceId: string, channelId: string, channelType: s
   };
 }
 
-/** Rejects routing another desk on the same connection already holds; clears it from deleted desks. */
+/** Rejects routing another desk on the same connection already holds. */
 async function assertRoutingFree(params: {
   workspaceId: string;
   channelId: string;
@@ -176,41 +175,24 @@ async function assertRoutingFree(params: {
   const contenders = others.filter(
     other => (isDefault && other.isDefault) || other.routingKeys.some(key => wanted.has(key)),
   );
-  if (contenders.length === 0) return;
+  const other = contenders[0];
+  if (!other) return;
 
-  // Existence is checked workspace-wide; names only for desks the caller can see.
-  const contenderIds = contenders.map(other => other.channelId);
-  const [existingIds, visibleDesks] = await Promise.all([
-    findWorkspaceDeskIds(workspaceId, { ids: contenderIds }),
-    db.channel.findMany({
-      where: { workspaceId, id: { in: contenderIds } },
-      select: { id: true, name: true },
-    }),
-  ]);
-  const existing = new Set(existingIds);
-  const names = new Map(visibleDesks.map(desk => [desk.id, desk.name]));
-  const stale = contenderIds.filter(id => !existing.has(id));
-  if (stale.length > 0) {
-    await db.emailChannelPreference.updateMany({
-      where: { workspaceId, channelId: { in: stale } },
-      data: NO_CALL_SETTINGS,
+  // Request-scoped, so a private desk the caller isn't in stays unnamed.
+  const desk = await db.channel.findFirst({
+    where: { workspaceId, id: other.channelId },
+    select: { name: true },
+  });
+  const deskName = desk?.name ? `"${desk.name}"` : 'another desk';
+  const clash = other.routingKeys.find(key => wanted.has(key));
+  if (clash) {
+    throw new CallConfigError(`${routingKeyLabel} "${clash}" already routes to ${deskName}`, 409, {
+      routingKeys: [`"${clash}" already routes to ${deskName}`],
     });
   }
-
-  for (const other of contenders) {
-    if (!existing.has(other.channelId)) continue;
-    const name = names.get(other.channelId);
-    const deskName = name ? `"${name}"` : 'another desk';
-    const clash = other.routingKeys.find(key => wanted.has(key));
-    if (clash) {
-      throw new CallConfigError(`${routingKeyLabel} "${clash}" already routes to ${deskName}`, 409, {
-        routingKeys: [`"${clash}" already routes to ${deskName}`],
-      });
-    }
-    throw new CallConfigError(`${deskName} is already the default desk for this connection`, 409, {
-      isDefault: [`${deskName} is already the default desk for this connection`],
-    });
-  }
+  throw new CallConfigError(`${deskName} is already the default desk for this connection`, 409, {
+    isDefault: [`${deskName} is already the default desk for this connection`],
+  });
 }
 
 /** A desk's call settings live on its email_channel_preferences row (the call* columns). */
@@ -231,21 +213,13 @@ export const deskCallSettingsService = {
     return rows.filter(isConfigured).map(toView);
   },
 
-  /** Live desks on any connection; archived or deleted desks are left out, as they don't block removal. */
+  /** Desks on any connection in the workspace. */
   async listForWorkspace(workspaceId: string): Promise<DeskCallSettingsView[]> {
     const rows = await db.emailChannelPreference.findMany({
       where: { workspaceId, callConnectionId: { not: null } },
       select: CALL_SETTINGS_SELECT,
     });
-    const views = rows.filter(isConfigured).map(toView);
-    if (views.length === 0) return views;
-    const live = new Set(
-      await findWorkspaceDeskIds(workspaceId, {
-        ids: views.map(view => view.channelId),
-        excludeArchived: true,
-      }),
-    );
-    return views.filter(view => live.has(view.channelId));
+    return rows.filter(isConfigured).map(toView);
   },
 
   /** The desk a call goes to: the one routing its key, else the connection's default desk. */
@@ -349,14 +323,6 @@ export const deskCallSettingsService = {
   async remove(workspaceId: string, channelId: string): Promise<void> {
     await db.emailChannelPreference.updateMany({
       where: { workspaceId, channelId },
-      data: NO_CALL_SETTINGS,
-    });
-  },
-
-  /** Unbinds every desk still on the connection, e.g. archived desks when it is removed. */
-  async removeForConnection(workspaceId: string, connectionId: string): Promise<void> {
-    await db.emailChannelPreference.updateMany({
-      where: { workspaceId, callConnectionId: connectionId },
       data: NO_CALL_SETTINGS,
     });
   },
