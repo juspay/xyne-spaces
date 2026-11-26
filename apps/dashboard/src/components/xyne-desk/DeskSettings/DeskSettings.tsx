@@ -106,7 +106,7 @@ export const DeskSettings: React.FC<DeskSettingsProps> = ({ open, onClose, chann
       ? DESK_SETTINGS_TABS
       : DESK_SETTINGS_TABS.filter(tab => tab.id !== 'history');
     if (isCall) {
-      return tabs.filter(tab => ['assignment', 'Agent', 'history'].includes(tab.id));
+      return tabs.filter(tab => ['assignment', 'Agent', 'metrics', 'history'].includes(tab.id));
     }
     return isEmail || isSocial ? tabs : tabs.filter(tab => tab.id !== 'automation');
   }, [isCall, isEmail, isSocial, canViewHistory]);
