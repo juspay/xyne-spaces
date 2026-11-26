@@ -1,5 +1,6 @@
 import { Router, type NextFunction, type Request, type Response } from 'express';
 import {
+  UserStatus,
   UserType,
   createSdlcClawLinkSchema,
   listSdlcEntityLinksSchema,
@@ -34,6 +35,52 @@ function route(
 function channelIdFromBody(req: Request): string | undefined {
   const value = req.body?.channelId;
   return typeof value === 'string' && value ? value : undefined;
+}
+
+/**
+ * Auth for /api/internal/sdlc/hub, mounted behind validateS2SKey: the key proves claw-auth sent it,
+ * and claw-auth binds the acting user to the run, so the request acts as that person.
+ */
+export async function authenticateActingUser(req: Request, _res: Response, next: NextFunction): Promise<void> {
+  try {
+    const header = req.headers['x-xyne-acting-user-id'];
+    const id = typeof header === 'string' ? header.trim() : '';
+    if (!id) throw new AppError('SDLC app requests require an initiating user', 403);
+    // The run's bound workspace: a key holder cannot act as a user of another workspace.
+    const workspaceHeader = req.headers['x-xyne-workspace-id'];
+    const workspaceId = typeof workspaceHeader === 'string' ? workspaceHeader.trim() : '';
+    if (!workspaceId) throw new AppError('SDLC app requests require the run workspace', 403);
+    const user = await prisma.user.findFirst({
+      where: { id, workspaceId, userType: { notIn: [UserType.APP, UserType.AGENT] }, status: { not: UserStatus.INACTIVE }, leftAt: null },
+      select: {
+        id: true,
+        providerUserId: true,
+        email: true,
+        name: true,
+        displayName: true,
+        workspaceId: true,
+        role: true,
+        orgMemberId: true,
+        orgMember: { select: { role: true, leftAt: true } },
+      },
+    });
+    if (!user?.orgMember || user.orgMember.leftAt) throw new AppError('Initiating user is unavailable in this workspace', 403);
+    // The table ACLs read req.user, so they check this person's rights.
+    req.user = {
+      id: user.id,
+      googleId: user.providerUserId,
+      email: user.email,
+      name: user.name,
+      displayName: user.displayName,
+      workspaceId: user.workspaceId,
+      role: user.role,
+      orgRole: user.orgMember.role,
+      memberId: user.orgMemberId,
+    };
+    next();
+  } catch (error) {
+    next(error);
+  }
 }
 
 async function actorFromRequest(req: Request): Promise<SdlcActor> {

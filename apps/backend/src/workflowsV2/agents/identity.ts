@@ -74,9 +74,9 @@ export async function resolveClawRunIdentity(
   workspaceId: string,
 ): Promise<ClawRunIdentity> {
   const agents = await listDispatchableClawAgents();
-  const agent = agents.find((candidate) => candidate.slug === agentSlug);
+  const matches = agents.filter((candidate) => candidate.slug === agentSlug);
 
-  if (!agent) {
+  if (matches.length === 0) {
     // Distinguish "no such agent" from "exists but not dispatchable" — the
     // second is a claw-side publishing problem, not a typo in the workflow.
     const known = await listS2SClawAgents();
@@ -90,24 +90,25 @@ export async function resolveClawRunIdentity(
     );
   }
 
-  const agentUserId = agent.spacesAppUserId as string;
-
-  const [workspace, user] = await Promise.all([
+  const [workspace, users] = await Promise.all([
     db.workspace.findUnique({ where: { id: workspaceId }, select: { orgId: true } }),
-    db.user.findUnique({
-      where: { id: agentUserId },
-      select: { name: true, email: true, orgMemberId: true },
+    db.user.findMany({
+      where: { id: { in: matches.map((candidate) => candidate.spacesAppUserId as string) } },
+      select: { id: true, name: true, email: true, orgMemberId: true, orgMember: { select: { orgId: true } } },
     }),
   ]);
 
   if (!workspace?.orgId) {
     throw new Error(`[workflows] workspace ${workspaceId} has no organization`);
   }
+  // Slugs are unique per org only: another org's agent of the same slug must not run as its bot here.
+  const user = users.find((candidate) => candidate.orgMember?.orgId === workspace.orgId);
   if (!user) {
     throw new Error(
-      `[workflows] claw agent "${agentSlug}" points at Spaces user ${agentUserId}, which does not exist`,
+      `[workflows] claw agent "${agentSlug}" has no Spaces user in this workspace's organization`,
     );
   }
+  const agentUserId = user.id;
   if (!user.orgMemberId) {
     throw new Error(
       `[workflows] the Spaces user for claw agent "${agentSlug}" has no orgMemberId`,
@@ -123,4 +124,34 @@ export async function resolveClawRunIdentity(
     spacesOrgId: workspace.orgId,
     spacesOrgMemberId: user.orgMemberId,
   };
+}
+
+/** The picker's view of `resolveClawRunIdentity`'s org rule, so activation refuses what a run would. */
+export async function dispatchableClawAgentsIn(workspaceId: string): Promise<S2SClawAgent[]> {
+  const [agents, workspace] = await Promise.all([
+    listDispatchableClawAgents(),
+    db.workspace.findUnique({ where: { id: workspaceId }, select: { orgId: true } }),
+  ]);
+  if (!workspace?.orgId) return [];
+  const users = await db.user.findMany({
+    where: {
+      id: { in: agents.map((agent) => agent.spacesAppUserId as string) },
+      orgMember: { orgId: workspace.orgId },
+    },
+    select: { id: true },
+  });
+  const inOrg = new Set(users.map((user) => user.id));
+  return agents.filter((agent) => inOrg.has(agent.spacesAppUserId as string));
+}
+
+/** Not `attributes.createdByUserId`: the router consumes that at create and never persists it. */
+export const SDLC_AUTHOR_METADATA_KEY = 'sdlcAuthorUserId';
+
+export function sdlcAuthorOf(metadata: string | null | undefined): string | undefined {
+  try {
+    const author = (JSON.parse(metadata ?? '{}') as Record<string, unknown>)[SDLC_AUTHOR_METADATA_KEY];
+    return typeof author === 'string' && author ? author : undefined;
+  } catch {
+    return undefined;
+  }
 }

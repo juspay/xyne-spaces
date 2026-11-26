@@ -49,6 +49,7 @@ import {
   Sparkles,
   SquareArrowOutUpRight,
   Upload,
+  Workflow,
   X,
   Zap,
 } from 'lucide-react';
@@ -131,6 +132,7 @@ import {
   wikiLandingPage,
 } from './SdlcWikiSection';
 import { useSdlcWikiData } from './useSdlcWikiData';
+import SdlcWorkflowsSection from './SdlcWorkflowsSection';
 import { SdlcReleases } from './SdlcReleases/SdlcReleases';
 import { SdlcReleaseBreadcrumb } from './SdlcReleases/SdlcReleaseDetail';
 import { SdlcTicketThread, useTicketThreadAccess } from './SdlcTicketThread';
@@ -252,6 +254,7 @@ type Section =
   | 'calls'
   | 'releases'
   | 'artifacts'
+  | 'workflows'
   | 'agents'
   | 'environments';
 
@@ -266,6 +269,7 @@ const SECTIONS: Array<{ id: Exclude<Section, 'artifacts'>; label: string; icon: 
   { id: 'tickets', label: 'Issues', icon: CircleDot },
   { id: 'calls', label: 'Calls', icon: Phone },
   { id: 'releases', label: 'Releases', icon: Rocket },
+  { id: 'workflows', label: 'Workflows', icon: Workflow },
   { id: 'agents', label: 'Agents', icon: Bot },
   { id: 'environments', label: 'Environments', icon: Server },
 ];
@@ -360,10 +364,12 @@ export default function SdlcScreen(): ReactElement {
     workspaceId,
     channelId,
     section: routeSection,
+    '*': workflowsSplat,
   } = useParams<{
     workspaceId?: string;
     channelId?: string;
     section?: string;
+    '*'?: string;
   }>();
   const navigate = useNavigate();
   const location = useLocation();
@@ -371,7 +377,12 @@ export default function SdlcScreen(): ReactElement {
   // A window of its own has no hub sidebar, and keeps the explorer beside the page.
   const isDocumentWindow = isSdlcWindow();
   const section: Section = (
-    routeSection && SECTION_IDS.has(routeSection) ? routeSection : 'overview'
+    routeSection && SECTION_IDS.has(routeSection)
+      ? routeSection
+      : // The workflows route is a splat: it outranks `:section` and has no `section` param.
+        workflowsSplat !== undefined
+        ? 'workflows'
+        : 'overview'
   ) as Section;
   const routeSearchParams = useMemo(() => new URLSearchParams(location.search), [location.search]);
   const openReleaseId = section === 'releases' ? routeSearchParams.get('release') : null;
@@ -4248,6 +4259,10 @@ export default function SdlcScreen(): ReactElement {
                       onNotFoundBack={closeOpenCanvas}
                     />
                   </div>
+                </div>
+              ) : section === 'workflows' ? (
+                <div className='min-h-0 flex-1 overflow-hidden bg-background'>
+                  <SdlcWorkflowsSection />
                 </div>
               ) : section === 'releases' ? (
                 <SdlcReleases

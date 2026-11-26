@@ -95,6 +95,10 @@ export interface SdlcHubKnowledgeLinks {
 export const SDLC_WORKFLOW_RELATION = "WORKFLOW";
 export const SDLC_WIKI_WORKFLOW_RELATION = "WIKI_WORKFLOW";
 
+export function sdlcHubWorkflowFolderId(channelId: string): string {
+  return `sdlc-hub-${channelId}`;
+}
+
 /**
  * The parent -> child edge: a TRACK or FOLDER on the source side, the thing it
  * holds on the target. Shares its name with track membership because a root-level

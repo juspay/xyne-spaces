@@ -1,11 +1,15 @@
 import { pipeline } from 'node:stream/promises';
 import express, { type Request, type Response, type Router } from 'express';
 import { createWorkflowRouter, type RouteAccess, type RouteRequest } from '@xyne/workflow-sdk';
+import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { appWorkflowLimiter, webhookLimiter } from '@/middleware/rateLimiters';
 import { workflowAttachmentUpload } from '@/middleware/upload';
 import { ShareableEntityType } from '@xyne/shared';
 import { appResourceAccessService } from '@/services/appResourceAccessService';
+import { SDLC_AUTHOR_METADATA_KEY, sdlcAuthorOf } from './agents/identity';
+import { isRecord } from './agents/claw-provider';
+import { RUN_STARTING_ROUTES, withRunStarter } from './runStarter';
 import { persistence, workflowRuntime } from './runtime';
 import { attrsOf } from './utils';
 import type { XyneCtx } from './types';
@@ -47,6 +51,28 @@ const ctxFromRequest = (req: Request): XyneCtx => {
  * create to stamp ownership and is not persisted.
  */
 const ATTRIBUTE_INJECTED_ROUTES = new Set(['POST /workflows', 'POST /folders', 'POST /credentials']);
+
+/** SDLC steps act as this author, so only the server sets it: whoever last changed the steps. */
+const guardSdlcAuthor = async (key: string, request: RouteRequest, ctx: XyneCtx): Promise<void> => {
+  const body = request.body;
+  if (!isRecord(body)) return;
+
+  if (key !== 'POST /workflows' && key !== 'PUT /workflows/:id') return;
+  const sent = body['metadata'];
+  const metadata = isRecord(sent) ? { ...sent } : {};
+  delete metadata[SDLC_AUTHOR_METADATA_KEY];
+  if (body['config']) metadata[SDLC_AUTHOR_METADATA_KEY] = ctx.userId;
+  else if (sent !== undefined && key === 'PUT /workflows/:id') {
+    // Metadata replaces whole: keep the author the steps were last saved by.
+    const stored = await db.workflow.findFirst({
+      where: { id: request.params['id'] ?? '', workspaceId: ctx.workspaceId },
+      select: { metadata: true },
+    });
+    const author = sdlcAuthorOf(stored?.metadata);
+    if (author) metadata[SDLC_AUTHOR_METADATA_KEY] = author;
+  }
+  if (sent !== undefined || body['config']) body['metadata'] = metadata;
+};
 
 /** How to find the workflow a request acts on; `undefined` is refused as "not found". */
 type WorkflowUnderTest = (req: Request) => Promise<string | undefined>;
@@ -341,8 +367,11 @@ const mount = (
             body['attributes'] = { workspaceId: ctx.workspaceId, createdByUserId: ctx.userId };
             (routeRequest as { body: unknown }).body = body;
           }
+          if (ctx) await guardSdlcAuthor(key, routeRequest, ctx);
 
-          const response = await route.handler(routeRequest, ctx);
+          const response = ctx && RUN_STARTING_ROUTES.has(key)
+            ? await withRunStarter(ctx.userId, () => route.handler(routeRequest, ctx))
+            : await route.handler(routeRequest, ctx);
           const name = typeof req.query['name'] === 'string' ? req.query['name'] : 'download';
           await sendRouteResponse(res, response, route.path, name);
         } catch (err) {

@@ -97,8 +97,9 @@ function page<T extends { id: string; name: string }>(
  * the automations picker hid them too — and a private channel the caller is not
  * in must not even be named back to them.
  */
-export async function channelOptions(q: OptionsQuery): Promise<FieldOptionsPage> {
+export async function channelOptions(q: OptionsQuery, only: { type?: 'SDLC' } = {}): Promise<FieldOptionsPage> {
   const visible = {
+    ...only,
     workspaceId: q.workspaceId,
     // Matches automations' picker, which hid DMs and group DMs and nothing else.
     // (`browsableChannels` in zero/queries.ts is stricter — DEFAULT only — but
@@ -136,6 +137,9 @@ export async function channelOptions(q: OptionsQuery): Promise<FieldOptionsPage>
   });
   return page(rows, label);
 }
+
+/** SDLC hubs the caller can read, by the same rule as `requireSdlcHubReader`. */
+export const sdlcHubOptions = (q: OptionsQuery): Promise<FieldOptionsPage> => channelOptions(q, { type: 'SDLC' });
 
 export async function boardOptions(q: OptionsQuery): Promise<FieldOptionsPage> {
   const select = { id: true, name: true };
