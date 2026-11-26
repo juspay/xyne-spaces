@@ -589,13 +589,12 @@ class WorkerService {
       //   await aiProvisioningWorker.shutdown();
       // }
 
-      // Disabled (Automations)
-      // if (appConfig.enableAutomationWorker) {
-      //   const { deskLabelBackfillWorker } = await import(
-      //     '@/automations/queue/desk-label-backfill.worker'
-      //   );
-      //   await deskLabelBackfillWorker.shutdown();
-      // }
+      if (appConfig.enableAutomationWorker) {
+        const { deskLabelBackfillWorker } = await import(
+          '@/automations/queue/desk-label-backfill.worker'
+        );
+        await deskLabelBackfillWorker.shutdown();
+      }
 
       // Disabled (LLM)
       // await autoDraftWorker.shutdown();
