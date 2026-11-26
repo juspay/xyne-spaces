@@ -44,7 +44,13 @@ export function encryptedRoute(contract: RequestContract, options: Omit<Encrypte
   if (options.transitProxyIngress && !config.internal.transitProxyIngressEnabled) {
     return [];
   }
-  return [enterDekPassthrough, transformRequest({ contract, ...options }), makeBodyUnreadable(contract), transformResponse];
+  return [
+    enterDekPassthrough,
+    transformRequest({ contract, ...options }),
+    ...(options.afterTransform ? [options.afterTransform] : []),
+    makeBodyUnreadable(contract),
+    transformResponse,
+  ];
 }
 
 export type EncryptedRouteOptions = {
@@ -59,6 +65,11 @@ export type EncryptedRouteOptions = {
    * match the setting.
    */
   transitProxyIngress?: boolean;
+  /**
+   * Runs right after the body is transformed and before its unreadable fields are wrapped:
+   * where the typed framework checks the fields' form and derives facts of plaintext ones.
+   */
+  afterTransform?: (req: Request, res: Response, next: NextFunction) => void;
 };
 
 /** Entity type of the keys the Prisma encryption extension writes rows under. */

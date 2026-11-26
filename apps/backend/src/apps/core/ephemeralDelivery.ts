@@ -40,6 +40,13 @@ export interface EphemeralDeliveryArgs {
   flow?: unknown;
   /** Rendered HTML or markdown, used when there is no `flow`. */
   content?: string;
+  /**
+   * Builds the content once the card's capability token is minted (when `appId` is a valid
+   * app id; null otherwise): for content built elsewhere (the encryption service, compose
+   * slackChatContent) that may be an interactive flow card carrying that token. Used instead
+   * of `content` / `flow`.
+   */
+  buildContent?: (capability: { appId: string; token: string } | null) => Promise<string>;
   isMarkdown?: boolean;
   metadata?: Record<string, unknown>;
 }
@@ -129,7 +136,14 @@ export async function deliverEphemeralMessage(
   let flowJSON: Record<string, unknown> | undefined;
   let isMarkdown = args.isMarkdown ?? false;
 
-  if (args.flow !== undefined) {
+  if (args.buildContent) {
+    const capability =
+      args.appId && isAlphanumericId(args.appId)
+        ? { appId: args.appId, token: mintFlowToken({ appId: args.appId, userId: args.recipientId, messageId }) }
+        : null;
+    content = await args.buildContent(capability);
+    isMarkdown = false;
+  } else if (args.flow !== undefined) {
     if (!args.appId) {
       return { ok: false, reason: 'invalid_app' };
     }

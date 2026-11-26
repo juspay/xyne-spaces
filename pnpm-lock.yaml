@@ -2099,6 +2099,9 @@ importers:
       fuse.js:
         specifier: 7.5.0
         version: 7.5.0
+      isomorphic-dompurify:
+        specifier: 2.36.0
+        version: 2.36.0(@noble/hashes@2.2.0)
       react:
         specifier: '>=18.0.0'
         version: 19.2.3

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { defineRequestContract, type RequestOf } from '../define.js';
+import { unreadableString } from '../unreadable-string.js';
 import { defineRoute } from '../api-route.js';
 import { MESSAGE_DELIVERY } from '../../validation/flowSchema.js';
 import { conversationsSendClient } from './conversations.js';
@@ -40,8 +41,8 @@ export const appsChatPostMessageClient = defineRequestContract({
     channelId: z.string().optional(),
     channelName: z.string().optional(),
     conversationId: z.string().optional(),
-    text: z.string().optional(),
-    markdownText: z.string().optional(),
+    text: unreadableString().optional(),
+    markdownText: unreadableString().optional(),
     flow: z.unknown().optional(),
     attachments: z.array(z.unknown()).optional(),
   }),
@@ -60,8 +61,8 @@ export const appsChatUpdateMessageClient = defineRequestContract({
     messageId: z.string(),
     channelId: z.string().optional(),
     channelName: z.string().optional(),
-    text: z.string().optional(),
-    markdownText: z.string().optional(),
+    text: unreadableString().optional(),
+    markdownText: unreadableString().optional(),
     flowJSON: z.unknown().optional(),
     attachments: z.array(z.unknown()).optional(),
   }),
@@ -86,8 +87,8 @@ export const appsChatPostEphemeralClient = defineRequestContract({
     conversationId: z.string().optional(),
     user: z.string(),
     messageDelivery: z.string().optional(),
-    text: z.string().optional(),
-    markdownText: z.string().optional(),
+    text: unreadableString().optional(),
+    markdownText: unreadableString().optional(),
     flow: z.unknown().optional(),
     attachments: z.array(z.unknown()).optional(),
   }),

@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { defineRoute } from '../api-route.js';
 import { defineRequestContract } from '../define.js';
 import { derive } from '../extractors.js';
+import { unreadableString } from '../unreadable-string.js';
 
 // ─── Slack-compatible Xyne Apps API (/apps/slack/...) ─────────────────────────
 // Same actions as the native /apps/chat API, in Slack's wire format, for bots written against
@@ -107,7 +108,7 @@ export const appsSlackChatPostMessageClient = defineRequestContract({
   sourceToDerived: { text: slackChatTextFacts },
   schema: z.object({
     channel: z.string().optional(),
-    text: z.string().optional(),
+    text: unreadableString().optional(),
     blocks: z.unknown().optional(),
     attachments: z.unknown().optional(),
     thread_ts: z.unknown().optional(),
@@ -121,7 +122,7 @@ export const appsSlackChatPostEphemeralClient = defineRequestContract({
   schema: z.object({
     channel: z.string().optional(),
     user: z.string().optional(),
-    text: z.string().optional(),
+    text: unreadableString().optional(),
     blocks: z.unknown().optional(),
     attachments: z.unknown().optional(),
     thread_ts: z.unknown().optional(),
@@ -135,7 +136,7 @@ export const appsSlackChatUpdateClient = defineRequestContract({
   schema: z.object({
     channel: z.string().optional(),
     ts: z.string().optional(),
-    text: z.string().optional(),
+    text: unreadableString().optional(),
     blocks: z.unknown().optional(),
     attachments: z.unknown().optional(),
   }),

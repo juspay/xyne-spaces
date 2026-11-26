@@ -1,19 +1,17 @@
 import {
 	MessageType,
-	UnreadableString,
 	collectAllSlackGroupIds,
 	collectAllSlackUserIds,
 	conversationsSendClient,
 	derivedNames,
 	findSlackMentionIds,
 	findSlackMentionTokens,
-	isCiphertextValue,
 	mergeSlackMentionIds,
 	slackChatContentTemplate,
-	type DerivedFacts,
 	type ExtractorName,
 	type FieldFacts,
 	type RouteBody,
+	type UnreadableString,
 	type appsSlackChatPostEphemeral,
 	type appsSlackChatPostMessage,
 	type appsSlackChatUpdate,
@@ -30,7 +28,6 @@ import type { AuthenticatedUser } from "@/types/express";
 import { slackError, type SlackChannel } from "./access";
 import { resolveSlackUserId } from "./middleware";
 import { resolveSlackHandleReplacements } from "./request-transformers/handleMentions";
-import { transformPostEphemeral, transformPostMessage, transformUpdate } from "./request-transformers/chat";
 import {
 	transformPostEphemeralResponse,
 	transformPostMessageResponse,
@@ -40,9 +37,11 @@ import {
 /**
  * The Slack-compatible write methods (/apps/slack/chat.postMessage, chat.postEphemeral,
  * chat.update) on the typed framework (slack/routes.ts). Same answers as the old controller
- * handlers. With `text` encrypted by the ingress transit proxy, the content is built by the
- * encryption service (compose slackChatContent) from the ids the backend looks up here: the
- * backend never reads the text. With `text` plain, the old transformers build it, unchanged.
+ * handlers. `text` is an UnreadableString: the handlers never read it. The content is built by
+ * compose (template slackChatContent): by the encryption service while DB encryption is on,
+ * here otherwise, from the ids looked up here, which come from the facts of `text` (from the
+ * encryption service, or derived from plaintext by the framework) and from `blocks` /
+ * `attachments`, which stay plaintext.
  */
 
 const XYNE_MESSAGE_CONTENT_MAX_LENGTH = 10000;
@@ -55,24 +54,17 @@ type SlackWriteInput<B> = {
 	user: AuthenticatedUser | undefined;
 	app: AppCaller | undefined;
 	channel: SlackChannel;
-	/** Facts the encryption service extracted from the encrypted `text`. */
+	/** Facts of `text` (Slack ids, rawLength). */
 	textFacts: FieldFacts | undefined;
 };
 
-function isEncryptedText(text: string | undefined): text is string {
-	return !!text && isCiphertextValue(text);
-}
-
 /**
- * `msg_too_long` as before: the body's JSON over 10k characters. Encrypted `text` is longer
- * than the text it holds, so it is counted by the length the encryption service measured.
+ * `msg_too_long` as before: the body's JSON over 10k characters, `text` counted by the length
+ * measured from its plaintext (`rawLength`), since it is not readable here.
  */
-function isTooLong(body: { text?: string }, textFacts: FieldFacts | undefined): boolean {
-	if (isEncryptedText(body.text)) {
-		const rest = JSON.stringify({ ...body, text: undefined }).length;
-		return rest + (textFacts?.rawLength ?? 0) > XYNE_MESSAGE_CONTENT_MAX_LENGTH;
-	}
-	return JSON.stringify(body).length > XYNE_MESSAGE_CONTENT_MAX_LENGTH;
+function isTooLong(body: object, textFacts: FieldFacts | undefined): boolean {
+	const rest = JSON.stringify({ ...body, text: undefined }).length;
+	return rest + (textFacts?.rawLength ?? 0) > XYNE_MESSAGE_CONTENT_MAX_LENGTH;
 }
 
 /** The conversation a Slack `thread_ts` (a message id) starts, if it is in `channelId`. */
@@ -89,21 +81,19 @@ export async function resolveSlackThreadConversationId(
 }
 
 /**
- * The content of a Slack-format message whose `text` arrived encrypted, built by the
- * encryption service (compose slackChatContent): the processContent steps, with every lookup
- * done here first: legacy handle mentions (postMessage only), Slack mentions, and the Slack →
- * Xyne id maps for a flow card. The ids come from `textFacts` for the encrypted text and are
- * found here in `blocks` / `attachments`, which stay plaintext. Returns the stored value
- * (ciphertext under the workspace key).
+ * A Slack-format message's content, built by compose (slackChatContent): the processContent
+ * steps, with every lookup done here first: legacy handle mentions (postMessage only), Slack
+ * mentions, and the Slack → Xyne id maps for a flow card. Returns the stored value.
  */
-async function buildEncryptedSlackChatContent(input: {
-	text: string;
+async function buildSlackChatContent(input: {
+	text: UnreadableString | undefined;
 	blocks?: unknown[];
 	attachments?: unknown[];
 	mrkdwn?: boolean;
 	textFacts: FieldFacts | undefined;
 	workspaceId: string;
 	resolveHandles: boolean;
+	ephemeral?: { appId: string; token: string } | null;
 }): Promise<string> {
 	const facts = input.textFacts ?? {};
 	const json = [input.blocks, input.attachments].filter((v): v is unknown[] => !!v?.length).map((v) => JSON.stringify(v));
@@ -114,7 +104,7 @@ async function buildEncryptedSlackChatContent(input: {
 	};
 	const found = mergeSlackMentionIds([textIds, ...json.map(findSlackMentionIds)]);
 
-	// Legacy handle mentions (`<@harry.sharma>`) first, as transformPostMessage does: a handle
+	// Legacy handle mentions (`<@harry.sharma>`) first, as transformPostMessage did: a handle
 	// that names one user becomes `<@xyneUserId>`, which is then looked up like any id.
 	const handles = input.resolveHandles
 		? await resolveSlackHandleReplacements([...textIds.users, ...json.flatMap(findSlackMentionTokens)], input.workspaceId)
@@ -130,18 +120,15 @@ async function buildEncryptedSlackChatContent(input: {
 		),
 	];
 	const ids = { ...found, users };
+	const structured = { blocks: input.blocks as never, attachments: input.attachments as never };
 
 	const [mentions, idMaps] = await Promise.all([
 		resolveSlackMentionTargets(ids, config.slackBotToken, input.workspaceId),
 		json.length
 			? resolveBlockKitIdMaps(
 					{
-						userIds: [
-							...new Set([...users, ...collectAllSlackUserIds({ blocks: input.blocks as never, attachments: input.attachments as never })]),
-						],
-						groupIds: [
-							...new Set([...ids.groups, ...collectAllSlackGroupIds({ blocks: input.blocks as never, attachments: input.attachments as never })]),
-						],
+						userIds: [...new Set([...users, ...collectAllSlackUserIds(structured)])],
+						groupIds: [...new Set([...ids.groups, ...collectAllSlackGroupIds(structured)])],
 					},
 					config.slackBotToken,
 					input.workspaceId,
@@ -153,7 +140,7 @@ async function buildEncryptedSlackChatContent(input: {
 		{
 			template: slackChatContentTemplate,
 			inputs: {
-				text: UnreadableString.make(input.text),
+				text: input.text ?? null,
 				blocks: input.blocks ?? null,
 				attachments: input.attachments ?? null,
 				mrkdwn: input.mrkdwn ?? null,
@@ -161,6 +148,7 @@ async function buildEncryptedSlackChatContent(input: {
 				mentions,
 				idMaps,
 				screenId: crypto.randomUUID(),
+				ephemeral: input.ephemeral ?? null,
 			},
 		},
 		{ workspaceId: input.workspaceId },
@@ -180,45 +168,37 @@ export async function slackChatPostMessage(input: SlackWriteInput<RouteBody<type
 
 	const userId = user?.id ?? "";
 	const appId = app?.appId ?? "";
-	const workspaceId = user?.workspaceId;
+	const workspaceId = requireWorkspace(user);
 	const channelId = channel.channelId;
 
-	let content: string;
-	let isMarkdown = false;
-	let derived: DerivedFacts | undefined;
-	if (isEncryptedText(body.text)) {
-		const ws = requireWorkspace(user);
-		content = await buildEncryptedSlackChatContent({
-			text: body.text,
-			blocks: body.blocks,
-			attachments: body.attachments,
-			mrkdwn: body.mrkdwn,
-			textFacts,
-			workspaceId: ws,
-			resolveHandles: true,
-		});
-		derived = { version: 2, fields: { content: await deriveStoredFacts(content, MESSAGE_CONTENT_FACTS, { workspaceId: ws }) } };
-	} else {
-		const args = await transformPostMessage({ ...body, channel: channelId } as never, { userId, appId, workspaceId });
-		content = args.content;
-		isMarkdown = args.isMarkdown;
-	}
+	const content = await buildSlackChatContent({
+		text: body.text,
+		blocks: body.blocks,
+		attachments: body.attachments,
+		mrkdwn: body.mrkdwn,
+		textFacts,
+		workspaceId,
+		resolveHandles: true,
+	});
 
 	const thread = await resolveSlackThreadConversationId(body.thread_ts, channelId);
 	if (thread.error) throw slackError(thread.error);
 
+	const contentFacts = await deriveStoredFacts(content, MESSAGE_CONTENT_FACTS, { workspaceId });
 	const result = await findOrCreateConversation(
 		channelId,
 		userId,
 		content,
-		isMarkdown,
+		false,
 		thread.conversationId,
 		undefined,
 		MessageType.BOT,
 		body.metadata,
-		derived,
+		{ version: 2, fields: { content: contentFacts } },
 	);
-	return transformPostMessageResponse(result, channelId, body.text ?? "", appId, body.username);
+	// `text` goes back as the bot sent it: an UnreadableString, written readable by the framework
+	// at the response (makeReadable), then re-encrypted for the caller if it is ciphertext.
+	return transformPostMessageResponse(result, channelId, (body.text ?? "") as unknown as string, appId, body.username);
 }
 
 /** POST /apps/slack/chat.postEphemeral */
@@ -228,33 +208,14 @@ export async function slackChatPostEphemeral(input: SlackWriteInput<RouteBody<ty
 
 	const userId = user?.id ?? "";
 	const appId = app?.appId ?? "";
-	const workspaceId = user?.workspaceId;
+	const workspaceId = requireWorkspace(user);
 	const channelId = channel.channelId;
 
-	const recipientId = await resolveSlackUserId(body.user, workspaceId ?? "");
+	const recipientId = await resolveSlackUserId(body.user, workspaceId);
 	if (!recipientId) throw slackError("user_not_found");
 
 	const thread = await resolveSlackThreadConversationId(body.thread_ts, channelId);
 	if (thread.error) throw slackError(thread.error);
-
-	let args: { flow?: Parameters<typeof deliverEphemeralMessage>[0]["flow"]; content?: string; isMarkdown: boolean; metadata?: Record<string, unknown> };
-	if (isEncryptedText(body.text)) {
-		// Built as content, never as a flow object: the encryption service returns the card
-		// already rendered (`<div data-flow-json>`), so it shows but is not an interactive,
-		// signed ephemeral flow.
-		const content = await buildEncryptedSlackChatContent({
-			text: body.text,
-			blocks: body.blocks,
-			attachments: body.attachments,
-			mrkdwn: body.mrkdwn,
-			textFacts,
-			workspaceId: requireWorkspace(user),
-			resolveHandles: false,
-		});
-		args = { content, isMarkdown: false, metadata: body.metadata };
-	} else {
-		args = await transformPostEphemeral({ ...body, channel: channelId, recipientId } as never, { userId, appId, workspaceId });
-	}
 
 	const sender = await repositories.users.findById(userId);
 	const result = await deliverEphemeralMessage({
@@ -264,10 +225,20 @@ export async function slackChatPostEphemeral(input: SlackWriteInput<RouteBody<ty
 		senderId: userId,
 		senderName: sender?.name,
 		messageDelivery: "EPHEMERAL",
-		...(args.flow ? { appId, flow: args.flow } : {}),
-		content: args.content,
-		isMarkdown: args.isMarkdown,
-		metadata: args.metadata,
+		appId,
+		// Built once the card's capability token is minted, so a flow card stays interactive.
+		buildContent: (capability) =>
+			buildSlackChatContent({
+				text: body.text,
+				blocks: body.blocks,
+				attachments: body.attachments,
+				mrkdwn: body.mrkdwn,
+				textFacts,
+				workspaceId,
+				resolveHandles: false,
+				ephemeral: capability,
+			}),
+		metadata: body.metadata,
 	});
 	if (!result.ok) {
 		throw slackError(result.reason === "not_in_channel" ? "user_not_in_channel" : "invalid_arguments");
@@ -292,17 +263,15 @@ export async function slackChatUpdate(input: SlackWriteInput<RouteBody<typeof ap
 	if (!existingConversation) throw slackError("thread_not_found");
 	if (existingConversation.channelId !== channelId) throw slackError("message_not_found");
 
-	const content = isEncryptedText(body.text)
-		? await buildEncryptedSlackChatContent({
-				text: body.text,
-				blocks: body.blocks,
-				attachments: body.attachments,
-				textFacts,
-				workspaceId: requireWorkspace(user),
-				resolveHandles: false,
-			})
-		: (await transformUpdate(body as never, { workspaceId: user?.workspaceId })).content;
+	const content = await buildSlackChatContent({
+		text: body.text,
+		blocks: body.blocks,
+		attachments: body.attachments,
+		textFacts,
+		workspaceId: requireWorkspace(user),
+		resolveHandles: false,
+	});
 
 	const result = await updateConversation(messageId, content);
-	return transformUpdateResponse(result, channelId, body.text ?? "", userId);
+	return transformUpdateResponse(result, channelId, (body.text ?? "") as unknown as string, userId);
 }

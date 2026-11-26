@@ -143,7 +143,7 @@ type BodyOf<B, E> = E extends RequestContract<infer S, infer D extends SourceToD
   ? {
       [K in keyof Out<B>]: K extends keyof D
         ? K extends UnreadableKeys<S>
-          ? Out<B>[K]
+          ? UnreadableString | Extract<Out<B>[K], null | undefined>
           : Encrypted<NonNullable<Out<B>[K]>> | Extract<Out<B>[K], null | undefined>
         : Out<B>[K];
     }

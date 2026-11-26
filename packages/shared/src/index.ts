@@ -83,3 +83,4 @@ export * from './sdlcFolderAncestry';
 export { refileSdlcFolderEdges } from './zero/sdlcFolderAncestry';
 export * from './validation/etaManagementSchema';
 export * from './slack/index.js';
+export { sanitizeMessageContent } from './sanitize/messageContent.js';

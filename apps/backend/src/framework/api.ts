@@ -1,7 +1,12 @@
 import express, { type Application, type NextFunction, type Request, type RequestHandler, type Response } from 'express';
 import type { z } from 'zod';
 import {
+  deriveFactsFromPlaintext,
+  derivedNames,
+  isCiphertextValue,
   makeUnreadable,
+  reveal,
+  UnreadableString,
   type AnyRouteContract,
   type RequestContract,
   type RouteBody,
@@ -14,6 +19,7 @@ import {
 import { config } from '@/config/env';
 import { authMiddleware } from '@/middleware/auth';
 import { encryptedRoute } from '@/middleware/encryptedRoute';
+import { isDekPassthrough } from '@/services/encryption/dekPassthrough';
 import { encryptResponseBodyMiddleware } from '@/middleware/decryptionMiddleware';
 import { errorHandler } from '@/middleware/errorHandler';
 import { authenticateApp } from '@/apps/middelware/authenticator';
@@ -238,6 +244,83 @@ function checkResponse(contract: AnyRouteContract, result: unknown): void {
   }
 }
 
+/**
+ * The encrypted fields' form, then their facts, as for contracted mutators
+ * (assertArgsMatchContract, deriveLocally): runs after the encryption service transformed the
+ * body and before the unreadable fields are wrapped.
+ *
+ * - Form: a field the contract keeps plain must not arrive as ciphertext; an
+ *   `unreadableString()` field must be ciphertext once the encryption service transformed the
+ *   body (DEK passthrough). Without the transform (no gateway, encryption off) everything is
+ *   plaintext and is encrypted at rest on write.
+ * - Facts: when the encryption service extracted none (it did not run, or the body was plain),
+ *   they are computed here from the plaintext with the same shared extractors, so a handler
+ *   always decides on `derived` and never reads the text.
+ */
+function contractFieldsAndFacts(encryption: RequestContract): RequestHandler {
+  const factNames = derivedNames(encryption);
+  return function contractFieldsAndFactsMiddleware(req, res, next) {
+    const body = (req.body ?? {}) as Record<string, unknown>;
+    const transformed = isDekPassthrough();
+    for (const [field, value] of Object.entries(body)) {
+      if (typeof value !== 'string' || value.length === 0) continue;
+      const unreadable = encryption.unreadableFields.includes(field);
+      const problem =
+        !unreadable && isCiphertextValue(value)
+          ? 'is plaintext in the contract but arrived encrypted'
+          : unreadable && transformed && !isCiphertextValue(value)
+            ? 'is encrypted in the contract but arrived as plaintext'
+            : undefined;
+      if (problem) {
+        logger.error('[api] request field does not match its type in the contract', { field, problem, path: req.path });
+        res.status(400).json({ error: 'Request body does not match its contract', code: 'ENC_CONTRACT_VIOLATION', field, message: problem });
+        return;
+      }
+    }
+    if (!req.derived) {
+      const derived = deriveFactsFromPlaintext(body, factNames);
+      if (derived) req.derived = derived;
+    }
+    next();
+  };
+}
+
+/**
+ * The encryption pipeline (encryptedRoute) with the field check and facts step after its
+ * transform; where the pipeline does not run (an `app` route without the ingress proxy), the
+ * check and facts step alone, so the handler gets the same `derived` and wrapped fields.
+ */
+function encryptionSteps(
+  contract: AnyRouteContract,
+  encryption: { resolveWorkspaceId: (req: Request) => Promise<string> } | undefined,
+  auth: RouteAuth,
+): RequestHandler[] {
+  if (!contract.encryption || !encryption) return [];
+  const fieldsAndFacts = contractFieldsAndFacts(contract.encryption as RequestContract);
+  const steps = encryptedRoute(contract.encryption as RequestContract, {
+    resolveWorkspaceId: encryption.resolveWorkspaceId,
+    transitProxyIngress: auth === 'app' || auth === 'slack-app',
+    afterTransform: fieldsAndFacts,
+  });
+  return steps.length > 0 ? steps : [fieldsAndFacts];
+}
+
+/**
+ * `value` with every UnreadableString in it (at any depth) as the value it holds: ciphertext,
+ * or plaintext while nothing is encrypted. The response's write boundary, as tx.mutate is the
+ * database's: a handler hands back what it holds (e.g. the bot's own `text`, echoed in a Slack
+ * answer) without reading it, and ciphertext is re-encrypted for the caller after this
+ * (transformResponse). Without it an UnreadableString would be sent as "<redacted>".
+ */
+function makeReadable(value: unknown): unknown {
+  if (value instanceof UnreadableString) return reveal(value);
+  if (Array.isArray(value)) return value.map(makeReadable);
+  if (value && typeof value === 'object' && Object.getPrototypeOf(value) === Object.prototype) {
+    return Object.fromEntries(Object.entries(value).map(([key, inner]) => [key, makeReadable(inner)]));
+  }
+  return value;
+}
+
 function respond<C extends AnyRouteContract, A extends AccessChecks>(contract: C, impl: RouteImpl<C, A>): RequestHandler {
   return async function respondMiddleware(req: Request, res: Response, next: NextFunction) {
     try {
@@ -254,8 +337,9 @@ function respond<C extends AnyRouteContract, A extends AccessChecks>(contract: C
         ip: req.ip,
         userAgent: req.get('user-agent'),
       });
-      checkResponse(contract, result);
-      res.status(impl.successStatus ?? 200).json(result);
+      const readable = makeReadable(result);
+      checkResponse(contract, readable);
+      res.status(impl.successStatus ?? 200).json(readable);
     } catch (error) {
       if (error instanceof ContractError) {
         res.status(error.status).json(error.body);
@@ -303,12 +387,7 @@ function build<C extends AnyRouteContract, A extends AccessChecks>(contract: C, 
     ...(impl.upload ? [impl.upload] : []),
     validate(contract, impl.invalidRequest),
     ...(impl.access ? [runAccess(impl.access)] : []),
-    ...(contract.encryption && encryption
-      ? encryptedRoute(contract.encryption as RequestContract, {
-          resolveWorkspaceId: encryption.resolveWorkspaceId,
-          transitProxyIngress: auth === 'app' || auth === 'slack-app',
-        })
-      : []),
+    ...encryptionSteps(contract, encryption, auth),
     respond(contract, impl),
     // Last: an error any step passes on (anything not a ContractError) gets the app's error
     // answer here, in the route itself, so a typed request never reaches anything app.ts adds.

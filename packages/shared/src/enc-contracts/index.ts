@@ -2,7 +2,7 @@ export { EXTRACTORS, derive, derivedFactsSchema, fieldFactsSchema } from './extr
 export type { Derivable, ExtractorGroups, ExtractorName, ExtractorOutput, FieldFacts, DerivedFacts } from './extractors.js';
 export { defineRequestContract, makeUnreadable, sourceFieldNames, derivedNames } from './define.js';
 export { UnreadableString, reveal, unreadableString } from './unreadable-string.js';
-export { COMPOSE_TEMPLATES, defineComposeTemplate, forwardedMessageEditTemplate, forwardedMessageTemplate, isComposeTemplateName, runComposeTemplate, slackMessageContentTemplate, slackChatContentTemplate, slackMentionTargetsSchema } from './compose.js';
+export { COMPOSE_TEMPLATES, defineComposeTemplate, forwardedMessageEditTemplate, forwardedMessageTemplate, isComposeTemplateName, runComposeTemplate, slackMessageContentTemplate, slackChatContentTemplate, markdownContentTemplate, slackMentionTargetsSchema } from './compose.js';
 export type { ComposeInputs, ComposeResult, ComposeTemplate, ComposeTemplateName } from './compose.js';
 export type { DerivedSpec, Encrypted, FieldDerived, RequestContract, RequestBody, RequestDerived, RequestOf, SourceToDerived, UnreadableBody } from './define.js';
 export { matchesRoute, normalizeRequestPath } from './route-match.js';

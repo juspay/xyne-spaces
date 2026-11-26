@@ -5,6 +5,8 @@ import { SlackBlockKitParser } from '../slack/blockKitParser.js';
 import { applySlackHandleMentions, applySlackMentions, type SlackMentionTargets } from '../slack/mentions.js';
 import { buildFlowFromBlockKit } from '../slack/flow.js';
 import { flowFallbackLabel } from '../utils/flowCardLabel.js';
+import { validateFlowDefinition } from '../validation/flowSchema.js';
+import { sanitizeMessageContent } from '../sanitize/messageContent.js';
 import type { SlackAttachment, SlackBlock } from '../slack/blockKitTypes.js';
 
 /**
@@ -195,6 +197,13 @@ export const slackChatContentTemplate = defineComposeTemplate({
     mentions: slackMentionTargetsSchema,
     idMaps: z.object({ users: z.record(z.string(), z.string()), groups: z.record(z.string(), z.string()) }),
     screenId: z.string(),
+    /**
+     * An ephemeral card's capability (chat.postEphemeral): the app and the signed token
+     * deliverEphemeralMessage minted for it. The flow card then carries them as
+     * deliverEphemeralMessage's own cards do (token in `data`, appId and flow id attributes),
+     * so its actions work. Null elsewhere.
+     */
+    ephemeral: z.object({ appId: z.string(), token: z.string() }).nullable().optional(),
   }),
   build: inputs => {
     const mentions = inputs.mentions as SlackMentionTargets;
@@ -205,6 +214,16 @@ export const slackChatContentTemplate = defineComposeTemplate({
 
     if (blocks?.length || attachments?.length) {
       const flow = buildFlowFromBlockKit({ text, blocks, attachments }, inputs.idMaps, inputs.screenId);
+      if (flow && inputs.ephemeral) {
+        // As deliverEphemeralMessage's buildFlowContent: validated, the token in `data` (the
+        // schema strips unknown top-level keys), appId and flow id as attributes.
+        const valid = validateFlowDefinition(flow);
+        if (!valid.success) throw new Error('slackChatContent: the flow card is not a valid flow');
+        const flowJSON = { ...valid.data, data: { ...(valid.data.data ?? {}), __xyneFlowToken: inputs.ephemeral.token } };
+        const flowId = valid.data.screenId ?? inputs.screenId;
+        const escapedJSON = JSON.stringify(flowJSON).replace(/"/g, '&quot;');
+        return `<div data-flow-json="${escapedJSON}" data-flow-appid="${encodeHtmlAttr(inputs.ephemeral.appId)}" data-flow-id="${encodeHtmlAttr(flowId)}">${encodeHtmlAttr(flowFallbackLabel(flowJSON))}</div>`;
+      }
       if (flow) {
         const escapedJSON = JSON.stringify(flow).replace(/"/g, '&quot;');
         return `<div data-flow-json="${escapedJSON}">${encodeHtmlAttr(flowFallbackLabel(flow))}</div>`;
@@ -223,12 +242,24 @@ export const slackChatContentTemplate = defineComposeTemplate({
   },
 });
 
+/**
+ * A Xyne Apps message's content from markdown (`markdownText`, or `text` with contentFormat
+ * markdown): the markdown, sanitized for storage (sanitizeMessageContent), as the chat
+ * controller stores it; here so the encryption service can build it from text it holds encrypted.
+ */
+export const markdownContentTemplate = defineComposeTemplate({
+  name: 'markdownContent',
+  inputs: z.object({ markdown: unreadableString() }),
+  build: inputs => sanitizeMessageContent(inputs.markdown),
+});
+
 /** Every compose template, by name: the names the encryption service and the transformer accept. */
 export const COMPOSE_TEMPLATES = {
   forwardedMessage: forwardedMessageTemplate,
   forwardedMessageEdit: forwardedMessageEditTemplate,
   slackMessageContent: slackMessageContentTemplate,
   slackChatContent: slackChatContentTemplate,
+  markdownContent: markdownContentTemplate,
 } as const;
 
 export type ComposeTemplateName = keyof typeof COMPOSE_TEMPLATES;
