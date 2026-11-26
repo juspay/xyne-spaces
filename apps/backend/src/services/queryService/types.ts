@@ -217,6 +217,8 @@ const MAX_OFFSET = 100000;
 const MAX_FIELD_NAME_LENGTH = 128;
 const MAX_FILTER_DEPTH = 5;
 const MAX_FILTER_CONDITIONS = 100;
+/** Conditions plus the groups holding them. */
+const MAX_FILTER_NODES = MAX_FILTER_CONDITIONS * 2;
 const MAX_VALUE_LIST_LENGTH = 1000;
 
 /** A system column name or `custom.<fieldId>`; anything else cannot name a real field. */
@@ -242,11 +244,20 @@ const FilterValueSchema = z.union([
   z.array(z.union([ScalarValueSchema, OptionValueSchema])).max(MAX_VALUE_LIST_LENGTH),
 ]);
 
+const RESERVED_ALIASES = new Set(['__proto__', 'constructor', 'prototype']);
+
 const AggregationSchema = z
   .object({
     function: z.enum(['COUNT', 'SUM', 'AVG', 'MIN', 'MAX']),
     field: FieldNameSchema,
-    alias: z.string().max(64).regex(/^[A-Za-z0-9_ .-]+$/, 'Invalid alias').optional(),
+    // Free text from the dashboard ("Avg (hrs)", "% done", non-English names). It is only
+    // ever a key of a plain result object, so only the prototype-related names are refused.
+    alias: z
+      .string()
+      .min(1)
+      .max(200)
+      .refine(a => !RESERVED_ALIASES.has(a), 'Invalid alias')
+      .optional(),
   })
 
 const OrderBySchema = z
@@ -273,20 +284,31 @@ const LogicalFilterSchema: z.ZodType<LogicalFilter> = z.lazy(() =>
     }),
 ) as z.ZodType<LogicalFilter>;
 
-/** Depth and total size of a filter tree, so one request cannot build an unbounded WHERE. */
-function filterShape(filter: LogicalFilter, depth = 1): { depth: number; conditions: number } {
-  let maxDepth = depth;
-  let conditions = 0;
-  for (const c of filter.conditions) {
-    if (isLogicalFilter(c)) {
-      const inner = filterShape(c, depth + 1);
-      maxDepth = Math.max(maxDepth, inner.depth);
-      conditions += inner.conditions;
-    } else {
-      conditions += 1;
+/**
+ * Depth and size of the raw filter tree, checked before zod sees it. zod's recursive schema
+ * would otherwise walk an arbitrarily deep tree (a 10mb body nests ~300k levels) and overflow
+ * the stack. Iterative, and stops at the first limit it passes.
+ */
+function checkRawFilterShape(raw: unknown): string | null {
+  const pending: Array<{ node: unknown; depth: number }> = [{ node: raw, depth: 1 }];
+  let nodes = 0;
+  while (pending.length > 0) {
+    const { node, depth } = pending.pop()!;
+    if (++nodes > MAX_FILTER_NODES) {
+      return `Filters may hold at most ${MAX_FILTER_CONDITIONS} conditions`;
     }
+    if (!node || typeof node !== 'object' || Array.isArray(node)) continue;
+    const conditions = (node as { conditions?: unknown }).conditions;
+    if (!Array.isArray(conditions)) continue;
+    if (depth > MAX_FILTER_DEPTH) {
+      return `Filters may nest at most ${MAX_FILTER_DEPTH} levels`;
+    }
+    if (conditions.length > MAX_FILTER_CONDITIONS) {
+      return `Filters may hold at most ${MAX_FILTER_CONDITIONS} conditions`;
+    }
+    for (const condition of conditions) pending.push({ node: condition, depth: depth + 1 });
   }
-  return { depth: maxDepth, conditions };
+  return null;
 }
 
 const GenericQuerySchema = z
@@ -301,22 +323,16 @@ const GenericQuerySchema = z
     limit: z.number().int().positive().max(MAX_QUERY_LIMIT).optional(),
     offset: z.number().int().nonnegative().max(MAX_OFFSET).optional(),
     dateGranularity: z.enum(['hour', 'day', 'week', 'month']).optional(),
-  })
-  .superRefine((q, ctx) => {
-    if (!q.filters) return;
-    const shape = filterShape(q.filters);
-    if (shape.depth > MAX_FILTER_DEPTH) {
-      ctx.addIssue({ code: 'custom', message: `Filters may nest at most ${MAX_FILTER_DEPTH} levels` });
-    }
-    if (shape.conditions > MAX_FILTER_CONDITIONS) {
-      ctx.addIssue({ code: 'custom', message: `Filters may hold at most ${MAX_FILTER_CONDITIONS} conditions` });
-    }
   });
 
 /**
  * Parse and validate a generic query
  */
 export function parseGenericQuery(data: unknown): { success: boolean; query?: GenericQuery; error?: string } {
+  if (data && typeof data === 'object' && 'filters' in data) {
+    const shapeError = checkRawFilterShape((data as { filters?: unknown }).filters);
+    if (shapeError) return { success: false, error: shapeError };
+  }
   const result = GenericQuerySchema.safeParse(data);
   if (!result.success) {
     return {

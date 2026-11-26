@@ -22,17 +22,20 @@ import {
 import { formEntityValueTextHash } from '@/utils/formEntityValueHash';
 import { logger } from '@/utils/logger';
 
+/** Most entity ids a custom-field filter may resolve to; well under Postgres's bind limit. */
+const MAX_CUSTOM_FILTER_IDS = 20000;
+
+/** A query refused for a reason the caller can fix. Its message is safe to return. */
+export class QueryRejectedError extends Error {}
+
 /** Returned to the caller instead of the raw error, which can carry Prisma's view of the schema. */
 function executionFailure(code: string, error: unknown, startTime: number): QueryResult {
+  const details = { executionTimeMs: Date.now() - startTime };
+  if (error instanceof QueryRejectedError) {
+    return { success: false, error: { code, message: error.message, details } };
+  }
   logger.error('[analytics-query] execution failed', { code, error });
-  return {
-    success: false,
-    error: {
-      code,
-      message: 'Query execution failed',
-      details: { executionTimeMs: Date.now() - startTime },
-    },
-  };
+  return { success: false, error: { code, message: 'Query execution failed', details } };
 }
 
 type TypedFilterTarget =
@@ -135,12 +138,17 @@ async function withTimeout<T>(
   promise: Promise<T>,
   timeoutMs: number = QUERY_TIMEOUT
 ): Promise<T> {
-  return Promise.race([
-    promise,
-    new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error('Query timeout')), timeoutMs)
-    ),
-  ]);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error('Query timeout')), timeoutMs);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export class GenericQueryBuilder {
@@ -446,8 +454,15 @@ export class GenericQueryBuilder {
       findFormEntityValueKeys(this.prisma, {
         where: formEntityWhere,
         distinct: ['entityId'],
+        // Every id ends up in an `id IN (...)` list, so the list is bounded.
+        take: MAX_CUSTOM_FILTER_IDS + 1,
       })
     );
+    if (matchingValues.length > MAX_CUSTOM_FILTER_IDS) {
+      throw new QueryRejectedError(
+        `The custom-field filter matches more than ${MAX_CUSTOM_FILTER_IDS} records; narrow it`,
+      );
+    }
 
     return matchingValues.map(v => v.entityId);
   }
@@ -715,19 +730,23 @@ export class GenericQueryBuilder {
 
     // Get custom field values for all entities
     const customFieldIds = aggregations.map(agg => agg.field.replace('custom.', ''));
-    const customFieldValues = await findFormEntityValues(this.prisma, {
-      where: {
-        entityId: { in: entityIds },
-        entityType,
-        fieldId: { in: customFieldIds },
-      },
-    });
+    const customFieldValues = await withTimeout(
+      findFormEntityValues(this.prisma, {
+        where: {
+          entityId: { in: entityIds },
+          entityType,
+          fieldId: { in: customFieldIds },
+        },
+      }),
+    );
 
     // Fetch field types to know how to interpret values
-    const formFields = await this.prisma.formFields.findMany({
-      where: { id: { in: customFieldIds } },
-      select: { id: true, fieldType: true },
-    });
+    const formFields = await withTimeout(
+      this.prisma.formFields.findMany({
+        where: { id: { in: customFieldIds } },
+        select: { id: true, fieldType: true },
+      }),
+    );
     const fieldTypeMap = new Map(formFields.map(f => [f.id, f.fieldType]));
 
     // Group values by field
@@ -897,13 +916,15 @@ export class GenericQueryBuilder {
       const customFieldValuesByField = new Map<string, Map<string, any>>();
       
       if (allCustomFieldIds.length > 0) {
-        const customFieldValues = await findFormEntityValues(this.prisma, {
-          where: {
-            entityId: { in: entityData.map((e: any) => e.id) },
-            entityType: query.entityType,
-            fieldId: { in: allCustomFieldIds },
-          },
-        });
+        const customFieldValues = await withTimeout(
+          findFormEntityValues(this.prisma, {
+            where: {
+              entityId: { in: entityData.map((e: any) => e.id) },
+              entityType: query.entityType,
+              fieldId: { in: allCustomFieldIds },
+            },
+          }),
+        );
 
         // Preprocess: O(n) instead of O(n * aggregations)
         customFieldValues.forEach(cf => {

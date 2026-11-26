@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import { createQueryService } from '@/services/queryService/queryService';
 import { DatabaseClient } from '@/database/client';
 import { logger } from '@/utils/logger';
+import { SUPPORTED_ENTITY_TYPES, isSupportedEntityType } from '@/services/queryService/types';
 
 export class QueryController {
   /**
@@ -10,14 +11,14 @@ export class QueryController {
    */
   public static async getFields(req: Request, res: Response): Promise<void> {
     try {
-      const entityType = req.query.entityType as string;
+      const entityType = req.query.entityType;
 
-      if (!entityType) {
+      if (typeof entityType !== 'string' || !isSupportedEntityType(entityType)) {
         res.status(400).json({
           success: false,
           error: {
-            code: 'MISSING_ENTITY_TYPE',
-            message: 'entityType query parameter is required',
+            code: 'INVALID_ENTITY_TYPE',
+            message: `entityType must be one of: ${SUPPORTED_ENTITY_TYPES.join(', ')}`,
           },
         });
         return;
