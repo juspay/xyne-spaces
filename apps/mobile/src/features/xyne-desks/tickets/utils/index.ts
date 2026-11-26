@@ -19,13 +19,10 @@ export {
 } from './map-generated-tags-to-filter-options';
 export {
   toDynamicFieldQueryFilters,
-  toDynamicFieldClientFilters,
-  filterSupportTicketsByDynamicFieldClientFilters,
   buildDynamicFieldFilterEntries,
   type DynamicFieldFilterValue,
   type DynamicFieldFilterEntry,
   type DynamicFieldQueryFilter,
-  type DynamicFieldClientFilter,
 } from './dynamic-field-filters';
 export { mapTicketListItem, type MapTicketListItemInput } from './map-ticket-list-item';
 export {

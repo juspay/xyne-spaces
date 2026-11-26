@@ -1,5 +1,10 @@
 import React from 'react';
-import type { Ticket, TicketTag } from '@xyne/shared';
+import {
+  readFormEntityValue,
+  type Ticket,
+  type TicketTag,
+  type TypedFormEntityValueRow,
+} from '@xyne/shared';
 import { CheckTickSingle as Check, Subtask } from '@xyne/icons';
 import Tooltip, { TruncatedTooltip } from '../../ui/Tooltip';
 import Avatar from '../../ui/Avatar/Avatar';
@@ -127,7 +132,7 @@ const AssigneeCell: React.FC<{ ticket: Ticket }> = ({ ticket }) => {
   );
 };
 
-type FormValue = { fieldId: string; actualFieldValue?: unknown; updatedAt?: number | null };
+type FormValue = TypedFormEntityValueRow & { fieldId: string; updatedAt?: number | null };
 
 type TicketColumnsRowProps = {
   ticket: Ticket;
@@ -271,7 +276,7 @@ const TicketColumnsRowBase: React.FC<TicketColumnsRowProps> = ({
               : best,
           undefined,
         );
-        return <DynamicFieldCell fieldType={field.fieldType} value={latest?.actualFieldValue} />;
+        return <DynamicFieldCell fieldType={field.fieldType} value={readFormEntityValue(latest)} />;
       }
     }
   };

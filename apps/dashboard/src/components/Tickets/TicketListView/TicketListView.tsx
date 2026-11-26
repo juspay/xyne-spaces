@@ -17,10 +17,8 @@ import type { TicketListItem } from './TicketListView.types';
 import { DeskType, TicketPriority, MailboxState } from '@xyne/shared';
 import type { MailboxFolder } from '../../xyne-desk/DeskFolders/DeskMailboxSidebar';
 import {
-  ticketMatchesDynamicFieldEntries,
   type DynamicFieldFilterEntry,
   type DynamicFieldQueryFilter,
-  type FormEntityValueLike,
 } from '../../../utils/board/dynamicFieldFilters';
 import type { ResolvedDisplayFormField } from '../../../utils/board/resolveDisplayFormFields';
 import { dynamicColumnKey } from '../TicketTable/TicketTableTypes';
@@ -652,16 +650,8 @@ export const TicketListView = function TicketListView({
         }
       });
     }
-    if (dynamicFieldEntries?.length) {
-      rows = rows.filter(t =>
-        ticketMatchesDynamicFieldEntries(
-          t.formEntityValues as FormEntityValueLike[] | undefined,
-          dynamicFieldEntries,
-        ),
-      );
-    }
     return rows;
-  }, [allRows, mailboxFolder, dynamicFieldEntries]);
+  }, [allRows, mailboxFolder]);
 
   // Paginate over the FILTERED rows: render one PAGE_SIZE window; a (PAGE_SIZE+1)th filtered
   // row is the "next page exists" sentinel (mirrors the server keyset paging, on filtered rows).

@@ -1,9 +1,10 @@
 import { Transaction } from '@rocicorp/zero';
 import { z } from 'zod';
-import { AttachmentEntityType, FormEntityType, FormFieldType, type FormFieldValue, Schema } from './schema.js';
+import { AttachmentEntityType, FormEntityType, FormFieldType, Schema } from './schema.js';
 import { stringFromFormValue } from '../tickets/utils.js';
 import { resolveParentOption } from '../utils/formFieldOptions.js';
 import {
+  assertFormEntityValueFitsType,
   assertFormFieldType,
   formEntityValueItemId,
   readFormEntityValue,
@@ -264,7 +265,7 @@ export async function writeFormEntityValueCreate(
   const fieldName =
     globalField?.fieldName ?? legacyField?.globalField?.fieldName ?? legacyField?.fieldName ?? null;
 
-  const actualFieldValue = toStoredFormValue(fieldType, newValue);
+  const valueToStore = toStoredFormValue(fieldType, newValue);
   await insertFormEntityValue(tx, {
     id,
     workspaceId,
@@ -275,7 +276,7 @@ export async function writeFormEntityValueCreate(
     contextId,
     version: version ?? 1,
     fieldType: assertFormFieldType(fieldType, resolvedFieldId),
-    value: actualFieldValue,
+    value: valueToStore,
     timestamp,
   });
 
@@ -286,7 +287,7 @@ export async function writeFormEntityValueCreate(
     entityType,
     fieldName,
     activeCheckField: toActiveCheckField(membership, fieldName),
-    docCheck: toDocCheck(entityType, fieldType, actualFieldValue, id),
+    docCheck: toDocCheck(entityType, fieldType, valueToStore, id),
   };
 }
 
@@ -507,18 +508,13 @@ export async function upsertManyFormEntityValues(
   return writes;
 }
 
-// Dual write: clients that still read actualFieldValue keep seeing current values.
-const legacyJsonValue = (value: unknown): FormFieldValue => {
-  if (value === null || value === undefined) return null;
-  if (typeof value === 'string' || Array.isArray(value)) return value as FormFieldValue;
-  return String(value);
-};
-
 // textHash needs the backend's key: the optimistic client write leaves it null and the
 // server's write fills it.
 const storedFormEntityValueFields = (fieldType: FormFieldType, value: unknown, fieldId: string) => {
   const typed = toTypedFormEntityValue(assertFormFieldType(fieldType, fieldId), value);
-  return { fields: { ...typed.columns, textHash: null, actualFieldValue: legacyJsonValue(value) }, items: typed.items };
+  assertFormEntityValueFitsType(fieldType, value, typed);
+  // The old JSON column is cleared, so the backfill can't copy a stale value back.
+  return { fields: { ...typed.columns, textHash: null, actualFieldValue: null }, items: typed.items };
 };
 
 // Makes the value's form_entity_value_items rows exactly `items`. Item ids are derived, so

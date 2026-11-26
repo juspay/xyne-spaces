@@ -235,11 +235,24 @@ export const getDynamicFieldScalarFilters = (
 
     // Zero can express scalar equality for JSON values. Date ranges and array containment
     // still use the existing all-ticket path until those values are normalized/indexed.
+    // A field whose type isn't known can't be matched, so it is left out.
     const fieldType = dynamicFieldTypes?.[fieldId];
-    scalarFilters.push({ fieldId, values: value, ...(fieldType && { fieldType }) });
+    if (!fieldType) continue;
+    scalarFilters.push({ fieldId, values: value, fieldType });
   }
 
   return scalarFilters.length > 0 ? scalarFilters : undefined;
+};
+
+// Saved views from before the group-by stored its field type leave it out; the board's field
+// types fill it in so the query matches on the typed columns.
+export const withGroupByFieldType = (
+  groupBy: KanbanPageGroupBy | undefined,
+  fieldTypes: Record<string, string> | undefined,
+): KanbanPageGroupBy | undefined => {
+  if (typeof groupBy !== 'object' || groupBy.fieldType) return groupBy;
+  const fieldType = fieldTypes?.[groupBy.fieldId];
+  return fieldType ? { ...groupBy, fieldType } : groupBy;
 };
 
 export const getFormFieldValue = (
@@ -325,7 +338,7 @@ export const buildKanbanTicketsPageArgs = (
       stageName: options.stageName,
       limit: options.pageSize ?? DEFAULT_PAGE_SIZE,
       start,
-      groupBy: options.groupBy,
+      groupBy: withGroupByFieldType(options.groupBy, options.dynamicFieldTypes),
       groupKey: options.groupKey,
       formFieldValue: getFormFieldValue(options.groupBy, options.groupKey),
       vespaTicketIds: options.vespaTicketIds,

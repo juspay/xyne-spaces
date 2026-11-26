@@ -1214,14 +1214,14 @@ async function main() {
             entityType: 'TICKET',
             fieldId: generateId(),
             fieldValue: '40',
-            actualFieldValue: 40
+            numberValue: 40
           },
           {
             entityId: ticket1.id,
             entityType: 'TICKET',
             fieldId: generateId(),
             fieldValue: 'High',
-            actualFieldValue: 'High'
+            plainValue: 'High'
           }
         ]
       });

@@ -30,7 +30,6 @@ import { TICKETS_SELECTION_FADE_MS } from '../constants';
 import type { TicketMailboxFolder, TicketsFilterDrawerItem, TicketsFilterKind } from '../types';
 import {
   buildDynamicFieldFilterEntries,
-  toDynamicFieldClientFilters,
   formatAssigneeFilterLabel,
   formatDateFilterLabel,
   formatMultiSelectFilterLabel,
@@ -192,10 +191,6 @@ export default function TicketsListScreen() {
     () => toDynamicFieldQueryFilters(dynamicFieldEntries),
     [dynamicFieldEntries],
   );
-  const dynamicFieldClientFilters = useMemo(
-    () => toDynamicFieldClientFilters(dynamicFieldEntries),
-    [dynamicFieldEntries],
-  );
 
   const effectiveAssignedTo = useMemo(() => {
     if (assigneeIds.length > 0) return assigneeIds;
@@ -216,7 +211,6 @@ export default function TicketsListScreen() {
       userGroups: userGroupIds,
       ...(isLabelFilterAvailable && conversationLabelId ? { conversationLabelId } : {}),
       ...(dynamicFieldQueryFilters ? { dynamicFieldFilters: dynamicFieldQueryFilters } : {}),
-      ...(dynamicFieldClientFilters.length ? { dynamicFieldClientFilters } : {}),
       ...(isMailboxDesk ? { mailboxFolder: activeFolder } : {}),
       // x != null              // skips both null and undefined
       // x !== undefined        // skips only undefined; null still passes

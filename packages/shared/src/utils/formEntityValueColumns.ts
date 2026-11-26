@@ -153,6 +153,22 @@ export const toTypedFormEntityValue = (
   }
 };
 
+const isBlankFormValue = (value: unknown): boolean =>
+  value === null ||
+  value === undefined ||
+  (typeof value === 'string' && value.trim() === '') ||
+  (Array.isArray(value) && value.every(isBlankFormValue));
+
+/**
+ * Throws when a value is set but its field type can't hold it ("Yes" for a BOOLEAN), which
+ * toTypedFormEntityValue would otherwise store as empty.
+ */
+export const assertFormEntityValueFitsType = (fieldType: string, value: unknown, typed: TypedFormEntityValue): void => {
+  if (isBlankFormValue(value)) return;
+  if (typed.items.length > 0 || Object.values(typed.columns).some(column => column !== null)) return;
+  throw new Error(`${JSON.stringify(value)} is not a valid ${fieldType} value`);
+};
+
 /** A custom-field value as callers work with it: text, number, boolean, ISO date, or a list. */
 export type FormEntityValueRead = string | string[] | number | boolean | null;
 
@@ -164,17 +180,6 @@ export type TypedFormEntityValueRow = {
   plainValue?: string | null;
   // Required so a reader cannot forget to load the items relation (MULTI_SELECT / USER values).
   items: ReadonlyArray<{ item: string }>;
-  // Old JSON value, read only for rows the typed-column backfill has not reached yet.
-  actualFieldValue?: unknown;
-};
-
-const legacyValue = (value: unknown): FormEntityValueRead => {
-  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return value;
-  if (Array.isArray(value)) {
-    const items = value.filter((item): item is string => typeof item === 'string');
-    return items.length > 0 ? items : null;
-  }
-  return null;
 };
 
 /**
@@ -194,9 +199,7 @@ export const readFormEntityValue = (row: TypedFormEntityValueRow | null | undefi
   }
   // Items have no stored order, so they are always returned sorted; the same value reads back identically.
   if (row.items && row.items.length > 0) return row.items.map(entry => entry.item).sort();
-  // Every write fills the typed columns and actualFieldValue together, so an empty typed value
-  // with a set actualFieldValue only happens on rows written before the typed columns existed.
-  return legacyValue(row.actualFieldValue);
+  return null;
 };
 
 /**
