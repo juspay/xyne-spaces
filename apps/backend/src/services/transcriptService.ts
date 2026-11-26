@@ -1108,11 +1108,16 @@ export class TranscriptService {
   /**
    * Generate AI summary from the formatted transcript with explicit retry loop.
    */
+  /**
+   * `options.sealed`: the summary is only stored. Without Claw it then runs on the egress
+   * gateway and comes back as workspace-DEK ciphertext (store it as-is, never read it).
+   */
   async generateCallSummary(
     transcript: string,
     callId?: string,
     modelType?: SummaryModelType,
     workspaceId?: string,
+    options: { sealed?: { workspaceId: string } } = {},
   ): Promise<string | null> {
     const callCreator = await this.getCallCreatorName(callId);
     const prompt = CALL_SUMMARY_PROMPT
@@ -1124,6 +1129,8 @@ export class TranscriptService {
       () => prompt,
       'call_summary',
       callId || 'unknown',
+      undefined,
+      options.sealed ? { workspaceId: options.sealed.workspaceId, format: 'text', modelType } : undefined,
     );
 
     if (!extracted.ok) {
@@ -1149,11 +1156,16 @@ export class TranscriptService {
   /**
    * Generate a short AI title from transcript with explicit retry loop.
    */
+  /**
+   * `options.sealed`: as for generateCallSummary. The gateway then shapes the title itself
+   * (first line, unquoted, at most 100 characters), since the backend gets only ciphertext.
+   */
   async generateCallTitle(
     transcript: string,
     callId?: string,
     promptTemplate = CALL_TITLE_PROMPT,
     modelType?: SummaryModelType,
+    options: { sealed?: { workspaceId: string } } = {},
   ): Promise<string | null> {
     const prompt = promptTemplate.replace('{transcript}', transcript);
 
@@ -1162,6 +1174,8 @@ export class TranscriptService {
       () => prompt,
       'call_title',
       callId || 'unknown',
+      undefined,
+      options.sealed ? { workspaceId: options.sealed.workspaceId, format: 'title', modelType } : undefined,
     );
 
     if (!extracted.ok) {
@@ -1176,8 +1190,13 @@ export class TranscriptService {
    * retry/extraction path as `generateCallTitle`, but using the recording-
    * specific prompt so recording and regular-call title wording can diverge.
    */
-  async generateRecordingTitle(transcript: string, callId?: string, modelType?: SummaryModelType): Promise<string | null> {
-    return this.generateCallTitle(transcript, callId, RECORDING_TITLE_PROMPT, modelType);
+  async generateRecordingTitle(
+    transcript: string,
+    callId?: string,
+    modelType?: SummaryModelType,
+    options: { sealed?: { workspaceId: string } } = {},
+  ): Promise<string | null> {
+    return this.generateCallTitle(transcript, callId, RECORDING_TITLE_PROMPT, modelType, options);
   }
 
   /**

@@ -6,6 +6,7 @@ import { logger } from '@/utils/logger';
 // import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
 // import { OrgLLMServiceAccountPurpose } from '@xyne/shared';
 import { runCallAiTask } from '@/services/callAi/callAiGateway';
+import { isGatewayLlmEnabled, runLlmOnGateway } from '@/services/callAi/gatewayLlm';
 
 const DEFAULT_MODEL = 'glm-latest';
 
@@ -83,8 +84,19 @@ function llmUnavailable(operation: string, callId: string | undefined): Extracte
 }
 
 /**
+ * The caller only stores the reply. Without Claw it then runs on the egress gateway
+ * and the content comes back as workspace-DEK ciphertext of `workspaceId`.
+ */
+export interface SealedOutput {
+  workspaceId: string;
+  format?: 'text' | 'title';
+  modelType?: SummaryModelType;
+}
+
+/**
  * Run a non-streaming call LLM task on the Claw agent (CALL_AI_USE_CLAW_AGENT,
- * see services/callAi). Retries live in the Claw runner.
+ * see services/callAi). Retries live in the Claw runner. Otherwise a task with
+ * `sealed` runs on the egress gateway (gatewayLlm).
  */
 export async function executeCallLlmWithRetry(
   _createAgent: () => unknown,
@@ -92,18 +104,48 @@ export async function executeCallLlmWithRetry(
   operation: string,
   callId: string,
   buildSystemPrompt?: () => string | undefined,
+  sealed?: SealedOutput,
 ): Promise<ExtractedContent> {
   const systemPrompt = buildSystemPrompt?.()?.trim();
+  const userPrompt = buildPrompt();
   return runCallAiTask(
     {
       operation,
-      userPrompt: buildPrompt(),
+      userPrompt,
       ...(systemPrompt ? { systemPrompt } : {}),
       ...(callId && callId !== 'unknown' ? { callId } : {}),
     },
     clawExtractedAdapter,
-    async () => llmUnavailable(operation, callId),
+    async () =>
+      sealed && isGatewayLlmEnabled()
+        ? runSealedOnGateway(operation, callId, userPrompt, systemPrompt, sealed)
+        : llmUnavailable(operation, callId),
   );
+}
+
+async function runSealedOnGateway(
+  operation: string,
+  callId: string,
+  userPrompt: string,
+  systemPrompt: string | undefined,
+  sealed: SealedOutput,
+): Promise<ExtractedContent> {
+  try {
+    const content = await runLlmOnGateway({
+      operation,
+      userPrompt,
+      systemPrompt,
+      model: resolveSummaryModel(sealed.modelType),
+      workspaceId: sealed.workspaceId,
+      format: sealed.format,
+    });
+    return { ok: true, content };
+  } catch (error) {
+    logger.warn(`[${callId || 'unknown'}] ${operation}_gateway_failed`, {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return failedResult('gateway_failed');
+  }
 }
 
 /** Same as executeCallLlmWithRetry; kept for best-effort extras such as labels and tickets. */

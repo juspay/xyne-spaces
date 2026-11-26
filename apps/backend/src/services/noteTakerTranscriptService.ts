@@ -9,6 +9,8 @@ import { acquireLock, releaseLock } from '@/utils/distributedLock';
 import { transcriptService, type TranscriptEntry } from '@/services/transcriptService';
 import type { SummaryModelType } from '@/services/callLlmRetry';
 import { isClawCallAiEnabled } from '@/services/callAi/clawCallAiRunner';
+import { isGatewayLlmEnabled } from '@/services/callAi/gatewayLlm';
+import { runWithDekPassthrough } from '@/services/encryption';
 import { callDocumentService, numberTranscriptSegments, type CitationContext } from '@/services/callDocumentService';
 import { findExistingDetailedSummaryCanvas } from '@/services/canvasService';
 import { logDetailedSummaryFailed } from '@/services/detailedSummaryFailureLog';
@@ -153,6 +155,8 @@ class NoteTakerTranscriptService {
       // the transcript is only attached and indexed.
       if (isClawCallAiEnabled()) {
         await this.generateAiOutputs(call, formattedTranscript, entries.length);
+      } else if (isGatewayLlmEnabled()) {
+        await this.generateSealedAiOutputs(call, formattedTranscript);
       }
       await this.queueVespaIndexing(call);
 
@@ -224,6 +228,35 @@ class NoteTakerTranscriptService {
     });
     if (detailedSummary) {
       await this.notifySummaryReady(call, detailedSummary.rawSummary);
+    }
+  }
+
+  /**
+   * Without Claw: summary and title on the egress gateway. They come back as workspace-DEK
+   * ciphertext and are stored as-is (DEK passthrough: not re-encrypted, not decrypted).
+   * Outputs that read the reply (detailed summary, labels, title syncs) need Claw.
+   */
+  private async generateSealedAiOutputs(call: Call, formattedTranscript: string): Promise<void> {
+    const callId = call.externalId;
+    const sealed = { workspaceId: call.workspaceId };
+    const modelType = await this.getSummaryModelPreference(call);
+    const { numbered } = numberTranscriptSegments(formattedTranscript);
+    const [aiSummary, title] = await Promise.all([
+      transcriptService.generateCallSummary(numbered, callId, modelType, undefined, { sealed }).catch(() => null),
+      call.title
+        ? null
+        : transcriptService.generateRecordingTitle(formattedTranscript, callId, modelType, { sealed }).catch(() => null),
+    ]);
+    const data = { ...(aiSummary ? { aiSummary } : {}), ...(title ? { title } : {}) };
+    if (Object.keys(data).length === 0) {
+      logger.error(`[${callId}] ai_summary_skipped`, { reason: 'generation_failed', path: 'note_taker' });
+      return;
+    }
+    try {
+      await runWithDekPassthrough(() => repositories.calls.update(call.id, data));
+      logger.info(`[${callId}] call_record_updated`, { fields_updated: Object.keys(data).join(','), path: 'note_taker' });
+    } catch (error) {
+      logger.error(`[${callId}] call_record_update_failed`, { stage: 'sealed_summary_save', path: 'note_taker', error });
     }
   }
 
