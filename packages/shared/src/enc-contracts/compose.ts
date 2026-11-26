@@ -7,10 +7,9 @@ import {
   parseRepliesMd,
   serializeParentMessageMd,
   serializeRepliesMd,
-  serializeTicketMd,
 } from '../utils/activityMetadataParser.js';
 import type { ConversationAnchorType } from '../utils/activityMetadataParser.js';
-import type { MessageType, TicketPriority, TicketStatusV2 } from '../zero/schema.js';
+import type { MessageType } from '../zero/schema.js';
 
 /**
  * A value the server stores encrypted but cannot build itself, because it is made from values it
@@ -178,36 +177,6 @@ export const repliesMdAddReplierTemplate = defineComposeTemplate({
   },
 });
 
-/** `conversations.ticket_md`: a ticket's card, as `serializeTicketMd` writes it; the description is unreadable. */
-export const ticketMdTemplate = defineComposeTemplate({
-  name: 'ticketMd',
-  inputs: z.object({
-    id: z.string().min(1),
-    title: z.string().nullable().optional(),
-    description: unreadableString().nullable().optional(),
-    statusV2: z.string().nullable().optional(),
-    priority: z.string().nullable().optional(),
-    assignedTo: z.string().nullable().optional(),
-    createdBy: z.string().nullable().optional(),
-    createdAt: z.number().nullable().optional(),
-    eta: z.number().nullable().optional(),
-    xyneId: z.string().nullable().optional(),
-    stageName: z.string().nullable().optional(),
-    ticketType: z.string().nullable().optional(),
-    channelId: z.string().nullable().optional(),
-    conversationId: z.string().nullable().optional(),
-  }),
-  build: inputs => {
-    const md = serializeTicketMd({
-      ...inputs,
-      statusV2: inputs.statusV2 as TicketStatusV2 | null | undefined,
-      priority: inputs.priority as TicketPriority | null | undefined,
-    });
-    if (md === null) throw new Error('ticketMd: no id');
-    return md;
-  },
-});
-
 /** Every compose template, by name: the names the encryption service and the transformer accept. */
 export const COMPOSE_TEMPLATES = {
   forwardedMessage: forwardedMessageTemplate,
@@ -215,7 +184,6 @@ export const COMPOSE_TEMPLATES = {
   initialMessageMd: initialMessageMdTemplate,
   parentMessageMd: parentMessageMdTemplate,
   repliesMdAddReplier: repliesMdAddReplierTemplate,
-  ticketMd: ticketMdTemplate,
 } as const;
 
 export type ComposeTemplateName = keyof typeof COMPOSE_TEMPLATES;

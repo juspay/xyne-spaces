@@ -16,7 +16,7 @@ export const UNREADABLE_COLUMNS = {
   channels: ['callSummaryPrompt'],
   coes: ['action'],
   collections: ['description'],
-  conversations: ['initial_message_md', 'parent_message_md', 'replies_md', 'ticket_md'],
+  conversations: ['initial_message_md', 'parent_message_md', 'replies_md'],
   dashboards: ['description'],
   delayed_messages: ['content'],
   draft_messages: ['content'],

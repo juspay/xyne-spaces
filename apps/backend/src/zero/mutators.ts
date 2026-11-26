@@ -103,7 +103,6 @@ import {
   entityLinkContextSchema,
   withExtension,
   updateSubTicketsMdFromZero,
-  linkSubTicketConversationToParentFromZero,
   parseBoardEtaManagement,
   mergeBoardEtaManagement,
   parseTicketEtaManagement,
@@ -223,6 +222,7 @@ import {
 import { v4 as uuidv4 } from 'uuid';
 import { defineContractMutator, getMutationFacts } from './encryptedMutation';
 import type { AnyTransaction } from './unreadableTransaction';
+import { composeSubTicketAnchorMd } from './mutation-sync/composeMd';
 import { detectVcsProvider } from '@/utils/repoUrlParser';
 import { getStorageService } from '@/services/storage';
 import { summaryTemplateService } from '@/services/summaryTemplateService';
@@ -1996,13 +1996,19 @@ export function createMutators(
           const uniqueSourceIds = [...activityBySourceId.keys()];
 
           const messages = await tx.run(
-            zql.messages
-              .where('messageId', 'IN', uniqueSourceIds)
-              .related('conversation'),
+            zql.messages.where('messageId', 'IN', uniqueSourceIds),
+          );
+          // Read on their own: conversations has unreadable columns, so tx.run refuses .related('conversation').
+          const conversationIds = [...new Set(messages.map(m => m.conversationId))];
+          const conversations = conversationIds.length > 0
+            ? await tx.run(zql.conversations.where('conversationId', 'IN', conversationIds))
+            : [];
+          const conversationById = new Map(
+            conversations.map(c => [c.conversationId, c]),
           );
 
           const messageByMessageId = new Map(
-            messages.map(m => [m.messageId, m]),
+            messages.map(m => [m.messageId, { ...m, conversation: conversationById.get(m.conversationId) }]),
           );
 
           for (const [sourceId, activity] of activityBySourceId) {
@@ -4973,7 +4979,8 @@ export function createMutators(
               content: '',
               hasAttachment: false,
               edited: false,
-              link_preview_md: '',
+              // null, not '': an empty string would be encrypted at rest like any plaintext.
+              link_preview_md: null,
             });
           } else {
             // SCENARIO 2: Hard Delete (Reply OR Root with no replies)
@@ -8019,12 +8026,8 @@ export function createMutators(
               await updateSubTicketsMdFromZero(tx, zql, mapping.ticketId);
             }
             if (mappedTicketId && mappings[0]) {
-              await linkSubTicketConversationToParentFromZero(
-                tx,
-                zql,
-                mappedTicketId,
-                mappings[0].ticketId,
-              );
+              // parent_message_md is stored encrypted: the encryption service builds the anchor.
+              await composeSubTicketAnchorMd(tx, mappedTicketId, mappings[0].ticketId);
             }
           }
         },

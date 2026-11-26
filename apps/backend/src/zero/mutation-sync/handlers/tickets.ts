@@ -1,12 +1,13 @@
 import type { Transaction } from '@rocicorp/zero';
 import {
   Schema,
+  serializeTicketMd,
   updateParentSubTicketsMdFromZero,
-  syncTicketRelativesFromZero,
 } from '@xyne/shared';
+import type { TicketCardSummary } from '@xyne/shared';
 import { zql } from '../../queries';
 import { BaseMutationSyncHandler } from '../base-handler';
-import { composeTicketMd } from '../composeMd';
+import { syncTicketRelatives } from '../composeMd';
 
 type TicketArgs = {
   id?: string;
@@ -55,13 +56,36 @@ const updateTicketMd = async (args: unknown, tx: Transaction<Schema>): Promise<v
   const ticket = await tx.run(zql.tickets.where('id', ticketId).one());
   if (!ticket?.conversationId) return;
 
+  const summary: TicketCardSummary = {
+    id: ticket.id,
+    title: ticket.title,
+    description: ticket.description,
+    statusV2: ticket.statusV2,
+    priority: ticket.priority,
+    assignedTo: ticket.assignedTo ?? null,
+    createdBy: ticket.createdBy,
+    createdAt: ticket.createdAt,
+    eta: ticket.eta ?? null,
+    xyneId: ticket.xyneId,
+    stageName: ticket.stageName,
+    ticketType: ticket.ticketType ?? null,
+    channelId: ticket.channelId,
+    conversationId: ticket.conversationId,
+  };
+
+  const ticketMd = serializeTicketMd(summary);
+
   const conversation = await tx.run(
     zql.conversations.where('conversationId', ticket.conversationId).one()
   );
   if (!conversation) return;
 
-  // The description is unreadable, so the encryption service builds ticket_md (ticketMdTemplate).
-  if (!(await composeTicketMd(tx, ticket, conversation))) return;
+  if (conversation.ticket_md === ticketMd) return;
 
-  await syncTicketRelativesFromZero(tx, zql, ticket.id);
+  await tx.mutate.conversations.update({
+    conversationId: ticket.conversationId,
+    ticket_md: ticketMd,
+  });
+
+  await syncTicketRelatives(tx, ticket.id);
 };
