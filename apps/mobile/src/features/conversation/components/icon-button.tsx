@@ -1,5 +1,5 @@
-import { useMemo, type ReactElement, type ReactNode } from 'react';
-import { Pressable, type Insets } from 'react-native';
+import { useMemo, type ReactElement, type ReactNode, type Ref } from 'react';
+import { Pressable, type Insets, type View } from 'react-native';
 
 import { haptics } from '@/src/utils/haptics';
 import { cn } from '@/src/utils/cn';
@@ -17,6 +17,7 @@ type IconButtonProps = {
   /** For a toggle: whether it is on. */
   selected?: boolean;
   hitSlop?: number | Insets;
+  ref?: Ref<View>;
 };
 
 /** Figma "Button / Icon": a round, square-hit-area button with a tap haptic. */
@@ -30,6 +31,7 @@ export function IconButton({
   expanded,
   selected,
   hitSlop,
+  ref,
 }: IconButtonProps): ReactElement {
   const style = useMemo(() => ({ width: size, height: size }), [size]);
   const state = useMemo(
@@ -45,6 +47,7 @@ export function IconButton({
 
   return (
     <Pressable
+      ref={ref}
       accessibilityRole='button'
       accessibilityLabel={label}
       {...(state === undefined ? {} : { accessibilityState: state })}

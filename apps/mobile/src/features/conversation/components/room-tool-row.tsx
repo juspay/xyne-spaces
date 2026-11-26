@@ -1,4 +1,4 @@
-import { memo, type ReactElement } from 'react';
+import { memo, useEffect, useRef, type ReactElement } from 'react';
 import { StyleSheet, View } from 'react-native';
 import Animated, { LayoutAnimationConfig } from 'react-native-reanimated';
 
@@ -38,7 +38,8 @@ const styles = StyleSheet.create({
 /**
  * The focused card's bottom row: the tools or the formatting strip on the
  * left, mic / Send on the right. Aa and the strip's close cross-fade the two;
- * the row fades in as the field takes focus.
+ * the row fades in as the field takes focus. Dictation takes the row at once:
+ * the tools leave without fading, so they never sit under its controls.
  */
 function RoomToolRowComponent({ disabled }: { disabled: boolean }): ReactElement {
   const { isFormattingVisible } = useChatInputPanelState();
@@ -47,17 +48,23 @@ function RoomToolRowComponent({ disabled }: { disabled: boolean }): ReactElement
     formatting: isFormattingVisible,
     dictating: status === 'listening',
   });
+  const previousLeading = useRef(leading);
+  const backFromFormatting = previousLeading.current === 'formatting' && leading === 'tools';
+  useEffect(() => {
+    previousLeading.current = leading;
+  }, [leading]);
 
   return (
     <Animated.View entering={rowIn} style={styles.row}>
       <View style={styles.leading}>
-        <LayoutAnimationConfig skipEntering skipExiting>
+        {/* Keyed on whether anything shows, so going to dictation unmounts this config and skips the swap's exit. */}
+        <LayoutAnimationConfig key={leading === 'none' ? 'none' : 'some'} skipEntering skipExiting>
           {leading === 'none' ? null : (
             <Animated.View key={leading} entering={swapIn} exiting={swapOut} style={styles.swap}>
               {leading === 'formatting' ? (
                 <RoomFormatStrip disabled={disabled} />
               ) : (
-                <RoomTools disabled={disabled} />
+                <RoomTools disabled={disabled} focusFormatting={backFromFormatting} />
               )}
             </Animated.View>
           )}

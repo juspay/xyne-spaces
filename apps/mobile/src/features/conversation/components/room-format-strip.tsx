@@ -1,5 +1,5 @@
 import { X } from 'lucide-react-native';
-import { useCallback, type ReactElement } from 'react';
+import { useCallback, useRef, type ReactElement } from 'react';
 import { ScrollView, StyleSheet, View } from 'react-native';
 import { useCSSVariable } from 'uniwind';
 
@@ -13,7 +13,9 @@ import {
   TYPING_BAR_TOOL_GAP,
   TYPING_BAR_TOOL_HIT_SLOP,
   TYPING_BAR_TOOL_SIZE,
+  TYPING_BAR_TOOLS_SWAP_MS,
 } from '../constants';
+import { useMountAccessibilityFocus } from '../hooks/use-mount-accessibility-focus';
 import { colorOf } from '../model/token-color';
 import { IconButton } from './icon-button';
 import { RoomFormatButton } from './room-format-button';
@@ -33,7 +35,8 @@ const styles = StyleSheet.create({
  * The formatting strip, in place of the tools: a close back to the tools
  * where Aa sat, so the same spot opens and shuts it, a hairline, then every
  * style the editor has, scrolling within the room left of mic / Send and
- * fading out at its right edge.
+ * fading out at its right edge. It opens from Aa, so a screen reader moves
+ * to its close, where Aa was.
  */
 export function RoomFormatStrip({ disabled }: { disabled: boolean }): ReactElement {
   const { setIsFormattingVisibleState } = useChatInputActions();
@@ -43,6 +46,8 @@ export function RoomFormatStrip({ disabled }: { disabled: boolean }): ReactEleme
   ]);
   const active = colorOf(activeToken);
   const muted = colorOf(mutedToken);
+  const closeRef = useRef<View>(null);
+  useMountAccessibilityFocus(closeRef, true, TYPING_BAR_TOOLS_SWAP_MS);
 
   const hide = useCallback(
     (): void => setIsFormattingVisibleState(false),
@@ -52,6 +57,7 @@ export function RoomFormatStrip({ disabled }: { disabled: boolean }): ReactEleme
   return (
     <View className='min-w-0 flex-1 flex-row items-center' style={styles.row}>
       <IconButton
+        ref={closeRef}
         label='Hide formatting'
         size={TYPING_BAR_TOOL_SIZE}
         hitSlop={TYPING_BAR_TOOL_HIT_SLOP}

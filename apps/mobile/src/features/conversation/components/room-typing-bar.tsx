@@ -105,16 +105,21 @@ type RoomTypingBarProps = ComponentProps<typeof ConversationInput> & {
  */
 const TRAY_KEEPS_FIELD_FOCUS = Platform.OS === 'ios';
 
+type RoomAttachButtonProps = {
+  tray: PlusTrayState;
+  onTrayChange: (tray: PlusTrayState) => void;
+};
+
 /**
  * The "+" plate. It opens the tray over the bar, putting the keyboard away
  * (on iOS keeping the field's focus and caret), so closing the tray can bring
- * the keyboard straight back.
+ * the keyboard straight back. The field shows as the pill while the tray is
+ * up, on both platforms, and the formatting strip goes, as a blur closes it.
  */
-function RoomAttachButton(): ReactElement | null {
+function RoomAttachButton({ tray, onTrayChange }: RoomAttachButtonProps): ReactElement | null {
   const { isEditing } = useChatInputConversation();
   const { interrupt } = useRoomDictationControls();
-  const { setIsMentionOpenState } = useChatInputActions();
-  const [tray, setTray] = useState<PlusTrayState>(PLUS_TRAY_CLOSED);
+  const { setIsMentionOpenState, setIsFormattingVisibleState } = useChatInputActions();
   const color = colorOf(useCSSVariable('--color-spaces-muted'));
   // Set at the tap, before the render: a second quick tap must not reopen it
   // and record the keyboard as gone, losing it when the tray closes.
@@ -126,15 +131,16 @@ function RoomAttachButton(): ReactElement | null {
     interrupt();
     // On iOS the field keeps focus under the tray, which would leave open suggestions behind it.
     setIsMentionOpenState(false);
+    setIsFormattingVisibleState(false);
     const keyboardVisible = KeyboardController.isVisible();
     // Not awaited: the tray rises while the keyboard goes.
     if (keyboardVisible) void KeyboardController.dismiss({ keepFocus: TRAY_KEEPS_FIELD_FOCUS });
-    setTray(openPlusTray(keyboardVisible));
-  }, [interrupt, setIsMentionOpenState]);
+    onTrayChange(openPlusTray(keyboardVisible));
+  }, [interrupt, onTrayChange, setIsFormattingVisibleState, setIsMentionOpenState]);
   const handleClosed = useCallback((): void => {
     trayOpenRef.current = false;
-    setTray(PLUS_TRAY_CLOSED);
-  }, []);
+    onTrayChange(PLUS_TRAY_CLOSED);
+  }, [onTrayChange]);
 
   if (isEditing) return null;
 
@@ -160,6 +166,11 @@ type RoomFieldProps = {
   onBlur: ((e: BlurEvent) => void) | undefined;
 };
 
+type RoomFieldOwnProps = RoomFieldProps & {
+  /** The "+" tray is up: the field shows as the pill even while it keeps focus (iOS). */
+  trayOpen: boolean;
+};
+
 /**
  * The field: the classic input restyled through its seams. Unfocused it is a
  * pill with mic / Send inside; focused it opens into a card whose text spans
@@ -167,10 +178,11 @@ type RoomFieldProps = {
  * mic / Send. Re-renders when focus, content, the edit mode or the dictation
  * status changes, since each can move the trailing control or its inset.
  */
-function RoomField({ disabled, onFocus, onBlur }: RoomFieldProps): ReactElement {
+function RoomField({ disabled, onFocus, onBlur, trayOpen }: RoomFieldOwnProps): ReactElement {
   const { isEditing, isTwinEditing } = useChatInputConversation();
   const { hasComposerContent } = useChatInputText();
-  const { isInputFocused, isLinkModalOpen } = useChatInputPanelState();
+  const { isInputFocused: hasFocus, isLinkModalOpen } = useChatInputPanelState();
+  const isInputFocused = hasFocus && !trayOpen;
   const { setIsFormattingVisibleState } = useChatInputActions();
   const status = useRoomDictationStatus();
   const { onNativeText } = useRoomDictationControls();
@@ -216,7 +228,7 @@ function RoomField({ disabled, onFocus, onBlur }: RoomFieldProps): ReactElement 
       trailingSlot={isInputFocused ? null : trailing}
       trailingInset={fieldTrailingInset(action, isInputFocused)}
       trailingAlign='end'
-      footerSlot={toolRow}
+      footerSlot={isInputFocused ? toolRow : null}
       attachmentsSlot={ATTACHMENTS}
       onChangeText={handleChangeText}
     />
@@ -230,6 +242,7 @@ function RoomField({ disabled, onFocus, onBlur }: RoomFieldProps): ReactElement 
  */
 function RoomBarRow({ disabled, onFocus, onBlur }: RoomFieldProps): ReactElement {
   const mentionsAnchor = useBarAnchor();
+  const [tray, setTray] = useState<PlusTrayState>(PLUS_TRAY_CLOSED);
 
   return (
     <RoomDictationProvider>
@@ -242,7 +255,7 @@ function RoomBarRow({ disabled, onFocus, onBlur }: RoomFieldProps): ReactElement
       >
         <RoomEditStrip />
         <View className='w-full flex-row items-end gap-2'>
-          <RoomAttachButton />
+          <RoomAttachButton tray={tray} onTrayChange={setTray} />
           <View className='min-w-0 flex-1'>
             <ComposerScheduleHost
               className={FIELD_HOST_CLASS}
@@ -251,7 +264,12 @@ function RoomBarRow({ disabled, onFocus, onBlur }: RoomFieldProps): ReactElement
               ScheduledBannerView={ScheduledPill}
             >
               <ComposerTwinAssistHost>
-                <RoomField disabled={disabled} onFocus={onFocus} onBlur={onBlur} />
+                <RoomField
+                  disabled={disabled}
+                  onFocus={onFocus}
+                  onBlur={onBlur}
+                  trayOpen={tray.open}
+                />
               </ComposerTwinAssistHost>
             </ComposerScheduleHost>
           </View>
