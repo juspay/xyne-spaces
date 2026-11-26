@@ -1192,7 +1192,6 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       resolvedParentProvider,
       runtimeProviderOrder,
       providerConfigs,
-      subagentProviders,
       subagentProviderMode,
       rawPersonalProvider,
     } = await resolveProvidersForDispatch({
@@ -1313,15 +1312,13 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
             },
           });
         }
+        // The agent's app token works only on the app route (the user route reads only a
+        // user's session cookie); Spaces checks the app's files:read permission and that its
+        // bot can see the attachment's conversation.
         if (safeAttachmentId) {
           sources.push({
             label: "apps-route",
-            url: `${CONFIG.spacesInternalUrl}/api/apps/attachments/${safeAttachmentId}/download`,
-            headers: { Authorization: `Bearer ${agent.appToken}` },
-          });
-          sources.push({
-            label: "user-route",
-            url: `${CONFIG.spacesInternalUrl}/api/attachments/${safeAttachmentId}/download`,
+            url: `${CONFIG.spacesInternalUrl}/api/apps/files/download/${safeAttachmentId}`,
             headers: { Authorization: `Bearer ${agent.appToken}` },
           });
         }
@@ -1433,7 +1430,6 @@ async function handleWebhook(req: Request, res: Response): Promise<void> {
       ...(agentSkills && agentSkills.length > 0 ? { skills: agentSkills } : {}),
       ...(resolvedParentProvider ? { provider: resolvedParentProvider } : {}),
       ...(runtimeProviderOrder.length > 1 ? { providerOrder: runtimeProviderOrder } : {}),
-      ...(Object.keys(subagentProviders).length > 0 ? { subagentProviders } : {}),
       subagentProviderMode,
       ...(Object.keys(providerConfigs).length > 0 ? { providerConfigs } : {}),
       ...(pendingGoalStart?.providerOverride ? { providerOverride: pendingGoalStart.providerOverride } : {}),

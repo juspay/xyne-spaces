@@ -2854,11 +2854,12 @@ function extractWorkspaceId(req: Request): string | undefined {
   return resolveSpacesUserAuth(req).workspaceId ?? getCookieValue(req, "xyne_last_workspace");
 }
 
-// /api/apps/* routes are mounted on Spaces' legacy `auth.ts` middleware, which
-// reads the session ONLY from the `xyne_session` cookie (gated behind a
-// truthy workspaceId). Send both Cookie + headers so we work on both legacy
-// and authV2 routes; otherwise these calls 401 ~15min after the JWT issues.
-function spacesUserAuthHeaders(
+// Spaces' `authenticate` reads the user JWT ONLY from the
+// `xyne_ws_<workspaceId>_token` cookie (workspace from `x-workspace-id`) and
+// never reads Authorization, so without that cookie every /api/apps/* call
+// here is a 401 TOKEN_MISSING. The Bearer header, `xyne_session` and
+// `xyne_last_workspace` stay for Spaces routes that still read them.
+export function spacesUserAuthHeaders(
   userToken: string,
   sessionId: string | undefined,
   workspaceId: string | undefined,
@@ -2868,7 +2869,10 @@ function spacesUserAuthHeaders(
   if (workspaceId) headers["x-workspace-id"] = workspaceId;
   const cookieParts: string[] = [];
   if (sessionId) cookieParts.push(`xyne_session=${sessionId}`);
-  if (workspaceId) cookieParts.push(`xyne_last_workspace=${workspaceId}`);
+  if (workspaceId) {
+    cookieParts.push(`xyne_last_workspace=${workspaceId}`);
+    cookieParts.push(`xyne_ws_${workspaceId}_token=${userToken}`);
+  }
   if (cookieParts.length > 0) headers["Cookie"] = cookieParts.join("; ");
   return headers;
 }

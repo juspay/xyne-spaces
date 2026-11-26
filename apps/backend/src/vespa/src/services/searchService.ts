@@ -25,7 +25,7 @@ import {
   filterByNativeRank,
 } from '../utils/responseProcessor';
 import { highlightText } from '../utils/highlight';
-import { config as appConfig } from '@/config/env';
+import { config as appConfig, superpositionDefault } from '@/config/env';
 import { superpositionClient } from '@/services/superpositionClient';
 import { sudoQueryService } from '@/services/hyperAnalytics/sudoQueryService';
 import { db } from '@/database/client';
@@ -509,7 +509,7 @@ export class SearchService {
       // channel-affinity tier then promotes over real matches. Default [] = nothing skipped.
       const semanticDisabledRankProfiles = await superpositionClient.getObjectValue(
         'vespa_search_semantic_disabled_rank_profiles',
-        [],
+        superpositionDefault('vespa_search_semantic_disabled_rank_profiles', []),
         {}
       );
       const useSemanticAnyway = !(
@@ -518,7 +518,7 @@ export class SearchService {
       );
       const newFallbackMethod = await superpositionClient.getBooleanValue(
         'vespa_search_new_fallback_method',
-        false,
+        superpositionDefault('vespa_search_new_fallback_method', false),
         {}
       );
       // Passes effectiveWorkspaceId to YqlBuilder, so the top-level `workspaceId contains
@@ -529,7 +529,7 @@ export class SearchService {
       // is enabled, so the schema has to be backfilled before the results are complete.
       const enableWorkspaceFiltering = await superpositionClient.getBooleanValue(
         'enableWorkSpaceFiltering',
-        true,
+        superpositionDefault('enableWorkSpaceFiltering', true),
         {}
       );
       const payload = buildPayload(useSemanticAnyway, enableWorkspaceFiltering ? effectiveWorkspaceId : undefined);

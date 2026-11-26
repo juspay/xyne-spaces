@@ -22,7 +22,7 @@
 
 import type { Citation } from "xyne-claw-shared";
 import { pushInvocation, type ProgressDest } from "./agent.js";
-import { takeCitations } from "./citations.js";
+import { recordCitations, takeCitations } from "./citations.js";
 import { createLogger } from "./logger.js";
 import { findTool, scrub, toolResultText, type ExecutableTool } from "./prefetch.js";
 
@@ -145,6 +145,91 @@ async function runSource(
   }
 }
 
+/** `agentConfig.answerContext`: the searches the caller already ran as the user (Spaces cmd+K). */
+interface ProvidedSection {
+  area: string;
+  /** `spaces-vespa-search`-style rows; cited rows carry `[clf-__TOOL_CALL_ID__#N]`. */
+  text: string;
+  citations: Citation[];
+}
+
+function providedSectionsFrom(agentConfig: Record<string, unknown> | undefined): ProvidedSection[] | null {
+  const value = agentConfig?.["answerContext"] as { sections?: unknown } | undefined;
+  if (!value || !Array.isArray(value.sections)) return null;
+  return value.sections.filter(
+    (s): s is ProvidedSection =>
+      !!s && typeof s === "object" && typeof s.area === "string" && typeof s.text === "string" && Array.isArray(s.citations),
+  );
+}
+
+/**
+ * The answering block from searches the caller already ran (the Spaces backend does for
+ * cmd+K: Vespa text is hashed and only it can read it back), registered and rendered
+ * exactly as buildAnswerContext's own. Null when none were sent, and buildAnswerContext
+ * runs the searches itself.
+ */
+export function renderProvidedAnswerContext(opts: {
+  agentConfig: Record<string, unknown> | undefined;
+  scope: string;
+  askerName?: string | undefined;
+  progressUrl?: ProgressDest;
+  sessionId?: string;
+}): { block: string; sections: RetrievedSection[] } | null {
+  const provided = providedSectionsFrom(opts.agentConfig);
+  if (!provided) return null;
+
+  const startedAt = new Date().toISOString();
+  const found = provided.flatMap((section): Array<Retrieved & { body: string }> => {
+    const toolCallId = `answer-${section.area}`;
+    const result = section.text.split("__TOOL_CALL_ID__").join(toolCallId);
+    const body = scrub(result, { keepCitations: true });
+    if (!body) return [];
+    // Through the same chokepoint as a tool's own citations, so they get the same icon keys.
+    recordCitations(toolCallId, section.citations);
+    const citations = takeCitations(toolCallId);
+    return [{
+      heading: `Search: ${section.area}`,
+      body,
+      invocation: {
+        toolName: "spaces-vespa-search",
+        toolCallId,
+        args: { searchArea: section.area, hits: HITS_PER_AREA },
+        result,
+        isError: false,
+        startedAt,
+        durationMs: 0,
+        status: "completed",
+        ...(citations ? { citations } : {}),
+      },
+    }];
+  });
+  return finishAnswerContext(found, opts);
+}
+
+/**
+ * Register each search as a tool call and render the block. The answering turn makes no
+ * tool calls of its own, so without the registration the `[clf-…]` tokens in the results
+ * point at nothing and the UI drops them instead of rendering a source chip.
+ */
+function finishAnswerContext(
+  found: Array<Retrieved & { body: string }>,
+  opts: { scope: string; askerName?: string | undefined; progressUrl?: ProgressDest; sessionId?: string },
+): { block: string; sections: RetrievedSection[] } {
+  if (opts.progressUrl && opts.sessionId) {
+    for (const { invocation } of found) {
+      if (invocation) pushInvocation(opts.progressUrl, opts.sessionId, invocation);
+    }
+  }
+
+  const sections = found.map((r) => `### ${r.heading}\n${r.body}`).join("\n\n");
+  const results = sections
+    ? `## Search results for this question (scope: ${opts.scope})\n${sections}`
+    : `## Search results for this question (scope: ${opts.scope})\nNothing relevant was found.`;
+
+  const asker = opts.askerName ? `\n\nThe person asking is ${opts.askerName}.` : "";
+  return { block: `${ANSWER_RULES}${asker}\n\n${results}`, sections: found };
+}
+
 /**
  * Run the question against the scope's sources in parallel and render the block
  * appended to the answering turn's context. Never throws.
@@ -191,20 +276,5 @@ export async function buildAnswerContext(opts: {
     log.warn(`[answer-context] retrieval exceeded ${RETRIEVE_TIMEOUT_MS}ms — answering from ${found.length}/${jobs.length} sources`);
   }
 
-  // Register each search as a tool call. The answering turn makes no tool calls of its
-  // own, so without this the `[clf-…]` tokens in the results point at nothing and the UI
-  // drops them instead of rendering a source chip.
-  if (opts.progressUrl && opts.sessionId) {
-    for (const { invocation } of found) {
-      if (invocation) pushInvocation(opts.progressUrl, opts.sessionId, invocation);
-    }
-  }
-
-  const sections = found.map((r) => `### ${r.heading}\n${r.body}`).join("\n\n");
-  const results = sections
-    ? `## Search results for this question (scope: ${opts.scope})\n${sections}`
-    : `## Search results for this question (scope: ${opts.scope})\nNothing relevant was found.`;
-
-  const asker = opts.askerName ? `\n\nThe person asking is ${opts.askerName}.` : "";
-  return { block: `${ANSWER_RULES}${asker}\n\n${results}`, sections: found };
+  return finishAnswerContext(found, opts);
 }

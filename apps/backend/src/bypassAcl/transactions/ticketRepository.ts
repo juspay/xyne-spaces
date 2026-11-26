@@ -482,32 +482,3 @@ export function updateTicketStageTx(isForwardMovement: boolean, currentStage: an
     return { updatedTicket, etaResult };
   });
 }
-export function claimReleaseInsightsGenerationTx(ticketId: string, staleBefore: Date) {
-  return transaction(['Ticket'], 'claimReleaseInsightsGeneration: release-insights generation claim flag must commit atomically; tx is not ACL-wrapped', prisma, 
-    async (tx) => {
-      const ticket = await tx.ticket.findUnique({
-        where: { id: ticketId },
-        select: { metadata: true },
-      });
-      if (!ticket) return false;
-      const current = (ticket.metadata as Record<string, unknown> | null) ?? {};
-      if (current.isGeneratingReleaseInsights === true) {
-        const startedAt = current.insightsGenerationStartedAt;
-        const started = typeof startedAt === 'string' ? Date.parse(startedAt) : NaN;
-        if (Number.isFinite(started) && started >= staleBefore.getTime()) return false;
-      }
-      await tx.ticket.update({
-        where: { id: ticketId },
-        data: {
-          metadata: {
-            ...current,
-            isGeneratingReleaseInsights: true,
-            insightsGenerationStartedAt: new Date().toISOString(),
-          } as Prisma.InputJsonObject,
-        },
-      });
-      return true;
-    },
-    { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }
-  );
-}

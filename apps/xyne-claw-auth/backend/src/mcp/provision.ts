@@ -236,7 +236,9 @@ async function ensureProvisioned(
   }
 
   const job = install(name, version, dir);
-  inflight.set(key, job.then(() => pkgDir));
+  // Waiters re-check health themselves, so the shared promise never rejects: a failed
+  // install would otherwise be an unhandled rejection, which exits the process.
+  inflight.set(key, job.then(() => pkgDir, () => pkgDir));
   try {
     await job;
   } finally {

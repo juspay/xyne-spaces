@@ -1,4 +1,5 @@
 import type { Request } from 'express';
+import { config } from '@/config/env';
 import { superpositionClient, type SuperpositionContext } from '@/services/superpositionClient';
 import { logger } from '@/utils/logger';
 
@@ -14,18 +15,22 @@ export function cacContextFromRequest(req: Request): SuperpositionContext {
   };
 }
 
+/** This stack's default for `key` (SUPERPOSITION_DEFAULTS), for when Superposition has none. */
+const fallbackFor = (key: string): unknown | null => config.superposition.defaults[key] ?? null;
+
 export class CacConfigService {
   public static async fetch(key: string, context?: SuperpositionContext): Promise<unknown | null> {
     try {
       const allConfigs = await superpositionClient.resolveAllConfigDetails(context);
       const entry = allConfigs[key];
-      if (entry === undefined || entry === null) return null;
+      if (entry === undefined || entry === null) return fallbackFor(key);
 
-      const rawValue = typeof entry === 'object' && entry !== null && 'value' in entry
-        ? (entry.value as unknown)
-        : entry;
+      const rawValue =
+        typeof entry === 'object' && entry !== null && 'value' in entry
+          ? (entry.value as unknown)
+          : entry;
 
-      if (rawValue === undefined || rawValue === null) return null;
+      if (rawValue === undefined || rawValue === null) return fallbackFor(key);
       if (typeof rawValue === 'string') {
         // JSON.parse expects a JSON-formatted string. A URL like "https://app.example.org" is not valid JSON:
         try {
@@ -37,7 +42,7 @@ export class CacConfigService {
       return rawValue;
     } catch (error) {
       logger.error(`[CacConfigService] Error fetching ${key} from CAC:`, error);
-      return null;
+      return fallbackFor(key);
     }
   }
 }

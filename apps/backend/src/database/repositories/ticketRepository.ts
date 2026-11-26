@@ -10,7 +10,6 @@ import { DatabaseClient } from '@/database/client';
 import {
   BaseTicketType,
   FLOW_STAGE_NAMES,
-  isReleaseTicket,
   TicketStatusV2,
   TicketPriority,
   ActivityType,
@@ -28,7 +27,6 @@ import {
   type TicketChanges,
   type FormFieldChanges,
 } from '@/automations/triggers/ticket-updated.trigger';
-import { versionReleaseMappingService } from '@/services/release/versionReleaseMappingService';
 import { dualWriteTicketTag, dualWriteTicketTags } from '@/services/ticketTagDualWriteService';
 import type { TicketLike } from '@/automations/triggers/ticket-context';
 import { dispatchCommittedTicketStatusChange } from '@/services/flowStatusChangeDispatcher';
@@ -45,7 +43,6 @@ import {
 } from '@/services/etaManagement';
 import { createTicketTx, createTicketWithClient } from '@/bypassAcl/transactions/ticketRepository';
 import { updateTicketStageTx, updateTicketStageFlowGuardedTx } from '@/bypassAcl/transactions/ticketRepository';
-import { claimReleaseInsightsGenerationTx } from '@/bypassAcl/transactions/ticketRepository';
 //import { queueTicketIngestion } from '@/queues/vespaQueue';
 
 export const prisma = DatabaseClient.getInstance();
@@ -443,26 +440,6 @@ export class TicketRepository {
 
     await syncConversationTicketMdFromPrismaTicket(prisma, updatedTicket);
 
-    if (
-      newStatusV2 === TicketStatusV2.COMPLETED
-      && oldStatusV2 !== TicketStatusV2.COMPLETED
-      && isReleaseTicket(updatedTicket.ticketType as BaseTicketType | null)
-    ) {
-      // The ticket update above is already committed; deployed-version
-      // bookkeeping must not fail the request or suppress the emits below.
-      try {
-        await versionReleaseMappingService.updateDeployedVersionOnCompletion(
-          ticketId,
-          updatedTicket.updatedAt,
-        );
-      } catch (error) {
-        logger.error(
-          `[VersionReleaseMapping] failed to update deployedVersion for ticket ${ticketId}:`,
-          error,
-        );
-      }
-    }
-
     if (stageChanged || statusChanged) {
       const changes: TicketChanges = {};
       if (stageChanged) {
@@ -779,23 +756,6 @@ export class TicketRepository {
     }
   } 
 
-  // Claims the release-insights in-flight flag. Read + write run in one SERIALIZABLE
-  // transaction (same pattern as the sharing services): a concurrent claimer's commit
-  // fails ours with P2034, and the retry re-reads the flag it just set. No raw SQL — the
-  // tenant extensions must see this write. Returns false when another generation holds
-  // the flag and it isn't older than `staleBefore`.
-  async claimReleaseInsightsGeneration(ticketId: string, staleBefore: Date): Promise<boolean> {
-    for (let attempt = 1; attempt <= 3; attempt += 1) {
-      try {
-        return await claimReleaseInsightsGenerationTx(ticketId, staleBefore);
-      } catch (error) {
-        const isWriteConflict = (error as { code?: string } | null)?.code === 'P2034';
-        if (!isWriteConflict || attempt === 3) throw error;
-      }
-    }
-    return false;
-  }
-
   async updateTicketMetadata(ticketId: string, metadata: Record<string, any>): Promise<void> {
     const ticket = await prisma.ticket.findUnique({
       where: { id: ticketId },
@@ -927,26 +887,6 @@ export class TicketRepository {
     }
 
     await syncConversationTicketMdFromPrismaTicket(prisma, updatedTicket);
-
-    if (
-      fields.statusV2 === TicketStatusV2.COMPLETED
-      && previousStatus !== TicketStatusV2.COMPLETED
-      && isReleaseTicket(updatedTicket.ticketType as BaseTicketType | null)
-    ) {
-      // The ticket update above is already committed; deployed-version
-      // bookkeeping must not fail the request or suppress the emits below.
-      try {
-        await versionReleaseMappingService.updateDeployedVersionOnCompletion(
-          ticketId,
-          updatedTicket.updatedAt,
-        );
-      } catch (error) {
-        logger.error(
-          `[VersionReleaseMapping] failed to update deployedVersion for ticket ${ticketId}:`,
-          error,
-        );
-      }
-    }
 
     // Consolidate all field changes into a single TICKET_UPDATED emit.
     if (prevSnapshot) {

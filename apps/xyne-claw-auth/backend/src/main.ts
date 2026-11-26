@@ -7,7 +7,7 @@ const log = createLogger("main");
 process.env.SERVICE_NAME ||= "xyne-claw-auth";
 
 import express from "express";
-import { CONFIG } from "./config.js";
+import { CONFIG, encryptionKeys } from "./config.js";
 import { installParsers } from "./http/parsers.js";
 import { mountRoutes } from "./http/routes.js";
 import { bootWorkers, shutdownWorkers } from "./boot/workers.js";
@@ -17,6 +17,9 @@ import { redisService } from "./redis.js";
 import { agentRunRepository, settleRunStatsWrites } from "./repositories/agentRunRepository.js";
 import { closeMessagingAccountManager } from "./surfaces/messaging/bootstrap.js";
 import { startEventLoopMonitor } from "./lib/event-loop-monitor.js";
+
+// Fail at boot, not on the first request, when ENCRYPTION_KEY is missing or malformed.
+encryptionKeys();
 
 const app = express();
 // How many reverse proxies sit in front of this process. Without it Express

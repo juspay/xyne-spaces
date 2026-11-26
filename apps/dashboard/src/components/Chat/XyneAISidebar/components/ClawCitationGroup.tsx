@@ -43,12 +43,18 @@ export function ClawCitationGroup({
   refs,
   toolInvocations,
   onOpenToolDebug,
+  popoverClassName,
+  onSourceOpen,
 }: {
   refs: ClawCiteGroupRef[];
   toolInvocations: ToolInvocation[] | undefined;
   /** Generic auto-citations carry no link — clicking opens the source tool call
    *  in the debug panel instead. Absent for normal (linkable) citations. */
   onOpenToolDebug?: ((toolCallId: string) => void) | undefined;
+  /** Extra classes for the source list, e.g. a z-index above a modal the chip sits in. */
+  popoverClassName?: string;
+  /** Called when a source link is clicked, e.g. to close the modal the chip sits in. */
+  onSourceOpen?: () => void;
 }): ReactElement | null {
   // On the /ai page each KB PDF source opens in the docs panel instead of
   // navigating. `citationDocs` is null off /ai → falls back to CitationLink.
@@ -108,7 +114,13 @@ export function ClawCitationGroup({
       );
     }
     return it.url ? (
-      <CitationLink url={it.url} newTab={it.newTab} className={chipClass} ariaLabel={it.label}>
+      <CitationLink
+        url={it.url}
+        newTab={it.newTab}
+        className={chipClass}
+        ariaLabel={it.label}
+        {...(onSourceOpen && { onClick: onSourceOpen })}
+      >
         {inner}
       </CitationLink>
     ) : onOpenToolDebug ? (
@@ -182,7 +194,7 @@ export function ClawCitationGroup({
       side='top'
       align='start'
       sideOffset={4}
-      className='p-1 max-w-[300px]'
+      className={popoverClassName ? `p-1 max-w-[300px] ${popoverClassName}` : 'p-1 max-w-[300px]'}
     >
       <div className='flex flex-col gap-0.5 max-h-[260px] overflow-y-auto'>
         {items.map((it, i) => {
@@ -224,7 +236,13 @@ export function ClawCitationGroup({
             );
           }
           return it.url ? (
-            <CitationLink key={i} url={it.url} newTab={it.newTab} className={rowClass}>
+            <CitationLink
+              key={i}
+              url={it.url}
+              newTab={it.newTab}
+              className={rowClass}
+              {...(onSourceOpen && { onClick: onSourceOpen })}
+            >
               {inner}
             </CitationLink>
           ) : onOpenToolDebug ? (

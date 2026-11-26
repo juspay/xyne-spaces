@@ -8,8 +8,7 @@ import { vespaQueue } from '@/queues/vespaQueue';
 import { ticketSchema } from '@/vespa/src/types';
 import { buildKanbanCountsSnapshot } from '@/services/tickets/kanbanCountsSnapshotService';
 import { websocketService } from '@/services/websocketService';
-import { versionReleaseMappingService } from '@/services/release/versionReleaseMappingService';
-import { BaseTicketType, isReleaseTicket, PRStatusEvent, BoardType, ActivityType, TicketStatusV2, FLOW_STAGE_NAMES } from '@xyne/shared';
+import { PRStatusEvent, BoardType, ActivityType, FLOW_STAGE_NAMES } from '@xyne/shared';
 import { ticketStageTransitionService } from './stageTransition/ticketStageTransitionService';
 import { assertFlowStepSkippable } from '@/services/flowCascadeService';
 import { updateTicketTagsTx } from '@/bypassAcl/transactions/ticketService';
@@ -288,26 +287,6 @@ export class TicketService {
       updates.push('tags');
     }
 
-    if (
-      params.status === 'COMPLETED'
-      && prevSnapshot
-      && prevSnapshot.statusV2 !== TicketStatusV2.COMPLETED
-      && isReleaseTicket(updatedTicket.ticketType as BaseTicketType | null)
-    ) {
-      // The ticket update above is already committed; deployed-version
-      // bookkeeping must not fail the request.
-      try {
-        await versionReleaseMappingService.updateDeployedVersionOnCompletion(
-          ticketId,
-          updatedTicket.updatedAt,
-        );
-      } catch (error) {
-        logger.error(
-          `[VersionReleaseMapping] failed to update deployedVersion for ticket ${ticketId}:`,
-          error,
-        );
-      }
-    }
     // Write TicketActivity audit rows for every field that actually changed.
     // Best-effort: the ticket update above is already committed, so an audit
     // write failure must not fail the request.

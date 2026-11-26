@@ -141,8 +141,6 @@ export class ReleaseRepository {
 
 	/**
 	 * Persist a release change's form values + a FORM_SAVED audit event atomically.
-	 * Lives here (not on ReleaseService) so CommitAnalysisService can call it without
-	 * constructing a ReleaseService — that wiring created a circular dependency.
 	 */
 	// Release forms are seed data — they only change when re-seeded. The
 	// commit-analysis loops call saveReleaseFormValues once per changed file,

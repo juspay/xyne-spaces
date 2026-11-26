@@ -91,7 +91,6 @@ Services contain the core business logic. Located in `src/services/`.
 | `pullRequestValidationService.ts` | Validate PR data |
 | `multiPullRequestService.ts` | Multi-PR operations |
 | `prTicketStatusSyncService.ts` | Sync PR status with ticket status |
-| `commitAnalysisService.ts` | Analyze commits, detect changes, release analysis |
 | `jenkinsService.ts` | Jenkins CI integration, trigger builds, fetch stages |
 
 ### AI & Agents
@@ -144,7 +143,6 @@ Services contain the core business logic. Located in `src/services/`.
 ### Release Management
 | Service | Purpose |
 |---------|---------|
-| `release/applicationBackfillService.ts` | Data backfilling |
 | `release/core/` | Core release logic, change detection, diff parsing |
 | `release/xyne/` | Xyne-specific release workflows |
 
@@ -192,7 +190,6 @@ User personalization.
 
 ### `release/`
 Release management.
-- `applicationBackfillService.ts` - Data backfilling
 - `core/` - Core release logic
 - `xyne/` - Xyne-specific release logic
 

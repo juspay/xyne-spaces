@@ -1,8 +1,6 @@
 import { logger } from '@/utils/logger';
 import { config } from '@/config/env';
 import { resolveSecret } from '@/config/secretResolver';
-import { ChangeEntry, PullRequestInfo } from '../types/bitbucket';
-import { VcsClient } from '../types/vcs';
 
 export interface GitHubComment {
   id: number;
@@ -55,16 +53,15 @@ export interface ReviewThreadsGraphQLResponse {
 }
 
 interface GitHubServiceConfig {
-  // owner/repo are used by the legacy GraphQL review-thread methods. The
-  // release-flow methods (added later in this file) take owner/repo as call-site
-  // arguments, mirroring BitbucketService.
+  // owner/repo are used by the GraphQL review-thread methods; listRepoTree takes
+  // them as call-site arguments.
   owner?: string;
   repo?: string;
   token?: string;
   apiUrl?: string;
 }
 
-export class GitHubService implements VcsClient {
+export class GitHubService {
   private config: GitHubServiceConfig;
   private graphqlUrl: string;
   private restBaseUrl: string;
@@ -86,21 +83,6 @@ export class GitHubService implements VcsClient {
       return `Bearer ${this.config.token}`;
     }
     return undefined;
-  }
-
-  // Browser host derived from the API URL: api.github.com → github.com;
-  // GitHub Enterprise https://<host>/api/v3 → https://<host>.
-  private webBaseUrl(): string {
-    const apiUrl = this.config.apiUrl ?? 'https://api.github.com';
-    if (/^https?:\/\/api\.github\.com\/?$/.test(apiUrl)) {
-      return 'https://github.com';
-    }
-    return apiUrl.replace(/\/api\/v3\/?$/, '').replace(/\/+$/, '');
-  }
-
-  buildCommitFileUrl(owner: string, repo: string, commitId: string, _filePath: string): string {
-    // No reliable file anchor for a commit view on GitHub — link to the commit.
-    return `${this.webBaseUrl()}/${owner}/${repo}/commit/${commitId}`;
   }
 
   private async makeGraphQLRequest<T>(query: string, variables: Record<string, unknown>): Promise<T> {
@@ -204,9 +186,7 @@ export class GitHubService implements VcsClient {
     );
   }
 
-  // ─── Release-flow REST helpers (VcsClient) ────────────────────────────────
-  // The four methods below mirror BitbucketService so the commit-analysis
-  // pipeline can be driven against GitHub by swapping the client.
+  // ─── REST helpers ─────────────────────────────────────────────────────────
 
   private sleep(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
@@ -318,198 +298,6 @@ export class GitHubService implements VcsClient {
     return (data.tree ?? []).filter(entry => entry.type === 'blob').map(entry => entry.path);
   }
 
-  // Map GitHub file status → ChangeEntry.type so downstream code (ChangeDetector,
-  // diffParser) stays provider-agnostic.
-  private mapGitHubFileStatus(
-    status: string,
-  ): 'ADD' | 'MODIFY' | 'DELETE' | 'RENAME' | 'COPY' | 'MOVE' {
-    switch (status) {
-      case 'added': return 'ADD';
-      case 'removed': return 'DELETE';
-      case 'renamed': return 'RENAME';
-      case 'copied': return 'COPY';
-      case 'modified':
-      case 'changed':
-      default: return 'MODIFY';
-    }
-  }
-
-  private pathToChangeEntry(filename: string, previousFilename: string | undefined, status: string): ChangeEntry {
-    const components = filename.split('/');
-    const name = components[components.length - 1];
-    const extMatch = name?.match(/\.([^.]+)$/);
-    const entry: ChangeEntry = {
-      path: {
-        components,
-        name,
-        extension: extMatch ? extMatch[1] : undefined,
-        toString: filename,
-      },
-      type: this.mapGitHubFileStatus(status),
-    };
-    if (previousFilename) {
-      const prevComponents = previousFilename.split('/');
-      entry.srcPath = { components: prevComponents, toString: previousFilename };
-      entry.dstPath = { components, toString: filename };
-    }
-    return entry;
-  }
-
-  async getMergedPullRequest(
-    owner: string,
-    repo: string,
-    commitHash: string,
-    branch?: string,
-  ): Promise<PullRequestInfo | null> {
-    try {
-      type GitHubPullForCommit = {
-        number: number;
-        title: string;
-        body: string | null;
-        state: 'open' | 'closed';
-        merged_at: string | null;
-        html_url: string;
-        user: { login: string; id: number; email?: string | null };
-        base: { ref: string };
-      };
-
-      const prs = await this.restRequest<GitHubPullForCommit[]>(
-        `/repos/${owner}/${repo}/commits/${commitHash}/pulls`,
-      );
-
-      logger.info(
-        `GitHub: found ${prs.length} PR(s) for commit ${commitHash} in ${owner}/${repo}`,
-      );
-
-      if (prs.length === 0) return null;
-
-      const merged = prs.filter(pr => pr.merged_at != null);
-      if (merged.length === 0) {
-        logger.info(`No merged PRs for commit ${commitHash} (found ${prs.length} unmerged)`);
-        return null;
-      }
-
-      // Only PRs targeting the supplied branch; fall back to main/master
-      // (logged) when none, so a release-branch commit isn't mis-attributed.
-      let relevant: GitHubPullForCommit[];
-      if (branch) {
-        relevant = merged.filter(pr => pr.base.ref === branch);
-        if (relevant.length === 0) {
-          relevant = merged.filter(pr => pr.base.ref === 'main' || pr.base.ref === 'master');
-          if (relevant.length > 0) {
-            logger.warn(
-              `GitHub: no merged PR targets branch ${branch} for commit ${commitHash}; ` +
-              `falling back to ${relevant.length} main/master PR(s)`,
-            );
-          }
-        }
-      } else {
-        relevant = merged;
-      }
-      if (relevant.length === 0) {
-        logger.info(`No relevant merged PRs for commit ${commitHash} on branch ${branch}`);
-        return null;
-      }
-
-      relevant.sort(
-        (a, b) => new Date(b.merged_at!).getTime() - new Date(a.merged_at!).getTime(),
-      );
-
-      const pr = relevant[0];
-      return {
-        id: pr.number,
-        title: pr.title,
-        description: pr.body ?? '',
-        state: 'MERGED',
-        url: pr.html_url,
-        mergedAt: pr.merged_at!,
-        author: {
-          displayName: pr.user.login,
-          id: pr.user.id,
-          emailAddress: pr.user.email ?? '',
-        },
-      };
-    } catch (error) {
-      logger.error(`GitHub: failed to fetch PRs for commit ${commitHash}:`, error as Error);
-      return null;
-    }
-  }
-
-  async getCommitChanges(owner: string, repo: string, commitId: string): Promise<ChangeEntry[]> {
-    type GitHubCommitFile = {
-      filename: string;
-      previous_filename?: string;
-      status: string;
-    };
-    type GitHubCommitResponse = { files?: GitHubCommitFile[] };
-
-    const data = await this.restRequest<GitHubCommitResponse>(
-      `/repos/${owner}/${repo}/commits/${commitId}`,
-    );
-    const files = data.files ?? [];
-    return files.map(f => this.pathToChangeEntry(f.filename, f.previous_filename, f.status));
-  }
-
-  async getCommitsBetween(
-    owner: string,
-    repo: string,
-    sinceCommitId: string,
-    untilCommitId: string,
-    _branch?: string,
-  ): Promise<string[]> {
-    // compare API paginates commits[] (max 250/page); page through via
-    // total_commits so long release ranges aren't silently truncated.
-    type GitHubCompareResponse = { total_commits: number; commits: Array<{ sha: string }> };
-
-    try {
-      const ids: string[] = [];
-      const PER_PAGE = 250;
-      for (let page = 1; ; page++) {
-        const data = await this.restRequest<GitHubCompareResponse>(
-          `/repos/${owner}/${repo}/compare/${sinceCommitId}...${untilCommitId}?per_page=${PER_PAGE}&page=${page}`,
-        );
-        ids.push(...data.commits.map(c => c.sha));
-        if (ids.length >= data.total_commits || data.commits.length === 0) break;
-      }
-      logger.info(
-        `GitHub: found ${ids.length} commit(s) between ${sinceCommitId}..${untilCommitId} in ${owner}/${repo}`,
-      );
-      return ids;
-    } catch (error) {
-      const msg = error instanceof Error ? error.message : String(error);
-      logger.error(
-        `GitHub: failed to fetch commits between ${sinceCommitId} and ${untilCommitId} in ${owner}/${repo}: ${msg}`,
-      );
-      throw error;
-    }
-  }
-
-  async getFileDiff(owner: string, repo: string, commitId: string, filePath: string): Promise<string> {
-    try {
-      type GitHubCommitFile = {
-        filename: string;
-        patch?: string;
-      };
-      type GitHubCommitResponse = { files?: GitHubCommitFile[] };
-
-      const data = await this.restRequest<GitHubCommitResponse>(
-        `/repos/${owner}/${repo}/commits/${commitId}`,
-      );
-      const file = (data.files ?? []).find(f => f.filename === filePath);
-      if (!file) {
-        logger.warn(`GitHub: file ${filePath} not in commit ${commitId}`);
-        return '';
-      }
-      // `patch` is GitHub's unified-diff body without the `--- a/foo` / `+++ b/foo`
-      // headers diffParser expects, so synthesize them.
-      const patch = file.patch ?? '';
-      if (!patch) return '';
-      return `--- a/${filePath}\n+++ b/${filePath}\n${patch}\n`;
-    } catch (error) {
-      logger.error(`GitHub: failed to fetch diff for ${filePath} in ${commitId}:`, error as Error);
-      throw error;
-    }
-  }
 }
 
 export const createGitHubService = async (owner: string, repo: string): Promise<GitHubService> => {

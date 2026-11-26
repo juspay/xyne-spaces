@@ -95,3 +95,23 @@ test('key ids round-trip', () => {
   assert.equal(parseTransitKeyId('tk-x'), null);
   assert.equal(parseTransitKeyId('cm123'), null);
 });
+
+// Shared with the encryption service and y-sweet tests: fixed keys, nonce and docId give this K_sock.
+test('socket key matches the cross-service vector', async () => {
+  const clientPoint = Buffer.from('BG/wO5SSQc4drdQ1GeaWDgqFtBppoFwygQOqK84VlMoWPE91OlW/AdxT9sCwx+7ni0DG/30lqW4igrmJzvccFEo=', 'base64');
+  const b64url = b => Buffer.from(b).toString('base64url');
+  const privateKey = await crypto.subtle.importKey(
+    'jwk',
+    { kty: 'EC', crv: 'P-256', d: b64url(Buffer.alloc(32, 1)), x: b64url(clientPoint.subarray(1, 33)), y: b64url(clientPoint.subarray(33)) },
+    ECDH,
+    false,
+    ['deriveBits'],
+  );
+  const serverPoint = 'BFUPRxAD89+Xw99QaseX9nIfsaH7e49vg9IkSYplyI4kE2CT1wEuUJpzcVy9CwCjzA/0tcAbP/oZarH7MnA2uOY=';
+  const ring = new TransitKeyring({ privateKey, publicKey: toBase64(clientPoint) }, { current: 1, keys: [{ version: 1, publicKey: serverPoint }] }, async () => {
+    throw new Error('no refetch');
+  });
+  const key = await ring.socketKey(1, Buffer.from('000102030405060708090a0b0c0d0e0f', 'hex').toString('base64'), 'doc-123');
+  const expected = await crypto.subtle.importKey('raw', Buffer.from('92104fe4fbe6aedb7d12a804ad5c8f7dbb08e240b1fd6d40271b070306cda421', 'hex'), 'AES-GCM', false, ['encrypt', 'decrypt']);
+  assert.equal(await roundTrip(expected, key, 'frame'), 'frame');
+});

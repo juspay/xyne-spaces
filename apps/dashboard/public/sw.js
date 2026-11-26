@@ -243,3 +243,172 @@ async function handleQueuedNotificationActions() {
   // This could involve reading from IndexedDB and syncing with server
   console.log('Handling queued notification actions');
 }
+
+// ── Encrypted attachment streaming ──────────────────────────────────────────
+//
+// With file encryption on, attachments are stored encrypted and the backend never holds their
+// plaintext, so a <video> or pdf.js range request to /api/attachments/:id/stream cannot be
+// answered with plain bytes. This worker answers it instead: it asks the backend for the
+// encrypted chunks covering the range (`x-file-encryption`), decrypts them with the page's
+// transit key, and replies to the player with exactly the requested plaintext bytes. The key
+// is asked of the page (a non-extractable CryptoKey over postMessage) and never leaves the
+// browser. Files that are not encrypted come back as an ordinary range response and pass
+// through untouched. The container layout is packages/shared/src/crypto/file-container.ts;
+// keep the two in step.
+
+const ENCRYPTED_STREAM_PATH = /\/api\/attachments\/[^/]+\/stream$/;
+const FILE_ENCRYPTION_HEADER = 'x-file-encryption';
+const FILE_ENCRYPTION_HEADER_VALUE = 'XEF1';
+const FILE_CHUNK_IV_LENGTH = 12;
+const FILE_CHUNK_OVERHEAD = 12 + 16;
+const PAGE_REPLY_TIMEOUT_MS = 2000;
+/** Transit keys by key id, as the page handed them over. */
+const fileTransitKeys = new Map();
+
+self.addEventListener('fetch', (event) => {
+  const request = event.request;
+  if (request.method !== 'GET') return;
+  let url;
+  try {
+    url = new URL(request.url);
+  } catch {
+    return;
+  }
+  if (!ENCRYPTED_STREAM_PATH.test(url.pathname)) return;
+  event.respondWith(serveAttachmentStream(event));
+});
+
+/** Asks an open page of this app (the requesting one first) and returns its reply, or null. */
+async function askPage(clientId, message) {
+  const pages = [];
+  if (clientId) {
+    const own = await self.clients.get(clientId);
+    if (own && own.type === 'window') pages.push(own);
+  }
+  for (const page of await self.clients.matchAll({ type: 'window' })) {
+    if (!pages.some((p) => p.id === page.id)) pages.push(page);
+  }
+  for (const page of pages) {
+    const reply = await new Promise((resolve) => {
+      const channel = new MessageChannel();
+      const timer = setTimeout(() => resolve(null), PAGE_REPLY_TIMEOUT_MS);
+      channel.port1.onmessage = (e) => {
+        clearTimeout(timer);
+        resolve(e.data);
+      };
+      page.postMessage(message, [channel.port2]);
+    });
+    if (reply) return reply;
+  }
+  return null;
+}
+
+async function transitKeyFor(keyId, clientId) {
+  const cached = fileTransitKeys.get(keyId);
+  if (cached) return cached;
+  const reply = await askPage(clientId, { type: 'file-encryption-key', keyId });
+  if (!reply || !reply.key) throw new Error(`No transit key for ${keyId}`);
+  fileTransitKeys.set(keyId, reply.key);
+  return reply.key;
+}
+
+/** Plaintext of a transit container holding chunks `firstIndex`.. of a `totalChunks`-chunk file. */
+async function decryptContainerChunks(container, firstIndex, totalChunks, clientId) {
+  const magic = String.fromCharCode(container[0], container[1], container[2], container[3]);
+  if (container.length < 5 || magic !== FILE_ENCRYPTION_HEADER_VALUE) {
+    throw new Error('Not an encrypted file container');
+  }
+  const keyIdLength = container[4];
+  const headerLength = 4 + 1 + keyIdLength + 4 + 16;
+  const header = container.subarray(0, headerLength);
+  const keyId = new TextDecoder().decode(container.subarray(5, 5 + keyIdLength));
+  const chunkSize = new DataView(container.buffer, container.byteOffset + 5 + keyIdLength, 4).getUint32(0);
+  const key = await transitKeyFor(keyId, clientId);
+  const record = chunkSize + FILE_CHUNK_OVERHEAD;
+  const pieces = [];
+  let at = headerLength;
+  let index = firstIndex;
+  let total = 0;
+  while (at < container.length) {
+    const end = Math.min(at + record, container.length);
+    const aad = new Uint8Array(header.length + 5);
+    aad.set(header, 0);
+    new DataView(aad.buffer).setUint32(header.length, index);
+    aad[header.length + 4] = index === totalChunks - 1 ? 1 : 0;
+    const plain = new Uint8Array(
+      await crypto.subtle.decrypt(
+        { name: 'AES-GCM', iv: container.slice(at, at + FILE_CHUNK_IV_LENGTH), additionalData: aad },
+        key,
+        container.slice(at + FILE_CHUNK_IV_LENGTH, end),
+      ),
+    );
+    pieces.push(plain);
+    total += plain.length;
+    at = end;
+    index += 1;
+  }
+  const out = new Uint8Array(total);
+  let written = 0;
+  for (const piece of pieces) {
+    out.set(piece, written);
+    written += piece.length;
+  }
+  return out;
+}
+
+async function serveAttachmentStream(event) {
+  const request = event.request;
+  const state = await askPage(event.clientId, { type: 'file-encryption-state' });
+  if (!state || !state.active) return fetch(request);
+
+  const range = request.headers.get('range');
+  const headers = new Headers({ [FILE_ENCRYPTION_HEADER]: FILE_ENCRYPTION_HEADER_VALUE });
+  if (range) headers.set('range', range);
+  const response = await fetch(request.url, { headers, credentials: 'include', mode: 'cors', signal: request.signal });
+  const chunkStart = response.headers.get('x-file-chunk-start');
+  // Not an encrypted file (or an error): as the server sent it.
+  if (!response.ok || chunkStart === null) return response;
+
+  const first = Number(chunkStart);
+  const totalChunks = Number(response.headers.get('x-file-chunk-count'));
+  const size = Number(response.headers.get('x-file-size'));
+  const rangeStart = Number(response.headers.get('x-file-range-start'));
+  const rangeEnd = Number(response.headers.get('x-file-range-end'));
+  const contentType = response.headers.get('x-file-content-type') || 'application/octet-stream';
+  const container = new Uint8Array(await response.arrayBuffer());
+
+  let plaintext;
+  try {
+    plaintext = await decryptContainerChunks(container, first, totalChunks, event.clientId);
+  } catch {
+    // A key from an earlier session of the page: ask again once.
+    fileTransitKeys.clear();
+    try {
+      plaintext = await decryptContainerChunks(container, first, totalChunks, event.clientId);
+    } catch (error) {
+      console.error('[Service Worker] Encrypted attachment could not be decrypted', error);
+      return new Response(null, { status: 502 });
+    }
+  }
+
+  // The chunks start at a chunk boundary; the player asked for an exact range within them.
+  const offset = rangeStart - first * chunkSizeOf(container);
+  const body = plaintext.slice(offset, offset + Math.max(0, rangeEnd - rangeStart + 1));
+  const out = new Headers({
+    'Content-Type': contentType,
+    'Content-Length': String(body.byteLength),
+    'Accept-Ranges': 'bytes',
+    'Cache-Control': 'no-store',
+  });
+  if (range) {
+    out.set('Content-Range', `bytes ${rangeStart}-${rangeEnd}/${size}`);
+    return new Response(body, { status: 206, headers: out });
+  }
+  return new Response(body, { status: 200, headers: out });
+}
+
+/** The plaintext chunk size a container's header records. */
+function chunkSizeOf(container) {
+  const keyIdLength = container[4];
+  return new DataView(container.buffer, container.byteOffset + 5 + keyIdLength, 4).getUint32(0);
+}
