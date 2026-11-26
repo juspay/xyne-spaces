@@ -414,7 +414,7 @@ export async function importNotionTree(root: string, target: NotionImportTarget,
       if (!ysweetOk) summary.warnings.push(`Y-Sweet sync failed for "${node.title}" (DB content is saved; the editor may show it empty)`);
 
       await vespaQueue
-        .addJob({ schema: fileSchema, docId: canvasId, jobType: 'feed', userId: placement.ownerIds[0], app: SubApp.CANVAS })
+        .addJob({ schema: fileSchema, docId: canvasId, jobType: 'feed', userId: placement.ownerIds[0], workspaceId: target.workspaceId, app: SubApp.CANVAS })
         .catch(err => summary.warnings.push(`Vespa queue failed for "${node.title}": ${String(err)}`));
 
       node.created ? summary.created++ : summary.updated++;
