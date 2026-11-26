@@ -189,13 +189,20 @@ function signState(state: OAuthState): string {
   return `${body}.${crypto.createHmac('sha256', signingKey()).update(body).digest('base64url')}`;
 }
 
+/** Anything malformed is just "invalid" — this runs without sign-in, so it must never throw. */
 function verifyState(raw: string): OAuthState | null {
   const [body, mac] = raw.split('.');
   if (!body || !mac) return null;
-  const expected = crypto.createHmac('sha256', signingKey()).update(body).digest('base64url');
-  if (mac.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(mac), Buffer.from(expected))) return null;
-  const state = JSON.parse(Buffer.from(body, 'base64url').toString()) as OAuthState;
-  return state.x > Date.now() ? state : null;
+  const given = Buffer.from(mac);
+  const expected = Buffer.from(crypto.createHmac('sha256', signingKey()).update(body).digest('base64url'));
+  // Compare byte lengths: timingSafeEqual throws on unequal buffers (a non-ASCII mac has more bytes than characters).
+  if (given.length !== expected.length || !crypto.timingSafeEqual(given, expected)) return null;
+  try {
+    const state = JSON.parse(Buffer.from(body, 'base64url').toString()) as OAuthState;
+    return typeof state.x === 'number' && state.x > Date.now() ? state : null;
+  } catch {
+    return null;
+  }
 }
 
 /** The page the Notion consent tab/browser ends on — the user returns to the Spaces app themselves. */
