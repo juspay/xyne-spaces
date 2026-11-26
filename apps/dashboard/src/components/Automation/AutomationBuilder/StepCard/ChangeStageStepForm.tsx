@@ -379,10 +379,12 @@ function valueHint(suggestion: FieldSuggestion | undefined): string | undefined 
   switch (suggestion.fieldType) {
     case FormFieldType.SINGLE_SELECT:
       return options ? `One of: ${options}` : undefined;
-    case FormFieldType.MULTI_SELECT:
-      return `${options ? `Any of: ${options}. ` : ''}Use a list variable for several.`;
+    case FormFieldType.MULTI_SELECT: {
+      const several = 'Separate several with commas, or use a list variable.';
+      return options ? `Any of: ${options}. ${several}` : several;
+    }
     case FormFieldType.USER:
-      return 'A user ID, or a variable holding user IDs.';
+      return 'User IDs separated by commas, or a variable holding user IDs.';
     case FormFieldType.DATE:
       return 'A date, e.g. 2026-01-31.';
     case FormFieldType.BOOLEAN:
@@ -412,7 +414,9 @@ function toRows(raw: unknown): FormValueRow[] {
   });
 }
 
-// Values set through the API can be lists or numbers; they stay as-is until edited here.
+// Values set through the API can be lists or numbers; they stay as-is until edited here. An
+// edited list is saved as comma-separated text, which the step splits again for multi-select
+// and user fields.
 function displayValue(value: unknown): string {
   if (value === null || value === undefined) return '';
   if (typeof value === 'string') return value;

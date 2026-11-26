@@ -307,6 +307,61 @@ export async function upsertFormEntityValue(
   return existing;
 }
 
+/**
+ * upsertFormEntityValue for several values in one transaction: either every value is written or
+ * none is. Each key may appear only once.
+ */
+export async function upsertFormEntityValues(
+  client: Client,
+  inputs: readonly (NewFormEntityValue & { contextId: string; version: number })[]
+): Promise<WrittenFormEntityValue[]> {
+  if (inputs.length === 0) return [];
+  // The reads come first: the array form of $transaction only takes statements.
+  const existingRows = await Promise.all(
+    inputs.map((input) =>
+      client.formEntityValues.findUnique({
+        where: {
+          entityId_entityType_fieldId_contextId_version: {
+            entityId: input.entityId,
+            entityType: input.entityType,
+            fieldId: input.fieldId,
+            contextId: input.contextId,
+            version: input.version,
+          },
+        },
+        select: { id: true, workspaceId: true },
+      })
+    )
+  );
+  const written: WrittenFormEntityValue[] = [];
+  const operations: Operation[] = [];
+  inputs.forEach((input, index) => {
+    const existing = existingRows[index];
+    if (existing) {
+      const stored = storedColumns(input.fieldType, input.value, input.fieldId);
+      operations.push(
+        client.formEntityValues.update({
+          where: { id: existing.id },
+          data: { ...stored.data, ...(input.updatedAt && { updatedAt: input.updatedAt }) },
+          select: { id: true },
+        }),
+        ...itemOperations(client, existing, stored.items)
+      );
+      written.push(existing);
+      return;
+    }
+    const { stored, data } = newRowData(input, input.id ?? randomUUID());
+    const row = { id: data.id, workspaceId: data.workspaceId };
+    operations.push(
+      client.formEntityValues.create({ data, select: { id: true } }),
+      ...itemOperations(client, row, stored.items, true)
+    );
+    written.push(row);
+  });
+  await runTogether(client, operations);
+  return written;
+}
+
 /** Replaces the value of an existing row. */
 export async function updateFormEntityValue(
   client: Client,

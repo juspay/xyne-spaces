@@ -7,13 +7,14 @@ import {
   FormEntityType,
   FormFieldType,
   isFieldActive,
+  parseFieldOptionValues,
   sameFormEntityValue,
 } from '@xyne/shared';
 import { DatabaseClient } from '@/database/client';
 import { repositories } from '@/database/repositories';
 import {
   findFormEntityValues,
-  upsertFormEntityValue,
+  upsertFormEntityValues,
   type FormEntityValueRecord,
 } from '@/database/repositories/formEntityValueRepository';
 import { normalizeCustomFieldValue } from '@/apps/controllers/ticketController.helpers';
@@ -22,7 +23,10 @@ import {
   validateUserCustomFieldReferences,
   type ChangedCustomField,
 } from '@/services/ticketCustomFieldService';
-import { ticketStageTransitionService } from '@/services/stageTransition/ticketStageTransitionService';
+import {
+  isStageTransitionApprover,
+  ticketStageTransitionService,
+} from '@/services/stageTransition/ticketStageTransitionService';
 import { ActivitySource } from '@/types/ticket';
 import {
   resolveFormFieldDefinitionsForForm,
@@ -36,7 +40,9 @@ const StageFormValueSchema = z
   .union([z.string(), z.number(), z.boolean(), z.array(z.string())])
   .nullable()
   .optional()
-  .describe('Value to submit. Supports {{...}} placeholders.');
+  .describe(
+    'Value to submit. Supports {{...}} placeholders. Multi-select and user fields take a list, or text with the values separated by commas.',
+  );
 
 export const StageFormValuesSchema = z
   .array(
@@ -124,6 +130,16 @@ export async function moveTicketToStage(args: StageMoveArgs): Promise<StageMoveR
     const form = target?.formId
       ? await prepareFormValues(target.formId, formValues, ticket.workspaceId, stepType)
       : null;
+    // A move held for approval files its request without the form values, so they'd be lost.
+    if (
+      form &&
+      target?.approvalTransitionId &&
+      !(await isStageTransitionApprover(target.approvalTransitionId, updatedBy))
+    ) {
+      throw new Error(
+        `${stepType}: moving to "${stageName}" needs approval, and an automation can't send form values for approval. Let automations skip approval on this transition.`,
+      );
+    }
     const before = form && target ? await findStageValues(ticketId, target.stageId, form.fieldIds) : [];
 
     const result = await ticketStageTransitionService.transitionTicket(ticketId, updatedBy, stageName, {
@@ -136,7 +152,7 @@ export async function moveTicketToStage(args: StageMoveArgs): Promise<StageMoveR
     if (!result.success) {
       if (!form && result.transition?.formId && !result.requiresApproval) {
         throw new Error(
-          `${stepType}: moving to "${stageName}" needs its form filled in. Add form values on the "Move ticket to stage" step.`,
+          `${stepType}: moving to "${stageName}" needs its form filled in. Fill it with form values on a "Move ticket to stage" step.`,
         );
       }
       throw new Error(result.message ?? 'Stage transition failed');
@@ -165,12 +181,16 @@ export async function moveTicketToStage(args: StageMoveArgs): Promise<StageMoveR
       ? await prepareFormValues(target.formId, formValues, ticket.workspaceId, stepType)
       : null;
 
-  // Saved before the move, like the stage form modal does on linear boards.
-  const changed =
-    ticket && target && form ? await saveStageFormValues(ticketId, ticket.workspaceId, target.stageId, form) : [];
-  try {
-    await repositories.tickets.updateTicketStage(ticketId, stageName, updatedBy, ActivitySource.AUTOMATION);
-  } finally {
+  await repositories.tickets.updateTicketStage(ticketId, stageName, updatedBy, ActivitySource.AUTOMATION);
+  // Saved only after the move works, so a failed move leaves the form untouched and fires no events.
+  if (ticket && target && form) {
+    const changed = await saveStageFormValues(ticketId, ticket.workspaceId, target.stageId, form).catch(
+      (err: unknown) => {
+        throw new Error(
+          `${stepType}: moved the ticket to "${stageName}" but couldn't save its form values: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      },
+    );
     await emitFormSideEffects(ticketId, changed, updatedBy);
   }
   return toResult(form);
@@ -180,7 +200,7 @@ async function findTransitionForm(
   boardId: string,
   fromStageName: string,
   toStageName: string,
-): Promise<{ stageId: string; formId: string | null } | null> {
+): Promise<{ stageId: string; formId: string | null; approvalTransitionId: string | null } | null> {
   const prisma = DatabaseClient.getInstance();
   const [target, current] = await Promise.all([
     prisma.stage.findFirst({ where: { boardId, name: toStageName }, select: { id: true } }),
@@ -190,10 +210,16 @@ async function findTransitionForm(
   const transition = current
     ? await prisma.stageTransition.findUnique({
         where: { boardId_fromStageId_toStageId: { boardId, fromStageId: current.id, toStageId: target.id } },
-        select: { formId: true },
+        select: { id: true, formId: true, requiresApproval: true, bypassApprovalForAutomation: true },
       })
     : null;
-  return { stageId: target.id, formId: transition?.formId ?? null };
+  return {
+    stageId: target.id,
+    formId: transition?.formId ?? null,
+    // Set when the transition holds automation moves for approval, as transitionTicket does.
+    approvalTransitionId:
+      transition?.requiresApproval && !transition.bypassApprovalForAutomation ? transition.id : null,
+  };
 }
 
 async function findStageForm(
@@ -299,10 +325,23 @@ function normalizeFormValue(
       return normalizeCustomFieldValue(field, asText(raw));
     case FormFieldType.MULTI_SELECT:
     case FormFieldType.USER:
-      return normalizeCustomFieldValue(field, Array.isArray(raw) ? raw.map(asText) : asText(raw));
+      return normalizeCustomFieldValue(
+        field,
+        Array.isArray(raw) ? raw.map(asText) : splitListText(field, asText(raw)),
+      );
     default:
       return normalizeCustomFieldValue(field, raw);
   }
+}
+
+// Text lists several values with commas ("A, B"). A multi-select option that itself contains a
+// comma is still taken whole when it is the entire text.
+function splitListText(field: ResolvedFormFieldDefinition, value: unknown): unknown {
+  if (typeof value !== 'string') return value;
+  const isWholeOption =
+    field.fieldType === FormFieldType.MULTI_SELECT &&
+    parseFieldOptionValues(field.fieldEnum).includes(value.trim());
+  return isWholeOption ? value : value.split(',');
 }
 
 function isEmptyFormValue(value: unknown): boolean {
@@ -327,7 +366,7 @@ function findStageValues(
   });
 }
 
-/** Writes the stage form values of a linear-board move and returns what changed. */
+/** Writes the stage form values of a linear-board move, all or none, and returns what changed. */
 async function saveStageFormValues(
   ticketId: string,
   workspaceId: string,
@@ -343,8 +382,9 @@ async function saveStageFormValues(
   // Linear boards keep one visit per stage; write to it like the form UI does.
   const version = Math.max(1, eta._max.version ?? 0, ...before.map(row => row.version ?? 1));
   const now = new Date();
-  for (const entry of form.values) {
-    await upsertFormEntityValue(prisma, {
+  await upsertFormEntityValues(
+    prisma,
+    form.values.map(entry => ({
       entityId: ticketId,
       entityType: FormEntityType.TICKET,
       workspaceId,
@@ -355,8 +395,8 @@ async function saveStageFormValues(
       fieldType: entry.field.fieldType,
       value: entry.value,
       updatedAt: now,
-    });
-  }
+    })),
+  );
   return changedFields(form.values, before, version);
 }
 
