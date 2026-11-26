@@ -500,7 +500,9 @@ const getMessageBubbleClassName = (
     isBookmarked &&
       variant !== 'pinned' &&
       !isPinned &&
-      !isShowInChannel && ['bg-blue-50/90 rounded-sm message-bookmarked-bg'],
+      !isShowInChannel && [
+        'bg-blue-50/90 in-data-[theme=midnight]:bg-[rgba(59,130,246,0.1)] rounded-sm',
+      ],
     variant === 'pinned' && 'bg-background rounded-xl',
     isHighlighted && 'highlight-message',
     isXyneBot && 'pt-5',
@@ -1367,7 +1369,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                 <div className='flex flex-col gap-2'>
                   {typeof metadata?.['shareNote'] === 'string' && metadata['shareNote'] ? (
                     <div
-                      className={`jp-message-html whitespace-pre-wrap break-all-words inline-block ${getEmojiFontSizeClass(metadata['shareNote'])}`}
+                      className={`jp-message-html whitespace-pre-wrap inline-block ${getEmojiFontSizeClass(metadata['shareNote'])}`}
                     >
                       <ExpandableMessage maxHeight={500}>
                         <div className='jp-message-html inline-block'>
@@ -1406,7 +1408,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                   recordingShare={recordingShare}
                   renderNote={noteHtml => (
                     <div
-                      className={`jp-message-html whitespace-pre-wrap break-all-words inline-block ${getEmojiFontSizeClass(noteHtml)}`}
+                      className={`jp-message-html whitespace-pre-wrap inline-block ${getEmojiFontSizeClass(noteHtml)}`}
                     >
                       <ExpandableMessage maxHeight={500}>
                         <RenderMessageWithHTML
@@ -1487,7 +1489,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                   {/* Optional message from forwarder */}
                   {forwardedMessageData.optionalText && (
                     <div
-                      className={`jp-message-html whitespace-pre-wrap break-all-words inline-block ${getEmojiFontSizeClass(forwardedMessageData.optionalText)}`}
+                      className={`jp-message-html whitespace-pre-wrap inline-block ${getEmojiFontSizeClass(forwardedMessageData.optionalText)}`}
                     >
                       <ExpandableMessage maxHeight={500}>
                         <div className='jp-message-html inline-block'>
@@ -1545,7 +1547,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                         recordingShare={recordingShare}
                         renderNote={noteHtml => (
                           <div
-                            className={`jp-message-html whitespace-pre-wrap break-all-words inline-block text-muted-foreground ${getEmojiFontSizeClass(noteHtml)}`}
+                            className={`jp-message-html whitespace-pre-wrap inline-block text-muted-foreground ${getEmojiFontSizeClass(noteHtml)}`}
                           >
                             <ExpandableMessage maxHeight={500}>
                               <RenderMessageWithHTML
@@ -1579,7 +1581,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                     ) : (
                       <>
                         <div
-                          className={`jp-message-html whitespace-pre-wrap break-all-words inline-block text-muted-foreground ${getEmojiFontSizeClass(resolvedForwardedContent)}`}
+                          className={`jp-message-html whitespace-pre-wrap inline-block text-muted-foreground ${getEmojiFontSizeClass(resolvedForwardedContent)}`}
                         >
                           <ExpandableMessage maxHeight={500}>
                             <div className='jp-message-html inline-block'>
@@ -1623,7 +1625,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                 <>
                   {hasMessageContent(message.content) && (
                     <div
-                      className={`jp-message-html whitespace-pre-wrap break-all-words inline-block ${emojiFontSizeClass}`}
+                      className={`jp-message-html whitespace-pre-wrap inline-block ${emojiFontSizeClass}`}
                       style={isSystemMessage ? systemMessageStyles : undefined}
                     >
                       {callLinkOnlyExternalId && (

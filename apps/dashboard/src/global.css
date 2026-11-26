@@ -1798,10 +1798,6 @@
   }
 }
 
-@utility break-all-words {
-  word-break: break-all;
-}
-
 @utility no-scrollbar {
   -ms-overflow-style: none;
   scrollbar-width: none;
@@ -4440,11 +4436,6 @@
     background: linear-gradient(to bottom, #43484e, #5a6169);
   }
 
-  /* --- Bookmarked message background --- */
-  [data-theme="midnight"] .message-bookmarked-bg {
-    background-color: rgba(59, 130, 246, 0.1);
-  }
-
   /* --- Activity unread/read contrast --- */
   [data-theme="midnight"] [data-activity-id].bg-accent {
     background-color: hsl(216 6% 24%) !important;
@@ -5365,11 +5356,6 @@
   /* AI chat thread dark mode overrides */
   [data-theme="midnight"] .ai-chat-topbar {
     border-bottom-color: #2a2a2a;
-  }
-
-  [data-theme="midnight"] .ai-user-bubble {
-    background-color: #2a2a2a;
-    color: hsl(var(--foreground));
   }
 
   /* AI agent selector dropdown — soft neutral for light themes, near-black for midnight */

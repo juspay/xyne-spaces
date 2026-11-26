@@ -2349,7 +2349,7 @@ export const EmailComposer = ({
                     <span className='w-12 shrink-0 pt-px text-xs font-medium uppercase tracking-wide text-muted-foreground'>
                       To
                     </span>
-                    <span className='flex-1 wrap-break-word text-sm text-foreground wrap-anywhere'>
+                    <span className='flex-1 text-sm text-foreground wrap-anywhere'>
                       {toEmails.join(', ')}
                     </span>
                   </div>
@@ -2358,7 +2358,7 @@ export const EmailComposer = ({
                       <span className='w-12 shrink-0 pt-px text-xs font-medium uppercase tracking-wide text-muted-foreground'>
                         Cc
                       </span>
-                      <span className='flex-1 wrap-break-word text-sm text-foreground wrap-anywhere'>
+                      <span className='flex-1 text-sm text-foreground wrap-anywhere'>
                         {ccEmails.join(', ')}
                       </span>
                     </div>
@@ -2368,7 +2368,7 @@ export const EmailComposer = ({
                       <span className='w-12 shrink-0 pt-px text-xs font-medium uppercase tracking-wide text-muted-foreground'>
                         Bcc
                       </span>
-                      <span className='flex-1 wrap-break-word text-sm text-foreground wrap-anywhere'>
+                      <span className='flex-1 text-sm text-foreground wrap-anywhere'>
                         {bccEmails.join(', ')}
                       </span>
                     </div>
@@ -2378,7 +2378,7 @@ export const EmailComposer = ({
                       <span className='w-12 shrink-0 pt-px text-xs font-medium uppercase tracking-wide text-muted-foreground'>
                         Subject
                       </span>
-                      <span className='flex-1 wrap-break-word text-sm font-medium text-foreground wrap-anywhere'>
+                      <span className='flex-1 text-sm font-medium text-foreground wrap-anywhere'>
                         {isComposeMode ? composeSubject.trim() : ticketSubject?.trim()}
                       </span>
                     </div>
@@ -2388,7 +2388,7 @@ export const EmailComposer = ({
                 <div className='px-5 py-4'>
                   {hasEmailBody ? (
                     <div
-                      className='prose prose-sm dark:prose-invert max-w-none wrap-break-word text-sm text-foreground wrap-anywhere'
+                      className='prose prose-sm dark:prose-invert max-w-none text-sm text-foreground wrap-anywhere'
                       dangerouslySetInnerHTML={{
                         __html: DOMPurify.sanitize(emailContent),
                       }}
@@ -2403,7 +2403,7 @@ export const EmailComposer = ({
                     if (!activeSig) return null;
                     return (
                       <div
-                        className='prose prose-sm dark:prose-invert mt-4 wrap-break-word border-t border-border pt-4 text-sm text-muted-foreground wrap-anywhere'
+                        className='prose prose-sm dark:prose-invert mt-4 border-t border-border pt-4 text-sm text-muted-foreground wrap-anywhere'
                         dangerouslySetInnerHTML={{
                           __html: sanitizeSignatureHtml(activeSig.content),
                         }}

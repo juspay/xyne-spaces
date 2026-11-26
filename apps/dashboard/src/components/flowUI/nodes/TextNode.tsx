@@ -437,7 +437,7 @@ export const TextNode: React.FC<TextNodeProps> = ({ node, children, inline = fal
               alt={`:${part.name}:`}
               title={part.name}
               data-emoji='true'
-              className='inline-emoji inline-block w-5 h-5 object-contain align-middle'
+              className='inline-emoji inline-block object-contain align-middle'
             />
           );
         }

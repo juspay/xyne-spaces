@@ -1092,7 +1092,7 @@ function ChatMessageBubble({
           <div className='flex w-full items-start justify-end gap-1'>
             <div
               className={cn(
-                'ai-user-bubble rounded-3xl bg-[#ececec] px-4 py-2.5 text-sm leading-relaxed text-gray-900',
+                'rounded-3xl bg-[#ececec] px-4 py-2.5 text-sm leading-relaxed text-gray-900 in-data-[theme=midnight]:bg-[#2a2a2a] in-data-[theme=midnight]:text-foreground',
                 isEditing ? 'w-full' : 'max-w-full',
               )}
             >

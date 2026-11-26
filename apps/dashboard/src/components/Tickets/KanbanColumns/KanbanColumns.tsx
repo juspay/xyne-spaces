@@ -803,7 +803,7 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
     <div
       ref={reorder.stripRef}
       className={cn(
-        'flex gap-1 sm:gap-4 p-2 sm:p-3 h-full bg-background overflow-x-auto min-w-screen',
+        'flex gap-1 sm:gap-4 p-2 sm:p-3 h-full bg-background overflow-x-auto',
         containerClassName,
       )}
     >
