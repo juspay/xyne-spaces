@@ -17,6 +17,7 @@ export interface NotionImportJob {
   status: NotionJobStatus;
   channel?: string;
   notionWorkspace?: string;
+  notionWorkspaceId?: string; // member imports: scopes the access check to pages from this Notion workspace
   log: string[];
   sections?: NotionSection[]; // set when awaiting review
   summary?: NotionImportSummary;

@@ -88,7 +88,7 @@ async function withHeartbeat(job: ImportJob, run: () => Promise<void>): Promise<
 
 /** Record a new import and start reading Notion in the background (the request doesn't wait). */
 async function startJob(
-  init: Pick<ImportJob, 'kind' | 'userId' | 'userEmail' | 'workspaceId'> & { notionWorkspace: string | undefined; firstLog: string },
+  init: Pick<ImportJob, 'kind' | 'userId' | 'userEmail' | 'workspaceId' | 'notionWorkspaceId'> & { notionWorkspace: string | undefined; firstLog: string },
   accessToken: string | NotionTokenSource,
 ): Promise<ImportJob> {
   const { firstLog, notionWorkspace, ...rest } = init;
@@ -129,6 +129,7 @@ interface NotionTokenResponse {
   access_token?: string;
   refresh_token?: string;
   expires_in?: number; // not documented by Notion; used only if it's sent
+  workspace_id?: string;
   workspace_name?: string;
   owner?: { user?: { person?: { email?: string } } };
   error?: string;
@@ -257,6 +258,7 @@ router.get('/oauth/callback', async (req: Request, res: Response) => {
 
     await startJob({
       kind: 'member', userId: state.u, userEmail: state.e, workspaceId: state.w, notionWorkspace: token.workspace_name,
+      ...(token.workspace_id ? { notionWorkspaceId: token.workspace_id } : {}),
       firstLog: `Connected to Notion workspace "${token.workspace_name ?? '?'}" as ${notionEmail}`,
     }, oauthTokenSource(oauth, { ...token, access_token: accessToken }));
     // The consent ran in a separate tab (web) or the system browser (desktop app), so don't send
@@ -371,7 +373,7 @@ async function collectAndStage(job: ImportJob, accessToken: string | NotionToken
       : 'The integration can see no pages. In Notion, add the pages to it (integration settings → Content access), then start again.');
   }
   if (job.kind === 'member') {
-    await ingest(job, { sections: {}, member: { userId: job.userId } });
+    await ingest(job, { sections: {}, member: { userId: job.userId, ...(job.notionWorkspaceId ? { notionWorkspaceId: job.notionWorkspaceId } : {}) } });
     return;
   }
   job.sections = await runWithContext({ userId: job.userId, workspaceId: job.workspaceId }, () =>

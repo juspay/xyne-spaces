@@ -428,22 +428,31 @@ export async function importNotionTree(root: string, target: NotionImportTarget,
   // A member's import contains every page they can see in Notion. A page they saw before but not
   // now means they lost access in Notion (or it was deleted) — take their access away here too,
   // unless they created it.
-  if (plan?.member) {
+  // Only canvases from the same Notion workspace, and only access an import gave them (not a share made in Spaces).
+  if (plan?.member?.notionWorkspaceId) {
     const member = plan.member.userId;
     const seenNow = new Set(allNodes.map(n => n.key));
     const before = await db.canvas.findMany({
-      where: { workspaceId: target.workspaceId, metadata: { path: ['notionImport', 'seenBy'], array_contains: [member] } },
+      where: {
+        workspaceId: target.workspaceId,
+        AND: [
+          { metadata: { path: ['notionImport', 'seenBy'], array_contains: [member] } },
+          { metadata: { path: ['notionImport', 'notionWorkspaceId'], equals: plan.member.notionWorkspaceId } },
+        ],
+      },
       select: { id: true, title: true, createdBy: true, metadata: true },
     });
     for (const c of before) {
-      const meta = (c.metadata ?? {}) as { notionImport?: { key?: string; seenBy?: string[] } };
+      const meta = (c.metadata ?? {}) as { notionImport?: StoredNotionMeta };
       const key = meta.notionImport?.key;
       if (!key || seenNow.has(key) || c.createdBy === member) continue;
-      await db.canvasParticipant.deleteMany({ where: { canvasId: c.id, userId: member } });
+      const removed = (meta.notionImport?.granted ?? []).includes(member)
+        && (await db.canvasParticipant.deleteMany({ where: { canvasId: c.id, userId: member } })).count > 0;
       await db.canvas.update({
         where: { id: c.id },
-        data: { metadata: { ...meta, notionImport: { ...meta.notionImport, seenBy: (meta.notionImport?.seenBy ?? []).filter(u => u !== member) } } },
+        data: { metadata: toJsonSafeValue({ ...meta, notionImport: { ...meta.notionImport, seenBy: (meta.notionImport?.seenBy ?? []).filter(u => u !== member), granted: (meta.notionImport?.granted ?? []).filter(u => u !== member) } }) as unknown as Prisma.InputJsonValue },
       });
+      if (!removed) continue;
       summary.accessRemoved.push(c.title);
       // Without this they'd lose the canvas but could still find it in search.
       await enqueueCanvasPermissionRefresh(c.id).catch(err => summary.warnings.push(`Search access refresh failed for "${c.title}": ${String(err)}`));
