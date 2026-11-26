@@ -286,6 +286,35 @@ export const TYPING_BAR_MORPH_MS = 150;
 export const TYPING_BAR_MORPH_SCALE = 0.6;
 
 /*
+ * Typing bar, focused: the pill opens into a card. The text keeps 16 on both
+ * sides, and under it, 8 below the text, a row of 36 tools whose 20 glyphs
+ * start on the text's edge, with mic / Send 3 inside the card's bottom right
+ * corner as in the pill.
+ */
+export const TYPING_BAR_CARD_PADDING_BOTTOM = TYPING_BAR_FIELD_PADDING_RIGHT;
+export const TYPING_BAR_TOOL_SIZE = 36;
+export const TYPING_BAR_TOOL_GAP = 4;
+/** Pulls the row left by a button's inner padding, so the first glyph sits on the text's edge. */
+export const TYPING_BAR_TOOL_GLYPH_INSET = (TYPING_BAR_TOOL_SIZE - TYPING_BAR_ICON_SIZE) / 2;
+/**
+ * Stretches a 36 tool's touch area to 44 tall; sideways only to half the gap,
+ * so neighbours' touch areas meet rather than overlap.
+ */
+export const TYPING_BAR_TOOL_HIT_SLOP = {
+  top: (44 - TYPING_BAR_TOOL_SIZE) / 2,
+  bottom: (44 - TYPING_BAR_TOOL_SIZE) / 2,
+  left: TYPING_BAR_TOOL_GAP / 2,
+  right: TYPING_BAR_TOOL_GAP / 2,
+} as const;
+/** The hairline before the formatting strip's close. */
+export const TYPING_BAR_FORMAT_DIVIDER_HEIGHT = 20;
+/** The strip fades out over its last 16 before mic / Send; its end scrolls clear of the fade. */
+export const TYPING_BAR_FORMAT_FADE_WIDTH = 16;
+/** Tools ⇄ formatting: the incoming row grows from 96% as it fades in. */
+export const TYPING_BAR_TOOLS_SWAP_MS = 150;
+export const TYPING_BAR_TOOLS_SWAP_SCALE = 0.96;
+
+/*
  * Typing bar: edit / also send / attachments. Figma has none of these states,
  * so they follow the room's own language: 32 rows over the field, 16 in from
  * the sides like the bar, and 56 tiles inside the field.

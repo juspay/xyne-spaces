@@ -24,6 +24,7 @@ import {
   ChatInput,
   useChatInputActions,
   useChatInputConversation,
+  useChatInputPanelState,
   useChatInputText,
   type ConversationInput,
 } from '@/src/components/input-composer';
@@ -38,6 +39,7 @@ import { getConversationInputComposerKey } from '@/src/components/input-composer
 import { getChatComposerBottomPadding } from '@/src/features/chat/v2/chatKeyboardConfig';
 
 import {
+  TYPING_BAR_CARD_PADDING_BOTTOM,
   TYPING_BAR_FIELD_PADDING_LEFT,
   TYPING_BAR_FIELD_PADDING_RIGHT,
   TYPING_BAR_FIELD_PADDING_Y,
@@ -54,7 +56,7 @@ import { useBarAnchor } from '../hooks/use-bar-anchor';
 import { useRoomDictationControls, useRoomDictationStatus } from '../hooks/use-room-dictation';
 import { openPlusTray, PLUS_TRAY_CLOSED, type PlusTrayState } from '../model/plus-tray';
 import { colorOf } from '../model/token-color';
-import { trailingInset, typingBarAction, typingBarPlaceholder } from '../model/typing-bar';
+import { fieldTrailingInset, typingBarAction, typingBarPlaceholder } from '../model/typing-bar';
 import { IconButton } from './icon-button';
 import { PlusTray } from './plus-tray';
 import { RoomAlsoSendRow } from './room-also-send-row';
@@ -63,6 +65,7 @@ import { RoomDictationProvider } from './room-dictation-provider';
 import { RoomEditStrip } from './room-edit-strip';
 import { RoomMentions } from './room-mentions';
 import { RoomOfflineBanner } from './room-offline-banner';
+import { RoomToolRow } from './room-tool-row';
 import { RoomTrailing } from './room-trailing';
 import { ScheduledPill } from './scheduled-pill';
 import { ScheduleTray } from './schedule-tray';
@@ -73,6 +76,11 @@ const FIELD_STYLE = {
   paddingVertical: TYPING_BAR_FIELD_PADDING_Y,
   paddingLeft: TYPING_BAR_FIELD_PADDING_LEFT,
   paddingRight: TYPING_BAR_FIELD_PADDING_RIGHT,
+} as const;
+/** Focused, the tool row's mic / Send sits as near the card's bottom edge as its right. */
+const CARD_STYLE = {
+  ...FIELD_STYLE,
+  paddingBottom: TYPING_BAR_CARD_PADDING_BOTTOM,
 } as const;
 const FIELD_METRICS: ComposerFieldMetrics = {
   lineHeight: TYPING_BAR_LINE_HEIGHT,
@@ -153,14 +161,17 @@ type RoomFieldProps = {
 };
 
 /**
- * The pill: the classic input restyled through its seams, with mic / send
- * inside and no focused toolbar (formatting opens from the "+" tray).
- * Re-renders when the field gains or loses content, the edit mode or the
- * dictation status changes, since each can swap the trailing control and its inset.
+ * The field: the classic input restyled through its seams. Unfocused it is a
+ * pill with mic / Send inside; focused it opens into a card whose text spans
+ * the width, over a tool row that holds the tools, the formatting strip and
+ * mic / Send. Re-renders when focus, content, the edit mode or the dictation
+ * status changes, since each can move the trailing control or its inset.
  */
 function RoomField({ disabled, onFocus, onBlur }: RoomFieldProps): ReactElement {
   const { isEditing, isTwinEditing } = useChatInputConversation();
   const { hasComposerContent } = useChatInputText();
+  const { isInputFocused, isLinkModalOpen } = useChatInputPanelState();
+  const { setIsFormattingVisibleState } = useChatInputActions();
   const status = useRoomDictationStatus();
   const { onNativeText } = useRoomDictationControls();
   const placeholderColor = colorOf(useCSSVariable('--color-spaces-subtle'));
@@ -172,6 +183,17 @@ function RoomField({ disabled, onFocus, onBlur }: RoomFieldProps): ReactElement 
   });
 
   const trailing = useMemo(() => <RoomTrailing disabled={disabled} />, [disabled]);
+  const toolRow = useMemo(() => <RoomToolRow disabled={disabled} />, [disabled]);
+
+  // The next focus opens on the tools, not on a strip left showing (Slack);
+  // the link sheet only borrows the focus, so the strip waits for its return.
+  const handleBlur = useCallback(
+    (e: BlurEvent): void => {
+      if (!isLinkModalOpen) setIsFormattingVisibleState(false);
+      onBlur?.(e);
+    },
+    [isLinkModalOpen, onBlur, setIsFormattingVisibleState],
+  );
 
   const handleChangeText = useCallback(
     (e: NativeSyntheticEvent<OnChangeTextEvent>): void => {
@@ -183,18 +205,18 @@ function RoomField({ disabled, onFocus, onBlur }: RoomFieldProps): ReactElement 
   return (
     <ChatInput.Input
       {...(onFocus ? { onFocus } : {})}
-      {...(onBlur ? { onBlur } : {})}
+      onBlur={handleBlur}
       disabled={disabled}
       surfaceClassName='bg-spaces-surface'
       className={PILL_CLASS}
-      shellStyle={FIELD_STYLE}
+      shellStyle={isInputFocused ? CARD_STYLE : FIELD_STYLE}
       fieldMetrics={FIELD_METRICS}
       placeholderTextColor={placeholderColor}
       hideLeadingAttach
-      trailingSlot={trailing}
-      trailingInset={trailingInset(action)}
+      trailingSlot={isInputFocused ? null : trailing}
+      trailingInset={fieldTrailingInset(action, isInputFocused)}
       trailingAlign='end'
-      footerSlot={null}
+      footerSlot={toolRow}
       attachmentsSlot={ATTACHMENTS}
       onChangeText={handleChangeText}
     />
@@ -219,7 +241,6 @@ function RoomBarRow({ disabled, onFocus, onBlur }: RoomFieldProps): ReactElement
         className='w-full flex-col gap-2 px-4'
       >
         <RoomEditStrip />
-        <ChatInput.FormattingPanel />
         <View className='w-full flex-row items-end gap-2'>
           <RoomAttachButton />
           <View className='min-w-0 flex-1'>
@@ -244,8 +265,8 @@ function RoomBarRow({ disabled, onFocus, onBlur }: RoomFieldProps): ReactElement
  * Figma "Room / Typing bar": a "+" plate and a rounded field with a mic that
  * becomes Send once there is something to send. Drafts, attachments, mentions,
  * schedule, edit, also-send, offline and twin assist are the shared composer,
- * restyled. Attachments, emoji, formatting and scheduling open from the "+"
- * tray; formatting shows as the shared strip above the field.
+ * restyled. Attachments and scheduling open from the "+" tray; formatting,
+ * emoji, mentions and links from the focused card's tool row.
  */
 function RoomTypingBarComponent({
   conversationId,

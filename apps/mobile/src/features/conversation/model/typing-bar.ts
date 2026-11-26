@@ -1,8 +1,11 @@
+import { composerInputTrailingInset } from '@/src/components/input-composer/composer-input-typography';
 import { getChatComposerBottomPadding } from '@/src/features/chat/v2/chatKeyboardConfig';
 
 import {
   TYPING_BAR_DICTATING_WIDTH,
   TYPING_BAR_FIELD_HEIGHT,
+  TYPING_BAR_FIELD_PADDING_LEFT,
+  TYPING_BAR_FIELD_PADDING_RIGHT,
   TYPING_BAR_MIC_SIZE,
   TYPING_BAR_PADDING_TOP,
   TYPING_BAR_REPLY_PADDING_Y,
@@ -37,6 +40,21 @@ export function trailingInset(action: TypingBarAction): number {
         ? TYPING_BAR_MIC_SIZE
         : TYPING_BAR_DICTATING_WIDTH;
   return width + TYPING_BAR_TRAILING_GUTTER;
+}
+
+/**
+ * The text's right inset inside the field. Unfocused it clears the trailing
+ * control; focused that control moves to the tool row, and the text keeps the
+ * same 16 on the right as on the left (the shell pads 3, the shared input its
+ * own focused inset, this the rest).
+ */
+export function fieldTrailingInset(action: TypingBarAction, focused: boolean): number {
+  if (!focused) return trailingInset(action);
+  return (
+    TYPING_BAR_FIELD_PADDING_LEFT -
+    TYPING_BAR_FIELD_PADDING_RIGHT -
+    composerInputTrailingInset(true)
+  );
 }
 
 /** The least height the bar occupies, so the list reserves what the bar really needs. */

@@ -1,12 +1,4 @@
-import {
-  Camera,
-  CalendarClock,
-  CaseSensitive,
-  FileText,
-  Images,
-  Smile,
-  type LucideIcon,
-} from 'lucide-react-native';
+import { Camera, CalendarClock, FileText, Images, type LucideIcon } from 'lucide-react-native';
 import { type ReactElement } from 'react';
 
 import type { PlusTrayRow, PlusTrayRowId } from '../model/plus-tray';
@@ -16,8 +8,6 @@ const ROW_ICONS: Readonly<Record<PlusTrayRowId, LucideIcon>> = {
   photos: Images,
   camera: Camera,
   files: FileText,
-  emoji: Smile,
-  formatting: CaseSensitive,
   schedule: CalendarClock,
 };
 

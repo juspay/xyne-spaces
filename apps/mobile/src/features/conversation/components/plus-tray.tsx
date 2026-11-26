@@ -5,10 +5,8 @@ import { useConnectionState } from '@rocicorp/zero/react';
 import { useCSSVariable } from 'uniwind';
 
 import {
-  useChatInputActions,
   useChatInputConversation,
   useChatInputHandlers,
-  useChatInputPanelState,
   useChatInputText,
 } from '@/src/components/input-composer';
 import { useComposerAttachmentPicking } from '@/src/components/input-composer/hooks/useComposerAttachmentPicking';
@@ -17,7 +15,6 @@ import {
   pickFromFiles,
   pickFromGallery,
 } from '@/src/components/input-composer/utils/composer-attachments-picker';
-import { useLatestRef } from '@/src/components/input-composer/utils/use-latest-ref';
 
 import {
   plusTrayExitFocus,
@@ -38,22 +35,17 @@ type PlusTrayProps = {
 
 /**
  * The "+" tray (Figma "Plus tray"): a card floating over the screen and the
- * typing bar on a scrim, wired to the composer's own pickers, emoji sheet,
- * formatting strip and schedule picker. It slides up as the scrim fades in;
- * the scrim, the close plate, back, Escape or a drag down put it away again.
+ * typing bar on a scrim, wired to the composer's own pickers and schedule
+ * picker. It slides up as the scrim fades in; the scrim, the close plate,
+ * back, Escape or a drag down put it away again.
  */
 export function PlusTray({ heldKeyboard, onClosed }: PlusTrayProps): ReactElement {
   const { isEditing, isTwinEditing } = useChatInputConversation();
   const { canSend } = useChatInputText();
-  const { isFormattingVisible } = useChatInputPanelState();
   // Read straight from Zero: the shared offline hook only flips on a change
   // after it mounts, and the tray mounts mid-outage while Zero is reconnecting.
   const offline = useConnectionState().name !== 'connected';
-  // Read when the close resolves, after the tray's slide, not at the tap.
-  const isFormattingVisibleRef = useLatestRef(isFormattingVisible);
-  const { setIsEmojiPickerOpenState, setIsFormattingVisibleState, setIsMentionOpenState } =
-    useChatInputActions();
-  const { inputRef, rememberSelectionForEmojiInsert, openSchedule } = useChatInputHandlers();
+  const { inputRef, openSchedule } = useChatInputHandlers();
   const [foregroundToken, subtleToken] = useCSSVariable([
     '--color-spaces-foreground',
     '--color-spaces-subtle',
@@ -75,7 +67,7 @@ export function PlusTray({ heldKeyboard, onClosed }: PlusTrayProps): ReactElemen
           // iOS kept the field focused under an empty input view, which only the library puts back.
           if (focus === 'restore' && Platform.OS === 'ios')
             KeyboardController.setFocusTo('current');
-          else if (focus === 'restore' || focus === 'focus') inputRef.current?.focus();
+          else if (focus === 'restore') inputRef.current?.focus();
           resolve();
         };
         void motion.hide().then(finish);
@@ -94,7 +86,6 @@ export function PlusTray({ heldKeyboard, onClosed }: PlusTrayProps): ReactElemen
     picking: isPicking,
     canSchedule: canSend && !isEditing && !isTwinEditing,
     offline,
-    formattingVisible: isFormattingVisible,
   });
 
   const run = (id: PlusTrayRowId): void => {
@@ -109,18 +100,6 @@ export function PlusTray({ heldKeyboard, onClosed }: PlusTrayProps): ReactElemen
         return;
       case 'files':
         void pick(pickFromFiles);
-        return;
-      case 'emoji':
-        // While the field still holds the caret, so a custom emoji lands there.
-        rememberSelectionForEmojiInsert();
-        setIsFormattingVisibleState(false);
-        setIsMentionOpenState(false);
-        void handOff().then(() => setIsEmojiPickerOpenState(true));
-        return;
-      case 'formatting':
-        void close('formatting').then(() =>
-          setIsFormattingVisibleState(!isFormattingVisibleRef.current),
-        );
         return;
       case 'schedule':
         void handOff().then(openSchedule);

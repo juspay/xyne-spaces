@@ -1,5 +1,5 @@
 import { useMemo, type ReactElement, type ReactNode } from 'react';
-import { Pressable } from 'react-native';
+import { Pressable, type Insets } from 'react-native';
 
 import { haptics } from '@/src/utils/haptics';
 import { cn } from '@/src/utils/cn';
@@ -14,6 +14,9 @@ type IconButtonProps = {
   disabled?: boolean;
   /** For a button that opens a panel: whether that panel is showing. */
   expanded?: boolean;
+  /** For a toggle: whether it is on. */
+  selected?: boolean;
+  hitSlop?: number | Insets;
 };
 
 /** Figma "Button / Icon": a round, square-hit-area button with a tap haptic. */
@@ -25,14 +28,27 @@ export function IconButton({
   className,
   disabled = false,
   expanded,
+  selected,
+  hitSlop,
 }: IconButtonProps): ReactElement {
   const style = useMemo(() => ({ width: size, height: size }), [size]);
+  const state = useMemo(
+    () =>
+      expanded === undefined && selected === undefined
+        ? undefined
+        : {
+            ...(expanded === undefined ? {} : { expanded }),
+            ...(selected === undefined ? {} : { selected }),
+          },
+    [expanded, selected],
+  );
 
   return (
     <Pressable
       accessibilityRole='button'
       accessibilityLabel={label}
-      {...(expanded === undefined ? {} : { accessibilityState: { expanded } })}
+      {...(state === undefined ? {} : { accessibilityState: state })}
+      {...(hitSlop === undefined ? {} : { hitSlop })}
       disabled={disabled}
       onPressIn={() => void haptics.buttonTap()}
       onPress={onPress}

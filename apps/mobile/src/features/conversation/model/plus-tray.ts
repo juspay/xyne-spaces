@@ -1,6 +1,6 @@
 import type { TrayRow } from './tray-card';
 
-export type PlusTrayRowId = 'photos' | 'camera' | 'files' | 'emoji' | 'formatting' | 'schedule';
+export type PlusTrayRowId = 'photos' | 'camera' | 'files' | 'schedule';
 
 export type PlusTrayRow = TrayRow<PlusTrayRowId>;
 
@@ -15,7 +15,6 @@ export type PlusTrayComposer = Readonly<{
   canSchedule: boolean;
   /** Scheduling needs the server, as sending does. */
   offline: boolean;
-  formattingVisible: boolean;
 }>;
 
 const ATTACHMENT_LIMIT_SUBTITLE = 'Attachment limit reached';
@@ -26,10 +25,10 @@ function scheduleSubtitle({ offline, canSchedule }: PlusTrayComposer): string {
 }
 
 /**
- * The tray's rows, in two cards: what can be attached, then what changes the
- * message itself. Attaching is off while a picker is open or no slot is left;
- * scheduling needs something to send and a connection, as the send
- * long-press does.
+ * The tray's rows, in two cards: what can be attached, then when the message
+ * goes. Attaching
+ * is off while a picker is open or no slot is left; scheduling needs something
+ * to send and a connection, as the send long-press does.
  */
 export function plusTraySections(state: PlusTrayComposer): readonly PlusTraySection[] {
   const attachDisabled = state.picking || state.attachmentSlotsLeft === 0;
@@ -52,15 +51,6 @@ export function plusTraySections(state: PlusTrayComposer): readonly PlusTraySect
     {
       id: 'compose',
       rows: [
-        { id: 'emoji', title: 'Emoji', subtitle: null, disabled: false },
-        {
-          id: 'formatting',
-          title: 'Formatting',
-          subtitle: state.formattingVisible
-            ? 'Hide the formatting bar'
-            : 'Bold, lists, code and links',
-          disabled: false,
-        },
         {
           id: 'schedule',
           title: 'Schedule message',
@@ -86,24 +76,22 @@ export function openPlusTray(keyboardVisible: boolean): PlusTrayState {
 }
 
 /**
- * How the tray closes: put away (scrim, close, back, swipe), into the
- * formatting strip, or handed to a picker, the emoji sheet or the schedule sheet.
+ * How the tray closes: put away (scrim, close, back, swipe), or handed to a
+ * picker or the schedule sheet.
  */
-export type PlusTrayExit = 'dismiss' | 'formatting' | 'handoff';
+export type PlusTrayExit = 'dismiss' | 'handoff';
 
 /**
  * What a closing tray does with the field. `restore` brings back the keyboard
- * it held, `focus` raises one it did not, `release` lets go of a held focus for
- * a surface that takes over (and refocuses the field itself), `none` leaves it.
+ * it held, `release` lets go of a held focus for a surface that takes over
+ * (and refocuses the field itself), `none` leaves it.
  */
-type PlusTrayFocus = 'restore' | 'focus' | 'release' | 'none';
+type PlusTrayFocus = 'restore' | 'release' | 'none';
 
 export function plusTrayExitFocus(heldKeyboard: boolean, exit: PlusTrayExit): PlusTrayFocus {
   switch (exit) {
     case 'dismiss':
       return heldKeyboard ? 'restore' : 'none';
-    case 'formatting':
-      return heldKeyboard ? 'restore' : 'focus';
     case 'handoff':
       return heldKeyboard ? 'release' : 'none';
   }

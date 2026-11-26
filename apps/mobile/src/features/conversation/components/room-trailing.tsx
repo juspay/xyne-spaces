@@ -42,12 +42,21 @@ const { entering: morphIn, exiting: morphOut } = fadeScaleTransition({
   scale: TYPING_BAR_MORPH_SCALE,
 });
 
+type RoomTrailingProps = {
+  disabled: boolean;
+  /**
+   * In the pill it hangs below the text's last line; in the focused card's
+   * tool row it sits in the row, centred with the tools.
+   */
+  hang?: boolean;
+};
+
 /**
  * Mic, Send or the dictation controls at the field's right edge. Each swap
  * grows the incoming control in on the UI thread while the outgoing one
  * shrinks away; the first paint and the bar's unmount do not animate.
  */
-function RoomTrailingComponent({ disabled }: { disabled: boolean }): ReactElement {
+function RoomTrailingComponent({ disabled, hang = true }: RoomTrailingProps): ReactElement {
   const { isEditing, isTwinEditing } = useChatInputConversation();
   const { hasComposerContent } = useChatInputText();
   const status = useRoomDictationStatus();
@@ -120,7 +129,7 @@ function RoomTrailingComponent({ disabled }: { disabled: boolean }): ReactElemen
         key={action}
         entering={morphIn}
         exiting={morphOut}
-        style={TRAILING_STYLE}
+        style={hang ? TRAILING_STYLE : undefined}
         pointerEvents={blocksSend ? 'none' : 'auto'}
       >
         {control}
