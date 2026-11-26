@@ -1,6 +1,6 @@
 import type { WorkflowConfig, WorkflowStepConfig } from '@xyne/workflow-sdk';
 import { SDLC_AGENT_STEP_TYPE } from '@/workflowsV2/agents/sdlc-agent-provider';
-import { HUB_CORRECTOR_STEP_ID, SDLC_WIKI_PLAN_STEP_TYPE } from './wikiPlanStep';
+import { HUB_CORRECTOR_STEP_ID, REPOSITORY_CORRECTOR_STEP_ID, SDLC_WIKI_PLAN_STEP_TYPE } from './wikiPlanStep';
 
 const WINDOW = 'steps.__loop.output.currentItem';
 
@@ -142,7 +142,7 @@ export function buildWikiWorkflowConfig(channelId: string): WorkflowConfig {
                 source: `${WINDOW}.windows`,
                 body: [
                   agentStep('generate', 'Generator', window, REPOSITORY_GENERATOR_TASK),
-                  agentStep('correct', 'Corrector', window, REPOSITORY_CORRECTOR_TASK),
+                  agentStep(REPOSITORY_CORRECTOR_STEP_ID, 'Corrector', window, REPOSITORY_CORRECTOR_TASK),
                 ],
               },
             },

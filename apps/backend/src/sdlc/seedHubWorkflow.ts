@@ -51,7 +51,7 @@ const HUB_WORKFLOWS = [
 
 type HubWorkflow = (typeof HUB_WORKFLOWS)[number];
 
-/** Presence, dangling included, means "seeded once": a deleted workflow stays deleted. */
+/** Presence, dangling included, means "seeded once": a deleted workflow stays deleted. The oldest link wins a race. */
 async function findHubWorkflowLink(
   channelId: string,
   relation: string,
@@ -63,6 +63,7 @@ async function findHubWorkflowLink(
       targetType: 'WORKFLOW',
       relationType: relation,
     },
+    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
     select: { id: true, targetId: true },
   });
 }
@@ -158,7 +159,8 @@ async function hubAuthor(actor: SdlcActor, channelId: string, current?: string):
   return author;
 }
 
-async function createHubWorkflow(actor: SdlcActor, hub: Hub, workflow: HubWorkflow): Promise<string> {
+/** False when a concurrent seed linked its copy first: this copy is removed and theirs is kept. */
+async function createHubWorkflow(actor: SdlcActor, hub: Hub, workflow: HubWorkflow): Promise<boolean> {
   const record = await workflowRuntime.createWorkflow(
     { userId: actor.userId, workspaceId: actor.workspaceId },
     {
@@ -169,8 +171,9 @@ async function createHubWorkflow(actor: SdlcActor, hub: Hub, workflow: HubWorkfl
       attributes: { workspaceId: actor.workspaceId, createdByUserId: actor.userId },
     },
   );
+  let linkId: string;
   try {
-    await db.sdlcEntityLink.create({
+    ({ id: linkId } = await db.sdlcEntityLink.create({
       data: {
         workspaceId: actor.workspaceId,
         channelId: hub.channelId,
@@ -181,14 +184,23 @@ async function createHubWorkflow(actor: SdlcActor, hub: Hub, workflow: HubWorkfl
         relationType: workflow.relation,
         createdBy: actor.userId,
       },
-    });
+      select: { id: true },
+    }));
   } catch (error) {
     // Unlinked, the next seed would add a second copy.
     await db.workflow.delete({ where: { id: record.id } }).catch(() => undefined);
     throw error;
   }
+  // The check before create is not atomic and the link key includes the workflow id, so two seeds can both get here.
+  const winner = await findHubWorkflowLink(hub.channelId, workflow.relation);
+  if (winner && winner.id !== linkId) {
+    await db.sdlcEntityLink.delete({ where: { id: linkId } });
+    await db.workflow.delete({ where: { id: record.id } }).catch(() => undefined);
+    logger.info(`[SDLC] hub ${hub.channelId} already has "${workflow.name}" ${winner.targetId}, dropped duplicate ${record.id}`);
+    return false;
+  }
   logger.info(`[SDLC] seeded "${workflow.name}" workflow ${record.id} for hub ${hub.channelId}`);
-  return record.id;
+  return true;
 }
 
 export interface SeedHubWorkflowResult {
@@ -207,9 +219,10 @@ export async function seedHubWorkflow(
   for (const workflow of HUB_WORKFLOWS) {
     if (await findHubWorkflowLink(channelId, workflow.relation)) continue;
     // A dry run still fails where the real one would: a hub with no admin to act as.
-    if (hub) await createHubWorkflow(actor, hub, workflow);
-    else await hubAuthor(actor, channelId);
-    seeded = true;
+    if (!hub) {
+      await hubAuthor(actor, channelId);
+      seeded = true;
+    } else if (await createHubWorkflow(actor, hub, workflow)) seeded = true;
   }
   const wikiTriggerUpdated = await syncWikiTrigger(channelId, dryRun);
   return { status: seeded ? 'seeded' : 'skipped', wikiTriggerUpdated };

@@ -12,15 +12,17 @@ import { db } from '@/database/client';
 import { TERMINAL_EXECUTION_STATUSES } from '@/workflowsV2/constants';
 import { SDLC_AGENT_STEP_TYPE } from '@/workflowsV2/agents/sdlc-agent-provider';
 import { sdlcRunActorId } from '@/workflowsV2/agents/sdlc-dispatch';
-import { sdlcHubOptions, unpickable } from '@/workflowsV2/agents/sdlc-hub-step';
-import type { Checked, ConfigIssue } from '@/workflowsV2/connectors/xyne-spaces/validation';
-import type { XyneResourceAttrs } from '@/workflowsV2/types';
+import { noOptions, optionsQuery, sdlcHubOptions } from '@/workflowsV2/connectors/xyne-spaces/options';
+import { sdlcHubIssues, type Checked, type ConfigIssue } from '@/workflowsV2/connectors/xyne-spaces/validation';
+import type { XyneCtx, XyneResourceAttrs } from '@/workflowsV2/types';
 import { repoIdsForChannel, requireSdlcHubReader } from '../sdlcChannelMembership';
 import { sdlcVcs } from '../vcs';
 import { commitWindows } from './wikiWindows';
 
 export const SDLC_WIKI_PLAN_STEP_TYPE = 'SDLC_WIKI_PLAN';
 export const HUB_CORRECTOR_STEP_ID = 'hub_correct';
+/** Only a finished Corrector marks a window done: a Generator alone leaves pages unchecked. */
+export const REPOSITORY_CORRECTOR_STEP_ID = 'correct';
 
 // A LOOP stops at maxIterations (default 1000) without failing, so a run never plans past it.
 const MAX_WINDOWS_PER_REPOSITORY = 1000;
@@ -102,6 +104,7 @@ async function wikiHistory(
       hubSeenAt = row.updatedAt;
       continue;
     }
+    if (!row.stepName || leafStepId(row.stepName) !== REPOSITORY_CORRECTOR_STEP_ID) continue;
     let data: { type?: unknown; input?: { repoId?: unknown; generationCommit?: unknown } };
     try {
       data = JSON.parse(row.data ?? '{}');
@@ -134,12 +137,12 @@ export class SdlcWikiPlanStep extends BaseActionStep<typeof PlanConfigSchema, Pl
   readonly configSchema = PlanConfigSchema;
   readonly outputSchema = PlanOutputSchema;
 
-  override getOptions(ctx: FieldOptionsContext<Record<string, unknown>>): Promise<FieldOptionsPage> {
-    return ctx.field === 'channelId' ? sdlcHubOptions(ctx) : Promise.resolve({ items: [] });
+  override getOptions(ctx: FieldOptionsContext<PlanConfig, Record<string, unknown>, XyneCtx>): Promise<FieldOptionsPage> {
+    return ctx.field === 'channelId' ? sdlcHubOptions(optionsQuery(ctx)) : Promise.resolve(noOptions);
   }
 
   override validateConfig(ctx: Checked<{ channelId?: string }>): Promise<ConfigIssue[]> {
-    return unpickable(this, ctx, 'channelId', 'SDLC hub');
+    return sdlcHubIssues(ctx, 'channelId', ctx.known.channelId);
   }
 
   async execute(config: PlanConfig, ctx: StepExecutionContext): Promise<PlanOutput> {

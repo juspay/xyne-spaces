@@ -137,6 +137,36 @@ export async function channelOptions(q: OptionsQuery): Promise<FieldOptionsPage>
   return page(rows, label);
 }
 
+/** SDLC hubs the caller can read, by the same rule as `requireSdlcHubReader`. */
+export async function sdlcHubOptions(q: OptionsQuery): Promise<FieldOptionsPage> {
+  const visible = {
+    workspaceId: q.workspaceId,
+    type: 'SDLC' as const,
+    OR: [
+      { visibility: ChannelVisibility.PUBLIC },
+      { participants: { some: { userId: q.callerUserId } } },
+    ],
+  };
+  const select = { id: true, name: true };
+  const label = (r: { id: string; name: string }): FieldOption => ({ value: r.id, label: r.name, icon: 'hash' });
+
+  if (q.values?.length) {
+    const rows = await db.channel.findMany({
+      where: { AND: [visible, { id: { in: [...q.values] } }] },
+      select,
+      orderBy: BY_NAME,
+    });
+    return { items: rows.map(label) };
+  }
+  const rows = await db.channel.findMany({
+    where: { AND: [visible, nameLike(q.search), after(q.cursor)] },
+    select,
+    orderBy: BY_NAME,
+    take: PAGE + 1,
+  });
+  return page(rows, label);
+}
+
 export async function boardOptions(q: OptionsQuery): Promise<FieldOptionsPage> {
   const select = { id: true, name: true };
   const label = (r: { id: string; name: string }): FieldOption => ({

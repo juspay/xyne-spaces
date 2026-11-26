@@ -13,9 +13,9 @@ import { withOptions } from '@xyne/workflow-sdk';
 import type { Attachment, ResumePayload, StepExecutionContext } from '@xyne/workflow-sdk';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
-import { listScopedClawAgents, runScopedClawAgent } from '@/services/clawAgentService';
+import { runS2SClawAgent } from '@/services/clawAgentService';
 import { parseAgentAttachments } from '@/automations/services/agent-attachment.service';
-import { clawScopeFor, resolveClawRunIdentity, runAuthorOf } from './identity';
+import { listDispatchableClawAgents, resolveClawRunIdentity } from './identity';
 import type { XyneCtx, XyneResourceAttrs } from '../types';
 
 /**
@@ -57,10 +57,9 @@ export class ClawAgentProvider
   readonly configSchema = ClawAgentConfigSchema;
 
   /** Backs the agent picker on `agentSlug` (served through the step's `getOptions`). */
-  override async listAgents(ctx: XyneCtx): Promise<AgentDescriptor[]> {
-    const agents = await listScopedClawAgents(await clawScopeFor(ctx.userId, ctx.workspaceId));
-    // `spacesAppId` signs the dispatch and `spacesAppUserId` is the run's identity: an agent missing either fails mid-run.
-    return agents.filter((agent) => agent.spacesAppId && agent.spacesAppUserId).map((agent) => ({
+  override async listAgents(_ctx: XyneCtx): Promise<AgentDescriptor[]> {
+    const agents = await listDispatchableClawAgents();
+    return agents.map((agent) => ({
       id: agent.slug,
       name: agent.name,
       ...(agent.description ? { description: agent.description } : {}),
@@ -73,37 +72,16 @@ export class ClawAgentProvider
     ctx: StepExecutionContext,
   ): Promise<{ externalRef: string }> {
     const { workspaceId } = ctx.runtime.attributes as XyneResourceAttrs;
-    const author = runAuthorOf(ctx);
-    if (!author) {
-      throw new Error('[workflows] RUN_AGENT has no author to pick the agent for. Save the workflow again to stamp one.');
-    }
-    // Scoped to the author, so a slug only matches an agent they can reach in their own org.
-    const scope = await clawScopeFor(author, workspaceId);
-    const identity = await resolveClawRunIdentity(stepConfig.agentSlug, scope);
+    const identity = await resolveClawRunIdentity(stepConfig.agentSlug, workspaceId);
 
-    // One session per turn and attempt. Claw-auth only accepts ids of
-    // [A-Za-z0-9_-] (anything else is silently swapped for a random one), and it
-    // de-duplicates dispatches by session id — so each turn and each repair must
-    // have its own, while a genuinely repeated dispatch of the same one still
-    // collapses. The node path is hashed: it holds `:`, `/` and `#`.
-    const attempt = input.repair?.attempt ?? 0;
-    const turn = input.conversation?.turn ?? 0;
-    const sessionId = safeClawId(
-      `wf-${ctx.runtime.executionId}-${shortHash(ctx.runtime.stepName)}-t${String(turn)}-r${String(attempt)}`,
-    );
-    // A step that waits for replies keeps one conversation across its turns;
-    // claw resumes the agent's session by this id, so nothing is kept here.
-    const conversationId = input.conversation
-      ? safeClawId(`wf-${shortHash(`${workspaceId}|${stepConfig.agentSlug}|${input.conversation.id}`)}`)
-      : undefined;
+    const { attempt, sessionId, conversationId } = clawRunIds(ctx, input, workspaceId, stepConfig.agentSlug);
 
     logger.info(
       `[workflows] dispatching claw agent — execution=${ctx.runtime.executionId} `
       + `node=${ctx.runtime.stepName} agent=${stepConfig.agentSlug} session=${sessionId}`,
     );
 
-    const response = await dispatchWithBusyRetry(Boolean(conversationId), () => runScopedClawAgent({
-      identity: scope,
+    const response = await dispatchWithBusyRetry(Boolean(conversationId), () => runS2SClawAgent({
       sessionId,
       ...(conversationId ? { conversationId } : {}),
       agentSlug: stepConfig.agentSlug,
@@ -248,6 +226,27 @@ export function buildCallbackUrl(executionId: string, nodePath: string, attempt:
     + (turn !== undefined ? `&turn=${String(turn)}` : '');
 }
 
+/**
+ * One session per turn and attempt. Claw-auth only accepts ids of
+ * [A-Za-z0-9_-] (anything else is silently swapped for a random one), and it
+ * de-duplicates dispatches by session id — so each turn and each repair must
+ * have its own, while a genuinely repeated dispatch of the same one still
+ * collapses. The node path is hashed: it holds `:`, `/` and `#`.
+ * A step that waits for replies keeps one conversation across its turns;
+ * claw resumes the agent's session by this id, so nothing is kept here.
+ */
+export function clawRunIds(ctx: StepExecutionContext, input: AgentRunInput, workspaceId: string, agentSlug: string) {
+  const attempt = input.repair?.attempt ?? 0;
+  const turn = input.conversation?.turn ?? 0;
+  const sessionId = safeClawId(
+    `wf-${ctx.runtime.executionId}-${shortHash(ctx.runtime.stepName)}-t${String(turn)}-r${String(attempt)}`,
+  );
+  const conversationId = input.conversation
+    ? safeClawId(`wf-${shortHash(`${workspaceId}|${agentSlug}|${input.conversation.id}`)}`)
+    : undefined;
+  return { attempt, sessionId, conversationId };
+}
+
 function safeClawId(raw: string): string {
   return raw.replace(/[^A-Za-z0-9_-]/g, '-').slice(0, 96);
 }
@@ -266,7 +265,7 @@ const BUSY_RETRY_EVERY_MS = 3_000;
  * it; waiting it out is the whole fix, so only a conversation's dispatch
  * retries, and only on that answer.
  */
-async function dispatchWithBusyRetry<T>(inConversation: boolean, send: () => Promise<T>): Promise<T> {
+export async function dispatchWithBusyRetry<T>(inConversation: boolean, send: () => Promise<T>): Promise<T> {
   const deadline = Date.now() + BUSY_RETRY_MS;
   for (;;) {
     try {

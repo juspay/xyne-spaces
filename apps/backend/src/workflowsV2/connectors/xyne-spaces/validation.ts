@@ -1,6 +1,6 @@
 import { db } from '@/database/client';
 import type { XyneCtx } from '../../types';
-import { boardOptions, channelOptions } from './options';
+import { boardOptions, channelOptions, sdlcHubOptions } from './options';
 
 /** The SDK's `ConfigIssue`, which it does not export. */
 export interface ConfigIssue {
@@ -55,6 +55,11 @@ export function boardIssues(scope: Scope, path: string, value: Ids): Promise<Con
 export function channelIssues(scope: Scope, path: string, value: Ids): Promise<ConfigIssue[]> {
   const ids = idsOf(value);
   return unseen(path, 'Channel', ids, channelOptions(query(scope, ids)).then((page) => new Set(page.items.map((o) => o.value))));
+}
+
+export function sdlcHubIssues(scope: Scope, path: string, value: Ids): Promise<ConfigIssue[]> {
+  const ids = idsOf(value);
+  return unseen(path, 'SDLC hub', ids, sdlcHubOptions(query(scope, ids)).then((page) => new Set(page.items.map((o) => o.value))));
 }
 
 export function projectIssues(scope: Scope, path: string, value: Ids): Promise<ConfigIssue[]> {

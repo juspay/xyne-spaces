@@ -5,13 +5,9 @@ import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { runScopedClawAgent } from '@/services/clawAgentService';
 import { sdlcAgentContext } from '@/sdlc/SdlcAgentContextService';
-import { buildCallbackUrl, buildTask } from './claw-provider';
+import { buildCallbackUrl, buildTask, clawRunIds, dispatchWithBusyRetry } from './claw-provider';
 import { SDLC_AUTHOR_METADATA_KEY, clawScopeFor, runAuthorOf } from './identity';
 import type { XyneResourceAttrs } from '../types';
-
-function safeClawId(raw: string): string {
-  return raw.replace(/[^A-Za-z0-9_-]/g, '-').slice(0, 128);
-}
 
 /** The bot runs SDLC steps for whoever started the run, else the author: Spaces checks that person's hub rights. */
 export async function sdlcRunActorId(ctx: StepExecutionContext): Promise<string> {
@@ -46,15 +42,14 @@ export async function dispatchSdlcAgent(input: {
   });
   if (!user?.email) throw new Error(`[workflows] SDLC run actor ${actorUserId} is unavailable`);
 
-  const attempt = run.repair?.attempt ?? 0;
-  const sessionId = safeClawId(
-    `wf-${ctx.runtime.executionId}-${ctx.runtime.stepName}${attempt > 0 ? `-retry-${String(attempt)}` : ''}`
-  );
+  const ids = clawRunIds(ctx, run, attrs.workspaceId, SDLC_AGENT_SLUG);
+  const { attempt, sessionId } = ids;
+  // The grant is bound to the conversation and claw reads it back, so both use one id that holds across turns.
+  const conversationId = ids.conversationId ?? sessionId;
   const actor = { userId: user.id, workspaceId: attrs.workspaceId };
-  // The grant is bound to the conversation, and claw reads it back, so both use sessionId.
   const contextInput = {
     channelId: input.channelId,
-    conversationId: sessionId,
+    conversationId,
     ...(input.generationCommit ? { generationCommit: input.generationCommit } : {}),
   };
   const agentContext = input.repoId
@@ -65,9 +60,10 @@ export async function dispatchSdlcAgent(input: {
     `[workflows] dispatching SDLC agent execution=${ctx.runtime.executionId} node=${ctx.runtime.stepName} `
       + `channel=${input.channelId} repo=${input.repoId ?? '-'} session=${sessionId}`
   );
-  const response = await runScopedClawAgent({
-    // Slugs are unique per org only: scoping stops another org's "sdlc-agent" from getting the hub's grant.
-    identity: await clawScopeFor(user.id, attrs.workspaceId),
+  // Slugs are unique per org only: scoping stops another org's "sdlc-agent" from getting the hub's grant.
+  const identity = await clawScopeFor(user.id, attrs.workspaceId);
+  const response = await dispatchWithBusyRetry(Boolean(ids.conversationId), () => runScopedClawAgent({
+    identity,
     sessionId,
     // Pinned, not step config: another slug loses the SDLC tools.
     agentSlug: SDLC_AGENT_SLUG,
@@ -77,12 +73,12 @@ export async function dispatchSdlcAgent(input: {
     userName: user.name || user.email,
     userEmail: user.email,
     channelId: input.channelId,
-    conversationId: sessionId,
-    callbackUrl: buildCallbackUrl(ctx.runtime.executionId, ctx.runtime.stepName, attempt),
+    conversationId,
+    callbackUrl: buildCallbackUrl(ctx.runtime.executionId, ctx.runtime.stepName, attempt, run.conversation?.turn),
     executionProfile: 'sdlc',
     sdlcContext: agentContext as unknown as Record<string, unknown>,
     allowWriteInReadOnlyJob: true,
-  });
+  }));
   if (!response.success) {
     throw new Error(`[workflows] claw rejected the SDLC run: ${response.error ?? 'unknown error'}`);
   }
