@@ -113,8 +113,11 @@ export class MissingDeviceKeyError extends Error {
 }
 
 /** Sanitized device key from the request, or undefined when the client sent none. */
-export const getDeviceKey = (req: Request): string | undefined => {
-  const raw = req.headers[DEVICE_KEY_HEADER];
+export const getDeviceKey = (req: Request): string | undefined => deviceKeyFromHeaders(req.headers);
+
+/** The same, from a header set (typed routes get the headers, never the request). */
+export const deviceKeyFromHeaders = (headers: Request['headers']): string | undefined => {
+  const raw = headers[DEVICE_KEY_HEADER];
   const deviceKey = typeof raw === 'string' ? raw.trim() : undefined;
   if (!deviceKey || deviceKey.length > MAX_DEVICE_KEY_LENGTH) return undefined;
   return deviceKey;

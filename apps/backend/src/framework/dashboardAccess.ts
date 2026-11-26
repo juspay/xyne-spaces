@@ -2,6 +2,7 @@ import { AccessType, OrgRole, WorkspaceRole } from '@xyne/shared';
 import { DatabaseClient } from '@/database/client';
 import { repositories } from '@/database/repositories';
 import { logger } from '@/utils/logger';
+import { aclService } from '@/services/aclService';
 import { ContractError, type AccessCheck } from './api';
 
 /**
@@ -57,6 +58,44 @@ export function adminOrOwner(): AccessCheck<void> {
       throw new ContractError(403, {
         error: 'Admin or owner access required',
         message: 'This endpoint requires administrator or owner privileges',
+      });
+    }
+  };
+}
+
+/**
+ * The route ACL (`aclMiddleware.checkAccess`): the logged-in user, as stored, may use this
+ * method and path (`aclService.checkAccess` decides by the resource named in the path). Same
+ * answers: 403 `Unauthorized` with the reason, 500 when the check itself fails.
+ */
+export function routeAcl(): AccessCheck<void> {
+  return async ({ user, route }) => {
+    const refuse = (message: string) => new ContractError(403, { error: 'Unauthorized', message });
+    if (!user) throw refuse('User not authenticated - auth middleware should run first');
+    try {
+      const stored = await repositories.users.findById(user.id);
+      if (!stored) throw refuse(`User with ID ${user.id} not found in database`);
+      const access = await aclService.checkAccess(stored.id, route.method, route.path);
+      if (!access.hasAccess) {
+        logger.warn(`ACL denied access for user ${stored.id} (${stored.email}): ${access.reason}`);
+        throw refuse(access.reason || 'Insufficient permissions');
+      }
+    } catch (error) {
+      if (error instanceof ContractError) throw error;
+      logger.error('ACL middleware error:', error);
+      throw new ContractError(500, { error: 'Internal Server Error', message: 'Failed to check permissions' });
+    }
+  };
+}
+
+/** The analytics routes need a workspace (`analyticsAuthMiddleware.requireWorkspaceContext`). */
+export function analyticsWorkspace(): AccessCheck<void> {
+  return async ({ user }) => {
+    if (!user?.workspaceId) {
+      throw new ContractError(400, {
+        success: false,
+        error: 'Workspace context is required for analytics',
+        timestamp: new Date().toISOString(),
       });
     }
   };

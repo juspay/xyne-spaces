@@ -1,15 +1,7 @@
 import { Request, Response } from 'express';
 import { WORKSPACE_LEVEL } from '@/integrations/core/sourceScope';
-import { ExternalSourcePlatform } from '@/integrations/core/types';
-import {
-  SOCIAL_MEDIA_PLATFORMS,
-  isSocialMediaPlatform,
-  isMetaMessagingPlatform,
-} from '@/integrations/social-media/constants';
 import {
   buildSlackDeskSourceName,
-  resolveAppDeskInstalledAppId,
-  extractSlackChannelId,
 } from '../integrations/core/deskSources';
 import { ChannelRepository, CreateChannelInput } from '../database/repositories/channelRepository';
 import { ChannelParticipantRepository } from '../database/repositories/channelParticipantRepository';
@@ -57,7 +49,6 @@ import { userActivityTrackingService } from '@/services/userActivityTrackingServ
 import { vespaQueue } from '@/queues/vespaQueue';
 import { channelSchema } from '@/vespa/src/types';
 import { db } from '@/database/client';
-import { hasProjectAdminAccess } from '@/database/acl/admin-access';
 import { NAMESPACE } from '@/vespa/vespaConfig';
 import {logger} from '@/utils/logger';
 import { messageMetadataService } from '@/services/messageMetadataService';
@@ -69,8 +60,6 @@ import { encrypt, decrypt } from '@/services/encryptionService';
 import { canManageApps, findInstalledApp, linkChannelsDesk } from '@/channelsDesk/admin';
 import { channelsDeskOf } from '@/channelsDesk/desk';
 
-import { vespaService } from '@/services/vespaSearch';
-import { ChannelEmailAliasService } from '@/services/channelEmailAliasService';
 import { ensureDmConversationAuthorParticipant } from '@/utils/dmConversationParticipants';
 import { groupDmParticipantService } from '@/services/groupDmParticipantService';
 import { AppError } from '@/middleware/errorHandler';
@@ -88,7 +77,6 @@ export class ChannelController {
   private projectRepository: ProjectRepository;
   private emailChannelPreferenceRepository: EmailChannelPreferenceRepository;
   private externalSourceRepository: ExternalSourceRepository;
-  private channelEmailAliasService: ChannelEmailAliasService;
 
   constructor() {
     this.channelRepository = new ChannelRepository();
@@ -102,7 +90,6 @@ export class ChannelController {
     this.projectRepository = new ProjectRepository();
     this.emailChannelPreferenceRepository = new EmailChannelPreferenceRepository();
     this.externalSourceRepository = new ExternalSourceRepository();
-    this.channelEmailAliasService = new ChannelEmailAliasService();
   }
 
   // Helper method to get user info
@@ -1528,200 +1515,6 @@ export class ChannelController {
     }
   };
 
-  getConnectedEmail = async (req: Request, res: Response): Promise<void> => {
-    try {
-      const { channelId } = req.params;
-      if (!channelId) {
-        res.status(400).json({ error: 'channelId is required' });
-        return;
-      }
-
-      // This endpoint returns the channel's connected desk mailbox / owner account
-      // email. Gate it with the same rule the socket layer uses (canAccessChannel):
-      // workspace boundary + participant-only for PRIVATE channels.
-      const userId = req.user?.id;
-      const workspaceId = req.user?.workspaceId;
-      if (!userId || !workspaceId) {
-        res.status(401).json({ error: 'Unauthorized' });
-        return;
-      }
-      const channel = await this.channelRepository.findById(channelId);
-      if (!channel || channel.workspaceId !== workspaceId) {
-        res.status(404).json({ error: 'Channel not found' });
-        return;
-      }
-      if (channel.visibility === 'PRIVATE') {
-        const isParticipant = await this.channelParticipantRepository.isParticipant(channelId, userId);
-        if (!isParticipant) {
-          res.status(403).json({ error: 'Forbidden' });
-          return;
-        }
-      }
-
-      res.setHeader('Cache-Control', 'private, no-cache');
-
-      // Slack channels and apps can be bound onto any desk type; they must not shadow the desk's own source.
-      const source = await db.externalSource.findFirst({
-        where: {
-          channelId,
-          workspaceId,
-          NOT: {
-            sourceType: {
-              in: [
-                ...(channel.type === ChannelType.SLACK ? [] : [ExternalSourcePlatform.SLACK_DESK]),
-                ...(channel.type === ChannelType.APP ? [] : [ExternalSourcePlatform.APP_DESK]),
-              ],
-            },
-          },
-        },
-        select: { name: true, displayName: true, sourceType: true, isActive: true, externalIdentifier: true },
-        orderBy: { createdAt: 'desc' },
-      });
-      const hasSource = !!source;
-      let isConnected = source?.isActive === true;
-      const sourceType = source?.sourceType ?? null;
-
-      let connectedLabel: string | null = null;
-      let outboundConfigured = true;
-      let deskApps: Array<{
-        id: string;
-        displayName: string;
-        externalIdentifier: string | null;
-        packageName: string | null;
-        isActive: boolean;
-      }> = [];
-      if (source?.sourceType === ExternalSourcePlatform.APP_DESK) {
-        const installedAppId = resolveAppDeskInstalledAppId(source) ?? '';
-        const installedApp = await db.installedApps.findUnique({
-          where: { id: installedAppId },
-          select: { webhookUrl: true, app: { select: { name: true, signingSecret: true } } },
-        });
-        connectedLabel = installedApp?.app?.name ?? null;
-        outboundConfigured = Boolean(
-          installedApp?.webhookUrl?.trim() && installedApp.app?.signingSecret,
-        );
-      } else if (source?.sourceType === ExternalSourcePlatform.SLACK_DESK) {
-        connectedLabel = extractSlackChannelId(source.name);
-      } else if (sourceType && isSocialMediaPlatform(sourceType) && !isMetaMessagingPlatform(sourceType)) {
-        const reviewSources = await db.externalSource.findMany({
-          where: { channelId, workspaceId, sourceType: { in: [...SOCIAL_MEDIA_PLATFORMS] } },
-          select: {
-            id: true,
-            displayName: true,
-            externalIdentifier: true,
-            isActive: true,
-          },
-          orderBy: { createdAt: 'asc' },
-        });
-        const activeReviewSources = reviewSources.filter(reviewSource => reviewSource.isActive);
-        isConnected = activeReviewSources.length > 0;
-        deskApps = reviewSources.map(reviewSource => ({
-          id: reviewSource.id,
-          displayName: reviewSource.displayName,
-          externalIdentifier: reviewSource.externalIdentifier,
-          packageName: reviewSource.externalIdentifier,
-          isActive: reviewSource.isActive,
-        }));
-        connectedLabel = activeReviewSources
-          .map(reviewSource => reviewSource.displayName)
-          .join(', ') || 'No active apps';
-      } else if (source && isMetaMessagingPlatform(source.sourceType)) {
-        const igSources = await db.externalSource.findMany({
-          where: { channelId, workspaceId, sourceType: source.sourceType },
-          select: {
-            id: true,
-            displayName: true,
-            externalIdentifier: true,
-            isActive: true,
-          },
-          orderBy: { createdAt: 'asc' },
-        });
-        const activeIgSources = igSources.filter(s => s.isActive);
-        isConnected = activeIgSources.length > 0;
-        deskApps = igSources.map(s => ({
-          id: s.id,
-          displayName: s.displayName ?? s.externalIdentifier ?? '',
-          externalIdentifier: s.externalIdentifier,
-          packageName: s.externalIdentifier,
-          isActive: s.isActive,
-        }));
-        const handlePrefix = source.sourceType === ExternalSourcePlatform.INSTAGRAM ? '@' : '';
-        connectedLabel = activeIgSources.map(s => s.displayName ? `${handlePrefix}${s.displayName}` : s.externalIdentifier).join(', ') || null;
-      }
-
-      const fromDisplay = (source?.displayName ?? '').match(/[\w.+-]+@[\w.-]+\.[\w.-]+/)?.[0];
-      if (fromDisplay) {
-        const email = fromDisplay.toLowerCase();
-        res
-          .status(200)
-          .json({ email, isConnected, hasSource, sourceType, connectedLabel: connectedLabel ?? email, outboundConfigured, deskApps, googlePlayApps: deskApps });
-        return;
-      }
-
-      const preference = await db.emailChannelPreference.findUnique({
-        where: { channelId },
-        select: { ownerUserId: true },
-      });
-      if (preference?.ownerUserId) {
-        const owner = await db.user.findUnique({
-          where: { id: preference.ownerUserId },
-          select: { email: true },
-        });
-        if (owner?.email) {
-          const email = owner.email.toLowerCase();
-          res
-            .status(200)
-            .json({ email, isConnected, hasSource, sourceType, connectedLabel: connectedLabel ?? email, outboundConfigured, deskApps, googlePlayApps: deskApps });
-          return;
-        }
-      }
-
-      res.status(200).json({ email: null, isConnected, hasSource, sourceType, connectedLabel, outboundConfigured, deskApps, googlePlayApps: deskApps });
-    } catch (error) {
-      logger.error('Error in getConnectedEmail:', error);
-      res.status(500).json({ error: 'Internal server error' });
-    }
-  };
-
-  getEmailAlias = async (req: Request, res: Response): Promise<void> => {
-    try {
-      const userId = req.user?.id;
-      const { channelId } = req.params;
-
-      if (!userId) {
-        res.status(401).json({ error: 'Unauthorized' });
-        return;
-      }
-
-      if (!channelId) {
-        res.status(400).json({ error: 'channelId is required' });
-        return;
-      }
-
-      const isParticipant = await this.channelParticipantRepository.isParticipant(channelId, userId);
-      if (!isParticipant) {
-        res.status(403).json({ error: 'Forbidden' });
-        return;
-      }
-
-      const channel = await this.channelRepository.findById(channelId);
-      if (!channel) {
-        res.status(404).json({ error: 'Channel not found' });
-        return;
-      }
-
-      const info = await this.channelEmailAliasService.getChannelEmailInfo(
-        channel.workspaceId,
-        channelId,
-      );
-      res.status(200).json(info);
-    } catch (error) {
-      logger.error('Error in getEmailAlias:', error);
-      res.status(500).json({ error: 'Internal server error' });
-    }
-  };
-
-  // POST /api/channels/member-counts - Participant counts for a set of channels
   getChannelMemberCounts = async (req: Request, res: Response): Promise<void> => {
     try {
       const userId = req.user?.id;
@@ -1767,23 +1560,6 @@ export class ChannelController {
   };
 
   // GET /api/channels/:channelId/vespa-participants - Channel participants (user IDs) from Vespa chat_container.permissions
-  getVespaParticipants = async (req: Request, res: Response): Promise<void> => {
-    try {
-      const userId = req.user!.id;
-      const { channelId } = req.params;
-      if (!channelId) {
-        res.status(400).json({ success: false, error: 'channelId is required' });
-        return;
-      }
-      const userIds = await vespaService.channelService.getChannelParticipants(channelId, userId);
-      res.status(200).json({ success: true, data: { userIds } });
-    } catch (error) {
-      logger.error('Error in getVespaParticipants:', error);
-      res.status(500).json({ success: false, error: 'Internal server error' });
-    }
-  };
-
-  // GET /api/channels/:channelId/members - channel members as { id, name }
   getChannelMembers = async (req: Request, res: Response): Promise<void> => {
     try {
       const userId = req.user!.id;
@@ -1806,30 +1582,6 @@ export class ChannelController {
     }
   };
   
-  canLinkChannelBoards = async (req: Request, res: Response): Promise<void> => {
-    try {
-      const userId = req.user!.id;
-      const { channelId } = req.params;
-      if (!channelId) {
-        res.status(400).json({ success: false, error: 'channelId is required' });
-        return;
-      }
-
-      const role = await this.channelParticipantRepository.getParticipantRole(channelId, userId);
-      if (role === ChannelRole.ADMIN) {
-        res.status(200).json({ success: true, data: { canLinkBoards: true } });
-        return;
-      }
-
-      const isProjectAdmin = await hasProjectAdminAccess(db, userId);
-      res.status(200).json({ success: true, data: { canLinkBoards: isProjectAdmin } });
-    } catch (error) {
-      logger.error('Error in canLinkChannelBoards:', error);
-      res.status(500).json({ success: false, error: 'Internal server error' });
-    }
-  };
-
-  // GET /api/channels/search - Unified search for users and groups
   searchForMentions = async (req: Request, res: Response): Promise<void> => {
     try {
       const userId = req.user!.id;
@@ -1943,44 +1695,6 @@ export class ChannelController {
 
   // GET /api/channels/publish-targets - Get channels where user can publish docs
   // Returns DEFAULT scope channels (not DMs or GROUP_DMs)
-  getChannelsForDocs = async (req: Request, res: Response): Promise<void> => {
-    try {
-      const userId = req.user?.id;
-
-      if (!userId) {
-        res.status(403).json({ error: 'Unauthorized - user not authenticated' });
-        return;
-      }
-
-      const userParticipations = await this.channelParticipantRepository.getUserChannels(userId);
-      const channelIds = userParticipations.map(p => p.channelId);
-
-      if (channelIds.length === 0) {
-        res.status(200).json({ channels: [] });
-        return;
-      }
-
-      const allChannels = await this.channelRepository.getChannelsByIds(channelIds);
-
-      const docsChannels = allChannels.filter(channel =>
-        channel.scopeType === ChannelScopeType.DEFAULT || channel.scopeType === ChannelScopeType.DOCUMENT
-      );
-
-      res.status(200).json({
-        channels: docsChannels.map(c => ({
-          id: c.id,
-          name: c.name,
-          projectId: c.projectId,
-          scopeType: c.scopeType,
-        })),
-      });
-    } catch (error) {
-      logger.error('Error getting channels for docs:', error);
-      res.status(500).json({ error: 'Internal server error' });
-    }
-  };
-
-  // GET /api/users/me/dms - Get all user's DM channels
   getUserDMs = async (req: Request, res: Response): Promise<void> => {
     try {
       const userId = req.user!.id;

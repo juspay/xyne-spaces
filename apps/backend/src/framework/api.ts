@@ -1,4 +1,5 @@
 import express, { type Application, type NextFunction, type Request, type RequestHandler, type Response } from 'express';
+import type { IncomingHttpHeaders } from 'node:http';
 import type { z } from 'zod';
 import {
   deriveFactsFromPlaintext,
@@ -79,6 +80,10 @@ export type CheckInput<C> = {
   body: RouteBody<C>;
   user: AuthenticatedUser | undefined;
   app: AppCaller | undefined;
+  /** The request's method and full path (no query string), for checks that decide by route (the route ACL). */
+  route: { method: string; path: string };
+  /** The request headers (read only): device and app-version headers a few routes record. */
+  headers: Readonly<IncomingHttpHeaders>;
 };
 
 /**
@@ -119,6 +124,8 @@ export type RouteImpl<C extends AnyRouteContract, A extends AccessChecks = Recor
   access?: A;
   /** Status of the success response. Default 200. */
   successStatus?: number;
+  /** Headers set on every answer of this route, success or a ContractError (e.g. `Cache-Control`). */
+  responseHeaders?: Record<string, string>;
   /**
    * The answer to a request that breaks the contract (params, query or body), when the API's
    * wire format is not the default 400 `{ error: 'Validation error', code: 'VALIDATION_ERROR',
@@ -211,6 +218,8 @@ function checkInput(req: Request): CheckInput<AnyRouteContract> {
     body: req.body as never,
     user: req.user,
     app: appCaller(req),
+    route: { method: req.method, path: req.originalUrl.split('?')[0] },
+    headers: req.headers,
   };
 }
 
@@ -323,6 +332,7 @@ function makeReadable(value: unknown): unknown {
 
 function respond<C extends AnyRouteContract, A extends AccessChecks>(contract: C, impl: RouteImpl<C, A>): RequestHandler {
   return async function respondMiddleware(req: Request, res: Response, next: NextFunction) {
+    if (impl.responseHeaders) res.set(impl.responseHeaders);
     try {
       // Wrapped here as well as in encryptedRoute, so the handler gets UnreadableString
       // fields whether or not the encryption pipeline ran.

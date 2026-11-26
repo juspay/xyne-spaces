@@ -270,3 +270,30 @@ test('settings contracts: alias, client-event and tags-config rules', () => {
   assert.equal(API.channelTagsConfig.update.body.safeParse({ categories: { sev: { method: 'manual', tags: ['a', 'a'] } } }).success, false, 'duplicate tags');
   assert.equal(API.channelTagsConfig.update.body.safeParse({ categories: { sev: { method: 'llm', tags: ['p1', 'p2'] } } }).success, true);
 });
+
+test('notification preferences: unknown types are dropped first, the rest are checked', () => {
+  const body = API.notifications.preferencesSet.body;
+  const on = { browserEnabled: true, emailEnabled: false, slackEnabled: false };
+  // As before (zod 4 record with enum keys), every notification type must be present.
+  const all = Object.fromEntries(
+    ['TICKET_STATUS_CHANGE', 'TICKET_ASSIGNMENT', 'TICKET_REASSIGNMENT', 'TICKET_DUE_DATE_CHANGED', 'TICKET_PRIORITY_CHANGED',
+      'TICKET_USER_GROUP_CHANGED', 'TICKET_TITLE_CHANGED', 'TICKET_DESCRIPTION_CHANGED', 'TICKET_RCA_CREATED', 'TICKET_RCA_UPDATED',
+      'TICKET_SUBTICKET_ADDED', 'TICKET_RELATED_TICKET_ADDED', 'TICKET_RELATED_TICKET_REMOVED', 'CHANNEL_MESSAGE', 'MENTION',
+      'WORKFLOW_COMPLETION', 'WORKFLOW_FAILURE'].map((type) => [type, on]),
+  );
+  assert.equal(body.safeParse({ ...all, SYSTEM_ALERTS: on }).success, true, 'an old type is dropped, not an error');
+  assert.equal(Object.keys(body.safeParse({ ...all, SYSTEM_ALERTS: on }).data).includes('SYSTEM_ALERTS'), false);
+  assert.equal(body.safeParse({ ...all, MENTION: { browserEnabled: true } }).success, false, 'flags are required');
+});
+
+test('organizations, reactions, channels and labels contracts keep the controllers\' limits', () => {
+  assert.equal(API.organizations.addMember.body.safeParse({ userId: 'u', role: 'VIEWER' }).success, false, 'VIEWER is not assignable here');
+  assert.equal(API.organizations.addMember.body.safeParse({ userId: 'u', role: 'ADMIN' }).success, true);
+  assert.equal(API.reactions.bulk.body.safeParse({ messageIds: [] }).success, false, 'at least one id');
+  assert.equal(API.reactions.bulk.body.safeParse({ messageIds: Array.from({ length: 101 }, (_, i) => String(i)) }).success, false, 'at most 100');
+  assert.equal(API.channels.search.query.safeParse({ q: '  ' }).success, false, 'q needs a character');
+  assert.equal(API.channels.memberCounts.body.safeParse({ channelIds: Array.from({ length: 10001 }, (_, i) => String(i)) }).success, false);
+  assert.equal(API.conversationLabels.unreadCounts.query.safeParse({}).success, false, 'channelId is required');
+  assert.equal(API.analytics.activeUsers.query.safeParse({ groupBy: 'anything' }).success, true, 'groupBy is passed through, as before');
+  assert.equal(API.subTickets.link.body.safeParse({ ticketId: ' ', mappedTicketId: 'x' }).success, false, 'blank ticketId');
+});

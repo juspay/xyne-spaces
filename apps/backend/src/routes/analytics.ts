@@ -1,58 +1,57 @@
 import { Router } from 'express';
-import { AccessType } from '@xyne/shared';
-import { AnalyticsController } from '../controllers/analyticsController';
+import { AccessType, API } from '@xyne/shared';
 import { MultiPullRequestController } from '../controllers/multiPullRequestController';
 import { authorize } from '../middleware/authorize';
 import { aclMiddleware } from '../middleware/acl';
 import { analyticsAuthMiddleware } from '../middleware/analyticsAuth';
+import { api } from '@/framework/api';
+import { analyticsWorkspace, resourceAccess, routeAcl } from '@/framework/dashboardAccess';
+import {
+  activeChannels,
+  activeUsers,
+  currentActiveUsers,
+  filesShared,
+  messagesExchanged,
+  messagesToday,
+  numberOfCalls,
+  numberOfCanvases,
+  numberOfTickets,
+  topUsersByMessages,
+  totalCallsDuration,
+  usersOnboarded,
+} from '@/handlers/analytics';
 
+// Typed routes (API.analytics), served by the API router behind the contract gate. Every one runs
+// the same three checks, in this order: a workspace is present, the route ACL, then ANALYTICS
+// admin (INDIVIDUAL USER ACCESS ONLY, no group access).
+const analyticsChecks = {
+  access: {
+    workspace: analyticsWorkspace(),
+    acl: routeAcl(),
+    analytics: resourceAccess('ANALYTICS', AccessType.ADMIN),
+  },
+};
+
+api.routes(API.analytics, (serve) => ({
+  messagesExchanged: serve('messagesExchanged', { ...analyticsChecks, handle: ({ query, user }) => messagesExchanged({ query, user }) }),
+  activeUsers: serve('activeUsers', { ...analyticsChecks, handle: ({ query, user }) => activeUsers({ query, user }) }),
+  currentActiveUsers: serve('currentActiveUsers', { ...analyticsChecks, handle: ({ query, user }) => currentActiveUsers({ query, user }) }),
+  activeChannels: serve('activeChannels', { ...analyticsChecks, handle: ({ query, user }) => activeChannels({ query, user }) }),
+  filesShared: serve('filesShared', { ...analyticsChecks, handle: ({ query, user }) => filesShared({ query, user }) }),
+  messagesToday: serve('messagesToday', { ...analyticsChecks, handle: ({ query, user }) => messagesToday({ query, user }) }),
+  numberOfTickets: serve('numberOfTickets', { ...analyticsChecks, handle: ({ query, user }) => numberOfTickets({ query, user }) }),
+  numberOfCanvases: serve('numberOfCanvases', { ...analyticsChecks, handle: ({ query, user }) => numberOfCanvases({ query, user }) }),
+  numberOfCalls: serve('numberOfCalls', { ...analyticsChecks, handle: ({ query, user }) => numberOfCalls({ query, user }) }),
+  totalCallsDuration: serve('totalCallsDuration', { ...analyticsChecks, handle: ({ query, user }) => totalCallsDuration({ query, user }) }),
+  usersOnboarded: serve('usersOnboarded', { ...analyticsChecks, handle: ({ query, user }) => usersOnboarded({ query, user }) }),
+  topUsersByMessages: serve('topUsersByMessages', { ...analyticsChecks, handle: ({ query, user }) => topUsersByMessages({ query, user }) }),
+}));
+
+// Not moved yet: the pull-request list (its response carries titles).
 const router = Router();
-const analyticsController = new AnalyticsController();
 const multiPullRequestController = new MultiPullRequestController();
-
-// Apply ANALYTICS authorization to all routes - INDIVIDUAL USER ACCESS ONLY (no group access)
 const analyticsAuth = authorize('ANALYTICS', AccessType.ADMIN, false);
-
 router.use(analyticsAuthMiddleware.requireWorkspaceContext);
-
-// Messages exchanged endpoint
-router.get('/messages-exchanged', aclMiddleware.checkAccess, analyticsAuth, analyticsController.getMessagesExchanged);
-
-// Active users endpoint
-router.get('/active-users', aclMiddleware.checkAccess, analyticsAuth, analyticsController.getActiveUsers);
-
-
-// Current active users endpoint
-router.get('/current-active-users', aclMiddleware.checkAccess, analyticsAuth, analyticsController.getCurrentActiveUsers);
-
-// Active channels endpoint
-router.get('/active-channels', aclMiddleware.checkAccess, analyticsAuth, analyticsController.getActiveChannels);
-
-// Files shared endpoint
-router.get('/files-shared', aclMiddleware.checkAccess, analyticsAuth, analyticsController.getFilesShared);
-
-// Messages today endpoint
-router.get('/messages-today', aclMiddleware.checkAccess, analyticsAuth, analyticsController.getMessagesToday);
-
-// Number of tickets endpoint
-router.get('/number-of-tickets', aclMiddleware.checkAccess, analyticsAuth, analyticsController.getNumberOfTickets);
-
-// Number of canvases endpoint
-router.get('/number-of-canvases', aclMiddleware.checkAccess, analyticsAuth, analyticsController.getNumberOfCanvases);
-
-// Number of calls endpoint
-router.get('/number-of-calls', aclMiddleware.checkAccess, analyticsAuth, analyticsController.getNumberOfCalls);
-
-// Total duration of calls endpoint
-router.get('/total-calls-duration', aclMiddleware.checkAccess, analyticsAuth, analyticsController.getTotalCallsDuration);
-
-// Users onboarded endpoint
-router.get('/users-onboarded', aclMiddleware.checkAccess, analyticsAuth, analyticsController.getUsersOnboarded);
-
-// Top users by messages endpoint
-router.get('/top-users-by-messages', aclMiddleware.checkAccess, analyticsAuth, analyticsController.getTopUsersByMessages);
-
-// Multi-Repository Pull Request endpoints
 router.get('/multi-pull-requests', aclMiddleware.checkAccess, analyticsAuth, multiPullRequestController.getAllPullRequests);
 
 export default router;

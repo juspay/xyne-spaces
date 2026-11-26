@@ -1,34 +1,8 @@
 import { Request, Response } from 'express';
-import { NotificationType } from '@xyne/shared';
 import { notificationService } from '@/services/notificationService';
 import { unreadService } from '@/services/unreadService';
-import { getDeviceKey } from '@/services/authSessionService';
 import { logger } from '@/utils/logger';
 import { z } from 'zod';
-
-const subscribeSchema = z.object({
-  endpoint: z.string().url(),
-  keys: z.object({
-    p256dh: z.string(),
-    auth: z.string(),
-  }),
-});
-
-const unsubscribeSchema = z.object({
-  endpoint: z.string().url(),
-});
-
-const MIN_FCM_TOKEN_LENGTH = 100;
-const mobilePlatformSchema = z.enum(['ios', 'android', 'unknown']);
-
-const mobileRegisterSchema = z.object({
-  fcmToken: z.string().min(MIN_FCM_TOKEN_LENGTH),
-  voipToken: z.string().optional(),
-  platform: mobilePlatformSchema.default('unknown'),
-  deviceId: z.string().max(255).optional(),
-});
-
-const mobileUnregisterSchema = z.object({}).strict();
 
 const preferencesSchema = z.record(
   z.enum([
@@ -53,138 +27,10 @@ const preferencesSchema = z.record(
   z.object({
     browserEnabled: z.boolean(),
     emailEnabled: z.boolean(),
-    slackEnabled: z.boolean(),
-  })
+    slackEnabled: z.boolean() })
 );
 
 export class NotificationController {
-  /** The auth session (JWT `sid`) a mobile push token is registered against. */
-  private resolveSessionId(req: Request): string | undefined {
-    return req.user?.sid;
-  }
-
-  registerMobilePushToken = async (req: Request, res: Response): Promise<void> => {
-    try {
-      const userId = req.user?.id;
-      if (!userId) {
-        res.status(401).json({ error: 'Unauthorized' });
-        return;
-      }
-
-      const validated = mobileRegisterSchema.parse(req.body);
-      const sessionId = this.resolveSessionId(req);
-
-      if (!sessionId) {
-        logger.error('Failed to register mobile push token: No session ID found');
-        res.status(401).json({ error: 'Unauthorized' });
-        return;
-      }
-
-      await notificationService.registerMobilePushToken(userId, {
-        ...validated,
-        sessionId,
-        appVersion: req.headers['x-app-version'] as string | undefined,
-        orgMemberId: req.user?.memberId,
-        deviceKey: getDeviceKey(req),
-      });
-
-      res.json({ success: true });
-    } catch (error) {
-      logger.error('Failed to register mobile push token:', error);
-
-      if (error instanceof z.ZodError) {
-        res.status(400).json({ error: 'Invalid mobile token data', details: error.issues });
-        return;
-      }
-
-      res.status(500).json({ error: 'Internal server error' });
-    }
-  };
-
-  unregisterMobilePushToken = async (req: Request, res: Response): Promise<void> => {
-    try {
-      const userId = req.user?.id;
-      if (!userId) {
-        res.status(401).json({ error: 'Unauthorized' });
-        return;
-      }
-
-      mobileUnregisterSchema.parse(req.body ?? {});
-      const sessionId = this.resolveSessionId(req);
-
-      await notificationService.unregisterMobilePushToken(userId, sessionId ?? undefined, {
-        orgMemberId: req.user?.memberId,
-        deviceKey: getDeviceKey(req),
-      });
-
-      res.json({ success: true });
-    } catch (error) {
-      logger.error('Failed to unregister mobile push token:', error);
-
-      if (error instanceof z.ZodError) {
-        res.status(400).json({ error: 'Invalid mobile token data', details: error.issues });
-        return;
-      }
-
-      res.status(500).json({ error: 'Internal server error' });
-    }
-  };
-
-  async subscribe(req: Request, res: Response): Promise<void> {
-    try {
-      const userId = req.user?.id;
-      if (!userId) {
-        res.status(401).json({ error: 'Unauthorized' });
-        return;
-      }
-
-      const validatedData = subscribeSchema.parse(req.body);
-
-      await notificationService.saveSubscription(userId, {
-        endpoint: validatedData.endpoint,
-        p256dh: validatedData.keys.p256dh,
-        auth: validatedData.keys.auth,
-        userAgent: req.get('User-Agent') || undefined,
-      });
-
-      res.json({ success: true });
-    } catch (error) {
-      logger.error('Failed to save notification subscription:', error);
-
-      if (error instanceof z.ZodError) {
-        res.status(400).json({ error: 'Invalid subscription data', details: error.issues });
-        return;
-      }
-
-      res.status(500).json({ error: 'Internal server error' });
-    }
-  }
-
-  async unsubscribe(req: Request, res: Response): Promise<void> {
-    try {
-      const userId = req.user?.id;
-      if (!userId) {
-        res.status(401).json({ error: 'Unauthorized' });
-        return;
-      }
-
-      const validatedData = unsubscribeSchema.parse(req.body);
-
-      await notificationService.removeSubscription(userId, validatedData.endpoint);
-
-      res.json({ success: true });
-    } catch (error) {
-      logger.error('Failed to remove notification subscription:', error);
-
-      if (error instanceof z.ZodError) {
-        res.status(400).json({ error: 'Invalid unsubscribe data', details: error.issues });
-        return;
-      }
-
-      res.status(500).json({ error: 'Internal server error' });
-    }
-  }
-
   async getNotifications(req: Request, res: Response): Promise<void> {
     try {
       const userId = req.user?.id;
@@ -200,8 +46,7 @@ export class NotificationController {
       const notifications = await notificationService.getUserNotifications(userId, {
         page,
         limit,
-        status,
-      });
+        status });
 
       res.json(notifications);
     } catch (error) {
@@ -325,40 +170,6 @@ export class NotificationController {
     }
   }
 
-  async markAllAsRead(req: Request, res: Response): Promise<void> {
-    try {
-      const userId = req.user?.id;
-      if (!userId) {
-        res.status(401).json({ error: 'Unauthorized' });
-        return;
-      }
-
-      await notificationService.markAllAsRead(userId);
-
-      res.json({ success: true });
-    } catch (error) {
-      logger.error('Failed to mark all notifications as read:', error);
-      res.status(500).json({ error: 'Internal server error' });
-    }
-  }
-
-  async getUnreadCount(req: Request, res: Response): Promise<void> {
-    try {
-      const userId = req.user?.id;
-      if (!userId) {
-        res.status(401).json({ error: 'Unauthorized' });
-        return;
-      }
-
-      const count = await notificationService.getUnreadCount(userId);
-
-      res.json({ count });
-    } catch (error) {
-      logger.error('Failed to get unread notification count:', error);
-      res.status(500).json({ error: 'Internal server error' });
-    }
-  }
-
   async getWorkspaceNotificationCounts(req: Request, res: Response): Promise<void> {
     try {
       const memberId = req.user?.memberId;
@@ -376,44 +187,6 @@ export class NotificationController {
     }
   }
 
-  async sendTestNotification(req: Request, res: Response): Promise<void> {
-    try {
-      const userId = req.user?.id;
-      if (!userId) {
-        res.status(401).json({ error: 'Unauthorized' });
-        return;
-      }
-
-      // Create a test notification in the database
-      await notificationService.createNotification(userId, {
-        title: 'Test Notification',
-        message: 'This is a test notification from Xyne Spaces',
-        type: NotificationType.WORKFLOW_COMPLETION,
-        relatedEntityType: 'test',
-        relatedEntityId: 'test-' + Date.now(),
-        actionUrl: `/${req.user!.workspaceId}/notifications`,
-      });
-
-      res.json({ success: true, message: 'Test notification created successfully' });
-    } catch (error) {
-      logger.error('Failed to send test notification:', error);
-      res.status(500).json({ error: 'Internal server error' });
-    }
-  }
-
-  async getQueueStats(_req: Request, res: Response): Promise<void> {
-    try {
-      const stats = await notificationService.getStats();
-      if (stats) {
-        res.json(stats);
-      } else {
-        res.status(500).json({ error: 'Failed to retrieve queue stats' });
-      }
-    } catch (error) {
-      logger.error('Failed to get queue stats:', error);
-      res.status(500).json({ error: 'Internal server error' });
-    }
-  }
 }
 
 export const notificationController = new NotificationController();

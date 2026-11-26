@@ -1,11 +1,14 @@
 import express from 'express';
-import { SubTicketController } from '../controllers/subTicketController';
+import { API } from '@xyne/shared';
+import { api } from '@/framework/api';
+import { linkSubTicket, unlinkSubTicketHandler } from '@/handlers/workspace';
 
+// Typed routes (API.subTickets), served by the API router behind the contract gate.
+api.routes(API.subTickets, (serve) => ({
+  link: serve('link', { successStatus: 201, handle: ({ body, user }) => linkSubTicket({ body, user }) }),
+  unlink: serve('unlink', { successStatus: 204, handle: ({ body, user }) => unlinkSubTicketHandler({ body, user }) }),
+}));
+
+// Nothing untyped left under /api/sub-tickets.
 const router = express.Router();
-const subTicketController = new SubTicketController();
-
-// Link an existing ticket as a sub-ticket, and undo that link.
-router.post('/link', subTicketController.linkExisting);
-router.post('/unlink', subTicketController.unlink);
-
 export default router;

@@ -1,15 +1,18 @@
 import { Router } from 'express';
-import { ReactionController } from '../controllers/reactionController';
+import { API } from '@xyne/shared';
+import { api } from '@/framework/api';
+import { addReaction, getMessageReactions, getMessagesReactions, removeReaction, toggleReaction } from '@/handlers/reactions';
 
+// Typed routes (API.reactions), served by the API router behind the contract gate: dashboard login,
+// then the handler.
+api.routes(API.reactions, (serve) => ({
+  bulk: serve('bulk', { handle: ({ body, user }) => getMessagesReactions({ body, user }) }),
+  add: serve('add', { handle: ({ params, body, user }) => addReaction({ params, body, user }) }),
+  remove: serve('remove', { handle: ({ params, user }) => removeReaction({ params, user }) }),
+  toggle: serve('toggle', { handle: ({ params, user }) => toggleReaction({ params, user }) }),
+  get: serve('get', { handle: ({ params, user }) => getMessageReactions({ params, user }) }),
+}));
+
+// Nothing untyped left under /api/messages.
 const router = Router();
-const reactionController = new ReactionController();
-
-// Message reaction routes
-router.post('/:messageId/reactions', reactionController.addReaction.bind(reactionController));
-router.delete('/:messageId/reactions/:emojiName', reactionController.removeReaction.bind(reactionController));
-router.post('/:messageId/reactions/:emojiName/toggle', reactionController.toggleReaction.bind(reactionController));
-router.get('/:messageId/reactions', reactionController.getMessageReactions.bind(reactionController));
-
-// Bulk reactions for multiple messages
-router.post('/reactions/bulk', reactionController.getMessagesReactions.bind(reactionController));
 export default router;

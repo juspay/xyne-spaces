@@ -31,12 +31,17 @@ const emailChannelPreferenceRepo = new EmailChannelPreferenceRepository();
  * ChannelsACL (PUBLIC-or-participant). Callers that also gate on desk ownership pass the
  * granted result to assertDeskOwner.
  */
-export async function assertChannelMembership(
-  req: Request,
+export function assertChannelMembership(req: Request, channelId: string): Promise<ChannelAccessResult> {
+  return assertChannelMembershipOf(req.user, channelId);
+}
+
+/** The same check from the logged-in user alone (typed routes get the user, never the request). */
+export async function assertChannelMembershipOf(
+  user: { id?: string; workspaceId?: string } | undefined,
   channelId: string,
 ): Promise<ChannelAccessResult> {
-  const userId = req.user?.id;
-  const workspaceId = req.user?.workspaceId;
+  const userId = user?.id;
+  const workspaceId = user?.workspaceId;
 
   if (!userId || !workspaceId) {
     return { ok: false, status: 401, error: 'Authentication required' };
