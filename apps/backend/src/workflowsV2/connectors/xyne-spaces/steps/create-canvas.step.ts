@@ -65,10 +65,6 @@ export class CreateCanvasStep extends BaseActionStep<typeof CreateCanvasConfigSc
     if (markdown.trim() && blocks.length === 0) throw new Error('The content could not be turned into canvas blocks');
 
     const canvasId = uuidv4();
-    if (!(await syncToYSweet(canvasId, blocks, createdBy))) {
-      throw new Error(`Saving canvas ${canvasId} to Y-Sweet failed`);
-    }
-
     const now = new Date();
     await db.canvas.create({
       data: {
@@ -91,6 +87,13 @@ export class CreateCanvasStep extends BaseActionStep<typeof CreateCanvasConfigSc
     await db.canvasParticipant.create({
       data: { id: uuidv4(), canvasId, workspaceId, userId: createdBy, role: CanvasRole.OWNER, joinedAt: now, updatedAt: now },
     });
+
+    if (!(await syncToYSweet(canvasId, blocks, createdBy))) {
+      await db.canvas
+        .update({ where: { id: canvasId }, data: { isArchived: true } })
+        .catch((err) => logger.error(`[CREATE_CANVAS] Archiving canvas ${canvasId} after a failed sync failed:`, err));
+      throw new Error(`Saving canvas ${canvasId} to Y-Sweet failed`);
+    }
 
     vespaQueue
       .addJob({ schema: fileSchema, docId: canvasId, jobType: 'feed', userId: createdBy, app: SubApp.CANVAS, workspaceId })
