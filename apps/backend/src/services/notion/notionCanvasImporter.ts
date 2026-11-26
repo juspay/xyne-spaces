@@ -44,10 +44,11 @@ const NOTION_ID = /\s([0-9a-f]{32})$/i;
 const IMAGE_EXT = /\.(png|jpe?g|gif|webp|svg|bmp|avif)$/i;
 
 export interface NotionImportTarget {
-  userId: string; // the admin running the import
+  userId: string; // the person running the import
   workspaceId: string;
-  channelId: string; // where public sections go
-  projectId: string;
+  isAdmin: boolean; // may re-place canvases they don't own (token import re-review)
+  channelId: string | null; // where public sections go; only looked up when a section is public
+  projectId: string | null;
 }
 
 export type SectionAccess = { mode: 'public' } | { mode: 'private'; ownerUserId: string } | { mode: 'skip' };
@@ -129,17 +130,25 @@ interface Placement {
 
 const db = DatabaseClient.getInstance();
 
-/** The admin running the import and the channel public sections go to (default #general). */
-export async function resolveNotionImportTarget(input: { email: string; channelName?: string }): Promise<NotionImportTarget> {
-  const user = await db.user.findFirst({ where: { email: input.email }, select: { id: true, workspaceId: true } });
-  if (!user?.workspaceId) throw new Error(`No user with a workspace for ${input.email}`);
+/** The person running the import, and — only when a section goes public — the channel it goes to (default #general). */
+export async function resolveNotionImportTarget(input: { userId: string; workspaceId: string; channelName?: string; needsChannel: boolean }): Promise<NotionImportTarget> {
+  const user = await db.user.findFirst({ where: { id: input.userId, workspaceId: input.workspaceId }, select: { id: true, role: true } });
+  if (!user) throw new Error('The importing user is not in this workspace');
+  const target: NotionImportTarget = { userId: user.id, workspaceId: input.workspaceId, isAdmin: user.role === 'ADMIN', channelId: null, projectId: null };
+  if (!input.needsChannel) return target;
   const channelName = input.channelName || 'general';
+  // An open channel, or a private one the importer is in — never an archived one.
   const channel = await db.channel.findFirst({
-    where: { name: channelName, workspaceId: user.workspaceId },
+    where: {
+      name: channelName,
+      workspaceId: input.workspaceId,
+      isArchived: false,
+      OR: [{ visibility: 'PUBLIC' }, { participants: { some: { userId: user.id } } }],
+    },
     select: { id: true, projectId: true },
   });
-  if (!channel?.projectId) throw new Error(`Channel #${channelName} not found (or has no project)`);
-  return { userId: user.id, workspaceId: user.workspaceId, channelId: channel.id, projectId: channel.projectId };
+  if (!channel?.projectId) throw new Error(`Channel #${channelName} not found, archived, or not one you're in`);
+  return { ...target, channelId: channel.id, projectId: channel.projectId };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -275,6 +284,7 @@ export async function importNotionTree(root: string, target: NotionImportTarget,
     if (access.mode === 'private') {
       return { access: 'private', channelId: null, projectId: null, visibility: CanvasVisibility.PRIVATE, ownerIds: [access.ownerUserId], editorIds: [] };
     }
+    if (!target.channelId) throw new Error('A public section needs a channel');
     return {
       access: 'public',
       channelId: target.channelId,

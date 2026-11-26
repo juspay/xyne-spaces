@@ -398,7 +398,8 @@ async function ingest(job: ImportJob, plan: NotionImportPlan): Promise<void> {
       if (!job.stagingDir) throw new Error('The collected pages are no longer available — start the import again.');
       const dir = job.stagingDir;
       await runWithContext({ userId: job.userId, workspaceId: job.workspaceId }, async () => {
-        const target = await resolveNotionImportTarget({ email: job.userEmail, channelName: job.channel });
+        const needsChannel = !plan.member && Object.values(plan.sections).some(s => s.mode === 'public');
+        const target = await resolveNotionImportTarget({ userId: job.userId, workspaceId: job.workspaceId, needsChannel, ...(job.channel ? { channelName: job.channel } : {}) });
         job.summary = await importNotionTree(dir, target, plan);
       });
     });
