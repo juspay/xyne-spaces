@@ -62,7 +62,7 @@ import workspaceDeskRoutes from '@/integrations/routes/workspace-desk';
 import slackDeskRoutes from '@/integrations/routes/slack-desk';
 import appDeskRoutes from '@/integrations/routes/app-desk';
 import socialMediaRoutes from './integrations/routes/social-media.js';
-import telephonyRoutes from '@/integrations/routes/telephony';
+import ozonetelIntegrationRoutes from '@/integrations/routes/ozonetel';
 import slackUserAuthRoutes from '@/integrations/routes/slack-user-auth';
 import migrationRoutes from '@/migration';
 // Disabled (all workers)
@@ -106,7 +106,6 @@ import boardConfigCopyRoutes from '@/routes/boardConfigCopy';
 import auditLogRoutes from '@/routes/auditLogs';
 import recordingPointerBackfillRoutes from '@/routes/recordingPointerBackfill';
 import sdlcRepoCredentialBackfillRoutes from '@/routes/sdlcRepoCredentialBackfill';
-import callRoutingBackfillRoutes from '@/routes/callRoutingBackfill';
 import searchMetricsRoutes from '@/routes/searchMetrics';
 import searchFeedbackRoutes from '@/routes/searchFeedback';
 import knowledgeRoutes from '@/routes/knowledge';
@@ -338,7 +337,7 @@ export class App {
     this.app.use('/api/integrations/slack-desk', slackDeskRoutes);
     this.app.use('/api/integrations/app-desk', appDeskRoutes);
     this.app.use('/api/integrations/social-media', socialMediaRoutes);
-    this.app.use('/api/integrations/telephony', authMiddleware.authenticate, telephonyRoutes);
+    this.app.use('/api/integrations/ozonetel', authMiddleware.authenticate, ozonetelIntegrationRoutes);
     this.app.use('/api/integrations/slack-user', slackUserAuthRoutes);
 
     // Migration routes (body parsing handled in route file). Only mounted when
@@ -466,8 +465,6 @@ export class App {
     // '-backfill' path suffix also puts it behind backfillMountGuard above.
     this.app.use('/api/admin/recording-pointer-backfill', recordingPointerBackfillRoutes);
     this.app.use('/api/admin/sdlc-repo-credential-backfill', sdlcRepoCredentialBackfillRoutes);
-    // Moves call routing saved on connections before per-desk settings onto the desks; caller's workspace only.
-    this.app.use('/api/admin/call-routing-backfill', callRoutingBackfillRoutes);
     // Same shape: the one-off SDLC multi-repo data migration spans every workspace,
     // so it opens its own runAsSystem scope rather than taking workspaceScopedRoute.
 

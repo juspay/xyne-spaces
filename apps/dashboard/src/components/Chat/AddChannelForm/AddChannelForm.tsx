@@ -43,13 +43,7 @@ import { useOAuthProviders } from '../../../hooks/useOAuthProviders';
 import { useUserGroups } from '../../../hooks/useUserGroup';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { getWorkspaceSharedMailboxStatus } from '../../../services/clients/workspaceDeskApi';
-import {
-  getCallProviders,
-  getCallRoutingKeys,
-  listCallConnections,
-  TELEPHONY_QUERY_KEYS,
-} from '../../../services/clients/telephonyApi';
-import { EntityMultiSelector } from '../../ui/EntitySelector/EntityMultiSelector';
+import { getOzonetelConfig } from '../../../services/clients/telephonyApi';
 import { DeskType } from '@xyne/shared';
 import {
   GooglePlayServiceAccountKeyInput,
@@ -59,6 +53,7 @@ import {
 type ChannelFormMode = 'create' | 'promote';
 type ChannelFormData = CreateChannelFormData | PromoteGroupDmRequest;
 type ConnectorType = 'google' | 'microsoft' | null;
+type CallSource = 'OZONETEL';
 type Visibility = 'public' | 'private';
 
 interface SlackChannel {
@@ -102,7 +97,7 @@ const DESK_SOURCES: ReadonlyArray<{
   {
     value: DeskType.CALL,
     label: 'Call desk',
-    description: 'Create a call-first desk that receives calls from a call connection',
+    description: 'Create a call-first desk that can be used in workspace Ozonetel routing',
     icon: Phone,
   },
   {
@@ -195,9 +190,7 @@ interface AddChannelFormProps {
       connector?: ConnectorType;
       channelType?: 'EMAIL' | 'SLACK' | 'APP' | 'CALL' | 'SOCIAL_MEDIA' | 'CHANNELS' | undefined;
       deskType?: DeskType;
-      callConnectionId?: string;
-      callRoutingKeys?: string[];
-      callIsDefault?: boolean;
+      callSource?: CallSource;
       dlEmail?: string;
       slackChannelId?: string;
       installedAppId?: string;
@@ -258,10 +251,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
           isAppStorePrivateKey(appStorePrivateKey) &&
           areAppStoreApplicationsValid(appStoreApplications);
   };
-  const [callProviderId, setCallProviderId] = useState('');
-  const [callConnectionId, setCallConnectionId] = useState('');
-  const [callRoutingKeys, setCallRoutingKeys] = useState<string[]>([]);
-  const [callIsDefault, setCallIsDefault] = useState(false);
+  const selectedCallSource: CallSource = 'OZONETEL';
   const { isMobile } = usePlatform();
   const { data: oauthProviders } = useOAuthProviders();
 
@@ -299,36 +289,10 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
     queryFn: getWorkspaceSharedMailboxStatus,
     enabled: requireConnector,
   });
-  const isCallDeskForm = requireConnector && deskType === DeskType.CALL;
-  const { data: callConnections = [], isLoading: isLoadingCallConnections } = useQuery({
-    queryKey: TELEPHONY_QUERY_KEYS.connections,
-    queryFn: listCallConnections,
-    enabled: isCallDeskForm,
-  });
-  const { data: allCallProviders = [] } = useQuery({
-    queryKey: TELEPHONY_QUERY_KEYS.providers,
-    queryFn: getCallProviders,
-    enabled: isCallDeskForm,
-  });
-  // Only providers the workspace has connected; the first one is picked until the user chooses.
-  const callProviders = allCallProviders.filter(provider =>
-    callConnections.some(connection => connection.provider === provider.id),
-  );
-  const activeCallProviderId = callProviderId || callProviders[0]?.id || '';
-  const activeCallProvider = callProviders.find(provider => provider.id === activeCallProviderId);
-  const providerCallConnections = callConnections.filter(
-    connection => connection.provider === activeCallProviderId,
-  );
-  const selectedCallConnectionId =
-    callConnectionId ||
-    (providerCallConnections.length === 1 ? (providerCallConnections[0]?.id ?? '') : '');
-  const callRoutingKeyLabel = activeCallProvider?.routingKeyLabel ?? 'Campaign';
-  const { data: callRoutingKeyOptions = [], isLoading: isLoadingCallRoutingKeys } = useQuery({
-    queryKey: TELEPHONY_QUERY_KEYS.routingKeys(selectedCallConnectionId),
-    queryFn: () => getCallRoutingKeys(selectedCallConnectionId),
-    enabled:
-      isCallDeskForm && !!selectedCallConnectionId && !!activeCallProvider?.supportsRoutingKeys,
-    retry: false,
+  const { data: ozonetelConfig } = useQuery({
+    queryKey: ['workspace-ozonetel-config'],
+    queryFn: () => getOzonetelConfig(),
+    enabled: requireConnector && deskType === DeskType.CALL,
   });
 
   const workspaceDomain = workspaceMailbox?.displayName?.split('@')[1]?.toLowerCase() ?? '';
@@ -485,9 +449,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
             connector: null,
             channelType: 'CALL',
             deskType: DeskType.CALL,
-            callConnectionId: selectedCallConnectionId,
-            callRoutingKeys,
-            callIsDefault,
+            callSource: selectedCallSource,
             assigneeUserGroupId: value.assigneeUserGroupId,
           });
         } else {
@@ -539,7 +501,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
     (requireConnector &&
       deskType === DeskType.SOCIAL_MEDIA &&
       !isSocialMediaDeskValid(boardIdValue)) ||
-    (requireConnector && deskType === DeskType.CALL && !selectedCallConnectionId) ||
+    (requireConnector && deskType === DeskType.CALL && !ozonetelConfig?.configured) ||
     duplicateCheck?.isDuplicate === true;
 
   const submitDisabledReason = ((): string | null => {
@@ -595,10 +557,8 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
           return 'Bundle IDs must be unique';
         if (!boardIdValue) return 'Please select a board';
       }
-      if (deskType === DeskType.CALL && !selectedCallConnectionId)
-        return callConnections.length === 0
-          ? 'No call connections yet. Add one in Desk Integrations first.'
-          : 'Please select a call connection';
+      if (deskType === DeskType.CALL && !ozonetelConfig?.configured)
+        return 'Ozonetel is not configured. Set it up in Desk Integrations first.';
     }
     return null;
   })();
@@ -784,128 +744,38 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
       )}
 
       {requireConnector && deskType === DeskType.CALL && (
-        <div className='space-y-3'>
-          {!isLoadingCallConnections && callConnections.length === 0 ? (
+        <div className='space-y-2'>
+          <label htmlFor='call-source-select' className='text-sm font-medium text-foreground'>
+            Call source <span className='text-muted-foreground'>*</span>
+          </label>
+          <Select value={selectedCallSource} disabled>
+            <SelectTrigger id='call-source-select' className='w-full'>
+              <SelectValue placeholder='Select a source' />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value='OZONETEL'>Ozonetel</SelectItem>
+            </SelectContent>
+          </Select>
+          {!ozonetelConfig?.configured ? (
             <div className='flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 p-3'>
               <AlertCircle
                 size={16}
                 className='mt-0.5 flex-shrink-0 text-amber-600 dark:text-amber-400'
               />
               <div className='text-sm text-foreground'>
-                <div className='font-medium'>No call connections yet</div>
+                <div className='font-medium'>Ozonetel is not configured yet</div>
                 <div className='text-xs text-muted-foreground mt-1'>
-                  Add one from <span className='font-medium'>Desk Integrations</span>, then create
-                  this call desk.
+                  Configure Ozonetel first from{' '}
+                  <span className='font-medium'>Desk Integrations</span>, then create this call
+                  desk.
                 </div>
               </div>
             </div>
           ) : (
-            <>
-              <div className='space-y-2'>
-                <label
-                  htmlFor='call-provider-select'
-                  className='text-sm font-medium text-foreground'
-                >
-                  Call provider <span className='text-muted-foreground'>*</span>
-                </label>
-                <Select
-                  value={activeCallProviderId}
-                  onValueChange={value => {
-                    setCallProviderId(value);
-                    setCallConnectionId('');
-                    setCallRoutingKeys([]);
-                    setCallIsDefault(false);
-                  }}
-                  disabled={callProviders.length <= 1}
-                >
-                  <SelectTrigger id='call-provider-select' className='w-full'>
-                    <SelectValue placeholder='Select a provider' />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {callProviders.map(provider => (
-                      <SelectItem key={provider.id} value={provider.id}>
-                        {provider.displayName}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className='space-y-2'>
-                <label
-                  htmlFor='call-connection-select'
-                  className='text-sm font-medium text-foreground'
-                >
-                  Call connection <span className='text-muted-foreground'>*</span>
-                </label>
-                <Select
-                  value={selectedCallConnectionId}
-                  onValueChange={value => {
-                    setCallConnectionId(value);
-                    setCallRoutingKeys([]);
-                    setCallIsDefault(false);
-                  }}
-                >
-                  <SelectTrigger id='call-connection-select' className='w-full'>
-                    <SelectValue placeholder='Select a call connection' />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {providerCallConnections.map(connection => (
-                      <SelectItem key={connection.id} value={connection.id}>
-                        {connection.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {selectedCallConnectionId ? (
-                <>
-                  <div className='space-y-2'>
-                    <label className='text-sm font-medium text-foreground'>
-                      {callRoutingKeyLabel}s
-                    </label>
-                    <EntityMultiSelector
-                      options={[...new Set([...callRoutingKeyOptions, ...callRoutingKeys])].map(
-                        key => ({ value: key, label: key, icon: null }),
-                      )}
-                      selectedValues={callRoutingKeys}
-                      onMultiSelect={setCallRoutingKeys}
-                      allowCreate={true}
-                      onCreateOption={value =>
-                        setCallRoutingKeys(current =>
-                          [...new Set([...current, value.trim()])].filter(Boolean),
-                        )
-                      }
-                      isLoading={isLoadingCallRoutingKeys}
-                      placeholder={`Select ${callRoutingKeyLabel.toLowerCase()}s (optional)`}
-                      searchPlaceholder={`Search ${callRoutingKeyLabel.toLowerCase()}s`}
-                      showSearch={true}
-                      width='100%'
-                    />
-                  </div>
-                  <label className='flex items-start gap-2 text-sm text-foreground'>
-                    <input
-                      type='checkbox'
-                      checked={callIsDefault}
-                      onChange={e => setCallIsDefault(e.target.checked)}
-                      className='mt-0.5 h-4 w-4 rounded border-border text-desk-accent focus:ring-desk-accent'
-                      data-track-category='ADD_CHANNEL_FORM'
-                      data-track-name='ToggleCallDeskDefault'
-                    />
-                    <span>
-                      Default desk for this connection
-                      <span className='block text-xs text-muted-foreground'>
-                        Also takes calls whose {callRoutingKeyLabel.toLowerCase()} no desk routes.
-                      </span>
-                    </span>
-                  </label>
-                  <p className='text-xs text-muted-foreground'>
-                    You can change these later in Desk Settings → Telephony.
-                  </p>
-                </>
-              ) : null}
-            </>
+            <p className='text-xs text-muted-foreground'>
+              Ozonetel is configured. You can route campaigns to this call desk from Desk
+              Integrations.
+            </p>
           )}
         </div>
       )}

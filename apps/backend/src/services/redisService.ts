@@ -278,17 +278,11 @@ class RedisService {
   }
 
   // 24h so the post-call webhook still finds it after long calls.
-  async setCallTicketLink(connectionId: string, callId: string, ticketId: string): Promise<void> {
+  async setOzonetelCallTicket(workspaceId: string, callId: string, ticketId: string): Promise<void> {
     if (!this.redis) throw new Error('Redis not initialized');
-    await this.redis.set(`call-ticket:${connectionId}:${callId}`, ticketId, 'EX', 86400);
+    await this.redis.set(`ozonetel:call-ticket:${workspaceId}:${callId}`, ticketId, 'EX', 86400);
   }
 
-  async getCallTicketLink(connectionId: string, callId: string): Promise<string | null> {
-    if (!this.redis) throw new Error('Redis not initialized');
-    return this.redis.get(`call-ticket:${connectionId}:${callId}`);
-  }
-
-  // Pre-connections key, read only as a fallback; remove once links set before the change have expired.
   async getOzonetelCallTicket(workspaceId: string, callId: string): Promise<string | null> {
     if (!this.redis) throw new Error('Redis not initialized');
     return this.redis.get(`ozonetel:call-ticket:${workspaceId}:${callId}`);
