@@ -6,6 +6,7 @@ import { usePendingByMessageId } from '@xyne/shared/messages';
 import { groupReactionsForPill } from '@/src/components/chat/message/reactions/reaction-pill.utils';
 import { useChatRenderTokens } from '@/src/features/chat/v2/components/chat/message-row';
 import type { ChatPaintRow } from '@/src/features/chat/v2/paint/chatPaint.types';
+import { parseCustomEmoji } from '@/src/utils/customEmoji';
 import { haptics } from '@/src/utils/haptics';
 
 import { REACTION_CHIP_GAP } from '../constants';
@@ -67,7 +68,7 @@ export const ReactionChips = memo(function ReactionChips({
           label={String(group.count)}
           emojiName={group.emojiName}
           hydrateCustomEmoji={hydrateCustomEmoji}
-          accessibilityLabel={`${group.count} ${group.emojiName} ${group.count === 1 ? 'reaction' : 'reactions'}`}
+          accessibilityLabel={`${group.count} ${parseCustomEmoji(group.emojiName)?.name ?? group.emojiName} ${group.count === 1 ? 'reaction' : 'reactions'}`}
           onPress={handleOpenDetails}
           onLongPress={handleOpenDetails}
         />
@@ -79,6 +80,7 @@ export const ReactionChips = memo(function ReactionChips({
         <ReactionsSheet
           reactions={reactions}
           currentUserId={currentUser?.id}
+          canRemove={canReact}
           hydrateCustomEmoji={hydrateCustomEmoji}
           isOpen={details.isOpen}
           onOpenChange={details.onOpenChange}

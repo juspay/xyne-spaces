@@ -134,7 +134,8 @@ export function useThreadCardMotion({
   }, [contentReady]);
 
   useEffect(() => {
-    if (!animates || instant || !contentReady) return;
+    // Closed before its rows arrived: growing now would cancel the exit under way.
+    if (!animates || instant || !contentReady || leavingRef.current) return;
     scrim.set(withTiming(1, { duration: THREAD_CARD_SCRIM_MS }));
     progress.set(
       withTiming(1, {

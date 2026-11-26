@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type ReactElement } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
 import { BackHandler, Pressable, Text } from 'react-native';
 import { BottomSheetScrollView } from '@gorhom/bottom-sheet';
 import { useCSSVariable } from 'uniwind';
@@ -6,11 +6,13 @@ import { useCSSVariable } from 'uniwind';
 import type { RawReaction } from '@/src/components/chat/message/reactions/reaction-pill.utils';
 import { ReactionEmojiDisplay } from '@/src/components/chat/message/reactions/reaction-emoji-display';
 import { AppBottomSheet } from '@/src/components/ui/app-bottom-sheet';
+import { useLatestRef } from '@/src/components/input-composer/utils/use-latest-ref';
 import {
   useReactionsSheetModel,
   type ReactionRow,
 } from '@/src/features/chat/v2/components/conversation-composer/conversation-composer-reactions';
 import { AvatarFace } from '@/src/ui/avatar';
+import { parseCustomEmoji } from '@/src/utils/customEmoji';
 
 import {
   REACTION_CHIP_GAP,
@@ -44,6 +46,8 @@ const ROW_STYLE = {
 type ReactionsSheetProps = {
   reactions: readonly RawReaction[];
   currentUserId: string | undefined;
+  /** Whether your own row removes your reaction: off where the screen does not allow reacting. */
+  canRemove: boolean;
   hydrateCustomEmoji: boolean;
   isOpen: boolean;
   onOpenChange: (open: boolean) => void;
@@ -57,6 +61,7 @@ type ReactionsSheetProps = {
 export function ReactionsSheet({
   reactions,
   currentUserId,
+  canRemove,
   hydrateCustomEmoji,
   isOpen,
   onOpenChange,
@@ -93,19 +98,35 @@ export function ReactionsSheet({
     return (): void => subscription.remove();
   }, [isOpen, onOpenChange]);
 
+  // The removal waits for the sheet to leave: removing the last reaction drops
+  // the chips, and the sheet with them, which would cut its slide down short.
+  const pendingRemoval = useRef<string | null>(null);
+  const removeReaction = useLatestRef(handleRemoveReaction);
+  const flushRemoval = useCallback((): void => {
+    const emojiName = pendingRemoval.current;
+    pendingRemoval.current = null;
+    if (emojiName !== null) removeReaction.current(emojiName);
+  }, [removeReaction]);
+  // Unmounted some other way mid-close (the room left): the removal still happens.
+  useEffect(() => flushRemoval, [flushRemoval]);
+
   const handleRemove = useCallback(
     (emojiName: string): void => {
-      handleRemoveReaction(emojiName);
+      pendingRemoval.current = emojiName;
       onOpenChange(false);
     },
-    [handleRemoveReaction, onOpenChange],
+    [onOpenChange],
   );
+  const handleDismiss = useCallback((): void => {
+    onDismiss();
+    flushRemoval();
+  }, [flushRemoval, onDismiss]);
 
   return (
     <AppBottomSheet
       isOpen={isOpen}
       onOpenChange={onOpenChange}
-      onDismiss={onDismiss}
+      onDismiss={handleDismiss}
       mode='snap'
       snapPoints={SNAP_POINTS}
       backgroundStyle={backgroundStyle}
@@ -131,7 +152,7 @@ export function ReactionsSheet({
             emojiName={group.emojiName}
             hydrateCustomEmoji={hydrateCustomEmoji}
             filled={tab === group.emojiName}
-            accessibilityLabel={`${group.emojiName}, ${group.count}`}
+            accessibilityLabel={`${parseCustomEmoji(group.emojiName)?.name ?? group.emojiName}, ${group.count}`}
             onPress={setTab}
           />
         ))}
@@ -141,7 +162,7 @@ export function ReactionsSheet({
           <ReactorRow
             key={row.reactionId}
             row={row}
-            isSelf={!!currentUserId && row.userId === currentUserId}
+            isSelf={canRemove && !!currentUserId && row.userId === currentUserId}
             hydrateCustomEmoji={hydrateCustomEmoji}
             onRemove={handleRemove}
           />
