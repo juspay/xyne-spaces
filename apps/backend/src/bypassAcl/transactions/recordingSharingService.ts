@@ -1,6 +1,9 @@
 import { RecordingSharingService, RecordingSharingActor, asMetadata, RecordingSharingError, RecordingShareTarget, RECORDING_SHARE_INTENT, asSharePost, targetData, targetWhere, canvasRoleFor } from '@/services/recordingSharingService';
 import { shareEntityTypeFor } from '@/utils/callTypeUtils';
-import { EntityUserAccess, MessageType, serializeRepliesMd, addReplyToData, parseRepliesMd, ConversationParticipation, CallVisibility, CanvasVisibility, type GrantableEntityUserAccess, buildInitialMessageMd } from '@xyne/shared';
+import { EntityUserAccess, MessageType, serializeRepliesMd, ConversationParticipation, CallVisibility, CanvasVisibility, type GrantableEntityUserAccess, buildInitialMessageMd } from '@xyne/shared';
+import { unwrapForColumn } from '@/database/unwrapUnreadable';
+import { compose } from '@/services/encryption/compose';
+import { repliesMdAddReplierRequest } from '@/services/encryption/mdCompose';
 import { randomUUID } from 'node:crypto';
 import { Prisma, EntityAccess } from '@prisma/client';
 import type { RecordingAccessActivity } from '@/services/recordingSharingNotificationService';
@@ -237,15 +240,16 @@ export function linkTicketTx(self: RecordingSharingService, callId: string, acto
       },
     });
 
-    const repliesMd = serializeRepliesMd(
-      addReplyToData(parseRepliesMd(conversation.replies_md), actor.userId),
-    );
+    // replies_md is unreadable: the encryption service adds the replier (repliesMdAddReplier).
+    const replies = await compose(repliesMdAddReplierRequest(conversation.replies_md, actor.userId), {
+      workspaceId: actor.workspaceId,
+    });
     await tx.conversation.update({
       where: { conversationId: ticket.conversationId },
       data: {
         lastActivityAt: now,
         replyCount: { increment: 1 },
-        replies_md: repliesMd,
+        ...(!replies.unchanged && { replies_md: unwrapForColumn('conversations', 'replies_md', replies.value) }),
       },
     });
     await tx.conversationParticipant.updateMany({

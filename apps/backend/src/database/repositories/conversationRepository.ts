@@ -228,17 +228,10 @@ export class ConversationRepository extends BaseRepository<Conversation, CreateC
    * previous read-then-write, which also removes a lost-update race between
    * concurrent replies.
    */
-  async findRepliesMd(conversationId: string): Promise<string | null> {
-    const row = await this.db.conversation.findUnique({
-      where: { conversationId },
-      select: { replies_md: true },
-    });
-    return row?.replies_md ?? null;
-  }
-
   async applyThreadReply(params: {
     conversationId: string;
-    repliesMd: string | null;
+    /** The new replies_md (from compose, already encrypted); undefined leaves it as it is. */
+    repliesMd?: string;
     lastActivityAt: Date;
     replyCreatedAt?: Date | null;
     markParticipantsRead?: boolean;
@@ -251,7 +244,7 @@ export class ConversationRepository extends BaseRepository<Conversation, CreateC
       data: {
         replyCount: { increment: 1 },
         lastActivityAt,
-        replies_md: repliesMd,
+        ...(repliesMd !== undefined && { replies_md: repliesMd }),
       },
     });
 

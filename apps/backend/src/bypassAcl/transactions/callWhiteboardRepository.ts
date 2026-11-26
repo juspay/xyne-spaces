@@ -1,6 +1,9 @@
 import { transaction } from '../base';
 import { CallWhiteboardRepository, SaveCallWhiteboardAttachmentInput } from '@/database/repositories/callWhiteboardRepository';
-import { AttachmentEntityType, MessageType, serializeRepliesMd, addReplyToData, parseRepliesMd } from '@xyne/shared';
+import { AttachmentEntityType, MessageType } from '@xyne/shared';
+import { unwrapForColumn } from '@/database/unwrapUnreadable';
+import { compose } from '@/services/encryption/compose';
+import { repliesMdAddReplierRequest } from '@/services/encryption/mdCompose';
 import { advisoryXactLock } from '@/bypassAcl/lockServices';
 import { escapeHtml } from '@/utils/htmlEscape';
 
@@ -100,16 +103,17 @@ export function saveCallWhiteboardAttachmentTx(self: CallWhiteboardRepository, l
         where: { conversationId: data.conversationId },
         select: { replies_md: true },
       });
-      const updatedRepliesMd = serializeRepliesMd(
-        addReplyToData(parseRepliesMd(conversation?.replies_md), data.botUserId),
-      );
+      // replies_md is unreadable: the encryption service adds the replier (repliesMdAddReplier).
+      const replies = await compose(repliesMdAddReplierRequest(conversation?.replies_md, data.botUserId), {
+        workspaceId: data.workspaceId,
+      });
 
       await tx.conversation.update({
         where: { conversationId: data.conversationId },
         data: {
           replyCount: { increment: 1 },
           lastActivityAt: now,
-          replies_md: updatedRepliesMd,
+          ...(!replies.unchanged && { replies_md: unwrapForColumn('conversations', 'replies_md', replies.value) }),
         },
       });
 

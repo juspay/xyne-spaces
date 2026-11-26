@@ -1,18 +1,16 @@
 import { PrismaClient } from '@prisma/client';
 import { db } from '@/database/client';
+import { unwrapForColumn } from '@/database/unwrapUnreadable';
+import { compose } from '@/services/encryption/compose';
+import { initialMessageMdRequest, parentMessageMdRequest, repliesMdAddReplierRequest, type StoredMessage } from '@/services/encryption/mdCompose';
 import { logger } from '@/utils/logger';
 import {
   parseReactionsMd,
   serializeReactionsMd,
   addReactionToData,
   removeReactionFromData,
-  parseRepliesMd,
   serializeRepliesMd,
-  addReplyToData,
-  buildInitialMessageMd,
-  serializeParentMessageMd,
 } from '@xyne/shared';
-import type { InitialMessageSummary, ParentMessageSummary } from '@xyne/shared';
 
 export class MessageMetadataService {
   constructor(private prisma: PrismaClient) {}
@@ -70,8 +68,17 @@ export class MessageMetadataService {
     return hasReactions;
   }
 
-  buildRepliesMdAfterReply(currentMd: string | null | undefined, replierUserId: string): string | null {
-    return serializeRepliesMd(addReplyToData(parseRepliesMd(currentMd), replierUserId));
+  /** The conversation's replies_md with `replierUserId` added, built by compose; undefined when unchanged. */
+  async composeRepliesMdAfterReply(conversationId: string, replierUserId: string): Promise<string | undefined> {
+    const conversation = await this.prisma.conversation.findUnique({
+      where: { conversationId },
+      select: { replies_md: true, workspaceId: true },
+    });
+    if (!conversation) return undefined;
+    const result = await compose(repliesMdAddReplierRequest(conversation.replies_md, replierUserId), {
+      workspaceId: conversation.workspaceId,
+    });
+    return result.unchanged ? undefined : unwrapForColumn('conversations', 'replies_md', result.value);
   }
 
 
@@ -130,13 +137,19 @@ export class MessageMetadataService {
       latestReplierId: latestReply?.senderId ?? null
     };
   }
+  /** `initial_message_md` for a first message not stored yet, built by compose from its content as held. */
+  async composeNewInitialMessageMd(message: StoredMessage, workspaceId: string): Promise<string | null> {
+    const result = await compose(initialMessageMdRequest(message, null), { workspaceId });
+    return result.unchanged ? null : unwrapForColumn('conversations', 'initial_message_md', result.value);
+  }
+
   /**
    * Sync initial_message_md on a conversation from the initial message
    */
   async syncInitialMessageMd(conversationId: string): Promise<void> {
     const conversation = await this.prisma.conversation.findUnique({
       where: { conversationId },
-      select: { initialMessageId: true, initial_message_md: true },
+      select: { initialMessageId: true, initial_message_md: true, workspaceId: true },
     });
 
     if (!conversation?.initialMessageId) return;
@@ -147,16 +160,16 @@ export class MessageMetadataService {
 
     if (!message) return;
 
-    const md = buildInitialMessageMd({
-      ...message,
-      msgType: message.msgType as InitialMessageSummary['msgType'],
-      createdAt: message.createdAt.getTime(),
-    });
-    if (conversation.initial_message_md === md) return;
+    // The message text is unreadable: the encryption service builds the md (initialMessageMd).
+    const result = await compose(
+      initialMessageMdRequest({ ...message, createdAt: message.createdAt.getTime() }, conversation.initial_message_md),
+      { workspaceId: conversation.workspaceId },
+    );
+    if (result.unchanged) return;
 
     await this.prisma.conversation.update({
       where: { conversationId },
-      data: { initial_message_md: md },
+      data: { initial_message_md: unwrapForColumn('conversations', 'initial_message_md', result.value) },
     });
 
     logger.info('[MessageMetadataService] Synced initial_message_md', { conversationId });
@@ -168,7 +181,7 @@ export class MessageMetadataService {
   async syncParentMessageMd(conversationId: string): Promise<void> {
     const conversation = await this.prisma.conversation.findUnique({
       where: { conversationId },
-      select: { parentMessageId: true, parent_message_md: true },
+      select: { parentMessageId: true, parent_message_md: true, workspaceId: true },
     });
 
     if (!conversation?.parentMessageId) return;
@@ -187,21 +200,15 @@ export class MessageMetadataService {
 
     if (!message) return;
 
-    const summary: ParentMessageSummary = {
-      messageId: message.messageId,
-      conversationId: message.conversationId,
-      senderId: message.senderId,
-      content: message.content,
-      msgType: message.msgType as ParentMessageSummary['msgType'],
-      createdAt: message.createdAt.getTime(),
-    };
-
-    const md = serializeParentMessageMd(summary);
-    if (conversation.parent_message_md === md) return;
+    const result = await compose(
+      parentMessageMdRequest({ ...message, createdAt: message.createdAt.getTime() }, conversation.parent_message_md),
+      { workspaceId: conversation.workspaceId },
+    );
+    if (result.unchanged) return;
 
     await this.prisma.conversation.update({
       where: { conversationId },
-      data: { parent_message_md: md },
+      data: { parent_message_md: unwrapForColumn('conversations', 'parent_message_md', result.value) },
     });
 
     logger.info('[MessageMetadataService] Synced parent_message_md', { conversationId });

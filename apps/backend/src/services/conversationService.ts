@@ -20,7 +20,7 @@ import { keepMentionsWithin } from '@/utils/mentionParser';
 import { ConversationParticipantRepository } from '@/database/repositories/conversationParticipantRepository';
 import { UserRepository } from '@/database/repositories/users';
 import { Conversation, Message } from '@prisma/client';
-import { ConversationParticipation, MessageType, AttachmentEntityType, ChannelScopeType, ChannelRole, VespaInsertionStatus, VespaOperationType, WorkspaceRole, buildInitialMessageMd } from '@xyne/shared';
+import { ConversationParticipation, MessageType, AttachmentEntityType, ChannelScopeType, ChannelRole, VespaInsertionStatus, VespaOperationType, WorkspaceRole, buildInitialMessageMd, isCiphertextValue } from '@xyne/shared';
 import { uploadFiles, UploadedFileResult } from '@/services/fileUploadService';
 import { websocketService } from './websocketService';
 import { redisService } from './redisService';
@@ -451,28 +451,34 @@ export class ConversationService {
       createdAt: messageCreatedAt,
     };
 
+    const initialMessage = {
+      messageId,
+      conversationId,
+      workspaceId: channel.workspaceId,
+      senderId: userId,
+      content: (resolvedMessageMetadata as { contentFormat?: string } | null | undefined)?.contentFormat === 'markdown'
+        ? sanitizeMessageContent(messageContent)
+        : messageContent,
+      msgType: resolvedMsgType,
+      hasAttachment: processedFiles.length > 0,
+      createdAt: messageCreatedAt.getTime(),
+      metadata: resolvedMessageMetadata,
+      // Mirror the messages column defaults the insert below relies on, so the
+      // snapshot matches the row it describes.
+      isSent: true,
+      nudgeCount: 0,
+    };
+    // Content held encrypted (a bot's post through the transit proxy): the md is composed, not built around the ciphertext.
+    const initialMessageMd = isCiphertextValue(initialMessage.content)
+      ? await messageMetadataService.composeNewInitialMessageMd(initialMessage, channel.workspaceId)
+      : buildInitialMessageMd(initialMessage);
+
     const conversationData: CreateConversationInput = {
       conversationId,
       channelId,
       createdBy: userId,
       initialMessageId: messageId,
-      initial_message_md: buildInitialMessageMd({
-        messageId,
-        conversationId,
-        workspaceId: channel.workspaceId,
-        senderId: userId,
-        content: (resolvedMessageMetadata as { contentFormat?: string } | null | undefined)?.contentFormat === 'markdown'
-          ? sanitizeMessageContent(messageContent)
-          : messageContent,
-        msgType: resolvedMsgType,
-        hasAttachment: processedFiles.length > 0,
-        createdAt: messageCreatedAt.getTime(),
-        metadata: resolvedMessageMetadata,
-        // Mirror the messages column defaults the insert below relies on, so the
-        // snapshot matches the row it describes.
-        isSent: true,
-        nudgeCount: 0,
-      }),
+      initial_message_md: initialMessageMd,
       metadata,
       pinned: pinned || false,
       ...(createdAt && { createdAt }),
@@ -825,14 +831,11 @@ export class ConversationService {
         createdBy: userId,
         createdAt: message.createdAt,
         initialMessageId: message.messageId,
-        initial_message_md: buildInitialMessageMd({
-          ...message,
-          msgType: message.msgType as MessageType,
-          createdAt: message.createdAt.getTime(),
-        }),
         parentMessageId: conversation.initialMessageId,
         pinned: false,
       });
+      // Built from the stored message by compose, as the parent's md just below.
+      await messageMetadataService.syncInitialMessageMd(childConversationId);
       await messageMetadataService.syncParentMessageMd(childConversationId);
     }
 
@@ -843,10 +846,7 @@ export class ConversationService {
     const replyAppliedAt = new Date();
     await this.conversationRepository.applyThreadReply({
       conversationId,
-      repliesMd: messageMetadataService.buildRepliesMdAfterReply(
-        await this.conversationRepository.findRepliesMd(conversationId),
-        userId,
-      ),
+      repliesMd: await messageMetadataService.composeRepliesMdAfterReply(conversationId, userId),
       lastActivityAt: lastActivityAt ?? replyAppliedAt,
       replyCreatedAt: createdAt === undefined ? replyAppliedAt : message.createdAt,
       markParticipantsRead,
