@@ -162,6 +162,11 @@ function providedSectionsFrom(agentConfig: Record<string, unknown> | undefined):
   );
 }
 
+/** Whether the caller already ran the searches (agentConfig.answerContext), so this run needs no tools. */
+export function hasProvidedAnswerContext(agentConfig: Record<string, unknown> | undefined): boolean {
+  return providedSectionsFrom(agentConfig) !== null;
+}
+
 /**
  * The answering block from searches the caller already ran (the Spaces backend does for
  * cmd+K: Vespa text is hashed and only it can read it back), registered and rendered

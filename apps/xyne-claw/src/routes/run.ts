@@ -223,7 +223,7 @@ import {
   startPrefetchExtraction,
   type ExecutableTool,
 } from "../prefetch.js";
-import { answerFromContextEnabled, answerScopeFrom, buildAnswerContext, renderProvidedAnswerContext } from "../answer-context.js";
+import { answerFromContextEnabled, answerScopeFrom, buildAnswerContext, hasProvidedAnswerContext, renderProvidedAnswerContext } from "../answer-context.js";
 
 const clog = createLogger("run");
 const XYNE_CLAW_PACKAGE_DIR = fileURLToPath(new URL("../../", import.meta.url));
@@ -1809,19 +1809,31 @@ export async function processTask(
     // the workspace is still used for binary attachments. See toolOutputBaseDir.
     const mcpOutputDir = toolOutputBaseDir(conversationId, workspaceDir);
     const trustedSdlcBindings = trustedSdlcToolBindings(agentConfig?.["sdlcContext"]);
-    const mcpLoad = loadMcpToolsForUser(
-      sessionId,
-      sessionToken,
-      workspaceDir,
-      toolPermissions,
-      agentSlug,
-      mcpOutputDir,
-      (att) => pushAttachment(progressUrl, sessionId, att),
-      trustedSdlcBindings,
-      (serverType) => blockedConnectors.add(serverType),
-      undefined,
-      userId,
-    ).then((value) => ({ value }), (error: unknown) => ({ error }));
+    // Answer from Context with the searches already run by the caller: the only turn mounts no
+    // tools and nothing retrieves, so skip listing the user's MCP servers (it can take a minute).
+    const mcpLoad = answerFromContext && hasProvidedAnswerContext(agentConfig)
+      ? Promise.resolve({
+          value: {
+            groups: [],
+            unresolvedConfigured: [],
+            cleanup: async () => {},
+            getPendingActions: () => [],
+            getAttachments: () => [],
+          } as Awaited<ReturnType<typeof loadMcpToolsForUser>>,
+        })
+      : loadMcpToolsForUser(
+          sessionId,
+          sessionToken,
+          workspaceDir,
+          toolPermissions,
+          agentSlug,
+          mcpOutputDir,
+          (att) => pushAttachment(progressUrl, sessionId, att),
+          trustedSdlcBindings,
+          (serverType) => blockedConnectors.add(serverType),
+          undefined,
+          userId,
+        ).then((value) => ({ value }), (error: unknown) => ({ error }));
 
     // All per-type attachment ingestion (filter → decode → convert to a
     // `.context/` markdown sibling, plus the pdf/video/zip side effects) lives
