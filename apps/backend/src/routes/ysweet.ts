@@ -15,7 +15,3 @@ ysweetValidateRouter.post('/', ysweetController.validateAccess.bind(ysweetContro
 export const ysweetStorageKeyRouter = Router();
 
 ysweetStorageKeyRouter.post('/', ysweetController.getStorageKey.bind(ysweetController));
-
-export const ysweetDocWorkspaceRouter = Router();
-
-ysweetDocWorkspaceRouter.post('/', ysweetController.getDocWorkspace.bind(ysweetController));

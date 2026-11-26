@@ -131,7 +131,7 @@ import { registerPrivateBackfillRoutes } from '@/routes/privateBackfillRoutes';
 // Disabled (LLM)
 // import aiRoutes from '@/routes/aiRoutes';
 // import adminBackfillRoutes from '@/routes/adminBackfill';
-import ysweetRoutes, { ysweetDocWorkspaceRouter, ysweetStorageKeyRouter, ysweetValidateRouter } from '@/routes/ysweet';
+import ysweetRoutes, { ysweetStorageKeyRouter, ysweetValidateRouter } from '@/routes/ysweet';
 import canvasRoutes from '@/routes/canvas';
 import internalCanvasRoutes from '@/routes/internalCanvas';
 import { dashboardRouter, dashboardCrudRouter } from '@/routes/dashboard';
@@ -817,7 +817,6 @@ export class App {
     // by the shared Y_SWEET_SERVER_TOKEN instead of authMiddleware.
     this.app.use('/api/ysweet/validate', requireYSweetServerToken, ysweetValidateRouter);
     this.app.use('/internal/ysweet/storage-key', requireYSweetServerToken, ysweetStorageKeyRouter);
-    this.app.use('/internal/ysweet/doc-workspace', requireYSweetServerToken, ysweetDocWorkspaceRouter);
     this.app.use('/api', authMiddleware.authenticate, attachmentRoutes); // Attachment routes (file streaming)
     this.app.use('/api', authMiddleware.authenticate, draftAttachmentRoutes); // Draft attachment upload routes
     this.app.use('/api/link-preview', authMiddleware.authenticate, linkPreviewRoutes); // Link preview routes

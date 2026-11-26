@@ -22,6 +22,8 @@ import type {
   TransitEncryptResult,
   TransitServerKeys,
   YSweetSocketKey,
+  YSweetDocKey,
+  SealYSweetDocKeyInput,
 } from './types';
 
 function unsupported(operation: string): never {
@@ -134,6 +136,10 @@ const provider: EncryptionProvider = {
   async unwrapStorageKeys(wrappedKeys: string[]): Promise<Buffer[]> {
     if (wrappedKeys.length === 0) return [];
     return unsupported('unwrapStorageKeys');
+  },
+
+  async sealYSweetDocKey(_input: SealYSweetDocKeyInput): Promise<YSweetDocKey> {
+    return unsupported('sealYSweetDocKey');
   },
 
 

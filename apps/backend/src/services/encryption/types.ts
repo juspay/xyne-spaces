@@ -37,6 +37,19 @@ export type YSweetSocketKey = {
   wrappedKey: string;
 };
 
+/** A canvas doc's storage key sealed to y-sweet (`grant`), and its wrapped form to store. */
+export type YSweetDocKey = {
+  wrappedKey: string;
+  grant: string;
+};
+
+export type SealYSweetDocKeyInput = {
+  workspaceId: string;
+  docId: string;
+  /** The doc's existing key, wrapped under the workspace storage key; absent for a new key. */
+  wrappedKey?: string;
+};
+
 export type EncryptBatchItem = {
   value: string;
   entityId: string;
@@ -230,6 +243,13 @@ export interface EncryptionProvider {
   backfillEntities(items: ProvisionEntityInput[]): Promise<ProvisionEntityResult[]>;
   generateStorageKey(input: GenerateStorageKeyInput): Promise<StorageObjectKey>;
   unwrapStorageKeys(wrappedKeys: string[]): Promise<Buffer[]>;
+  /**
+   * A canvas doc's storage key sealed to y-sweet's public key, so y-sweet encrypts the doc
+   * itself and the backend relaying it can read neither the key nor the doc. Without
+   * `wrappedKey`, a new key under the workspace's storage key; with it, that key, which must
+   * belong to the workspace.
+   */
+  sealYSweetDocKey(input: SealYSweetDocKeyInput): Promise<YSweetDocKey>;
   /**
    * Chunks of a file into its workspace storage container: plaintext chunks (server-side
    * files), or the caller's transit container chunks (`sourceHeader`), which the encryption
