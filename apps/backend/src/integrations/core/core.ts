@@ -398,9 +398,12 @@ export class ExternalSourceCore {
           ? MessageDirection.OUTGOING
           : MessageDirection.INCOMING,
         entityType: isDeskChannel ? ExternalEntityType.EMAIL : ExternalEntityType.MESSAGE,
-        // Override createdAt with the real event time for Instagram/Facebook only (24h window check).
-        // Other adapters keep @default(now()) to avoid reordering historical imports.
-        ...(isMetaMessagingPlatform(source.sourceType) && { createdAt: normalizedData.metadata.timestamp }),
+        // Override createdAt with the real event time for Instagram/Facebook (24h window check) and X
+        // (its reply sender picks the channel the customer last wrote on, and polled backfill
+        // arrives out of order). Other adapters keep @default(now()) to avoid reordering historical imports.
+        ...((isMetaMessagingPlatform(source.sourceType) || source.sourceType === ExternalSourcePlatform.X) && {
+          createdAt: normalizedData.metadata.timestamp,
+        }),
       });
     }
 

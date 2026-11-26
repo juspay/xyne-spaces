@@ -231,3 +231,115 @@ export async function rotateAppStoreCredentials(
 ): Promise<void> {
   await apiInstance.post(`/integrations/social-media/${channelId}/app-store/credentials`, input);
 }
+
+// ── X ────────────────────────────────────────────────────────────────────────
+// Each customer brings their own X developer app; its four keys travel with every connect call.
+
+export interface XAppKeys {
+  clientId: string;
+  clientSecret: string;
+  consumerKey: string;
+  consumerSecret: string;
+}
+
+export interface XAccountStatus {
+  id: string;
+  isActive: boolean;
+  xchatEnabled: boolean;
+  hasAppKeys: boolean;
+  /** ISO time of the last complete poll (manual sync or stream gap repair). */
+  lastSyncedAt: string | null;
+}
+
+/** The exact URL the customer must add to their X app's callback URLs. */
+export async function getXCallbackUrl(): Promise<string> {
+  const response = await apiInstance.get<{ callbackUrl: string }>(
+    '/integrations/social-media/x/oauth/callback-url',
+  );
+  return response.data.callbackUrl;
+}
+
+/** Validates the app keys, then returns X's authorization URL for a new X desk. */
+export async function startXOAuth(input: {
+  channelName: string;
+  projectId: string;
+  boardId?: string;
+  assigneeUserGroupId?: string;
+  visibility: 'PUBLIC' | 'PRIVATE';
+  platform: 'web' | 'electron';
+  app: XAppKeys;
+}): Promise<string> {
+  const response = await apiInstance.post<{ authorizationUrl: string }>(
+    '/integrations/social-media/x/oauth/start',
+    { name: input.channelName, ...input },
+  );
+  return response.data.authorizationUrl;
+}
+
+/** Keys omitted ⇒ the backend reuses the app of an account already on this desk. */
+export async function addXAccount(
+  channelId: string,
+  platform: 'web' | 'electron',
+  app?: XAppKeys,
+): Promise<string> {
+  const response = await apiInstance.post<{ authorizationUrl: string }>(
+    `/integrations/social-media/${channelId}/x/add-account`,
+    { platform, ...(app && { app }) },
+  );
+  return response.data.authorizationUrl;
+}
+
+/** Keys omitted ⇒ the stored keys are reused; pass new ones after regenerating them on X. */
+export async function reconnectXAccount(
+  channelId: string,
+  sourceId: string,
+  platform: 'web' | 'electron',
+  app?: XAppKeys,
+): Promise<string> {
+  const response = await apiInstance.post<{ authorizationUrl: string }>(
+    `/integrations/social-media/${channelId}/x/${sourceId}/reconnect`,
+    { platform, ...(app && { app }) },
+  );
+  return response.data.authorizationUrl;
+}
+
+export async function disconnectXAccount(channelId: string, sourceId: string): Promise<void> {
+  await apiInstance.post(`/integrations/social-media/${channelId}/x/${sourceId}/disconnect`);
+}
+
+export async function getXAccounts(
+  channelId: string,
+): Promise<{ callbackUrl: string; accounts: XAccountStatus[] }> {
+  const response = await apiInstance.get<{ callbackUrl: string; accounts: XAccountStatus[] }>(
+    `/integrations/social-media/${channelId}/x/accounts`,
+  );
+  return response.data;
+}
+
+/** Unlocks the account's XChat keys with its passcode (used once, never stored). */
+export async function enableXChat(
+  channelId: string,
+  sourceId: string,
+  passcode: string,
+): Promise<void> {
+  await apiInstance.post(`/integrations/social-media/${channelId}/x/${sourceId}/xchat`, {
+    passcode,
+  });
+}
+
+export async function disableXChat(channelId: string, sourceId: string): Promise<void> {
+  await apiInstance.delete(`/integrations/social-media/${channelId}/x/${sourceId}/xchat`);
+}
+
+/** Backend error code (`code` on 4xx bodies), e.g. x_invalid_api_key. */
+export function getXErrorCode(error: unknown): string | undefined {
+  const code = (error as { response?: { data?: { code?: unknown } } })?.response?.data?.code;
+  return typeof code === 'string' ? code : undefined;
+}
+
+/** X's remaining XChat passcode attempts from a failed enableXChat, when X reported it. */
+export function getXChatGuessesRemaining(error: unknown): number | null {
+  const n = (error as { response?: { data?: { guessesRemaining?: unknown } } })?.response?.data
+    ?.guessesRemaining;
+  return typeof n === 'number' ? n : null;
+}

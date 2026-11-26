@@ -16,6 +16,7 @@ import googlePlayRoutes from './social-media/google-play';
 import appStoreRoutes from './social-media/app-store';
 import instagramRoutes from './social-media/instagram';
 import facebookRoutes from './social-media/facebook';
+import xRoutes, { teardownXSource } from './social-media/x';
 
 const TAG = '[SocialMediaRoutes]';
 const router = express.Router();
@@ -41,6 +42,7 @@ router.use(googlePlayRoutes);
 router.use(appStoreRoutes);
 router.use(instagramRoutes);
 router.use(facebookRoutes);
+router.use(xRoutes);
 
 router.post(
   '/:conversationId/reply',
@@ -188,6 +190,19 @@ router.post(
         },
         data: { credentials: '' },
       });
+
+      // X: stop event delivery (X bills per delivered event) and revoke tokens; keep app keys.
+      const xSources = await db.externalSource.findMany({
+        where: { channelId: req.params.channelId, workspaceId, sourceType: ExternalSourcePlatform.X },
+        select: { id: true },
+      });
+      for (const source of xSources) {
+        try {
+          await teardownXSource(source.id);
+        } catch (error) {
+          logger.warn(`${TAG} X teardown failed during desk disconnect`, { sourceId: source.id, error: String(error) });
+        }
+      }
 
       res.json({ message: 'Social media desk disconnected', sourceCount: result.count });
     } catch (error) {

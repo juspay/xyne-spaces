@@ -60,8 +60,8 @@ export const useRefetchExternalSource = (
   channelId: string | undefined,
   isSocialMedia = false,
   isCallDesk = false,
-  /** What a social-media desk fetches, for the toasts: reviews, or Facebook activity. */
-  socialItems: 'reviews' | 'Facebook activity' = 'reviews',
+  /** What a social-media desk fetches, for the toasts: reviews, Facebook activity or X activity. */
+  socialItems: 'reviews' | 'Facebook activity' | 'X activity' = 'reviews',
 ): {
   refetch: (range?: RefetchRange, target?: RefetchTarget) => void;
   isPending: boolean;

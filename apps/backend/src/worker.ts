@@ -40,6 +40,7 @@ import { scheduledMessageWorker } from '@/workers/scheduledMessageWorker';
 // import { etaDeadlineWorker } from '@/workers/etaDeadlineWorker';
 import { emailFetchWorker } from '@/workers/emailFetchWorker';
 import { gmailPubSubPullWorker } from '@/workers/gmailPubSubPullWorker';
+import { xStreamSupervisor } from '@/integrations/adapters/social-media/x/streamWorker';
 import { googleCalendarSyncQueue } from '@/queues/googleCalendarSyncQueue';
 import { microsoftCalendarSyncQueue } from '@/queues/microsoftCalendarSyncQueue';
 import { callCalendarPushQueue } from '@/queues/callCalendarPushQueue';
@@ -337,6 +338,12 @@ class WorkerService {
         }
       }
 
+      // X activity streams: one leased reader per tenant X app.
+      if (appConfig.enableXStreamWorker) {
+        logger.info('Starting X activity stream supervisor...');
+        await xStreamSupervisor.start();
+      }
+
       // Calendar sync consumers. The API owns the Google/Microsoft webhook
       // endpoints and only enqueues; the paging, upserts and cursor bookkeeping
       // run here so a webhook burst never lands on the request path.
@@ -558,6 +565,10 @@ class WorkerService {
       }
 
       await gmailPubSubPullWorker.shutdown();
+
+      if (appConfig.enableXStreamWorker) {
+        await xStreamSupervisor.stop();
+      }
 
       if (appConfig.enableCalendarSyncWorker) {
         await googleCalendarSyncQueue.close();

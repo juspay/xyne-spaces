@@ -220,6 +220,8 @@ import {
   connectGooglePlayDesk,
   startInstagramOAuth,
   startFacebookOAuth,
+  startXOAuth,
+  type XAppKeys,
 } from '../../services/clients/socialMediaDeskApi';
 import { InstagramCustomerHistory } from '../../components/xyne-desk/InstagramCustomerHistory/InstagramCustomerHistory';
 import { EmailThreadHeader } from '../../components/xyne-desk/EmailBody/EmailThreadHeader';
@@ -268,6 +270,8 @@ import {
   clearChannelConnectedEmailCache,
   fetchConnectedEmail,
 } from '../../hooks/useChannelConnectedEmail';
+import { xErrorMessage, xRedirectErrorMessage } from '../../utils/xErrors';
+import { openOAuthUrl } from '../../utils/oauthRedirect';
 import AddChannelForm, {
   isOAuthSocialProvider,
   type SocialProvider,
@@ -1958,6 +1962,28 @@ const SupportScreen = (): ReactElement => {
         },
         { replace: true },
       );
+    } else if (socialMediaOAuth === 'success' && socialMediaProvider === 'x') {
+      toast.success('X account connected successfully');
+      setSearchParams(
+        prev => {
+          const p = new URLSearchParams(prev);
+          p.delete('socialMediaOAuth');
+          p.delete('socialMediaProvider');
+          return p;
+        },
+        { replace: true },
+      );
+    } else if (socialMediaError && socialMediaProvider === 'x') {
+      toast.error(xRedirectErrorMessage(socialMediaError));
+      setSearchParams(
+        prev => {
+          const p = new URLSearchParams(prev);
+          p.delete('socialMediaError');
+          p.delete('socialMediaProvider');
+          return p;
+        },
+        { replace: true },
+      );
     } else if (socialMediaError && socialMediaProvider === 'facebook') {
       // payload formats: "facebook_page_mismatch:Page name", "facebook_page_disconnected:<sentence>"
       const separator = socialMediaError.indexOf(':');
@@ -2269,6 +2295,8 @@ const SupportScreen = (): ReactElement => {
   const isInstagramDesk = selectedChannelIntegration.sourceType === 'instagram';
   // Facebook is webhook-driven too, but its history can be pulled for a chosen time range.
   const isFacebookDesk = selectedChannelIntegration.sourceType === 'facebook';
+  // X is stream-driven; manual fetch polls mentions, DMs and XChat for a time range.
+  const isXDesk = selectedChannelIntegration.sourceType === SOCIAL_MEDIA_SOURCE_TYPE.X;
   const isCallDesk = selectedChannelFull?.type === ChannelType.CALL;
 
   // Artifact apps added to this desk (channel_published_tabs). Every member sees
@@ -2312,7 +2340,7 @@ const SupportScreen = (): ReactElement => {
     refetchChannelId,
     isSocialMediaDesk,
     isCallDesk,
-    isFacebookDesk ? 'Facebook activity' : 'reviews',
+    isFacebookDesk ? 'Facebook activity' : isXDesk ? 'X activity' : 'reviews',
   );
   const canRefetch = !!refetchChannelId;
   const {
@@ -2733,6 +2761,7 @@ const SupportScreen = (): ReactElement => {
         privateKey: string;
         applications: Array<{ bundleId: string }>;
       };
+      xApp?: XAppKeys;
     },
   ) => {
     const {
@@ -2746,6 +2775,7 @@ const SupportScreen = (): ReactElement => {
       applications,
       serviceAccountKey,
       appStore,
+      xApp,
       channelType: _submittedChannelType,
       ...rest
     } = data;
@@ -2827,33 +2857,52 @@ const SupportScreen = (): ReactElement => {
         return;
       }
 
-      if (socialProvider === 'INSTAGRAM' || socialProvider === 'FACEBOOK') {
-        const isFacebook = socialProvider === 'FACEBOOK';
-        void (isFacebook ? startFacebookOAuth : startInstagramOAuth)({
-          channelName: rest.name,
-          projectId: rest.projectId,
-          ...(rest.boardId ? { boardId: rest.boardId } : {}),
-          ...(rest.assigneeUserGroupId && {
-            assigneeUserGroupId: rest.assigneeUserGroupId,
-          }),
-          visibility: rest.visibility === 'public' ? 'PUBLIC' : 'PRIVATE',
-          platform: isElectron ? 'electron' : 'web',
-        })
+      // OAuth providers: start sign-in, then hand the browser to the provider. Starting can take
+      // seconds (X validates the customer's app keys against X first), so the form is blocked
+      // meanwhile.
+      const startOAuthDesk = (
+        start: () => Promise<string>,
+        errorMessage: (error: unknown) => string,
+      ): void => {
+        setIsConnectingReviewDesk(true);
+        void start()
           .then(authUrl => {
             setShowCreateChannelModal(false);
-            if (isElectron && window.electronAPI?.openExternal) {
-              window.electronAPI.openExternal(authUrl);
-            } else {
-              window.location.href = authUrl;
-            }
+            openOAuthUrl(authUrl);
           })
-          .catch(error => {
-            toast.error(
-              error instanceof Error
-                ? error.message
-                : `Failed to start ${isFacebook ? 'Facebook' : 'Instagram'} authorization`,
-            );
-          });
+          .catch(error => toast.error(errorMessage(error)))
+          .finally(() => setIsConnectingReviewDesk(false));
+      };
+      const oauthDeskInput = {
+        channelName: rest.name,
+        projectId: rest.projectId,
+        ...(rest.boardId ? { boardId: rest.boardId } : {}),
+        ...(rest.assigneeUserGroupId && { assigneeUserGroupId: rest.assigneeUserGroupId }),
+        visibility: rest.visibility === 'public' ? ('PUBLIC' as const) : ('PRIVATE' as const),
+        platform: isElectron ? ('electron' as const) : ('web' as const),
+      };
+
+      if (socialProvider === 'X') {
+        if (!xApp) {
+          toast.error('Enter all four X app keys');
+          return;
+        }
+        startOAuthDesk(
+          () => startXOAuth({ ...oauthDeskInput, app: xApp }),
+          error => xErrorMessage(error, 'Failed to start X authorization'),
+        );
+        return;
+      }
+
+      if (socialProvider === 'INSTAGRAM' || socialProvider === 'FACEBOOK') {
+        const isFacebook = socialProvider === 'FACEBOOK';
+        startOAuthDesk(
+          () => (isFacebook ? startFacebookOAuth : startInstagramOAuth)(oauthDeskInput),
+          error =>
+            error instanceof Error
+              ? error.message
+              : `Failed to start ${isFacebook ? 'Facebook' : 'Instagram'} authorization`,
+        );
         return;
       }
     }
@@ -3161,11 +3210,16 @@ const SupportScreen = (): ReactElement => {
                     label: 'Facebook',
                     className: 'bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-200',
                   }
-                : {
-                    label: 'Social',
-                    className:
-                      'bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-200',
-                  }
+                : socialSourceTypes[c.id] === SOCIAL_MEDIA_SOURCE_TYPE.X
+                  ? {
+                      label: 'X',
+                      className: 'bg-zinc-200 text-zinc-800 dark:bg-zinc-500/20 dark:text-zinc-100',
+                    }
+                  : {
+                      label: 'Social',
+                      className:
+                        'bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-200',
+                    }
             : c.type === ChannelType.CALL
               ? {
                   label: 'Call',
@@ -3679,7 +3733,11 @@ const SupportScreen = (): ReactElement => {
                             leadingAction={
                               isSocialMediaDesk
                                 ? {
-                                    label: isFacebookDesk ? 'Fetch from Facebook' : 'Fetch reviews',
+                                    label: isFacebookDesk
+                                      ? 'Fetch from Facebook'
+                                      : isXDesk
+                                        ? 'Fetch from X'
+                                        : 'Fetch reviews',
                                     // No sourceId => the hook routes to the
                                     // review sync; the dialog supplies the range.
                                     onSelect: () => {
@@ -3717,11 +3775,13 @@ const SupportScreen = (): ReactElement => {
                                 ? 'Fetching latest…'
                                 : isFacebookDesk
                                   ? 'Fetch from Facebook'
-                                  : isSocialMediaDesk
-                                    ? 'Fetch reviews'
-                                    : isCallDesk
-                                      ? 'Fetch missed calls'
-                                      : 'Fetch latest emails'
+                                  : isXDesk
+                                    ? 'Fetch from X'
+                                    : isSocialMediaDesk
+                                      ? 'Fetch reviews'
+                                      : isCallDesk
+                                        ? 'Fetch missed calls'
+                                        : 'Fetch latest emails'
                             }
                             side='bottom'
                           >
@@ -3731,11 +3791,13 @@ const SupportScreen = (): ReactElement => {
                                   ? 'Fetching latest…'
                                   : isFacebookDesk
                                     ? 'Fetch from Facebook'
-                                    : isSocialMediaDesk
-                                      ? 'Fetch reviews'
-                                      : isCallDesk
-                                        ? 'Fetch missed calls'
-                                        : 'Fetch latest emails'
+                                    : isXDesk
+                                      ? 'Fetch from X'
+                                      : isSocialMediaDesk
+                                        ? 'Fetch reviews'
+                                        : isCallDesk
+                                          ? 'Fetch missed calls'
+                                          : 'Fetch latest emails'
                               }
                               onClick={() => {
                                 // Single-source desks skip the picker but still
@@ -5012,21 +5074,28 @@ const SupportScreen = (): ReactElement => {
                 title: `Fetch from ${fetchTarget.sourceName}`,
                 subtitle: 'Choose how much history to pull from this source.',
               }
-            : isFacebookDesk
+            : isXDesk
               ? {
-                  title: 'Fetch from Facebook',
+                  title: 'Fetch from X',
                   subtitle:
-                    'Pull messages, comments and mentions from the connected Pages for a time range. Anything already on the desk is skipped. Messenger returns at most the 20 latest messages per conversation.',
-                  summaryLabel: 'Will fetch Facebook activity from',
+                    'Pull mentions, replies and DMs (including XChat, when enabled) for a time range. Anything already on the desk is skipped. X counts these reads against your X credits.',
+                  summaryLabel: 'Will fetch X activity from',
                 }
-              : isSocialMediaDesk
+              : isFacebookDesk
                 ? {
-                    title: 'Fetch reviews',
+                    title: 'Fetch from Facebook',
                     subtitle:
-                      'Pull new reviews or backfill a specific time range from the connected apps.',
-                    summaryLabel: 'Will fetch reviews posted',
+                      'Pull messages, comments and mentions from the connected Pages for a time range. Anything already on the desk is skipped. Messenger returns at most the 20 latest messages per conversation.',
+                    summaryLabel: 'Will fetch Facebook activity from',
                   }
-                : {})}
+                : isSocialMediaDesk
+                  ? {
+                      title: 'Fetch reviews',
+                      subtitle:
+                        'Pull new reviews or backfill a specific time range from the connected apps.',
+                      summaryLabel: 'Will fetch reviews posted',
+                    }
+                  : {})}
           {...(isCallDesk && {
             ...(!fetchTarget?.sourceName && {
               title: 'Fetch calls',
@@ -6837,7 +6906,9 @@ export const SupportTicketDetail = ({
                         ? 'Reply to this DM…'
                         : channelIntegrationInfo.sourceType === 'facebook'
                           ? 'Reply to this message…'
-                          : 'Reply to this review…'
+                          : channelIntegrationInfo.sourceType === SOCIAL_MEDIA_SOURCE_TYPE.X
+                            ? 'Reply on X… (posts: 280 characters)'
+                            : 'Reply to this review…'
                     }
                     // Play caps replies at 350; Apple documents no maximum, so do not invent one.
                     {...(channelIntegrationInfo.sourceType === SOCIAL_MEDIA_SOURCE_TYPE.INSTAGRAM
@@ -6846,7 +6917,10 @@ export const SupportTicketDetail = ({
                         ? { maxLength: 2000 }
                         : channelIntegrationInfo.sourceType === SOCIAL_MEDIA_SOURCE_TYPE.GOOGLE_PLAY
                           ? { maxLength: 350 }
-                          : {})}
+                          : channelIntegrationInfo.sourceType === SOCIAL_MEDIA_SOURCE_TYPE.X
+                            ? // X's DM limit; posts (280, weighted) are checked by the backend per thread.
+                              { maxLength: 10_000 }
+                            : {})}
                     trackingCategory='social-media-composer'
                   />
                 ) : null

@@ -1602,7 +1602,7 @@ export class ChannelController {
         );
       } else if (source?.sourceType === ExternalSourcePlatform.SLACK_DESK) {
         connectedLabel = extractSlackChannelId(source.name);
-      } else if (sourceType && isSocialMediaPlatform(sourceType) && !isMetaMessagingPlatform(sourceType)) {
+      } else if (sourceType && isSocialMediaPlatform(sourceType) && !isMetaMessagingPlatform(sourceType) && sourceType !== ExternalSourcePlatform.X) {
         const reviewSources = await db.externalSource.findMany({
           where: { channelId, workspaceId, sourceType: { in: [...SOCIAL_MEDIA_PLATFORMS] } },
           select: {
@@ -1625,7 +1625,8 @@ export class ChannelController {
         connectedLabel = activeReviewSources
           .map(reviewSource => reviewSource.displayName)
           .join(', ') || 'No active apps';
-      } else if (source && isMetaMessagingPlatform(source.sourceType)) {
+      } else if (source && (isMetaMessagingPlatform(source.sourceType) || source.sourceType === ExternalSourcePlatform.X)) {
+        // Multi-account social desks (Instagram, Facebook, X): one source per connected account.
         const igSources = await db.externalSource.findMany({
           where: { channelId, workspaceId, sourceType: source.sourceType },
           select: {
@@ -1645,7 +1646,8 @@ export class ChannelController {
           packageName: s.externalIdentifier,
           isActive: s.isActive,
         }));
-        const handlePrefix = source.sourceType === ExternalSourcePlatform.INSTAGRAM ? '@' : '';
+        const handlePrefix =
+          source.sourceType === ExternalSourcePlatform.INSTAGRAM || source.sourceType === ExternalSourcePlatform.X ? '@' : '';
         connectedLabel = activeIgSources.map(s => s.displayName ? `${handlePrefix}${s.displayName}` : s.externalIdentifier).join(', ') || null;
       }
 
