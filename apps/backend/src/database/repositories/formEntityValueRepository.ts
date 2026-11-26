@@ -110,9 +110,9 @@ function storedColumns(fieldType: FormFieldType, value: unknown, fieldId: string
   const { dateValue, ...columns } = typed.columns;
   return {
     data: {
-      // Nothing reads the old JSON column any more. Cleared, so the backfill can't copy a stale
-      // value back over the typed columns.
-      actualFieldValue: Prisma.DbNull,
+      // Dual write: kept so a rollback to code that reads actualFieldValue still sees current values.
+      actualFieldValue:
+        value === null || value === undefined ? Prisma.DbNull : (value as Prisma.InputJsonValue),
       ...columns,
       dateValue: dateValue === null ? null : new Date(dateValue),
       textHash: typed.textHashInput === null ? null : formEntityValueTextHash(typed.textHashInput),

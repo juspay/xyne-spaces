@@ -11,6 +11,7 @@ import {
   readFormEntityValue,
   resolveParentOption,
   toTypedFormEntityValue,
+  type FormFieldValue,
 } from '@xyne/shared';
 import { stringFromFormValue } from '@xyne/shared/zero';
 import { formEntityValueTextHash } from '@/utils/formEntityValueHash';
@@ -512,12 +513,18 @@ export async function upsertManyFormEntityValues(
   return writes;
 }
 
+// Dual write: clients that still read actualFieldValue keep seeing current values.
+const legacyJsonValue = (value: unknown): FormFieldValue => {
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'string' || Array.isArray(value)) return value as FormFieldValue;
+  return String(value);
+};
+
 const storedFormEntityValueFields = (fieldType: FormFieldType, value: unknown, fieldId: string) => {
   const typed = toTypedFormEntityValue(assertFormFieldType(fieldType, fieldId), value);
   assertFormEntityValueFitsType(fieldType, value, typed);
   const textHash = typed.textHashInput === null ? null : formEntityValueTextHash(typed.textHashInput);
-  // The old JSON column is cleared, so the backfill can't copy a stale value back.
-  return { fields: { ...typed.columns, textHash, actualFieldValue: null }, items: typed.items };
+  return { fields: { ...typed.columns, textHash, actualFieldValue: legacyJsonValue(value) }, items: typed.items };
 };
 
 // Makes the value's form_entity_value_items rows exactly `items`. Item ids are derived, so
