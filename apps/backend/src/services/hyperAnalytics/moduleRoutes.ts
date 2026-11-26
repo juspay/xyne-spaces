@@ -35,6 +35,7 @@ const EXACT_MODULES = new Set([
   '/knowledge-base',
   '/analytics',
   '/analytics-dashboard',
+  '/xyne-dashboards',
   '/dashboards',
   '/projects',
   '/team-intelligence',

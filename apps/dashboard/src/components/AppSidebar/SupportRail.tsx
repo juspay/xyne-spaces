@@ -5,7 +5,6 @@ import {
   NotificationBellOn,
   InboxDefault,
   SparkleAi01,
-  BubbleChart,
   Notebook,
   PhoneDefault,
   LightningThunderElectricOn,
@@ -47,7 +46,6 @@ interface SupportRailProps {
 //  - Calls       -> /calls (existing Call History)
 //  - AI Agent    -> /ai (existing Xyne AI)
 //  - Automations -> /automations (existing Automations; gated)
-//  - Dashboards  -> /analytics-dashboard (existing analytics dashboards)
 //  - Help Center -> /knowledge-base (existing Knowledge Base; gated)
 // Active state is derived from the live route on every render — never a toggle.
 const SUPPORT_RAIL_ITEMS: SupportRailItem[] = [
@@ -91,15 +89,6 @@ const SUPPORT_RAIL_ITEMS: SupportRailItem[] = [
     path: '/automations',
     gatedPath: '/automations',
     isActive: ctx => ctx.activeRoute === '/automations',
-  },
-  {
-    key: 'dashboards',
-    label: 'Dashboards',
-    description: 'Charts and reports built from data sources',
-    icon: BubbleChart,
-    path: '/analytics-dashboard',
-    gatedPath: '/analytics',
-    isActive: ctx => ctx.activeRoute === '/analytics-dashboard',
   },
   {
     key: 'help-center',

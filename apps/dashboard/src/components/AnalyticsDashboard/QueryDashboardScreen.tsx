@@ -1,4 +1,5 @@
-import { ArrowLeft, BarChart3, ChevronLeft, Plus, Save, X } from 'lucide-react';
+import { ArrowLeft, BarChart3, ChevronLeft, LogOut, Plus, Save, Share2, X } from 'lucide-react';
+import { toast } from 'sonner';
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { v4 as uuidv4 } from 'uuid';
@@ -37,6 +38,15 @@ import { getPieChartPreview } from '../QueryVisualizations/PieChart';
 import { QueryVisualization } from '../QueryVisualizations/QueryVisualization';
 import { QueryVisualizationType } from '../QueryVisualizations/types';
 import { Button } from '../ui/Button';
+import { Dialog } from '../ui/Dialog';
+import { AnalyticsDashboardShare } from '../AnalyticsDashboardShare/AnalyticsDashboardShare';
+import {
+  canEditDashboard,
+  getAnalyticsDashboardRole,
+  ownShare,
+} from '../AnalyticsDashboardShare/AnalyticsDashboardShare.utils';
+import { removeDashboardShare } from '../../services/AnalyticsDashboard/dashboardSharesService';
+import { getApiErrorMessage } from '../../utils/apiError';
 import { EntityMultiSelector } from '../ui/EntitySelector/EntityMultiSelector';
 import { EntitySelector } from '../ui/EntitySelector/EntitySelector';
 import Input from '../ui/Input/Input';
@@ -67,6 +77,7 @@ export const QueryDashboardScreen: React.FC = () => {
   const { user } = useAuth();
   // Main screen state
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [showShareDialog, setShowShareDialog] = useState(false);
   const [editingQueryId, setEditingQueryId] = useState<string | null>(null);
 
   // Query builder state
@@ -88,7 +99,7 @@ export const QueryDashboardScreen: React.FC = () => {
   const [previewData, setPreviewData] = useState<Record<string, unknown>[] | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
 
-  const [currentDashboard] = useCachedQuery(
+  const [currentDashboard, currentDashboardDetails] = useCachedQuery(
     queries.getDashboardById({ dashboardId: dashboardId || '' }),
     { enabled: !!dashboardId },
   );
@@ -477,6 +488,27 @@ export const QueryDashboardScreen: React.FC = () => {
   };
 
   if (!currentDashboard) {
+    // Zero syncs only dashboards shared with the viewer, so a missing or unshared one looks the
+    // same: "not available", whether or not it exists.
+    if (currentDashboardDetails.type === 'complete') {
+      return (
+        <div className='flex flex-col items-center justify-center h-full gap-3 text-center px-6'>
+          <p className='text-foreground font-medium'>{"This dashboard isn't available"}</p>
+          <p className='text-sm text-muted-foreground'>
+            {"It may have been deleted, or it hasn't been shared with you."}
+          </p>
+          <Button
+            size='sm'
+            variant='secondary'
+            onClick={() => void navigate('/xyne-dashboards')}
+            data-track-category='ANALYTICS'
+            data-track-name='Dashboard_Not_Available_Back'
+          >
+            Back to dashboards
+          </Button>
+        </div>
+      );
+    }
     return (
       <div className='flex items-center justify-center h-full'>
         <p className='text-muted-foreground'>Loading dashboard...</p>
@@ -487,6 +519,20 @@ export const QueryDashboardScreen: React.FC = () => {
   const dashboardData = (
     Array.isArray(currentDashboard) ? currentDashboard[0] : currentDashboard
   ) as DashboardWithQueries;
+  const role = getAnalyticsDashboardRole(dashboardData, dashboardData.shares, user?.id);
+  const canEdit = canEditDashboard(role);
+  const myShare = role === 'OWNER' ? undefined : ownShare(dashboardData.shares, user?.id);
+
+  const handleLeave = async (): Promise<void> => {
+    if (!myShare) return;
+    try {
+      await removeDashboardShare(dashboardData.id, myShare.id);
+      toast.success('You left the dashboard');
+      void navigate('/xyne-dashboards');
+    } catch (err) {
+      toast.error('Could not leave the dashboard', { description: getApiErrorMessage(err) });
+    }
+  };
 
   return (
     <div className='h-full bg-gradient-to-br from-background via-background to-muted/5 flex flex-col'>
@@ -495,7 +541,7 @@ export const QueryDashboardScreen: React.FC = () => {
         <div className='px-6 py-4 flex items-center justify-between'>
           <div className='flex items-center gap-3'>
             <button
-              onClick={() => void navigate('/analytics-dashboard')}
+              onClick={() => void navigate('/xyne-dashboards')}
               className='flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground hover:bg-muted/50 px-3 py-1.5 rounded-md transition-all duration-200 group'
               data-track-category='ANALYTICS'
               data-track-name='Navigate_Back_To_Dashboards'
@@ -513,27 +559,73 @@ export const QueryDashboardScreen: React.FC = () => {
               </h1>
             </div>
           </div>
-          <Button
-            size='sm'
-            onClick={() => {
-              resetForm();
-              setShowCreateModal(true);
-            }}
-            className='bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white gap-1.5 shadow-lg hover:shadow-xl transition-all duration-200 font-medium'
-            data-track-category='ANALYTICS'
-            data-track-name='Open_Create_Query_Modal'
-          >
-            <Plus size={16} />
-            Create Query
-          </Button>
+          <div className='flex items-center gap-2'>
+            {role === 'VIEWER' && (
+              <span className='text-xs text-muted-foreground px-2 py-1 rounded-md bg-muted'>
+                View only
+              </span>
+            )}
+            {myShare && (
+              <Button
+                size='sm'
+                variant='ghost'
+                onClick={() => void handleLeave()}
+                className='gap-1.5'
+                data-track-category='ANALYTICS'
+                data-track-name='Leave_Dashboard'
+              >
+                <LogOut size={16} />
+                Leave
+              </Button>
+            )}
+            {canEdit && (
+              <Button
+                size='sm'
+                variant='secondary'
+                onClick={() => setShowShareDialog(true)}
+                className='gap-1.5'
+                data-track-category='ANALYTICS'
+                data-track-name='Open_Share_Dashboard'
+              >
+                <Share2 size={16} />
+                Share
+              </Button>
+            )}
+            {canEdit && (
+              <Button
+                size='sm'
+                onClick={() => {
+                  resetForm();
+                  setShowCreateModal(true);
+                }}
+                className='bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white gap-1.5 shadow-lg hover:shadow-xl transition-all duration-200 font-medium'
+                data-track-category='ANALYTICS'
+                data-track-name='Open_Create_Query_Modal'
+              >
+                <Plus size={16} />
+                Create Query
+              </Button>
+            )}
+          </div>
         </div>
       </div>
+
+      {showShareDialog && (
+        <Dialog open={showShareDialog} onOpenChange={setShowShareDialog} title='Share dashboard'>
+          <AnalyticsDashboardShare
+            dashboard={dashboardData}
+            shares={dashboardData.shares ?? []}
+            role={role}
+          />
+        </Dialog>
+      )}
 
       {/* Content */}
       <div className='flex-1 min-h-0 overflow-y-auto px-6 py-6 bg-gradient-to-b from-transparent to-muted/5'>
         {/* Queries Display */}
         <QueryResults
           dashboardData={dashboardData}
+          canEdit={canEdit}
           onDeleteQuery={handleDeleteQuery}
           onEditQuery={handleEditQuery}
         />

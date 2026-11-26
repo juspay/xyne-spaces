@@ -1669,6 +1669,7 @@ export const activityTable = table("activities")
     pullRequestId: string().optional(),
     canvasId: string().optional(),
     savedViewId: string().optional(),
+    dashboardId: string().optional(),
     trackId: string().optional(),
     blockId: string().optional(),
     actorId: string(),
@@ -2383,6 +2384,20 @@ export const dashboardTable = table("dashboards")
     id: string(),
     name: string(),
     description: string().optional(),
+    createdBy: string(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey("id");
+
+export const dashboardShareTable = table("dashboard_shares")
+  .columns({
+    workspaceId: string(),
+    id: string(),
+    dashboardId: string(),
+    principalType: string(),
+    principalId: string(),
+    role: string(),
     createdBy: string(),
     createdAt: number(),
     updatedAt: number(),
@@ -5717,6 +5732,7 @@ export const schema = createSchema(
       formEntityValuesTable,
       formEntityValueItemsTable,
       dashboardTable,
+      dashboardShareTable,
       queryTable,
       dashboardQueryMappingTable,
       merchantTable,
@@ -6049,6 +6065,7 @@ export type FormFields = Row<typeof schema.tables.form_fields>;
 export type FormEntityValues = Row<typeof schema.tables.form_entity_values>;
 export type FormEntityValueItems = Row<typeof schema.tables.form_entity_value_items>;
 export type Dashboard = Row<typeof schema.tables.dashboards>;
+export type DashboardShare = Row<typeof schema.tables.dashboard_shares>;
 export type Query = Row<typeof schema.tables.queries>;
 export type dashboardQueryMapping = Row<typeof schema.tables.dashboard_queries_mapping>;
 export type Merchant = Row<typeof schema.tables.merchants>;

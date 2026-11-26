@@ -1097,6 +1097,70 @@ class NotificationService {
     };
   }
 
+  /**
+   * Xyne Dashboards: tells people a dashboard was shared with them, that their access changed
+   * (view <-> edit), or that it was removed. Only people shared with by name are notified; channel and workspace shares
+   * would notify everyone in them, so they don't.
+   */
+  async createDashboardSharedNotifications(
+    recipientUserIds: string[],
+    dashboardId: string,
+    dashboardName: string,
+    actorId: string,
+    actorName: string,
+    actorAction: 'dashboard_shared' | 'dashboard_access_changed' | 'dashboard_access_revoked',
+    accessLabel: 'view' | 'edit',
+    workspaceId: string,
+  ): Promise<{ deliveredUserIds: string[] }> {
+    const recipientIds = recipientUserIds.filter(id => id !== actorId);
+    if (recipientIds.length === 0) return { deliveredUserIds: [] };
+
+    getNotificationJobsExpected().add(recipientIds.length, {
+      platform: 'desktop',
+      message_type: 'dashboard',
+    });
+
+    const title =
+      actorAction === 'dashboard_shared'
+        ? `${actorName} shared a dashboard with you`
+        : actorAction === 'dashboard_access_changed'
+          ? `${actorName} changed your access to a dashboard`
+          : `${actorName} removed your access to a dashboard`;
+    const message =
+      actorAction === 'dashboard_shared'
+        ? `${actorName} shared "${dashboardName}" with you. You can ${accessLabel} it.`
+        : actorAction === 'dashboard_access_changed'
+          ? `You can now ${accessLabel} "${dashboardName}"`
+          : `${actorName} removed your access to "${dashboardName}"`;
+
+    const results = await Promise.allSettled(
+      recipientIds.map(async userId => {
+        await this.createNotification(userId, {
+          title,
+          message,
+          type: NotificationType.DASHBOARD_SHARED,
+          relatedEntityType: 'dashboard',
+          relatedEntityId: dashboardId,
+          // NotificationHandler prefixes the workspace and opens this on click. Someone who lost
+          // access lands on the list instead of a dashboard they can no longer open.
+          actionUrl:
+            actorAction === 'dashboard_access_revoked'
+              ? '/xyne-dashboards'
+              : `/xyne-dashboards/${encodeURIComponent(dashboardId)}`,
+          workspaceId,
+          metadata: { dashboardId, dashboardName, actorId, actorName, actorAction, access: accessLabel },
+        });
+        return userId;
+      }),
+    );
+
+    return {
+      deliveredUserIds: results
+        .filter((result): result is PromiseFulfilledResult<string> => result.status === 'fulfilled')
+        .map(result => result.value),
+    };
+  }
+
   async createThreadReplyNotifications(
     userIds: string[],
     replyMessageId: string,

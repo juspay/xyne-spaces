@@ -1,6 +1,7 @@
 import { createElement, type ComponentType, type ReactElement } from 'react';
 import {
   GraphTrendLine,
+  BubbleChart,
   Notebook,
   TicketToken,
   FolderDefault,
@@ -361,6 +362,13 @@ export const NAVIGATION_ITEMS: NavigationItem[] = [
     popout: true,
   },
   {
+    path: '/xyne-dashboards',
+    label: 'Xyne Dashboards',
+    description: 'Ticket dashboards you made or that are shared with you',
+    icon: BubbleChart,
+    popout: true,
+  },
+  {
     path: '/dashboards',
     label: 'Dashboards',
     description: 'Charts and reports built from data sources',
@@ -459,6 +467,7 @@ export const DEFAULT_TOOLBAR_PATHS: string[] = [
   '/projects',
   '/sdlc',
   '/support',
+  '/xyne-dashboards',
   '/chat/activity',
   '/apps-marketplace',
 ];
@@ -480,6 +489,7 @@ export const TOOLBAR_ITEM_DESCRIPTIONS: Record<string, string> = {
   '/apps-marketplace': 'Apps built on Xyne data, and creating your own',
   '/guide': 'Product documentation and onboarding guide',
   '/knowledge-base': 'File and folder knowledge base for Ask AI',
+  '/xyne-dashboards': 'Ticket dashboards people can share with each other',
   '/migrations/slack': 'Slack Migration tab under Migrations',
   '/scheduled-messages': 'Messages scheduled for later delivery (Inbox)',
 };
@@ -502,7 +512,13 @@ export const filterNavItemsByPermission = (
       const access = organisationsAccess(permissions, canManageOwnUserGroups);
       hasAccess = Object.values(access).some(Boolean);
     } else if (requiresAccess) {
-      if (resourceName === 'SDLC' || resourceName === 'TICKETS' || resourceName === 'SUPPORT') {
+      // Xyne Dashboards are for anyone who can view analytics; other ANALYTICS screens are admin-only.
+      if (
+        item.path === '/xyne-dashboards' ||
+        resourceName === 'SDLC' ||
+        resourceName === 'TICKETS' ||
+        resourceName === 'SUPPORT'
+      ) {
         // Any tier (READ/WRITE/ADMIN) unlocks the screen.
         hasAccess = permissions.some(p => p.resourceName === resourceName);
       } else {

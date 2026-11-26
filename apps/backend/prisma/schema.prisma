@@ -2855,6 +2855,7 @@ model Activity {
   pullRequestId   String?  // FK to pull_requests.id (optional, present only for PR-related ticket activities)
   canvasId        String?  // FK to canvas.id for canvas mention activities (no constraint)
   savedViewId     String?  // FK to saved_user_configurations.id for view-share activities (no constraint)
+  dashboardId     String?  // FK to dashboards.id for Xyne Dashboards share activities (no constraint)
   trackId         String?  // FK to sdlc_tracks.id (no constraint)
   blockId         String?  // Block ID within the canvas for canvas mention activities
   actorId         String  // User who performed the action (no FK constraint)
@@ -2891,6 +2892,7 @@ model Activity {
   @@index([callId]) // Fast lookup by call
   @@index([ticketId]) // Fast lookup by ticket
   @@index([savedViewId]) // Fast lookup by saved view
+  @@index([dashboardId]) // Fast lookup by dashboard
   @@index([channelId]) // Fast lookup by channel
   @@index([conversationId, userId]) // Fast lookup for reply batching
   @@index([actorId])
@@ -4083,6 +4085,27 @@ model Dashboard {
   updatedAt    DateTime @updatedAt
 
   @@map("dashboards")
+  @@schema("public")
+}
+
+/// Who a dashboard is shared with. The creator is its owner and has no row here.
+/// One row per audience: a person (USER, principalId = user id), a channel's current members
+/// (CHANNEL, principalId = channel id) or everyone in the workspace (WORKSPACE, principalId =
+/// workspace id). role is EDITOR or VIEWER; channel and workspace shares are VIEWER only.
+model DashboardShare {
+  workspaceId   String // denormalized tenant key (stamped on insert)
+  id            String   @id @default(cuid())
+  dashboardId   String
+  principalType String // USER | CHANNEL | WORKSPACE
+  principalId   String
+  role          String // EDITOR | VIEWER
+  createdBy     String
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([dashboardId, principalType, principalId])
+  @@index([principalType, principalId])
+  @@map("dashboard_shares")
   @@schema("public")
 }
 

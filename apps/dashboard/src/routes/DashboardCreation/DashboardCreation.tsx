@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useZero } from '../../hooks/useZero';
 import { queries } from '../../zero/queries';
@@ -12,6 +12,7 @@ import type { Dashboard as DashboardType } from '@xyne/shared';
 import { useAuth } from '../../hooks/useAuth';
 import { useCachedQuery } from '../../../src/hooks/useCachedQuery';
 import { usePlatform } from '../../hooks/usePlatform';
+import { useUsers } from '../../hooks/useUsers';
 
 export const DashboardCreation: React.FC = () => {
   const zero = useZero();
@@ -39,18 +40,99 @@ export const DashboardCreation: React.FC = () => {
         timestamp: Date.now(),
       }),
     );
-    void navigate(`/analytics-dashboard/${dashboardId}`);
+    void navigate(`/xyne-dashboards/${dashboardId}`);
   };
 
   const handleSelectDashboard = (dashboard: DashboardType): void => {
-    void navigate(`/analytics-dashboard/${dashboard.id}`);
+    void navigate(`/xyne-dashboards/${dashboard.id}`);
   };
 
   const handleDeleteDashboard = (dashboardId: string): void => {
     void zero.mutate(mutators.dashboard.delete({ id: dashboardId }));
   };
 
-  const dashboardList = dashboards || [];
+  const allUsers = useUsers();
+  const usersById = useMemo(() => new Map(allUsers.map(u => [u.id, u])), [allUsers]);
+
+  // Zero syncs only dashboards the user owns or that are shared with them.
+  const { mine, shared } = useMemo(() => {
+    const list = dashboards ?? [];
+    return {
+      mine: list.filter(d => d.createdBy === user?.id),
+      shared: list.filter(d => d.createdBy !== user?.id),
+    };
+  }, [dashboards, user?.id]);
+  const dashboardList = dashboards ?? [];
+
+  const renderCard = (dashboard: DashboardType, isOwn: boolean): React.ReactElement => (
+    <div key={dashboard.id} className='p-4 bg-muted rounded-lg hover:bg-muted transition-colors'>
+      <div className='flex items-start justify-between mb-2'>
+        <button
+          onClick={() => handleSelectDashboard(dashboard)}
+          className='flex-1 text-left'
+          data-track-category='Dashboards'
+          data-track-name='SelectDashboard'
+          data-track-metadata={JSON.stringify({
+            dashboardId: dashboard.id,
+            dashboardName: dashboard.name,
+          })}
+        >
+          <h3 className='text-md font-medium text-foreground'>{dashboard.name}</h3>
+        </button>
+        {/* Only the owner can delete a dashboard. */}
+        {isOwn && (
+          <button
+            aria-label={`Delete ${dashboard.name}`}
+            onClick={() => void handleDeleteDashboard(dashboard.id)}
+            className='p-1 text-muted-foreground hover:text-red-500'
+            data-track-category='Dashboards'
+            data-track-name='DeleteDashboard'
+            data-track-metadata={JSON.stringify({ dashboardId: dashboard.id })}
+          >
+            <Trash2 className='w-4 h-4' />
+          </button>
+        )}
+      </div>
+      <p className='text-sm text-muted-foreground mb-1'>
+        {dashboard.description || 'No description'}
+      </p>
+      {!isOwn && (
+        <p className='text-xs text-muted-foreground mb-3'>
+          Owner: {usersById.get(dashboard.createdBy)?.name ?? 'Unknown user'}
+        </p>
+      )}
+      <button
+        onClick={() => handleSelectDashboard(dashboard)}
+        className='text-sm text-blue-600 hover:text-blue-800 mt-2'
+        data-track-category='Dashboards'
+        data-track-name='OpenDashboard'
+        data-track-metadata={JSON.stringify({ dashboardId: dashboard.id })}
+      >
+        Open Dashboard →
+      </button>
+    </div>
+  );
+
+  const renderSection = (
+    title: string,
+    items: DashboardType[],
+    isOwn: boolean,
+    dotClass: string,
+  ): React.ReactElement | null =>
+    items.length === 0 ? null : (
+      <section className='space-y-4'>
+        <h3 className='text-md font-medium text-foreground mb-3 flex items-center gap-2'>
+          <span className={`w-2 h-2 rounded-full ${dotClass}`} />
+          {title}
+          <span className='text-sm text-muted-foreground font-normal'>
+            ({items.length} dashboard{items.length !== 1 ? 's' : ''})
+          </span>
+        </h3>
+        <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4'>
+          {items.map(d => renderCard(d, isOwn))}
+        </div>
+      </section>
+    );
 
   return (
     <div className='flex h-full bg-background md:rounded-2xl shadow-sm overflow-hidden'>
@@ -112,65 +194,15 @@ export const DashboardCreation: React.FC = () => {
             <div className='bg-muted p-4 rounded-full mb-4'>
               <LayoutDashboard className='w-12 h-12 text-muted-foreground' />
             </div>
-            <h3 className='text-lg font-medium text-foreground mb-2'>No Dashboards Created</h3>
+            <h3 className='text-lg font-medium text-foreground mb-2'>No dashboards yet</h3>
             <p className='text-muted-foreground'>
-              Create your first dashboard to start building queries
+              Create a dashboard, or ask a teammate to share one with you
             </p>
           </div>
         ) : (
-          <div className='space-y-4'>
-            <h3 className='text-md font-medium text-foreground mb-3 flex items-center gap-2'>
-              <span className='w-2 h-2 bg-blue-500 rounded-full' />
-              All Dashboards
-              <span className='text-sm text-muted-foreground font-normal'>
-                ({dashboardList.length} dashboard{dashboardList.length !== 1 ? 's' : ''})
-              </span>
-            </h3>
-            <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4'>
-              {dashboardList.map(dashboard => (
-                <div
-                  key={dashboard.id}
-                  className='p-4 bg-muted rounded-lg hover:bg-muted transition-colors'
-                >
-                  <div className='flex items-start justify-between mb-2'>
-                    <button
-                      onClick={() => handleSelectDashboard(dashboard)}
-                      className='flex-1 text-left'
-                      data-track-category='Dashboards'
-                      data-track-name='SelectDashboard'
-                      data-track-metadata={JSON.stringify({
-                        dashboardId: dashboard.id,
-                        dashboardName: dashboard.name,
-                      })}
-                    >
-                      <h3 className='text-md font-medium text-foreground'>{dashboard.name}</h3>
-                    </button>
-                    <button
-                      aria-label={`Delete ${dashboard.name}`}
-                      onClick={() => void handleDeleteDashboard(dashboard.id)}
-                      className='p-1 text-muted-foreground hover:text-red-500'
-                      data-track-category='Dashboards'
-                      data-track-name='DeleteDashboard'
-                      data-track-metadata={JSON.stringify({ dashboardId: dashboard.id })}
-                    >
-                      <Trash2 className='w-4 h-4' />
-                    </button>
-                  </div>
-                  <p className='text-sm text-muted-foreground mb-3'>
-                    {dashboard.description || 'No description'}
-                  </p>
-                  <button
-                    onClick={() => handleSelectDashboard(dashboard)}
-                    className='text-sm text-blue-600 hover:text-blue-800'
-                    data-track-category='Dashboards'
-                    data-track-name='OpenDashboard'
-                    data-track-metadata={JSON.stringify({ dashboardId: dashboard.id })}
-                  >
-                    Open Dashboard →
-                  </button>
-                </div>
-              ))}
-            </div>
+          <div className='space-y-8'>
+            {renderSection('My dashboards', mine, true, 'bg-blue-500')}
+            {renderSection('Shared with me', shared, false, 'bg-green-500')}
           </div>
         )}
       </div>

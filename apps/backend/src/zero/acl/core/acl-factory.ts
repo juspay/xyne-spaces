@@ -100,6 +100,7 @@ import { EntityAccessACL } from '../tables/entity-access-acl';
 import { SummaryTemplatesACL } from '../tables/summary-templates-acl';
 import { DashboardQueriesMappingACL } from '../tables/dashboard-queries-mapping-acl';
 import { DashboardsACL } from '../tables/dashboards-acl';
+import { DashboardSharesACL } from '../tables/dashboard-shares-acl';
 import { EmailDraftsACL } from '../tables/email-drafts-acl';
 import { EmailsACL } from '../tables/emails-acl';
 import { ImpactsACL } from '../tables/impacts-acl';
@@ -397,6 +398,8 @@ export class ACLFactory {
         return new DashboardQueriesMappingACL(ctx);
       case 'dashboards':
         return new DashboardsACL(ctx);
+      case 'dashboard_shares':
+        return new DashboardSharesACL(ctx);
       case 'email_drafts':
         return new EmailDraftsACL(ctx);
       case 'emails':
