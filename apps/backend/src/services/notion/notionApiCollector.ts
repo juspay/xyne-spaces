@@ -462,12 +462,12 @@ export class NotionApiCollector {
           this.warnings.push(`A database view ("${v.title || 'linked view'}") points to a database not shared with the integration`);
           return `> 🗂️ Notion database view${v.title ? ` "${v.title}"` : ''} — its source database wasn't shared with the import, so it wasn't migrated.\n\n`;
         }
-        return `[${title}](${notionRef(id)})\n\n`;
+        return `[${mdText(title)}](${notionRef(id)})\n\n`;
       }
       case 'link_to_page': {
         const id = bare(v.page_id ?? v.database_id ?? '');
         if (!id) return '';
-        return `[${ctx.items.get(id)?.title ?? 'Linked page'}](${notionRef(id)})\n\n`;
+        return `[${mdText(ctx.items.get(id)?.title ?? 'Linked page')}](${notionRef(id)})\n\n`;
       }
       case 'image':
       case 'file':
@@ -475,16 +475,20 @@ export class NotionApiCollector {
       case 'video':
       case 'audio': {
         const caption = plain(v.caption ?? []);
-        if (v.type === 'external') return block.type === 'image' ? `![${caption}](${v.external.url})\n\n` : `[${caption || v.external.url}](${v.external.url})\n\n`;
+        if (v.type === 'external') {
+          const url = mdUrl(v.external.url);
+          return block.type === 'image' ? `![${mdText(caption)}](${url})\n\n` : `[${mdText(caption || v.external.url)}](${url})\n\n`;
+        }
         const local = await this.download(v.file?.url, v.name ?? caption, ctx);
         if (!local) return `> ⚠️ A ${block.type} could not be downloaded from Notion.\n\n`;
         const href = relHref(ctx.fileDir, local);
-        return block.type === 'image' ? `![${caption || path.basename(local)}](${href})\n\n` : `[${caption || path.basename(local)}](${href})\n\n`;
+        const label = mdText(caption || path.basename(local));
+        return block.type === 'image' ? `![${label}](${href})\n\n` : `[${label}](${href})\n\n`;
       }
       case 'bookmark':
       case 'embed':
       case 'link_preview':
-        return v.url ? `[${plain(v.caption ?? []) || v.url}](${v.url})\n\n` : '';
+        return v.url ? `[${mdText(plain(v.caption ?? []) || v.url)}](${mdUrl(v.url)})\n\n` : '';
       case 'table_of_contents':
       case 'breadcrumb':
         return '';
@@ -543,7 +547,11 @@ const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 const errorText = (error: unknown) => (error instanceof Error ? error.message : String(error));
 const bare = (id: string) => id.replace(/-/g, '');
 const safeName = (s: string) => (s || 'Untitled').replace(/[/\\:*?"<>|\n\r]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120) || 'Untitled';
-const relHref = (fromDir: string, toFile: string) => path.relative(fromDir, toFile).split(path.sep).map(encodeURIComponent).join('/');
+const relHref = (fromDir: string, toFile: string) => path.relative(fromDir, toFile).split(path.sep).map(seg => mdUrl(encodeURIComponent(seg))).join('/');
+/** Notion text is text: escape what Markdown would read as links or formatting (a typed "[x](../..)" stays text). */
+const mdText = (s: string) => s.replace(/[\\`*_~[\]<>]/g, '\\$&');
+/** A link target the Markdown link syntax can't misread: no spaces or parentheses. */
+const mdUrl = (u: string) => u.replace(/[\s()]/g, c => `%${c.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')}`);
 const plain = (rt: Json[]) => (rt ?? []).map((t: Json) => t.plain_text ?? '').join('');
 const csvCell = (s: string) => (/[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s);
 
@@ -566,7 +574,7 @@ function richText(rt: Json[]): string {
     if (t.type === 'mention') {
       const m = t.mention;
       const id = bare(m.page?.id ?? m.database?.id ?? '');
-      if (id) return `[${s}](${notionRef(id)})`;
+      if (id) return `[${mdText(s)}](${notionRef(id)})`;
       if (m.type === 'user' && m.user?.id) return userMentionToken(bare(m.user.id));
       return s; // @date and other mentions come through as their display text
     }
@@ -575,7 +583,7 @@ function richText(rt: Json[]): string {
     else {
       const lead = s.match(/^\s*/)![0];
       const trail = s.match(/\s*$/)![0];
-      let core = s.trim();
+      let core = mdText(s.trim());
       if (core) {
         if (a.bold) core = `**${core}**`;
         if (a.italic) core = `*${core}*`;
@@ -584,7 +592,7 @@ function richText(rt: Json[]): string {
       s = lead + core + trail;
     }
     const href = notionPageHref(t.href ?? t.text?.link?.url);
-    return href ? `[${s}](${href})` : s;
+    return href ? `[${s}](${href.startsWith(NOTION_REF_PREFIX) ? href : mdUrl(href)})` : s;
   }).join('');
 }
 

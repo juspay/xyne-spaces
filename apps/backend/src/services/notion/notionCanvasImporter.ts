@@ -344,7 +344,7 @@ export async function importNotionTree(root: string, target: NotionImportTarget,
 
       const parent = node.parentRelPath ? byPath.get(node.parentRelPath) : undefined;
       if (parent?.canvasId) {
-        markdown = `↑ [${parent.title}](${canvasPath(parent.canvasId, target.workspaceId)})\n\n${markdown}`;
+        markdown = `↑ [${mdText(parent.title)}](${canvasPath(parent.canvasId, target.workspaceId)})\n\n${markdown}`;
       }
 
       const parsed = await convertMarkdownToBlockNote(markdown);
@@ -495,7 +495,7 @@ async function pageToMarkdown(
   let md = raw.replace(/^#\s+.*\n+/, ''); // leading "# Title" is the canvas title already
   const dir = path.dirname(node.relPath);
   const replacements: Array<[string, string]> = [];
-  for (const m of md.matchAll(/(!?)\[([^\]]*)\]\(([^)\s]+)\)/g)) {
+  for (const m of md.matchAll(/(!?)\[((?:\\.|[^\]\\])*)\]\(([^)\s]+)\)/g)) {
     const [whole, bang, label, href] = m;
     // Notion page references → always an internal route.
     if (href.startsWith(NOTION_REF_PREFIX)) {
@@ -559,7 +559,7 @@ async function databaseToMarkdown(
   const rows = parseCsv(raw.replace(/^\uFEFF/, ''));
   if (rows.length === 0) return '_Empty database._';
   const [header, ...body] = rows;
-  const cell = (v: string) => v.replace(/\|/g, '\\|').replace(/\n/g, ' ').replace(/ \([^)]*[0-9a-f]{32}[^)]*\)/gi, '');
+  const cell = (v: string) => mdText(v.replace(/ \([^)]*[0-9a-f]{32}[^)]*\)/gi, '')).replace(/\|/g, '\\|').replace(/\n/g, ' ');
   const table = [
     `> 🗂️ Imported from a Notion database (${body.length} rows). Typed properties, views, relations and rollups are not supported in Canvas yet — this is a static snapshot.`,
     '',
@@ -581,7 +581,7 @@ async function databaseToMarkdown(
       continue;
     }
     const content = demoteHeadings((await pageToMarkdown(rowRaw, row, root, resolveRef, canvasId, target, summary)).trim());
-    if (content) sections.push(`## ${row.title}\n\n${content}`);
+    if (content) sections.push(`## ${mdText(row.title)}\n\n${content}`);
   }
   return [...table, ...(sections.length ? ['', '---', '', sections.join('\n\n')] : [])].join('\n');
 }
@@ -1023,3 +1023,5 @@ const uniqueIds = (ids: Array<string | undefined | null>): string[] => [...new S
 const exists = (p: string) => fs.stat(p).then(() => true, () => false);
 const sha = (s: string | Buffer) => crypto.createHash('sha256').update(s).digest('hex');
 const safeDecode = (s: string) => { try { return decodeURIComponent(s); } catch { return s; } };
+/** Text in a Markdown label or heading: escape what would end or restyle it. */
+const mdText = (s: string) => s.replace(/[\\`*_~[\]<>]/g, '\\$&');
