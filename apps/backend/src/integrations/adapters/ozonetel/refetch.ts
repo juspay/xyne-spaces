@@ -1,7 +1,9 @@
 import { ExternalSource } from '@prisma/client';
 import { db } from '@/database/client';
-import { ozonetelConfigService } from '@/services/ozonetel/ozonetelConfigService';
+import type { OzonetelCredentials } from '@/services/ozonetel/ozonetelProvider';
 import { ozonetelService } from '@/services/ozonetel/ozonetelService';
+import { callConnectionService } from '@/services/telephony/callConnectionService';
+import { deskCallSettingsService } from '@/services/telephony/deskCallSettingsService';
 import { IST_OFFSET_MS } from '@/utils/dateUtils';
 import { logger } from '@/utils/logger';
 import { BaseRefetch, RefetchOptions, RefetchResult } from '../../core/baseRefetch';
@@ -92,6 +94,7 @@ function callIdOf(body: Record<string, unknown>): string {
 /** Ingests only calls we have no record of; calls that already arrived live are left untouched. */
 async function pullCalls(
   source: ExternalSource,
+  credentials: OzonetelCredentials,
   windows: CdrWindow[],
   keep?: (body: Record<string, unknown>) => boolean,
 ): Promise<RefetchResult> {
@@ -103,7 +106,7 @@ async function pullCalls(
     if (index > 0) await sleep(CDR_REQUEST_GAP_MS);
     let rows: Record<string, unknown>[];
     try {
-      rows = await ozonetelService.fetchCallDetails({ workspaceId: source.workspaceId, ...window });
+      rows = await ozonetelService.fetchCallDetails(credentials, window);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       logger.error(`${TAG} call details fetch failed`, {
@@ -168,19 +171,23 @@ export class OzonetelRefetch extends BaseRefetch {
     if (!options?.startDate || !options?.endDate) {
       throw new Error(`${TAG} startDate and endDate are required`);
     }
+    const connection = await callConnectionService.fromSource(source);
+    if (!connection) {
+      throw new Error(`${TAG} call connection ${source.id} is not available`);
+    }
+    const credentials = connection.credentials as OzonetelCredentials;
     const windows = splitByIstDay(Date.parse(options.startDate), Date.parse(options.endDate));
     const deskId = options.targetChannelId;
-    if (!deskId) return pullCalls(source, windows);
+    if (!deskId) return pullCalls(source, credentials, windows);
 
-    const rules = (await ozonetelConfigService.getConfig(source.workspaceId))?.ticketRules;
+    const settings = await deskCallSettingsService.listForConnection(source.workspaceId, connection.id);
+    const desk = settings.find(candidate => candidate.channelId === deskId);
     const routesToDesk = (body: Record<string, unknown>): boolean =>
-      ozonetelConfigService.resolveTargetChannelId(rules, { campaignName: text(body.CampaignName) }) === deskId;
-    const campaigns = Object.entries(rules?.campaignRouting ?? {})
-      .filter(([, channelId]) => channelId === deskId)
-      .map(([campaignName]) => campaignName);
+      deskCallSettingsService.pickDesk(settings, text(body.CampaignName))?.channelId === deskId;
+    const campaigns = desk?.routingKeys ?? [];
     // The default desk also takes unrouted campaigns, which no campaignName filter can express; with several
     // campaigns one unfiltered request per day beats one per campaign, and routesToDesk keeps the right rows.
-    const isDefaultDesk = rules?.defaultChannelId === deskId;
+    const isDefaultDesk = desk?.isDefault === true;
     if (!isDefaultDesk && campaigns.length === 0) {
       return { processed: 0, newTickets: 0, skipped: 0, errors: [] };
     }
@@ -188,6 +195,6 @@ export class OzonetelRefetch extends BaseRefetch {
       !isDefaultDesk && campaigns.length === 1
         ? windows.map(window => ({ ...window, campaignName: campaigns[0] }))
         : windows;
-    return pullCalls(source, requests, routesToDesk);
+    return pullCalls(source, credentials, requests, routesToDesk);
   }
 }

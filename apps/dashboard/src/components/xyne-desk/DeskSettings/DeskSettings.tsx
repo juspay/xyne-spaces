@@ -9,10 +9,11 @@ import { AssignmentTab } from './tabs/AssignmentTab';
 import { AutomationTab } from './tabs/AutomationTab';
 import { AIFeaturesTab } from './tabs/AIFeaturesTab';
 import { MetricsTab } from './tabs/MetricsTab';
+import { TelephonyTab } from './tabs/TelephonyTab';
 import { AuditLogSection } from '../../UserGroup/AssignmentConfigScreen/AuditLogSection';
 import { AuditEntityType } from '@xyne/shared';
 import { useCanViewAnalytics } from '../../../hooks/usePermissions';
-import { Inbox, Route, Zap, Bot, X, BarChart3, History } from 'lucide-react';
+import { Inbox, Route, Zap, Bot, X, BarChart3, History, Phone } from 'lucide-react';
 
 /** Props for the DeskSettings modal component */
 export interface DeskSettingsProps {
@@ -22,7 +23,14 @@ export interface DeskSettingsProps {
   userID: string | null | undefined;
 }
 
-export type TabId = 'inbox' | 'assignment' | 'automation' | 'Agent' | 'metrics' | 'history';
+export type TabId =
+  | 'inbox'
+  | 'assignment'
+  | 'telephony'
+  | 'automation'
+  | 'Agent'
+  | 'metrics'
+  | 'history';
 
 /** Configuration for a single settings tab */
 export interface TabConfig {
@@ -40,6 +48,7 @@ export interface DeskSignature {
 export const DESK_SETTINGS_TABS: { id: TabId; label: string; icon: React.ElementType }[] = [
   { id: 'inbox', label: 'Inbox', icon: Inbox },
   { id: 'assignment', label: 'Assignment & Routing', icon: Route },
+  { id: 'telephony', label: 'Telephony', icon: Phone },
   { id: 'automation', label: 'Automations', icon: Zap },
   { id: 'Agent', label: 'Agent', icon: Bot },
   { id: 'metrics', label: 'Metrics', icon: BarChart3 },
@@ -79,6 +88,7 @@ export const DeskSettings: React.FC<DeskSettingsProps> = ({ open, onClose, chann
     isEmail,
     isSocial,
     isCall,
+    isApp,
     isDirty,
     saving,
     save,
@@ -102,14 +112,16 @@ export const DeskSettings: React.FC<DeskSettingsProps> = ({ open, onClose, chann
   }, [isDirty, onClose]);
 
   const availableTabs = useMemo(() => {
-    const tabs = canViewHistory
+    const visible = canViewHistory
       ? DESK_SETTINGS_TABS
       : DESK_SETTINGS_TABS.filter(tab => tab.id !== 'history');
+    // Only call and app desks use a call connection.
+    const tabs = isCall || isApp ? visible : visible.filter(tab => tab.id !== 'telephony');
     if (isCall) {
-      return tabs.filter(tab => ['assignment', 'Agent', 'history'].includes(tab.id));
+      return tabs.filter(tab => ['assignment', 'telephony', 'Agent', 'history'].includes(tab.id));
     }
     return isEmail || isSocial ? tabs : tabs.filter(tab => tab.id !== 'automation');
-  }, [isCall, isEmail, isSocial, canViewHistory]);
+  }, [isCall, isApp, isEmail, isSocial, canViewHistory]);
 
   useEffect(() => {
     if (!availableTabs.some(tab => tab.id === activeTab)) {
@@ -217,6 +229,7 @@ export const DeskSettings: React.FC<DeskSettingsProps> = ({ open, onClose, chann
                       <InboxTab channelId={channelId} form={form} signatures={signatures} />
                     )}
                     {activeTab === 'assignment' && <AssignmentTab form={form} />}
+                    {activeTab === 'telephony' && <TelephonyTab form={form} />}
                     {activeTab === 'Agent' && (
                       <AIFeaturesTab
                         channelId={channelId}
