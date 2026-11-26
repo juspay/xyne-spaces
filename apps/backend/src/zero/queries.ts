@@ -3404,6 +3404,21 @@ export const queries: AnyQueryRegistry = defineQueries({
       );
     }
   ),
+ 
+  starredCanvases: defineQuery(z.object({}), ({ ctx }) => {
+    return zql.canvas_user_status
+      .where('userId', ctx.userID)
+      .where('isStarred', true)
+      .whereExists('canvas', canvas =>
+        applyCanvasVisibilityQueryFilter(canvas.where('docType', DocType.Canvas), ctx.userID),
+      )
+      .related('canvas', canvas =>
+        includeCurrentUserCanvasStatus(canvas.related('participants'), ctx.userID),
+      )
+      // Most recently starred first; id is the tie-breaker so the order is stable.
+      .orderBy('updatedAt', 'desc')
+      .orderBy('id', 'desc');
+  }),
   userQuartoDocsPaginated: defineQuery(
     z.object({
       limit: z.number(),
