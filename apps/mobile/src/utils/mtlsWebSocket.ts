@@ -8,6 +8,7 @@ import {
   type NativeEventSubscription,
 } from 'react-native';
 
+import { buildApiCookieHeader, mergeCookieHeader } from './apiCookieHeader';
 import { logger, type EventType } from './logger';
 import { isProtectedSecureWebSocketHost } from './mtlsTransportPolicy';
 
@@ -120,7 +121,22 @@ function isNativeSocketNotFoundError(error: unknown): boolean {
   return message.includes('socket') && message.includes('not found');
 }
 
-function connectNativeSocket(
+/**
+ * The backend authenticates only from the workspace cookie, and the sync server forwards the
+ * upgrade request's cookies to it, so the socket has to carry them like a browser does. Neither
+ * native socket reads a cookie store: Android has none and iOS uses an ephemeral session.
+ */
+async function withJarCookies(
+  url: string,
+  headers?: Record<string, string>,
+): Promise<Record<string, string> | undefined> {
+  const jarCookies = await buildApiCookieHeader(url.replace(/^ws(s?):/i, 'http$1:'));
+  const { Cookie: explicitCookie, ...rest } = headers ?? {};
+  const cookie = mergeCookieHeader(jarCookies, explicitCookie);
+  return cookie ? { ...rest, Cookie: cookie } : rest;
+}
+
+async function connectNativeSocket(
   url: string,
   protocols: string[],
   headers?: Record<string, string>,
@@ -129,7 +145,7 @@ function connectNativeSocket(
     throw new Error('MtlsSocketModule is not available. Rebuild the native app.');
   }
 
-  const headerPayload = normalizeHeaders(headers);
+  const headerPayload = normalizeHeaders(await withJarCookies(url, headers));
   const host = getHostForDiagnostics(url);
   console.log(MTLS_WS_LOG, 'native connect', {
     host,
