@@ -57,7 +57,7 @@ const MOTION = {
 } as const;
 
 /** A tray card's slide, which its owner drives to put the card away before acting. */
-export type TrayCardMotion = Readonly<{
+type TrayCardMotion = Readonly<{
   /** 0 hidden, 1 up. */
   progress: SharedValue<number>;
   /** Slides the card away; resolves once it is gone. Later calls get the same promise. */

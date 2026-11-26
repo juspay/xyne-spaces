@@ -53,7 +53,7 @@ const CONTENT_ROUTES: Readonly<Record<ChannelInfoContentRowId, ChannelSubRoute>>
   links: '/(protected)/chat/[channelId]/links',
 };
 
-export type ChannelInfoModel = {
+type ChannelInfoModel = {
   kind: RoomKind;
   /** The bare name: the tile already says it is a channel. */
   name: string;

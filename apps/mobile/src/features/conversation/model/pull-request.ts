@@ -10,7 +10,7 @@ import {
 /** A GitHub pull request named by its link. */
 export type PullRequestRef = { owner: string; repo: string; number: number };
 
-export type PullRequestCardModel = {
+type PullRequestCardModel = {
   title: string;
   /** "#5621 · owner/repo" under the title. */
   subtitle: string;

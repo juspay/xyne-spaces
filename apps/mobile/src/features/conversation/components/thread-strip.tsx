@@ -1,7 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, type ReactElement } from 'react';
 import { Pressable, Text, type View } from 'react-native';
 import { ChevronRight } from 'lucide-react-native';
-import { useCSSVariable } from 'uniwind';
 
 import type { ChatPaintRow } from '@/src/features/chat/v2/paint/chatPaint.types';
 
@@ -19,6 +18,7 @@ import {
 import { useSelfFace } from '../hooks/use-self-face';
 import { replyCountLabel, stripRepliers, stripTime } from '../model/thread-strip';
 import { openFromThreadCardSource, registerThreadCardOpener } from '../thread-card-source';
+import { useConversationPalette } from './conversation-palette';
 import { OverlappingAvatars } from './overlapping-avatars';
 
 type ThreadStripProps = {
@@ -34,7 +34,7 @@ export const ThreadStrip = memo(function ThreadStrip({
   lastActivityAt,
   onPress,
 }: ThreadStripProps): ReactElement {
-  const subtle = useCSSVariable('--color-spaces-subtle') as string;
+  const { subtle } = useConversationPalette();
   const self = useSelfFace();
   const count = paintRow.replyPreview?.count ?? paintRow.replyCount;
   const replierIds = paintRow.replyPreview?.latestReplierIds ?? paintRow.replyPreviewUserIds;

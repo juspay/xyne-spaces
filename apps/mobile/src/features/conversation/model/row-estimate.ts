@@ -81,7 +81,7 @@ export function estimateFlatMessageHeight(
  * at the size it will draw (the first photo's shape is all the row knows), then
  * a file card per file.
  */
-export function estimateAttachmentsHeight(
+function estimateAttachmentsHeight(
   placeholder: MediaPlaceholder | null,
   bodyWidth: number,
 ): number {

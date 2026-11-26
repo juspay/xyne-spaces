@@ -53,9 +53,7 @@ export function useHoldSource(
           const inset = source.topInset;
           node.measureInWindow((x, y, width, height) => {
             onMeasured(
-              width > 0 && height > 0
-                ? { x, y: y - inset, width, height: height + inset }
-                : null,
+              width > 0 && height > 0 ? { x, y: y - inset, width, height: height + inset } : null,
             );
           });
         },

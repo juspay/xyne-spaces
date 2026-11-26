@@ -28,7 +28,7 @@ type TicketCardModel = {
 };
 
 /** What the ticket's own record adds to the paint row's preview. */
-export type TicketRecordFacts = {
+type TicketRecordFacts = {
   statusV2?: string | null | undefined;
   eta?: number | null | undefined;
 };

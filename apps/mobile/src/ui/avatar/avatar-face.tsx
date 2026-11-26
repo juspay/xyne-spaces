@@ -7,21 +7,8 @@ import { forgetProfilePictureUri, useProfilePictureUri } from '@/src/hooks/usePr
 
 import { avatarRadius } from './avatar.geometry';
 import { isGeneratedInitialsPicture } from './avatar.picture';
+import { initialsOf } from './avatar.initials';
 import type { AvatarFallbackUser } from './avatar.types';
-
-/**
- * Up to two letters, from the first two words of the name.
- *
- * Not the classic `getInitials`, which returns one. The new design draws two
- * ("RS", "KS"), and one letter in a 32px squircle reads as a placeholder
- * rather than a person.
- */
-function initialsFor(name: string): string {
-  const words = name.trim().split(/\s+/).filter(Boolean);
-  const letters = words.slice(0, 2).map(word => Array.from(word)[0] ?? '');
-  const initials = letters.join('').toUpperCase();
-  return initials.length > 0 ? initials : '?';
-}
 
 type AvatarFaceProps = {
   userId: string;
@@ -105,7 +92,7 @@ export const AvatarFace = memo(function AvatarFace({
             letterSpacing: 0.2,
           }}
         >
-          {initialsFor(displayName)}
+          {initialsOf(displayName)}
         </Text>
       ) : null}
     </View>

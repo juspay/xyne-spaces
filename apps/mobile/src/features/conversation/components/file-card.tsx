@@ -1,7 +1,6 @@
 import { memo, useCallback, type ReactElement } from 'react';
 import { Pressable, Text, View } from 'react-native';
 import { ChevronRight, File } from 'lucide-react-native';
-import { useCSSVariable } from 'uniwind';
 
 import { getFileTypeConfig } from '@/src/components/chat/file-attachment-card';
 
@@ -14,6 +13,7 @@ import {
   FILE_CARD_SHADOW,
 } from '../constants';
 import { fileCardSubtitle } from '../model/file-card';
+import { useConversationPalette } from './conversation-palette';
 
 type FileCardProps = {
   attachmentId: string;
@@ -35,8 +35,7 @@ export const FileCard = memo(function FileCard({
   timeLabel,
   onOpen,
 }: FileCardProps): ReactElement {
-  const subtle = useCSSVariable('--color-spaces-subtle') as string;
-  const muted = useCSSVariable('--color-spaces-muted') as string;
+  const { subtle, muted } = useConversationPalette();
   const typeLabel = getFileTypeConfig(mimetype, fileName).label;
   const handlePress = useCallback((): void => onOpen(attachmentId), [attachmentId, onOpen]);
 

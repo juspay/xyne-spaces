@@ -16,7 +16,7 @@ export type RowFacts = {
 
 /**
  * Rows the flat layout does not restyle. They keep the classic row because
- * their whole look is chrome Figma has not drawn for the flat layout (call
+ * their whole look is chrome the flat layout does not have (call
  * and system lines, ticket activity, recordings, flow cards), and because a
  * row with no hydrated conversation has nothing for the flat body to render
  * yet. A ticket card is drawn flat under its sender; a ticket-created notice

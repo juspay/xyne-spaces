@@ -16,7 +16,7 @@ import { scheduledPillAccessibilityLabel, scheduledPillLabel } from '../model/sc
 import { colorOf } from '../model/token-color';
 
 /**
- * The room's scheduled-message notice (Figma draws none): a quiet pill 8 above
+ * The room's scheduled-message notice: a quiet pill 8 above
  * the field, in line with it, saying when the next one sends. A tap opens the
  * scheduled list, as the classic strip does.
  */

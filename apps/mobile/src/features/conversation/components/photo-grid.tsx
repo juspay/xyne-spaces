@@ -9,7 +9,6 @@ import {
 } from 'react-native';
 import { Image } from 'expo-image';
 import { Image as ImageIcon, Play, Video } from 'lucide-react-native';
-import { useCSSVariable } from 'uniwind';
 
 import { formatAttachmentDuration } from '@/src/features/chat/v2/components/conversation-composer/attachment-layout';
 import {
@@ -34,6 +33,7 @@ import {
   SCRIM_COLOR,
 } from '../constants';
 import { mediaMetadata, photoGridLayout, type PhotoCell } from '../model/photo-grid';
+import { useConversationPalette } from './conversation-palette';
 
 /** One photo or video of a message, as the grid needs it. */
 export type PhotoGridItem = {
@@ -167,8 +167,7 @@ const PhotoGridCell = memo(function PhotoGridCell({
   hydrate,
   onOpen,
 }: PhotoGridCellProps): ReactElement {
-  const muted = useCSSVariable('--color-spaces-muted') as string;
-  const onMedia = useCSSVariable('--color-spaces-accent-foreground') as string;
+  const { muted, accentForeground: onMedia } = useConversationPalette();
   const isVideo = item.kind === 'video';
   const { uri: imageUri, error: imageError } = useMtlsImage(isVideo ? undefined : item.id, {
     enabled: hydrate,

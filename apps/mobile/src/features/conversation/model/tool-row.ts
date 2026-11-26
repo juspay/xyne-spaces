@@ -1,5 +1,5 @@
 /** What the focused card's tool row shows left of mic / Send. */
-export type ToolRowLeading = 'tools' | 'formatting' | 'none';
+type ToolRowLeading = 'tools' | 'formatting' | 'none';
 
 /**
  * Aa swaps the tools for the formatting strip. While dictating, the row gives

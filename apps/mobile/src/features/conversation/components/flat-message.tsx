@@ -91,7 +91,7 @@ const getContinuationRowStyle = ({
 }: PressableStateCallbackType): typeof CONTINUATION_ROW_STYLE =>
   pressed ? CONTINUATION_ROW_PRESSED_STYLE : CONTINUATION_ROW_STYLE;
 
-export type FlatMessageProps = {
+type FlatMessageProps = {
   paintRow: ChatPaintRow;
   conversation: ConversationItem;
   currentUser: User | undefined;

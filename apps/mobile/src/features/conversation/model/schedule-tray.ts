@@ -11,8 +11,7 @@ import { scheduleDateLabel, scheduleWhenLabel } from './schedule-time';
 export type ScheduleTrayChoiceId = SchedulePresetId | 'custom';
 
 /** A choice row; a preset carries the time it schedules for, "Custom…" none. */
-export type ScheduleTrayChoice = TrayRow<ScheduleTrayChoiceId> &
-  Readonly<{ scheduledFor: number | null }>;
+type ScheduleTrayChoice = TrayRow<ScheduleTrayChoiceId> & Readonly<{ scheduledFor: number | null }>;
 
 /** The classic presets, named for the day; their exact time goes underneath. */
 function presetTitle(id: SchedulePresetId): string {
@@ -50,7 +49,7 @@ export function scheduleTrayChoices(now: Date): readonly ScheduleTrayChoice[] {
   ];
 }
 
-export type ScheduleTrayFieldId = 'date' | 'time';
+type ScheduleTrayFieldId = 'date' | 'time';
 
 /** The custom step's two rows, each opening its picker, with the value chosen so far. */
 export function scheduleTrayFields(value: Date): readonly TrayRow<ScheduleTrayFieldId>[] {

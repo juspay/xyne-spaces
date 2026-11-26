@@ -86,7 +86,7 @@ export const BODY_GUARD_LINE_HEIGHT = MESSAGE_BODY_LINE_HEIGHT;
  * it: no avatar, no header, and its words sit this far under the last element
  * of the message before.
  */
-export const CONTINUATION_GAP = 12;
+const CONTINUATION_GAP = 12;
 /**
  * The row above keeps its bottom padding, so a continuation pulls up by the
  * difference instead of adding its own top padding (negative: it overlaps that
@@ -315,9 +315,9 @@ export const TYPING_BAR_TOOLS_SWAP_MS = 150;
 export const TYPING_BAR_TOOLS_SWAP_SCALE = 0.96;
 
 /*
- * Typing bar: edit / also send / attachments. Figma has none of these states,
- * so they follow the room's own language: 32 rows over the field, 16 in from
- * the sides like the bar, and 56 tiles inside the field.
+ * Typing bar: edit / also send / attachments, in the room's own language:
+ * 32 rows over the field, 16 in from the sides like the bar, and 56 tiles
+ * inside the field.
  */
 /** The "Editing message" strip and the "Also send" row: 32 tall, a 16 icon or 18 check 8 from the words. */
 export const TYPING_BAR_STRIP_HEIGHT = 32;
@@ -525,7 +525,7 @@ const DIVIDER_LINE_HEIGHT = 18;
 export const DIVIDER_PADDING_Y = 22;
 export const DIVIDER_HEIGHT = DIVIDER_PADDING_Y * 2 + DIVIDER_LINE_HEIGHT;
 /**
- * The date that floats over the list while it scrolls (not in Figma): the
+ * The date that floats over the list while it scrolls: the
  * divider's words on a raised chip, outlined and shadowed like the thread
  * strip so it reads as above the messages, not cut into them. 12 / 6 padding,
  * 8 from the top of the list.
@@ -766,7 +766,7 @@ export const PLAN_TAG_PADDING_Y = 2;
 export const PLAN_NOTE_PADDING_TOP = 9;
 export const PLAN_NOTE_PADDING_BOTTOM = 6;
 export const PLAN_NOTE_PADDING_X = 11;
-/** The fold chevron that ends the note (not in Figma, which draws only the open card). */
+/** The fold chevron that ends the note. */
 export const PLAN_FOLD_ICON_SIZE = 16;
 
 /**

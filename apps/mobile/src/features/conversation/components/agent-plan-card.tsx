@@ -1,7 +1,6 @@
 import { memo, useCallback, useState, type ReactElement } from 'react';
 import { Pressable, Text, View } from 'react-native';
 import { Check, ChevronDown, ChevronUp, X } from 'lucide-react-native';
-import { useCSSVariable } from 'uniwind';
 
 import {
   PLAN_CARD_RADIUS,
@@ -38,7 +37,7 @@ import {
   type AgentPlanStep,
   type AgentPlanStepState,
 } from '../model/agent-plan';
-import { colorOf } from '../model/token-color';
+import { useConversationPalette } from './conversation-palette';
 import { MessageCardFrame } from './message-card-frame';
 
 const MARK_STYLE = {
@@ -95,9 +94,8 @@ type AgentPlanCardProps = {
 export const AgentPlanCard = memo(function AgentPlanCard({
   plan,
 }: AgentPlanCardProps): ReactElement {
-  const subtle = colorOf(useCSSVariable('--color-spaces-subtle'));
   // The tick is cut out of its disc in the panel's colour; read once for every step.
-  const tickColor = colorOf(useCSSVariable('--color-spaces-background'));
+  const { subtle, background: tickColor } = useConversationPalette();
   const [folded, setFolded] = useState(() => planStartsFolded(plan));
   const canFold = plan.steps.length > 0;
   const showSteps = canFold && !folded;

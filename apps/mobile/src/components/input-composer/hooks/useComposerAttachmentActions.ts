@@ -34,7 +34,9 @@ export const useComposerAttachmentActions = (): ComposerAttachmentActions => {
 
   const remove = useCallback(
     (attachmentId: string): void => {
-      const removedAttachment = attachmentsRef.current.find(item => item.attachmentId === attachmentId);
+      const removedAttachment = attachmentsRef.current.find(
+        item => item.attachmentId === attachmentId,
+      );
       if (!removedAttachment) return;
 
       setAttachments(prev => prev.filter(item => item.attachmentId !== attachmentId));

@@ -18,13 +18,19 @@ import { flatBodyWidth } from '../model/row-estimate';
 type ConversationPalette = {
   foreground: string;
   muted: string;
+  /** Hairlines and quiet fills inside a row's cards. */
+  subtle: string;
   surface: string;
+  /** Icons and words drawn over a photo or video. */
+  accentForeground: string;
   mention: string;
   mentionSurface: string;
   mentionSelf: string;
   mentionSelfSurface: string;
   /** The "Read more" link under a folded message. */
   readMore: string;
+  /** The screen's own background, whatever the rows sit on. */
+  background: string;
   /** What the rows sit on, for anything that fades into it. */
   rowBackground: string;
   /** A code block in the words: the row's own surface inside a hairline (Figma "Code / Block"). */
@@ -64,7 +70,9 @@ export function ConversationPaletteProvider({
   const canReact = ownCanReact ?? parent?.canReact ?? true;
   const foreground = useCSSVariable('--color-spaces-foreground') as string;
   const muted = useCSSVariable('--color-spaces-muted') as string;
+  const subtle = useCSSVariable('--color-spaces-subtle') as string;
   const surface = useCSSVariable('--color-spaces-surface') as string;
+  const accentForeground = useCSSVariable('--color-spaces-accent-foreground') as string;
   const mention = useCSSVariable('--color-spaces-mention') as string;
   const mentionSurface = useCSSVariable('--color-spaces-mention-surface') as string;
   const mentionSelf = useCSSVariable('--color-spaces-mention-self') as string;
@@ -79,12 +87,15 @@ export function ConversationPaletteProvider({
     () => ({
       foreground,
       muted,
+      subtle,
       surface,
+      accentForeground,
       mention,
       mentionSurface,
       mentionSelf,
       mentionSelfSurface,
       readMore,
+      background,
       rowBackground,
       codeBlock: {
         fontFamily: MONO_FONT,
@@ -103,12 +114,15 @@ export function ConversationPaletteProvider({
     [
       foreground,
       muted,
+      subtle,
       surface,
+      accentForeground,
       mention,
       mentionSurface,
       mentionSelf,
       mentionSelfSurface,
       readMore,
+      background,
       rowBackground,
       outline,
       widthInset,

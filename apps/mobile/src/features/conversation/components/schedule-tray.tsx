@@ -48,7 +48,7 @@ const STEP = fadeScaleTransition({
 type RowColors = Readonly<{ iconColor: string; lowestColor: string }>;
 
 /**
- * The room's schedule picker (Figma draws none): the classic sheet's steps
+ * The room's schedule picker: the classic sheet's steps
  * and state in the "+" tray's card. Its props are the sheet's, so the shared
  * schedule host can draw it in the sheet's place.
  */

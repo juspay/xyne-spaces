@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, type ComponentRef, type ReactElement } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  type ComponentRef,
+  type ReactElement,
+} from 'react';
 import { AccessibilityInfo, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import Animated from 'react-native-reanimated';
 
@@ -123,12 +130,7 @@ export function BubbleList({
               key={thread.threadId}
               ref={thread.threadId === parked[0]?.threadId ? firstRef : undefined}
             >
-              <BubbleListRow
-                thread={thread}
-                width={rowWidth}
-                onOpen={onOpen}
-                onRemove={onRemove}
-              />
+              <BubbleListRow thread={thread} width={rowWidth} onOpen={onOpen} onRemove={onRemove} />
             </View>
           ))}
         </ScrollView>

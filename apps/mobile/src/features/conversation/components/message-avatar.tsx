@@ -8,9 +8,9 @@ import {
 import { getSenderAvatarFallbackUser } from '@/src/features/chat/v2/paint/chatPaintAvatarFallback';
 import type { ChatPaintRow } from '@/src/features/chat/v2/paint/chatPaint.types';
 import { AVATAR_GEOMETRY, AvatarFace, type AvatarFallbackUser } from '@/src/ui/avatar';
+import { initialsOf } from '@/src/ui/avatar/avatar.initials';
 
 import { MESSAGE_AVATAR_SIZE, SELF_FACE_INITIALS_SHARE } from '../constants';
-import { initialsOf } from '../model/initials';
 
 type MessageAvatarProps = {
   paintRow: ChatPaintRow;

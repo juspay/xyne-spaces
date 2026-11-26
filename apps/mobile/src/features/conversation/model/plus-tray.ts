@@ -26,9 +26,9 @@ function scheduleSubtitle({ offline, canSchedule }: PlusTrayComposer): string {
 
 /**
  * The tray's rows, in two cards: what can be attached, then when the message
- * goes. Attaching
- * is off while a picker is open or no slot is left; scheduling needs something
- * to send and a connection, as the send long-press does.
+ * goes. Attaching is off while a picker is open or no slot is left;
+ * scheduling needs something to send and a connection, as the send
+ * long-press does.
  */
 export function plusTraySections(state: PlusTrayComposer): readonly PlusTraySection[] {
   const attachDisabled = state.picking || state.attachmentSlotsLeft === 0;

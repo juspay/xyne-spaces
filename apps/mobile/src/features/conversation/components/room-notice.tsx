@@ -12,7 +12,7 @@ import {
 } from '../constants';
 
 /**
- * A room-wide notice in the room's type (Figma draws none): a Title line, a
+ * A room-wide notice in the room's type: a Title line, a
  * Body/Small line under it, and a surface "Try again" pill when the list can
  * retry. The list's overlay centres it and keeps it off the sides.
  */

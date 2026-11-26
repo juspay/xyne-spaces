@@ -16,7 +16,7 @@ import { isContinuationRow, type ContinuationOptions } from '../model/grouping';
 
 type MessageFacts = ReturnType<typeof useInitialMessageFacts>;
 
-export type RowFlow = {
+type RowFlow = {
   /** The lone agent plan `FlatMessage` draws as its card; null for any other message. */
   plan: AgentPlan | null;
   /**

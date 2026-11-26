@@ -27,7 +27,7 @@ const BANNER_STYLE = {
 } as const;
 
 /**
- * The offline banner over the room's typing bar (Figma draws none): a quiet
+ * The offline banner over the room's typing bar: a quiet
  * surface card on the bar's sides, the classic copy in Body/Small, and a
  * "Reconnect" text button; once back, a short "Connected" in the positive colour.
  */

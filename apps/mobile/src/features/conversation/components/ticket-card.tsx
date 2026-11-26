@@ -2,7 +2,6 @@ import { memo, useMemo, type ReactElement, type ReactNode } from 'react';
 import { Text, View } from 'react-native';
 import { Clock, Target } from 'lucide-react-native';
 import { parseTicketMd } from '@xyne/shared';
-import { useCSSVariable } from 'uniwind';
 
 import { MONO_FONT } from '@/src/features/chat/v2/components/conversation-composer/utils/markdownStyle';
 import { getSenderAvatarFallbackUser } from '@/src/features/chat/v2/paint/chatPaintAvatarFallback';
@@ -39,6 +38,7 @@ import {
   type TicketPriorityMark,
   type TicketStatusGlyph,
 } from '../model/ticket-card';
+import { useConversationPalette } from './conversation-palette';
 import { MessageCardFrame } from './message-card-frame';
 
 const STUB_STYLE = {
@@ -85,7 +85,7 @@ export const TicketCard = memo(function TicketCard({
   onPress,
   onLongPress,
 }: TicketCardProps): ReactElement {
-  const subtle = useCSSVariable('--color-spaces-subtle') as string;
+  const { subtle } = useConversationPalette();
   const record = useMemo(() => parseTicketMd(ticketMd ?? null), [ticketMd]);
   const model = useMemo(() => ticketCardModel(ticket, record), [record, ticket]);
   const assignee = getSenderAvatarFallbackUser(ticket.assignee);

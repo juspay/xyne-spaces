@@ -3,7 +3,7 @@ export type NavStateLike = Readonly<{
   index?: number | undefined;
   routes: readonly NavRouteLike[];
 }>;
-export type NavRouteLike = Readonly<{
+type NavRouteLike = Readonly<{
   key: string;
   name: string;
   params?: object | undefined;

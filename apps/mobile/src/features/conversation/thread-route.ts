@@ -3,7 +3,7 @@ export const THREAD_CARD_ROUTE = '/thread/[channelId]/[threadId]';
 /** The thread inside the chat stack: the old screen, and cold notification opens. */
 export const CHAT_THREAD_ROUTE = '/chat/[channelId]/[threadId]';
 
-export type ThreadRoutePathname = typeof THREAD_CARD_ROUTE | typeof CHAT_THREAD_ROUTE;
+type ThreadRoutePathname = typeof THREAD_CARD_ROUTE | typeof CHAT_THREAD_ROUTE;
 
 /**
  * Whether threads open as the root card. Set by the app shell as it mounts,

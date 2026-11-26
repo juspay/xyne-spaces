@@ -2,6 +2,7 @@ import { memo, useCallback, type ReactElement } from 'react';
 import { View } from 'react-native';
 import { usePendingStatusByMessageId } from '@xyne/shared/messages';
 
+import { useLatestRef } from '@/src/components/input-composer/utils/use-latest-ref';
 import type { ThreadMessageRowProps } from '@/src/features/chat/v2/components/chat/chat-renderers';
 import { useInitialMessageFacts } from '@/src/features/chat/v2/components/chat/chat-message-list-row';
 
@@ -58,10 +59,16 @@ export const ConversationThreadMessageRow = memo(function ConversationThreadMess
     plan,
   };
   const { rowRef, registerHold } = useFlatHoldCopy(flatProps);
+  // The thread list hands over fresh handlers on every reply; read them through
+  // a ref so the memoized message underneath keeps its props and skips the render.
+  const handlers = useLatestRef({ onPress, onLongPress, onTicketPress });
+  const handlePress = useCallback((): void => handlers.current.onPress(), [handlers]);
+  const handleTicketPress = useCallback((): void => handlers.current.onTicketPress?.(), [handlers]);
+  const messageId = paintRow.messageId;
   const handleHold = useCallback((): void => {
-    registerHold(paintRow.messageId);
-    onLongPress?.();
-  }, [onLongPress, paintRow.messageId, registerHold]);
+    registerHold(messageId);
+    handlers.current.onLongPress?.();
+  }, [handlers, messageId, registerHold]);
 
   if (!isRestyledRow(paintRow, { isFlowJson: isClassicFlow })) return classicContent;
 
@@ -75,9 +82,9 @@ export const ConversationThreadMessageRow = memo(function ConversationThreadMess
       <FlatMessage
         {...flatProps}
         rowRef={rowRef}
-        onPress={onPress}
+        onPress={handlePress}
         onLongPress={onLongPress ? handleHold : undefined}
-        onTicketPress={onTicketPress}
+        onTicketPress={onTicketPress ? handleTicketPress : undefined}
       />
     </View>
   );
