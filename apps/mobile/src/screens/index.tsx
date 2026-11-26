@@ -1,10 +1,12 @@
 /**
- * EnrollmentScreen - QR-based certificate enrollment
+ * EnrollmentScreen - two-QR certificate enrollment
  *
- * This build uses the single-QR enrollment flow:
- * 1. Scan the enrollment payload displayed on the laptop
- * 2. Generate the keypair + CSR on-device and submit it with the QR token
- * 3. Store the returned certificate and CA chain in the TEE
+ * 1. Generate the keypair + CSR on-device and show the CSR as a QR code
+ * 2. The enrollment page scans it, signs it and shows the certificate as a QR code
+ * 3. Scan that QR and store the certificate (and CA chain, when given) in the TEE
+ *
+ * The CSR is kept until enrollment ends or is cancelled from the CSR QR screen: a certificate the
+ * page already signed only matches the key generated for that CSR.
  */
 
 import { useState, useEffect, useRef } from 'react';
@@ -15,29 +17,36 @@ import { UnifiedCertificateService, type CSRResult } from '../modules/certificat
 import { checkEnrollmentAndHealthStatus } from '../services/EnrollmentStatusService';
 import {
   EnrollmentFlowError,
-  submitCSRWithToken,
-  validateEnrollmentQrPayload,
+  buildCsrQrData,
+  parseCertificateQrPayload,
 } from '../services/EnrollmentAPIService';
 import {
-  flushSingleQrEnrollmentLogs,
-  logSingleQrEnrollment,
-  type SingleQrEnrollmentStage,
+  flushQrEnrollmentLogs,
+  logQrEnrollment,
+  type QrEnrollmentStage,
 } from '../services/enrollmentTelemetry';
 import { useEnrollment } from '../contexts/EnrollmentContext';
-import { ENROLLMENT_ORIGINS, ENROLLMENT_PORTAL_URL } from '../config';
+import { ENROLLMENT_PORTAL_URL } from '../config';
 import { useReportStartupReady } from '../observability/logging/hooks/startup/useReportStartupReady';
 import QRScanner from './QRScanner';
+import QRDisplay from './QRDisplay';
 import EnrollmentStatus from './EnrollmentStatus';
 
 type EnrollmentStep =
-  'checking' | 'start' | 'scan_enrollment_qr' | 'submitting' | 'success' | 'error';
+  | 'checking'
+  | 'start'
+  | 'preparing'
+  | 'show_csr_qr'
+  | 'scan_cert_qr'
+  | 'storing'
+  | 'success'
+  | 'error';
 
-const FAILURE_REASON_BY_STAGE: Record<SingleQrEnrollmentStage, string> = {
+const FAILURE_REASON_BY_STAGE: Record<QrEnrollmentStage, string> = {
   screen_check: 'status_check_failed',
   enrollment: 'enrollment_failed',
-  qr_validation: 'invalid_qr',
   csr_generation: 'csr_generation_failed',
-  csr_submission: 'request_failed',
+  qr_validation: 'invalid_qr',
   certificate_storage: 'certificate_storage_failed',
   mtls_health: 'health_check_failed',
 };
@@ -49,8 +58,9 @@ interface EnrollmentScreenProps {
 export default function EnrollmentScreen({ onEnrollmentComplete }: EnrollmentScreenProps) {
   const [step, setStep] = useState<EnrollmentStep>('checking');
   const [error, setError] = useState<string>('');
+  const [csrQrData, setCsrQrData] = useState<string>('');
   const isProcessingScanRef = useRef(false);
-  const singleQrCsrRef = useRef<CSRResult | null>(null);
+  const csrRef = useRef<CSRResult | null>(null);
   const isMountedRef = useRef(true);
   useReportStartupReady('enrollment', step !== 'checking');
 
@@ -78,7 +88,7 @@ export default function EnrollmentScreen({ onEnrollmentComplete }: EnrollmentScr
     try {
       const status = await checkEnrollmentAndHealthStatus();
 
-      logSingleQrEnrollment('info', {
+      logQrEnrollment('info', {
         stage: 'screen_check',
         outcome: 'succeeded',
         duration_ms: Date.now() - startedAt,
@@ -98,60 +108,80 @@ export default function EnrollmentScreen({ onEnrollmentComplete }: EnrollmentScr
     } catch (err: unknown) {
       if (!isMountedRef.current) return;
       const errorMessage = err instanceof Error ? err.message : 'Failed to check enrollment status';
-      logSingleQrEnrollment('error', {
+      logQrEnrollment('error', {
         stage: 'screen_check',
         outcome: 'failed',
         reason: 'status_check_failed',
         duration_ms: Date.now() - startedAt,
       });
-      flushSingleQrEnrollmentLogs();
+      flushQrEnrollmentLogs();
       console.error('[EnrollmentScreen] Enrollment status check failed:', errorMessage);
       setError(errorMessage);
       setStep('error');
     }
   }
 
-  function handleStartEnrollment() {
+  function resetEnrollment() {
     setError('');
+    setCsrQrData('');
     isProcessingScanRef.current = false;
-    singleQrCsrRef.current = null;
-    logSingleQrEnrollment('info', { stage: 'enrollment', outcome: 'started' });
-    setStep('scan_enrollment_qr');
+    csrRef.current = null;
   }
 
-  async function handleEnrollmentQrScanned(data: string) {
-    if (isProcessingScanRef.current) {
+  async function handleStartEnrollment() {
+    resetEnrollment();
+    logQrEnrollment('info', { stage: 'enrollment', outcome: 'started' });
+    setStep('preparing');
+
+    const startedAt = Date.now();
+    try {
+      const csr = await UnifiedCertificateService.generateCSR();
+      if (!isMountedRef.current) return;
+
+      csrRef.current = csr;
+      setCsrQrData(buildCsrQrData(csr));
+      setStep('show_csr_qr');
+    } catch (err: unknown) {
+      if (!isMountedRef.current) return;
+
+      const errorMessage = err instanceof Error ? err.message : 'Failed to prepare enrollment';
+      logQrEnrollment('error', {
+        stage: 'csr_generation',
+        outcome: 'failed',
+        reason: FAILURE_REASON_BY_STAGE.csr_generation,
+        duration_ms: Date.now() - startedAt,
+      });
+      flushQrEnrollmentLogs();
+      console.error('[EnrollmentScreen] CSR generation failed');
+      setError(errorMessage);
+      setStep('error');
+    }
+  }
+
+  function handleCancelEnrollment() {
+    resetEnrollment();
+    logQrEnrollment('info', { stage: 'enrollment', outcome: 'cancelled' });
+    flushQrEnrollmentLogs();
+    setStep('start');
+  }
+
+  async function handleCertificateQrScanned(data: string) {
+    if (isProcessingScanRef.current || !csrRef.current) {
       return;
     }
 
     isProcessingScanRef.current = true;
-    setStep('submitting');
+    setStep('storing');
     setError('');
 
-    let currentStage: SingleQrEnrollmentStage = 'qr_validation';
+    let currentStage: QrEnrollmentStage = 'qr_validation';
     const startedAt = Date.now();
 
     try {
-      const enrollment = validateEnrollmentQrPayload(data, { trustedOrigins: ENROLLMENT_ORIGINS });
-
-      currentStage = 'csr_generation';
-      const csr = singleQrCsrRef.current ?? (await UnifiedCertificateService.generateCSR());
-      singleQrCsrRef.current = csr;
-
-      currentStage = 'csr_submission';
-      const response = await submitCSRWithToken(
-        enrollment.url,
-        enrollment.token,
-        csr.csr,
-        csr.deviceInfo,
-        { trustedOrigins: ENROLLMENT_ORIGINS },
-      );
+      const { certificate, caChain } = parseCertificateQrPayload(data);
 
       currentStage = 'certificate_storage';
-      const stored = await UnifiedCertificateService.storeCertificate(
-        response.certificate,
-        response.ca_chain || null,
-      );
+      const stored = await UnifiedCertificateService.storeCertificate(certificate, caChain);
       if (!stored) {
         throw new Error('Certificate storage failed. Please try enrollment again.');
       }
@@ -166,16 +196,16 @@ export default function EnrollmentScreen({ onEnrollmentComplete }: EnrollmentScr
         );
       }
 
-      singleQrCsrRef.current = null;
-      logSingleQrEnrollment('info', {
+      csrRef.current = null;
+      logQrEnrollment('info', {
         stage: 'enrollment',
         outcome: 'succeeded',
         duration_ms: Date.now() - startedAt,
         is_enrolled: status.isEnrolled,
         is_healthy: status.isHealthy,
-        ca_chain_present: Boolean(response.ca_chain),
+        ca_chain_present: Boolean(caChain),
       });
-      flushSingleQrEnrollmentLogs();
+      flushQrEnrollmentLogs();
       setStep('success');
       setIsEnrolled(true);
 
@@ -186,31 +216,25 @@ export default function EnrollmentScreen({ onEnrollmentComplete }: EnrollmentScr
       if (!isMountedRef.current) return;
 
       const errorMessage = err instanceof Error ? err.message : 'Failed to complete enrollment';
-      const flowError = err instanceof EnrollmentFlowError ? err : null;
-      logSingleQrEnrollment('error', {
+      const reason =
+        err instanceof EnrollmentFlowError ? err.reason : FAILURE_REASON_BY_STAGE[currentStage];
+      logQrEnrollment('error', {
         stage: currentStage,
         outcome: 'failed',
-        reason: flowError?.reason ?? FAILURE_REASON_BY_STAGE[currentStage],
-        ...(flowError?.status !== undefined && { status_code: flowError.status }),
-        ...(flowError?.code !== undefined && { error_code: flowError.code }),
+        reason,
         duration_ms: Date.now() - startedAt,
       });
-      flushSingleQrEnrollmentLogs();
+      flushQrEnrollmentLogs();
       setError(errorMessage);
-      console.error('[EnrollmentScreen] Single-QR enrollment failed:', {
-        stage: currentStage,
-        reason: flowError?.reason ?? FAILURE_REASON_BY_STAGE[currentStage],
-      });
+      console.error('[EnrollmentScreen] QR enrollment failed:', { stage: currentStage, reason });
       Alert.alert('Enrollment failed', errorMessage);
-      setStep('scan_enrollment_qr');
+      setStep('scan_cert_qr');
       isProcessingScanRef.current = false;
     }
   }
 
   function handleRetry() {
-    setError('');
-    isProcessingScanRef.current = false;
-    singleQrCsrRef.current = null;
+    resetEnrollment();
     setStep('start');
   }
 
@@ -277,8 +301,8 @@ export default function EnrollmentScreen({ onEnrollmentComplete }: EnrollmentScr
               </Text>
               <Text style={{ flex: 1, fontSize: 16, color: stepText, lineHeight: 24 }}>
                 On your VPN-connected laptop, open{' '}
-                {ENROLLMENT_PORTAL_URL ?? 'the Xyne Spaces device enrollment portal'} in a browser
-                and sign in with your work account
+                {ENROLLMENT_PORTAL_URL ?? 'the Xyne Spaces device enrollment portal'} in a browser,
+                sign in with your work account and tap the &quot;Enroll Mobile&quot; button
               </Text>
             </View>
             <View
@@ -301,8 +325,8 @@ export default function EnrollmentScreen({ onEnrollmentComplete }: EnrollmentScr
                 2
               </Text>
               <Text style={{ flex: 1, fontSize: 16, color: stepText, lineHeight: 24 }}>
-                On the page that opens after login, tap the &quot;Enroll Mobile&quot; button to
-                display the enrollment QR code
+                Tap &quot;Start Enrollment&quot; below and hold the QR code this phone shows up to
+                your laptop&apos;s webcam
               </Text>
             </View>
             <View
@@ -325,8 +349,8 @@ export default function EnrollmentScreen({ onEnrollmentComplete }: EnrollmentScr
                 3
               </Text>
               <Text style={{ flex: 1, fontSize: 16, color: stepText, lineHeight: 24 }}>
-                Tap &quot;Start Enrollment&quot; below, then point this phone&apos;s camera at the
-                QR code shown on your laptop
+                Tap &quot;Continue&quot;, then point this phone&apos;s camera at the certificate QR
+                code the page shows to finish enrollment
               </Text>
             </View>
           </View>
@@ -371,24 +395,53 @@ export default function EnrollmentScreen({ onEnrollmentComplete }: EnrollmentScr
     );
   }
 
-  if (step === 'scan_enrollment_qr') {
+  if (step === 'preparing') {
+    return (
+      <SafeAreaView style={{ flex: 1, backgroundColor: background }}>
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 }}>
+          <ActivityIndicator size='large' color={accent} />
+          <Text style={{ fontSize: 18, color: primaryText, marginTop: 20, fontWeight: '500' }}>
+            Generating your secure QR code...
+          </Text>
+          <Text style={{ fontSize: 14, color: secondaryText, marginTop: 8 }}>
+            Your key is created in this device&apos;s secure hardware
+          </Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (step === 'show_csr_qr') {
+    return (
+      <QRDisplay
+        title='Show This QR Code'
+        instruction='Hold this screen up to the webcam of the laptop showing the enrollment page. Then tap Continue and scan the certificate QR code the page shows.'
+        data={csrQrData}
+        onContinue={() => {
+          isProcessingScanRef.current = false;
+          setStep('scan_cert_qr');
+        }}
+        onCancel={handleCancelEnrollment}
+      />
+    );
+  }
+
+  if (step === 'scan_cert_qr') {
+    // Back goes to the CSR QR, not the start: the page may already have signed this CSR.
     return (
       <QRScanner
-        title='Scan Enrollment QR'
-        instruction='Scan the enrollment QR code displayed on your laptop'
-        onQRScanned={handleEnrollmentQrScanned}
+        title='Scan Signed Certificate'
+        instruction='Scan the certificate QR code shown on the enrollment page on your laptop'
+        onQRScanned={handleCertificateQrScanned}
         onCancel={() => {
           isProcessingScanRef.current = false;
-          singleQrCsrRef.current = null;
-          logSingleQrEnrollment('info', { stage: 'enrollment', outcome: 'cancelled' });
-          flushSingleQrEnrollmentLogs();
-          setStep('start');
+          setStep('show_csr_qr');
         }}
       />
     );
   }
 
-  if (step === 'submitting') {
+  if (step === 'storing') {
     return (
       <SafeAreaView style={{ flex: 1, backgroundColor: background }}>
         <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 }}>
@@ -397,7 +450,7 @@ export default function EnrollmentScreen({ onEnrollmentComplete }: EnrollmentScr
             Provisioning your certificate...
           </Text>
           <Text style={{ fontSize: 14, color: secondaryText, marginTop: 8 }}>
-            Generating the CSR and securing your device credentials
+            Securing your device credentials
           </Text>
         </View>
       </SafeAreaView>
