@@ -2,11 +2,6 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Ticket } from '@xyne/shared';
 import { queries } from '../../zero/queries';
 import { useCachedQuery } from '../../hooks/useCachedQuery';
-import {
-  ticketMatchesDynamicFieldEntries,
-  type DynamicFieldFilterEntry,
-  type FormEntityValueLike,
-} from '../../utils/board/dynamicFieldFilters';
 
 const PAGE_SIZE = 20;
 const DAY_MS = 86_400_000;
@@ -25,24 +20,21 @@ export type SupportKanbanPageBaseArgs = Omit<
 type UseSupportKanbanTicketsPageOptions = SupportKanbanPageBaseArgs & {
   stage: string;
   otherStageNames?: string[];
-  dynamicFieldEntries?: DynamicFieldFilterEntry[];
   /** Server count for this column; 0 lets an empty page stop without widening the window. */
   expectedCount?: number;
   enabled?: boolean;
 };
 
-type PageState = { key: string; limit: number; target: number; windowStep: number; anchor: number };
+type PageState = { key: string; limit: number; windowStep: number; anchor: number };
 
 const initialPageState = (key: string): PageState => ({
   key,
   limit: PAGE_SIZE,
-  target: PAGE_SIZE,
   windowStep: 0,
   anchor: Math.ceil(Date.now() / WINDOW_ANCHOR_QUANTUM_MS) * WINDOW_ANCHOR_QUANTUM_MS,
 });
 
 export const useSupportKanbanTicketsPage = ({
-  dynamicFieldEntries,
   expectedCount,
   enabled = true,
   ...args
@@ -73,36 +65,21 @@ export const useSupportKanbanTicketsPage = ({
   const hasMore = rawCount >= page.limit;
   const isWindowBounded = windowSpan !== undefined;
 
-  // Dynamic-field entries are matched client-side, so a page can come back mostly hidden.
-  // Keep raising the limit until the visible rows reach the target or the column runs out.
-  const tickets = useMemo(() => {
-    const all = (rows ?? []) as Ticket[];
-    if (!dynamicFieldEntries?.length) return all;
-    return all.filter(ticket =>
-      ticketMatchesDynamicFieldEntries(
-        (ticket as Ticket & { formEntityValues?: FormEntityValueLike[] }).formEntityValues,
-        dynamicFieldEntries,
-      ),
-    );
-  }, [rows, dynamicFieldEntries]);
+  // Custom-field filters are part of the query (typed columns), so every row returned matches.
+  const tickets = useMemo(() => (rows ?? []) as Ticket[], [rows]);
 
   useEffect(() => {
-    if (!isComplete) return;
-    if (!hasMore) {
-      // A short page inside a bounded window may just mean the window is too narrow.
-      // The step is kept across load-more, so a sparse column only climbs once.
-      if (isWindowBounded && !(rawCount === 0 && expectedCount === 0)) {
-        setState({ ...page, windowStep: page.windowStep + 1 });
-      }
+    // A short page inside a bounded window may just mean the window is too narrow.
+    // The step is kept across load-more, so a sparse column only climbs once.
+    if (!isComplete || hasMore || !isWindowBounded || (rawCount === 0 && expectedCount === 0))
       return;
-    }
-    if (tickets.length < page.target) setState({ ...page, limit: page.limit + PAGE_SIZE });
-  }, [expectedCount, hasMore, isComplete, isWindowBounded, page, rawCount, tickets.length]);
+    setState({ ...page, windowStep: page.windowStep + 1 });
+  }, [expectedCount, hasMore, isComplete, isWindowBounded, page, rawCount]);
 
   const loadMore = useCallback(() => {
     if (!isComplete || !hasMore) return;
-    setState({ ...page, limit: page.limit + PAGE_SIZE, target: tickets.length + PAGE_SIZE });
-  }, [hasMore, isComplete, page, tickets.length]);
+    setState({ ...page, limit: page.limit + PAGE_SIZE });
+  }, [hasMore, isComplete, page]);
 
   return {
     tickets,

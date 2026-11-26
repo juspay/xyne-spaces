@@ -130,7 +130,6 @@ export const SupportTicketTable = ({
     ...(conversationIdWhitelist !== undefined ? { conversationIds: conversationIdWhitelist } : {}),
     formEntityValueFieldIds: displayFieldIds,
     ...MATCH_EVERY_STAGE,
-    ...(dynamicFieldEntries ? { dynamicFieldEntries } : {}),
     ...(expectedCount !== undefined ? { expectedCount } : {}),
     enabled: !!channelId,
   });

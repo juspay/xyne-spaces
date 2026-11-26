@@ -70,7 +70,6 @@ const RECORD_SELECT = {
   dateValue: true,
   boolValue: true,
   plainValue: true,
-  actualFieldValue: true,
   items: { select: { item: true }, orderBy: { item: 'asc' } },
 } satisfies Prisma.FormEntityValuesSelect;
 
@@ -111,9 +110,9 @@ function storedColumns(fieldType: FormFieldType, value: unknown, fieldId: string
   const { dateValue, ...columns } = typed.columns;
   return {
     data: {
-      // Dual write: clients that still read actualFieldValue keep seeing current values.
-      actualFieldValue:
-        value === null || value === undefined ? Prisma.DbNull : (value as Prisma.InputJsonValue),
+      // Nothing reads the old JSON column any more. Cleared, so the backfill can't copy a stale
+      // value back over the typed columns.
+      actualFieldValue: Prisma.DbNull,
       ...columns,
       dateValue: dateValue === null ? null : new Date(dateValue),
       textHash: typed.textHashInput === null ? null : formEntityValueTextHash(typed.textHashInput),

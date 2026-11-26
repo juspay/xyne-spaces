@@ -39,7 +39,6 @@ import {
   type SupportKanbanPageBaseArgs,
   useSupportKanbanTicketsPage,
 } from '../../../routes/SupportScreen/useSupportKanbanTicketsPage';
-import type { DynamicFieldFilterEntry } from '../../../utils/board/dynamicFieldFilters';
 import { TicketCard } from '../TicketCard/TicketCard';
 import {
   DropdownMenu,
@@ -576,7 +575,6 @@ const DeskPaginatedStageList: React.FC<{
   columnKey: string;
   pageArgs: SupportKanbanPageBaseArgs;
   otherStageNames?: string[] | undefined;
-  dynamicFieldEntries?: DynamicFieldFilterEntry[] | undefined;
   onPageComplete?: ((pageArgs: SupportKanbanPageBaseArgs) => void) | undefined;
   expectedCount?: number | undefined;
   onTicketsChange?: ((columnKey: string, tickets: Ticket[]) => void) | undefined;
@@ -591,7 +589,6 @@ const DeskPaginatedStageList: React.FC<{
   columnKey,
   pageArgs,
   otherStageNames,
-  dynamicFieldEntries,
   onPageComplete,
   expectedCount,
   ...listProps
@@ -600,7 +597,6 @@ const DeskPaginatedStageList: React.FC<{
     ...pageArgs,
     stage: stage.name,
     ...(otherStageNames ? { otherStageNames } : {}),
-    ...(dynamicFieldEntries ? { dynamicFieldEntries } : {}),
     ...(expectedCount !== undefined ? { expectedCount } : {}),
   });
 
@@ -667,7 +663,6 @@ interface KanbanColumnsProps {
   };
   deskPaginationConfig?: {
     pageArgs: SupportKanbanPageBaseArgs;
-    dynamicFieldEntries?: DynamicFieldFilterEntry[] | undefined;
     onPageComplete?: (pageArgs: SupportKanbanPageBaseArgs) => void;
   };
   allKnownTickets?: Ticket[];
@@ -930,7 +925,6 @@ export const KanbanColumns: React.FC<KanbanColumnsProps> = ({
                     otherStageNames={
                       stage.id === stages[0]?.id ? stages.slice(1).map(s => s.name) : undefined
                     }
-                    dynamicFieldEntries={deskPaginationConfig.dynamicFieldEntries}
                     onPageComplete={deskPaginationConfig.onPageComplete}
                     {...(serverStageCount !== undefined ? { expectedCount: serverStageCount } : {})}
                     {...(onTicketsChange !== undefined ? { onTicketsChange } : {})}

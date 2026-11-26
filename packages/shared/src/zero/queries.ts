@@ -113,6 +113,7 @@ const kanbanTicketsPageArgsSchema = z.object({
         type: z.literal('formField'),
         fieldId: z.string(),
         fieldName: z.string().optional(),
+        // Saved views from before the type was stored can omit it; the group then only requires the field to be set.
         fieldType: z.string().optional(),
       }),
     ])
@@ -124,8 +125,7 @@ const kanbanTicketsPageArgsSchema = z.object({
     .array(z.object({
       fieldId: z.string(),
       values: z.array(z.union([z.string(), z.number(), z.boolean()])),
-      // When set, values match on the typed columns; old clients omit it and match actualFieldValue.
-      fieldType: z.string().optional(),
+      fieldType: z.string(),
     }))
     .optional(),
   filters: kanbanTicketPageFiltersSchema.optional(),
@@ -195,8 +195,8 @@ const supportDynamicFieldFiltersSchema = z
     z.object({
       fieldId: z.string(),
       values: z.array(z.union([z.string(), z.number(), z.boolean()])).optional(),
-      // When set, values match on the typed columns for this type; when omitted, the field only has to be set.
-      fieldType: z.string().optional(),
+      // Values match on the typed columns for this type; with no values or range, the field only has to be set.
+      fieldType: z.string(),
       dateRange: z.object({ start: z.number().optional(), end: z.number().optional() }).optional(),
     }),
   )
@@ -204,32 +204,16 @@ const supportDynamicFieldFiltersSchema = z
 
 type SupportDynamicFieldFilters = z.infer<typeof supportDynamicFieldFiltersSchema>;
 
-// Old clients filter on actualFieldValue, which every write still fills (dual write).
-const toActualFieldValueQueryValue = (
-  value: string | number | boolean,
-): string | number | boolean =>
-  typeof value === 'string' ? JSON.stringify(value) : value;
-
 const applySupportDynamicFieldFilters = (
   query: any,
   dynamicFieldFilters: SupportDynamicFieldFilters,
 ) => {
   if (!dynamicFieldFilters?.length) return query;
   for (const fieldFilter of dynamicFieldFilters) {
-    const { fieldId, fieldType, values } = fieldFilter;
+    const { fieldId, fieldType } = fieldFilter;
     query = query.whereExists('formEntityValues', (formEntityValue: any) => {
       const fevQuery = formEntityValue.where('entityType', 'TICKET').where('fieldId', fieldId);
-      if (fieldType) {
-        return applyTypedDynamicFieldFilter(fevQuery, { ...fieldFilter, fieldType }, null);
-      }
-      if (!values || values.length === 0) return fevQuery;
-      return fevQuery.where((helpers: any) =>
-        helpers.or(
-          ...values.map((value: string | number | boolean) =>
-            helpers.cmp('actualFieldValue', '=', toActualFieldValueQueryValue(value)),
-          ),
-        ),
-      );
+      return applyTypedDynamicFieldFilter(fevQuery, { ...fieldFilter, fieldType }, null);
     });
   }
   return query;
@@ -612,19 +596,10 @@ const applyKanbanTicketPageConditions = (
         const fevQuery = formEntityValue
           .where('entityType', 'TICKET')
           .where('fieldId', dynamicFieldFilter.fieldId);
-        if (dynamicFieldFilter.fieldType) {
-          return applyTypedDynamicFieldFilter(
-            fevQuery,
-            { fieldType: dynamicFieldFilter.fieldType, values: dynamicFieldFilter.values },
-            null,
-          );
-        }
-        return fevQuery.where((helpers: any) =>
-          helpers.or(
-            ...dynamicFieldFilter.values.map((value: string | number | boolean) =>
-              helpers.cmp('actualFieldValue', '=', toActualFieldValueQueryValue(value)),
-            ),
-          ),
+        return applyTypedDynamicFieldFilter(
+          fevQuery,
+          { fieldType: dynamicFieldFilter.fieldType, values: dynamicFieldFilter.values },
+          null,
         );
       });
     }
@@ -651,9 +626,7 @@ const applyKanbanTicketPageConditions = (
   } else if (typeof groupBy === 'object' && groupBy.type === 'formField' && formFieldValue !== undefined) {
     query = query.whereExists('formEntityValues', (formEntityValue: any) => {
       const fevQuery = formEntityValue.where('entityType', 'TICKET').where('fieldId', groupBy.fieldId);
-      if (!groupBy.fieldType) {
-        return fevQuery.where('actualFieldValue', '=', toActualFieldValueQueryValue(formFieldValue));
-      }
+      if (!groupBy.fieldType) return fevQuery;
       return applyTypedDynamicFieldFilter(fevQuery, { fieldType: groupBy.fieldType, values: [formFieldValue] }, null);
     });
   }
