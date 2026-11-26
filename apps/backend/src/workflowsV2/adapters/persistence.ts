@@ -48,6 +48,8 @@ import type {
   StepRecord,
   WorkflowContext,
   WorkflowRecord,
+  WorkflowVersionRecord,
+  WorkflowVersionSummary,
 } from '@xyne/workflow-sdk';
 import { GateCategory } from '@xyne/workflow-sdk';
 import { validateCredentialAuth, validateCredentialValues, WorkflowStatus } from '@xyne/workflow-sdk';
@@ -88,9 +90,13 @@ import {
   toExecutionRecord,
   toFolderRecord,
   toStepRecord,
+  toVersionSummary,
+  versionRowId,
+  versionRowsOf,
+  VERSION_SUMMARY_SELECT,
   toWorkflowRecord,
 } from '../utils';
-import { createExecutionTx } from '@/bypassAcl/transactions/adaptersPersistence';
+import { createExecutionTx, createWorkflowVersionTx } from '@/bypassAcl/transactions/adaptersPersistence';
 
 // ─── Adapter ─────────────────────────────────────────────────────────────────
 
@@ -134,7 +140,13 @@ export class PrismaPersistenceAdapter implements PersistenceAdapter<XyneFilter> 
 
   async getWorkflow(id: string): Promise<WorkflowRecord | null> {
     const row = await db.workflow.findFirst({ where: { id, ...WORKFLOWS_SCOPE } });
-    return row ? toWorkflowRecord(row) : null;
+    if (!row) return null;
+    // The highest version number: a snapshot row's `version`, not a column of the live row.
+    const latest = await db.workflow.aggregate({
+      where: versionRowsOf(id),
+      _max: { version: true },
+    });
+    return { ...toWorkflowRecord(row), version: latest._max.version };
   }
 
   async listWorkflows(
@@ -474,6 +486,49 @@ export class PrismaPersistenceAdapter implements PersistenceAdapter<XyneFilter> 
     await db.workflow.updateMany({ where: { id, ...WORKFLOWS_SCOPE }, data: patch });
   }
 
+  // ── Workflow versions ──────────────────────────────────────────────────────
+  // A snapshot is a `public.workflows` row of type WorkflowVersion (see constants), so the
+  // WORKFLOWS_SCOPE queries above never return one.
+
+  async listWorkflowVersions(
+    workflowId: string,
+    page?: { limit?: number; offset?: number },
+  ): Promise<WorkflowVersionSummary[]> {
+    const rows = await db.workflow.findMany({
+      where: versionRowsOf(workflowId),
+      // The config body stays in the database; the list view never shows it.
+      select: VERSION_SUMMARY_SELECT,
+      orderBy: { version: 'desc' },
+      ...(page?.limit !== undefined ? { take: page.limit } : {}),
+      ...(page?.offset !== undefined ? { skip: page.offset } : {}),
+    });
+    return rows.map(toVersionSummary);
+  }
+
+  async getWorkflowVersion(workflowId: string, version: number): Promise<WorkflowVersionRecord | null> {
+    const row = await db.workflow.findFirst({
+      where: { id: versionRowId(workflowId, version) },
+    });
+    return row ? { ...toVersionSummary(row), config: row.context ?? '' } : null;
+  }
+
+  async createWorkflowVersion(data: {
+    workflowId: string;
+    config: string;
+    metadata: string | null;
+    summary: string | null;
+    eventType: string;
+    createdByUserId?: string | null;
+    note?: string | null;
+    onlyIfNone?: boolean;
+  }): Promise<number> {
+    // The tx below is unscoped, so prove the workflow is the caller's first.
+    if (!(await this.getWorkflow(data.workflowId))) {
+      throw new Error(`createWorkflowVersion: workflow ${data.workflowId} not found`);
+    }
+    return createWorkflowVersionTx(data.workflowId, data);
+  }
+
   // ── Folders ────────────────────────────────────────────────────────────────
 
   async getFolder(id: string): Promise<FolderRecord | null> {
@@ -572,6 +627,7 @@ export class PrismaPersistenceAdapter implements PersistenceAdapter<XyneFilter> 
     sourceExecutionId?: string;
     fireAt?: Date;
     origin?: ExecutionOrigin;
+    workflowVersion?: number | null;
     attributes: ResourceAttributes<'workflow'>;
   }): Promise<string> {
     const workspaceId = requireWorkspaceId(data.attributes, 'createExecution');

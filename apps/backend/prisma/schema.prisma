@@ -486,6 +486,9 @@ model Workflow {
   scheduledAt      DateTime? // Do the deployment only after 12 AM
   folderId         String?
   summary          String?
+  /// SDK workflow versions: a snapshot is a row of workflowType `WorkflowVersion` with id
+  /// `<workflowId>:v<version>` (the primary key makes a number unique per workflow). NULL elsewhere.
+  version          Int?
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 
@@ -493,6 +496,7 @@ model Workflow {
   workflowExecutions WorkflowExecution[]
   ticket             Ticket?             @relation(fields: [ticketId], references: [id])
   deskAutoLabelRuleReferences DeskAutoLabelRuleReference[]
+
 
   @@index([ticketId])
   @@index([ticketId, createdAt, id])
@@ -525,9 +529,10 @@ model WorkflowExecution {
   ignoreDuration            Int      @default(0) // ~22 days max (PAUSED or Waiting for external input)
   mode                      String                @default("AUTOMATIC") // for agent step continuation control
   createdBy                 String?  // User ID of who created/triggered this execution
+  workflowVersion           Int?     // SDK workflow version this run is pinned to; NULL is read as v1
 
   // Relations
-  workflow                Workflow               @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  workflow                Workflow             @relation(fields: [workflowId], references: [id], onDelete: Cascade)
   parentWorkflowExecution WorkflowExecution?     @relation("WorkflowExecutionParent", fields: [parentWorkflowExecutionId], references: [id], onDelete: Restrict, onUpdate: Restrict)
   childWorkflowExecutions WorkflowExecution[]    @relation("WorkflowExecutionParent")
   workflowSteps           WorkflowStep[]

@@ -287,6 +287,7 @@ export const workflowTable = table("workflows")
     scheduledAt: number().optional(),
     folderId: string().optional(),
     summary: string().optional(),
+    version: number().optional(),
     createdAt: number(),
     updatedAt: number(),
   })
@@ -311,6 +312,7 @@ export const workflowExecutionTable = table("workflow_executions")
     ignoreDuration: number(),
     mode: string(),
     createdBy: string().optional(),
+    workflowVersion: number().optional(),
   })
   .primaryKey("id");
 
