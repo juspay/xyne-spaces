@@ -53,3 +53,23 @@ export { ROUTE_METHODS, defineRoute, routeContracts, routeSpecProblems } from '.
 export type { AnyRouteContract, RouteBody, RouteBodyInput, RouteContract, RouteDerived, RouteGroup, RouteMethod, RouteParams, RouteQuery, RouteResponse } from './api-route.js';
 export { API } from './api.js';
 export { appsSlackChatDelete, appsSlackChatDeleteBodySchema, appsSlackChatDeleteResponseSchema, appsSlackChatPostMessage, appsSlackChatPostEphemeral, appsSlackChatUpdate, appsSlackChatPostMessageClient, appsSlackChatPostEphemeralClient, appsSlackChatUpdateClient } from './contracts/appsSlack.js';
+export { appsChannelDeskConfig, appsChannelInfo, appsChannelList, appsChannelOpenDm, appsChannelUpdate } from './contracts/appsChannels.js';
+export { appsGuestsCreate, appsGuestsGet, appsGuestsToken, appsGuestsUpdate, appsUserGroupsList, appsUserInfo } from './contracts/appsUsers.js';
+export { appsCallsGet, appsCallsSummaryTemplate, appsCallsSummaryTemplates, appsTicketBoardStages, appsTicketBoards, appsTicketListBySender } from './contracts/appsCallsTickets.js';
+export {
+  appsSlackAuthTestGet,
+  appsSlackAuthTestPost,
+  appsSlackConversationsInfoGet,
+  appsSlackConversationsInfoPost,
+  appsSlackConversationsListGet,
+  appsSlackConversationsListPost,
+  appsSlackConversationsOpen,
+  appsSlackUsersInfoGet,
+  appsSlackUsersInfoPost,
+  appsSlackUsersLookupByEmailGet,
+  appsSlackUsersLookupByEmailPost,
+  appsSlackUsersConversationsGet,
+  appsSlackUsersConversationsPost,
+  appsSlackUsergroupsListGet,
+  appsSlackUsergroupsListPost,
+} from './contracts/appsSlack.js';

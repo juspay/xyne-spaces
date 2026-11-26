@@ -1,10 +1,18 @@
 import { Router } from 'express';
-import { UserGroupController } from '../controllers/userGroupController';
-import { requirePermission } from '@/middleware/requirePermission';
+import { API } from '@xyne/shared';
+import { api } from '@/framework/api';
+import { appPermission } from '../access';
+import { listUserGroups } from '../handlers/users';
 
+// Typed routes (API.apps.usergroups), served by the API router behind the contract gate.
+api.routes(API.apps.usergroups, (serve) => ({
+  list: serve('list', {
+    auth: 'app',
+    access: { permission: appPermission('usergroups:read') },
+    handle: () => listUserGroups(),
+  }),
+}));
+
+// Nothing untyped left under /api/apps/usergroups.
 const router = Router();
-const userGroupController = new UserGroupController();
-
-router.get('/list', requirePermission('usergroups:read'), userGroupController.listUserGroups);
-
 export default router;

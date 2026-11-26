@@ -7,7 +7,6 @@ import { transcriptService } from '@/services/transcriptService';
 import { convertBlockNoteToMarkdown } from '@/services/canvasService';
 import { readFromYSweet } from '@/utils/ysweetUtils';
 import { isTranscriptUnlinked } from '@/utils/transcriptUnlink';
-import { summaryTemplateService } from '@/services/summaryTemplateService';
 import { INITIATED_BY_INSTALLED_APP_ID_KEY } from '@/services/callSummaryAppEventService';
 import { logger } from '@/utils/logger';
 
@@ -61,71 +60,6 @@ export class AppCallController {
       }
     } catch (error) {
       logger.error('[AppCallController] Failed to schedule call:', error);
-      next(error);
-    }
-  };
-
-  /**
-   * GET /api/apps/calls/:callId — call detail plus participants.
-   * `scope=metadata` (the default) skips the transcript/summary presence reads.
-   */
-  getCall = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-    const { callId } = req.params;
-    try {
-      const call = await this.loadReadableCall(req, res);
-      if (!call) return;
-
-      const [participants, hasTranscript] = await Promise.all([
-        repositories.calls.findParticipantsForApps(call.externalId),
-        // An admin-unlinked transcript still sits in storage; report it as absent.
-        isTranscriptUnlinked(call) ? false : transcriptService.transcriptExists(call.externalId),
-      ]);
-
-      const metadata =
-        call.metadata && typeof call.metadata === 'object' && !Array.isArray(call.metadata)
-          ? (call.metadata as Record<string, unknown>)
-          : {};
-      const summaryCanvasId = metadata.detailedSummaryCanvasId;
-
-      res.json({
-        success: true,
-        call: {
-          callId: call.externalId,
-          title: call.title,
-          description: call.description,
-          status: call.status,
-          callType: call.callType,
-          callOrigin: call.callOrigin,
-          channelId: call.channelId,
-          createdByUserId: call.createdByUserId,
-          organizerId: call.organizerId,
-          roomLink: call.roomLink,
-          scheduledStartsAt: call.startsAt?.toISOString() ?? null,
-          scheduledEndsAt: call.endsAt?.toISOString() ?? null,
-          timezone: call.timezone,
-          startedAt: call.startedAt?.toISOString() ?? null,
-          endedAt: call.endedAt?.toISOString() ?? null,
-          durationSeconds: this.durationSeconds(call.startedAt, call.endedAt),
-          summaryTemplateId: call.summaryTemplateId,
-          hasTranscript,
-          // 'ready' | 'pending' | 'failed' on the note-taker path; regular calls
-          // only ever get the canvas pointer, so presence is the signal there.
-          summaryStatus:
-            typeof metadata.detailedSummaryStatus === 'string'
-              ? metadata.detailedSummaryStatus
-              : typeof summaryCanvasId === 'string'
-                ? 'ready'
-                : null,
-          detailedSummaryCanvasId: typeof summaryCanvasId === 'string' ? summaryCanvasId : null,
-          participants: participants.map(participant => ({
-            ...participant,
-            joinedAt: participant.joinedAt?.toISOString() ?? null,
-            leftAt: participant.leftAt?.toISOString() ?? null,
-          })),
-        },
-      });
-    } catch (error) {
-      logger.error(`[AppCallController] [${callId}] Failed to get call:`, error);
       next(error);
     }
   };
@@ -267,62 +201,6 @@ export class AppCallController {
   };
 
   /**
-   * GET /api/apps/calls/summary-templates — every template visible to the
-   * installing user: their own, workspace-public, and explicitly shared ones.
-   *
-   * Summary rows only. The prompt bodies (systemPrompt, sections,
-   * autoTriggerPrompt) are returned by the single-template route, so a list of
-   * every visible template does not hand out every prompt in the workspace.
-   */
-  listSummaryTemplates = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-    try {
-      const templates = await summaryTemplateService.list(req.user!.workspaceId, req.user!.id);
-      res.json({
-        success: true,
-        templates: templates.map(template => ({
-          id: template.id,
-          name: template.name,
-          visibility: template.visibility,
-          defaultOutlet: template.defaultOutlet,
-          version: template.version,
-          sectionCount: Array.isArray(template.sections) ? template.sections.length : 0,
-          createdBy: template.createdBy,
-          createdAt: template.createdAt,
-          canEdit: template.canEdit,
-          isSystem: template.isSystem,
-        })),
-      });
-    } catch (error) {
-      logger.error('[AppCallController] Failed to list summary templates:', error);
-      next(error);
-    }
-  };
-
-  /**
-   * GET /api/apps/calls/summary-templates/:templateId — full template detail,
-   * including the generated system prompt and section definitions. This is the
-   * only route that returns them; the list route stays summary-only.
-   */
-  getSummaryTemplate = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-    const { templateId } = req.params;
-    try {
-      const template = await summaryTemplateService.findAccessibleById(
-        templateId,
-        req.user!.workspaceId,
-        req.user!.id,
-      );
-      if (!template) {
-        res.status(404).json({ success: false, error: 'Summary template not found' });
-        return;
-      }
-      res.json({ success: true, template });
-    } catch (error) {
-      logger.error(`[AppCallController] [${templateId}] Failed to get summary template:`, error);
-      next(error);
-    }
-  };
-
-  /**
    * Resolves :callId and applies the same read check the native call-detail
    * route uses. Writes the error response itself and answers null when the
    * caller may not read the call.
@@ -394,9 +272,4 @@ export class AppCallController {
     }
   }
 
-  private durationSeconds(startedAt: Date | null, endedAt: Date | null): number | null {
-    if (!startedAt || !endedAt) return null;
-    const ms = new Date(endedAt).getTime() - new Date(startedAt).getTime();
-    return ms > 0 ? Math.round(ms / 1000) : null;
-  }
 }

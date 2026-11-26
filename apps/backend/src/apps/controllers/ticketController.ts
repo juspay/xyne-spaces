@@ -171,18 +171,6 @@ const AppDeskInboundBodySchema = z.object({
   timestamp: z.string().datetime({ offset: true, message: 'timestamp must be an ISO 8601 timestamp' }).optional(),
 });
 
-const ListBySenderQuerySchema = z.object({
-  channelIds: z.array(z.string().min(1, 'channelId must not be empty').trim()).min(1, {
-    message: 'At least one channelId is required (channelId, repeated channelId, or channelIds)',
-  }),
-  senderEmail: z.string().email('senderEmail must be a valid email').trim(),
-  limit: z
-    .string()
-    .optional()
-    .transform(val => (val ? parseInt(val, 10) : 20)),
-  cursor: z.string().optional(),
-});
-
 /**
  * Coerce a scalar-or-array query value into an array so both
  * `field: "a"` and `field: ["a","b"]` are accepted.
@@ -255,41 +243,10 @@ const SearchTicketsBodySchema = z.object({
   }
 });
 
-const ListBoardsQuerySchema = z.object({
-  projectId: z.string().min(1, 'projectId must not be empty').trim().optional(),
-});
-
-const BoardIdParamsSchema = z.object({
-  boardId: z.string().min(1, 'boardId is required').trim(),
-});
-
 const TicketConversationQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(20),
   cursor: z.string().optional(),
 });
-
-function parseListBySenderChannelIds(query: Request['query']): string[] {
-  const ids = new Set<string>();
-
-  const channelIdsParam = query.channelIds;
-  if (typeof channelIdsParam === 'string' && channelIdsParam.trim()) {
-    for (const part of channelIdsParam.split(',')) {
-      const trimmed = part.trim();
-      if (trimmed) ids.add(trimmed);
-    }
-  }
-
-  const channelIdParam = query.channelId;
-  if (Array.isArray(channelIdParam)) {
-    for (const value of channelIdParam) {
-      if (typeof value === 'string' && value.trim()) ids.add(value.trim());
-    }
-  } else if (typeof channelIdParam === 'string' && channelIdParam.trim()) {
-    ids.add(channelIdParam.trim());
-  }
-
-  return [...ids];
-}
 
 interface MerchantTicketsListCursor {
   id: string;
@@ -1114,94 +1071,6 @@ export class TicketController {
   };
 
   /**
-   * List tickets raised by an external merchant (email sender).
-   * GET /api/apps/ticket/listBySender?channelIds=id1,id2&senderEmail=...&limit=20&cursor=...
-   * Also supports repeated channelId=... or a single channelId for backward compatibility.
-   */
-  listBySender = async (req: Request, res: Response): Promise<void> => {
-    try {
-      const channelIds = parseListBySenderChannelIds(req.query);
-      const queryResult = ListBySenderQuerySchema.safeParse({
-        ...req.query,
-        channelIds,
-      });
-      if (!queryResult.success) {
-        res.status(400).json({
-          error: 'Validation error',
-          code: 'VALIDATION_ERROR',
-          details: queryResult.error.issues,
-        });
-        return;
-      }
-
-      const { channelIds: validatedChannelIds, senderEmail, limit: rawLimit, cursor } =
-        queryResult.data;
-      const limit = Math.min(Math.max(rawLimit, 1), 100);
-      const decodedCursor = decodeCursor<MerchantTicketsListCursor>(cursor);
-
-      const access = await validateChannelIdsAccess(validatedChannelIds, req.user!.id);
-      if (!access.ok) {
-        res.status(access.status).json({
-          error: access.error,
-          message: access.message,
-        });
-        return;
-      }
-
-      const normalizedSender =
-        extractEmailAddress(senderEmail) ?? senderEmail.trim().toLowerCase();
-
-      const tickets = await repositories.tickets.findTicketsByMerchantSenderEmail({
-        channelIds: validatedChannelIds,
-        senderEmail: normalizedSender,
-        limit,
-        cursor: decodedCursor
-          ? { id: decodedCursor.id, createdAt: new Date(decodedCursor.createdAt) }
-          : undefined,
-      });
-
-      const items: MerchantTicketListItem[] = tickets.map(ticket => {
-        const metadata = ticket.metadata as { reporterEmail?: string } | null;
-        return {
-          ticketId: ticket.id,
-          xyneId: ticket.xyneId,
-          title: ticket.title,
-          statusV2: ticket.statusV2,
-          stageName: ticket.stageName,
-          priority: ticket.priority,
-          createdAt: ticket.createdAt,
-          lastEmailAt: ticket.lastEmailAt,
-          conversationId: ticket.conversationId,
-          channelId: ticket.channelId,
-          senderEmail: metadata?.reporterEmail ?? normalizedSender,
-        };
-      });
-
-      const pagination = paginateResults(
-        items,
-        limit,
-        (item): MerchantTicketsListCursor => ({
-          id: item.ticketId,
-          createdAt: item.createdAt.getTime(),
-        }),
-      );
-
-      res.status(200).json({
-        items: pagination.items,
-        nextCursor: pagination.nextCursor,
-        hasMore: pagination.hasMore,
-      });
-    } catch (error) {
-      logger.error('[TicketController] listBySender error:', error);
-      if (error instanceof Error && error.message === 'Invalid cursor format') {
-        res.status(400).json({ error: error.message, code: 'VALIDATION_ERROR' });
-        return;
-      }
-      res.status(500).json({ error: 'Internal server error', code: 'INTERNAL_ERROR' });
-    }
-  };
-
-  /**
    * Search tickets with dynamic filters using a JSON body.
    * POST /api/apps/ticket/list/search
    */
@@ -1475,122 +1344,6 @@ export class TicketController {
         res.status(400).json({ error: error.message, code: 'VALIDATION_ERROR' });
         return;
       }
-      res.status(500).json({ error: 'Internal server error', code: 'INTERNAL_ERROR' });
-    }
-  };
-
-  /**
-   * List boards in the app's workspace, optionally narrowed to one project.
-   * GET /api/apps/ticket/boards?projectId=...
-   */
-  listBoards = async (req: Request, res: Response): Promise<void> => {
-    try {
-      const queryResult = ListBoardsQuerySchema.safeParse(req.query);
-      if (!queryResult.success) {
-        res.status(400).json({
-          error: 'Validation error',
-          code: 'VALIDATION_ERROR',
-          details: queryResult.error.issues,
-        });
-        return;
-      }
-
-      const workspaceId = req.user?.workspaceId;
-      if (!workspaceId) {
-        res.status(400).json({ error: 'Authenticated workspace is required', code: 'VALIDATION_ERROR' });
-        return;
-      }
-
-      const { projectId } = queryResult.data;
-      const boards = await prismaClient.board.findMany({
-        where: { workspaceId, ...(projectId ? { projectId } : {}) },
-        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
-        select: {
-          id: true,
-          name: true,
-          boardType: true,
-          description: true,
-          projectId: true,
-          createdAt: true,
-          updatedAt: true,
-        },
-      });
-
-      res.status(200).json({
-        boards: boards.map(board => ({
-          boardId: board.id,
-          name: board.name,
-          boardType: board.boardType,
-          description: board.description,
-          projectId: board.projectId,
-          createdAt: board.createdAt,
-          updatedAt: board.updatedAt,
-        })),
-      });
-    } catch (error) {
-      logger.error('[TicketController] listBoards error:', error);
-      res.status(500).json({ error: 'Internal server error', code: 'INTERNAL_ERROR' });
-    }
-  };
-
-  /**
-   * List the stages of a board, ordered by sequence.
-   * GET /api/apps/ticket/boards/:boardId/stages
-   */
-  listBoardStages = async (req: Request, res: Response): Promise<void> => {
-    try {
-      const paramsResult = BoardIdParamsSchema.safeParse(req.params);
-      if (!paramsResult.success) {
-        res.status(400).json({
-          error: 'Validation error',
-          code: 'VALIDATION_ERROR',
-          details: paramsResult.error.issues,
-        });
-        return;
-      }
-
-      const workspaceId = req.user?.workspaceId;
-      if (!workspaceId) {
-        res.status(400).json({ error: 'Authenticated workspace is required', code: 'VALIDATION_ERROR' });
-        return;
-      }
-
-      const { boardId } = paramsResult.data;
-      const board = await prismaClient.board.findFirst({
-        where: { id: boardId, workspaceId },
-        select: { id: true, name: true, projectId: true },
-      });
-      if (!board) {
-        res.status(404).json({ error: `Board with ID ${boardId} not found`, code: 'BOARD_NOT_FOUND' });
-        return;
-      }
-
-      const stages = await prismaClient.stage.findMany({
-        where: { boardId },
-        orderBy: [{ sequenceNumber: 'asc' }, { createdAt: 'asc' }],
-        select: {
-          id: true,
-          name: true,
-          sequenceNumber: true,
-          eta: true,
-          defaultTicketStatusV2: true,
-        },
-      });
-
-      res.status(200).json({
-        boardId: board.id,
-        boardName: board.name,
-        projectId: board.projectId,
-        stages: stages.map(stage => ({
-          stageId: stage.id,
-          name: stage.name,
-          sequenceNumber: stage.sequenceNumber,
-          eta: stage.eta,
-          defaultTicketStatusV2: stage.defaultTicketStatusV2,
-        })),
-      });
-    } catch (error) {
-      logger.error('[TicketController] listBoardStages error:', error);
       res.status(500).json({ error: 'Internal server error', code: 'INTERNAL_ERROR' });
     }
   };

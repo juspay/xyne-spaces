@@ -14,6 +14,19 @@ import { checkBotMessageDelete } from "@/apps/core/botMessageDelete";
 import { deleteConversationMessage } from "@/apps/core/conversationUtils";
 import { slackChannel, slackError, slackHandle } from "./access";
 import { slackChatPostEphemeral, slackChatPostMessage, slackChatUpdate } from "./chatWrite";
+import {
+	slackAuthTest,
+	slackConversationsInfo,
+	slackConversationsList,
+	slackConversationsOpen,
+	slackUsergroupsList,
+	slackUsersConversations,
+	slackUsersInfo,
+	slackUsersLookupByEmail,
+} from "./reads";
+
+/** What every Slack-compatible route has: the bot token with Slack-style answers, invalid_arguments for a bad request. */
+const slackRoute = () => ({ auth: "slack-app" as const, invalidRequest: () => slackError("invalid_arguments") });
 
 /** The bot's workspace: whose key the encrypted `text` is stored under. */
 const encryptUnderBotWorkspace = {
@@ -33,9 +46,6 @@ router.post(
 );
 
 router.use(slackAuthenticateApp);
-
-router.get("/auth.test", controller.authTest);
-router.post("/auth.test", controller.authTest);
 
 // ─── Typed routes (contracts in @xyne/shared, API.apps.slack) ──────────────────
 // Served by the API router behind the contract gate, not by this router.
@@ -86,6 +96,74 @@ api.routes(API.apps.slack, (serve) => ({
 		handle: ({ body, user, app, access, derived }) =>
 			slackHandle(() => slackChatUpdate({ body, user, app, channel: access.channel, textFacts: derived?.fields.text })),
 	}),
+	// ─── Reads: GET (query) and POST (body), as Slack answers both ───────────────
+	authTestGet: serve("authTestGet", { ...slackRoute(), handle: ({ user, app }) => slackHandle(() => slackAuthTest({ user, app })) }),
+	authTestPost: serve("authTestPost", { ...slackRoute(), handle: ({ user, app }) => slackHandle(() => slackAuthTest({ user, app })) }),
+	conversationsInfoGet: serve("conversationsInfoGet", {
+		...slackRoute(),
+		access: { permission: appPermission("channels:read"), channel: slackChannel("query") },
+		handle: ({ access }) => slackHandle(() => slackConversationsInfo({ channel: access.channel })),
+	}),
+	conversationsInfoPost: serve("conversationsInfoPost", {
+		...slackRoute(),
+		access: { permission: appPermission("channels:read"), channel: slackChannel("body") },
+		handle: ({ access }) => slackHandle(() => slackConversationsInfo({ channel: access.channel })),
+	}),
+	conversationsListGet: serve("conversationsListGet", {
+		...slackRoute(),
+		access: { permission: appPermission("channels:read") },
+		handle: ({ query }) => slackHandle(() => slackConversationsList(query)),
+	}),
+	conversationsListPost: serve("conversationsListPost", {
+		...slackRoute(),
+		access: { permission: appPermission("channels:read") },
+		handle: ({ body }) => slackHandle(() => slackConversationsList(body)),
+	}),
+	conversationsOpen: serve("conversationsOpen", {
+		...slackRoute(),
+		access: { permission: appPermission("im:write") },
+		handle: ({ body, user, app }) => slackHandle(() => slackConversationsOpen({ body, user, app })),
+	}),
+	usersInfoGet: serve("usersInfoGet", {
+		...slackRoute(),
+		access: { permission: appPermission("users:read") },
+		handle: ({ query }) => slackHandle(() => slackUsersInfo(query)),
+	}),
+	usersInfoPost: serve("usersInfoPost", {
+		...slackRoute(),
+		access: { permission: appPermission("users:read") },
+		handle: ({ body }) => slackHandle(() => slackUsersInfo(body)),
+	}),
+	usersLookupByEmailGet: serve("usersLookupByEmailGet", {
+		...slackRoute(),
+		access: { permission: appPermission("users:read") },
+		handle: ({ query, user, app }) => slackHandle(() => slackUsersLookupByEmail({ args: query, user, app })),
+	}),
+	usersLookupByEmailPost: serve("usersLookupByEmailPost", {
+		...slackRoute(),
+		access: { permission: appPermission("users:read") },
+		handle: ({ body, user, app }) => slackHandle(() => slackUsersLookupByEmail({ args: body, user, app })),
+	}),
+	usersConversationsGet: serve("usersConversationsGet", {
+		...slackRoute(),
+		access: { permission: appPermission("channels:read") },
+		handle: ({ query, user, app }) => slackHandle(() => slackUsersConversations({ args: query, user, app })),
+	}),
+	usersConversationsPost: serve("usersConversationsPost", {
+		...slackRoute(),
+		access: { permission: appPermission("channels:read") },
+		handle: ({ body, user, app }) => slackHandle(() => slackUsersConversations({ args: body, user, app })),
+	}),
+	usergroupsListGet: serve("usergroupsListGet", {
+		...slackRoute(),
+		access: { permission: appPermission("usergroups:read") },
+		handle: ({ query }) => slackHandle(() => slackUsergroupsList(query)),
+	}),
+	usergroupsListPost: serve("usergroupsListPost", {
+		...slackRoute(),
+		access: { permission: appPermission("usergroups:read") },
+		handle: ({ body }) => slackHandle(() => slackUsergroupsList(body)),
+	}),
 }));
 
 router.get(
@@ -113,44 +191,6 @@ router.post(
 	slackChannelValidation("body"),
 	controller.conversationsReplies,
 );
-
-router.get(
-	"/conversations.info",
-	requirePermission("channels:read"),
-	slackChannelValidation("query"),
-	controller.conversationsInfo,
-);
-router.post(
-	"/conversations.info",
-	requirePermission("channels:read"),
-	slackChannelValidation("body"),
-	controller.conversationsInfo,
-);
-
-router.get("/conversations.list", requirePermission("channels:read"), controller.conversationsList);
-router.post("/conversations.list", requirePermission("channels:read"), controller.conversationsList);
-
-router.post("/conversations.open", requirePermission("im:write"), controller.conversationsOpen);
-
-router.get("/users.info", requirePermission("users:read"), controller.usersInfo);
-router.post("/users.info", requirePermission("users:read"), controller.usersInfo);
-
-router.get("/users.lookupByEmail", requirePermission("users:read"), controller.usersLookupByEmail);
-router.post("/users.lookupByEmail", requirePermission("users:read"), controller.usersLookupByEmail);
-
-router.get(
-	"/users.conversations",
-	requirePermission("channels:read"),
-	controller.usersConversations,
-);
-router.post(
-	"/users.conversations",
-	requirePermission("channels:read"),
-	controller.usersConversations,
-);
-
-router.get("/usergroups.list", requirePermission("usergroups:read"), controller.usergroupsList);
-router.post("/usergroups.list", requirePermission("usergroups:read"), controller.usergroupsList);
 
 router.post(
 	"/files.upload",

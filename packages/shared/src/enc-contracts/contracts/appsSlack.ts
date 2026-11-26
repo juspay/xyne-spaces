@@ -166,3 +166,72 @@ export const appsSlackChatUpdate = defineRoute({
   response: slackOk,
   encryption: appsSlackChatUpdateClient,
 });
+
+// ─── Slack-compatible reads (auth, conversations, users, usergroups) ──────────
+// Each method answers GET (arguments in the query) and POST (arguments in the body), as Slack
+// does: one contract per method and verb, the same rules. Ids, names and profile data only.
+
+const slackListLimit = z
+  .union([z.number(), z.string()])
+  .optional()
+  .transform((val) => (val ? Number(val) : 100));
+
+const conversationsInfoArgs = z.object({ channel: z.string().min(1, 'channel is required') });
+const conversationsListArgs = z.object({ types: z.string().optional(), limit: slackListLimit, cursor: z.string().optional() });
+const usersInfoArgs = z.object({ user: z.string().min(1, 'user is required') });
+const usersLookupByEmailArgs = z.object({ email: z.string().email('email is required') });
+const usersConversationsArgs = z.object({
+  user: z.string().optional(),
+  types: z.string().optional(),
+  limit: slackListLimit,
+  cursor: z.string().optional(),
+  exclude_archived: slackBoolean.default(false),
+  team_id: z.string().optional(),
+});
+const usergroupsListArgs = z.object({
+  include_users: slackBoolean.default(false),
+  include_disabled: slackBoolean.default(false),
+  include_count: slackBoolean.default(true),
+  team_id: z.string().optional(),
+});
+
+/** A Slack read method as its GET (query) and POST (body) contracts. */
+function slackRead<A extends z.ZodType, P extends string>(path: P, args: A) {
+  return {
+    get: defineRoute({ method: 'GET', path, query: args, response: slackOk }),
+    post: defineRoute({ method: 'POST', path, body: args, response: slackOk }),
+  };
+}
+
+const authTest = slackRead('/apps/slack/auth.test', z.object({}));
+const conversationsInfo = slackRead('/apps/slack/conversations.info', conversationsInfoArgs);
+const conversationsList = slackRead('/apps/slack/conversations.list', conversationsListArgs);
+const usersInfo = slackRead('/apps/slack/users.info', usersInfoArgs);
+const usersLookupByEmail = slackRead('/apps/slack/users.lookupByEmail', usersLookupByEmailArgs);
+const usersConversations = slackRead('/apps/slack/users.conversations', usersConversationsArgs);
+const usergroupsList = slackRead('/apps/slack/usergroups.list', usergroupsListArgs);
+
+export const appsSlackAuthTestGet = authTest.get;
+export const appsSlackAuthTestPost = authTest.post;
+export const appsSlackConversationsInfoGet = conversationsInfo.get;
+export const appsSlackConversationsInfoPost = conversationsInfo.post;
+export const appsSlackConversationsListGet = conversationsList.get;
+export const appsSlackConversationsListPost = conversationsList.post;
+export const appsSlackUsersInfoGet = usersInfo.get;
+export const appsSlackUsersInfoPost = usersInfo.post;
+export const appsSlackUsersLookupByEmailGet = usersLookupByEmail.get;
+export const appsSlackUsersLookupByEmailPost = usersLookupByEmail.post;
+export const appsSlackUsersConversationsGet = usersConversations.get;
+export const appsSlackUsersConversationsPost = usersConversations.post;
+export const appsSlackUsergroupsListGet = usergroupsList.get;
+export const appsSlackUsergroupsListPost = usergroupsList.post;
+
+/** conversations.open: POST only. `users` (comma-separated) or `channel`. */
+export const appsSlackConversationsOpen = defineRoute({
+  method: 'POST',
+  path: '/apps/slack/conversations.open',
+  body: z
+    .object({ users: z.string().optional(), channel: z.string().optional(), return_im: slackBoolean })
+    .refine((data) => !!data.users || !!data.channel, { message: 'users or channel is required', path: ['users'] }),
+  response: slackOk,
+});

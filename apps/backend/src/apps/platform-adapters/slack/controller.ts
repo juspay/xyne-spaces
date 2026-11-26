@@ -12,9 +12,6 @@ import {
 	getConversationReplies,
 } from "@/apps/core/conversationUtils";
 import { ingestAttachment } from "@/apps/core/fileUtils";
-import { getAllUserGroups } from "@/apps/core/userGroupUtils";
-import { getUserData } from "@/apps/core/userUtils";
-import { unifiedDMService } from "@/bots/unified/services/unified-dm-service";
 import { repositories } from "@/database/repositories";
 import {
 	type UploadedFileResult,
@@ -31,27 +28,15 @@ import {
 } from "./middleware";
 import {
 	transformHistory,
-	transformList,
 	transformReplies,
-	transformUsersConversations,
 } from "./request-transformers/conversations";
 import { transformFilesUpload } from "./request-transformers/files";
 import {
-	transformUsersInfo,
-	transformUsersLookupByEmail,
-} from "./request-transformers/users";
-import {
 	transformHistoryResponse,
-	transformInfoResponse,
-	transformListResponse,
-	transformOpenResponse,
 	transformRepliesResponse,
-	transformUsersConversationsResponse,
 } from "./response-transformers/conversations";
 import { deriveFiletype, transformFilesUploadResponse } from "./response-transformers/files";
-import { transformUsergroupsListResponse } from "./response-transformers/usergroups";
-import { transformUsersInfoResponse } from "./response-transformers/users";
-import type { SlackAuthTestResponse, SlackFileObject } from "./types";
+import type { SlackFileObject } from "./types";
 
 // ========== Zod Schemas ==========
 
@@ -67,12 +52,6 @@ function parseJsonString(value: unknown): unknown {
 function getSlackParams(req: Request): unknown {
 	return req.method === "GET" ? req.query : req.body;
 }
-
-const SlackBooleanSchema = z.preprocess((value) => {
-	if (value === "true") return true;
-	if (value === "false") return false;
-	return value;
-}, z.boolean().optional());
 
 const SlackOptionalStringSchema = z
 	.string()
@@ -97,50 +76,6 @@ const RepliesSchema = z.object({
 		.optional()
 		.transform((val) => (val ? Number(val) : 100)),
 	cursor: z.string().optional(),
-});
-
-const ConversationsInfoSchema = z.object({
-	channel: z.string().min(1, "channel is required"),
-});
-
-const ConversationsListSchema = z.object({
-	types: z.string().optional(),
-	limit: z
-		.union([z.number(), z.string()])
-		.optional()
-		.transform((val) => (val ? Number(val) : 100)),
-	cursor: z.string().optional(),
-});
-
-const ConversationsOpenSchema = z
-	.object({
-		users: z.string().optional(),
-		channel: z.string().optional(),
-		return_im: SlackBooleanSchema,
-	})
-	.refine((data) => !!data.users || !!data.channel, {
-		message: "users or channel is required",
-		path: ["users"],
-	});
-
-const UsersInfoSchema = z.object({
-	user: z.string().min(1, "user is required"),
-});
-
-const UsersConversationsSchema = z.object({
-	user: z.string().optional(),
-	types: z.string().optional(),
-	limit: z
-		.union([z.number(), z.string()])
-		.optional()
-		.transform((val) => (val ? Number(val) : 100)),
-	cursor: z.string().optional(),
-	exclude_archived: SlackBooleanSchema.default(false),
-	team_id: z.string().optional(),
-});
-
-const UsersLookupByEmailSchema = z.object({
-	email: z.string().email("email is required"),
 });
 
 const FilesUploadSchema = z.object({
@@ -179,13 +114,6 @@ const CompleteUploadExternalSchema = z.object({
 	thread_ts: SlackOptionalStringSchema,
 });
 
-const UsergroupsListSchema = z.object({
-	include_users: SlackBooleanSchema.default(false),
-	include_disabled: SlackBooleanSchema.default(false),
-	include_count: SlackBooleanSchema.default(true),
-	team_id: z.string().optional(),
-});
-
 // ========== File Upload V2 State ==========
 
 const UPLOAD_REDIS_PREFIX = "slack_upload:";
@@ -202,32 +130,6 @@ interface FileUploadV2State {
 // ========== Controller ==========
 
 export class SlackController {
-	authTest = wrapSlackHandler(async (req: Request, res: Response) => {
-		const context = getSlackAuthContext(req);
-		const user = await repositories.users.findById(context.userId);
-		if (!user) {
-			res.status(200).json({ ok: false, error: "user_not_found" });
-			return;
-		}
-
-		const workspaceId = user.workspaceId ?? context.workspaceId ?? "";
-		const workspace = workspaceId
-			? await repositories.workspaces.findById(workspaceId)
-			: null;
-		const response: SlackAuthTestResponse = {
-			ok: true,
-			url: "",
-			team: workspace?.name ?? "",
-			user: user.name ?? user.email,
-			team_id: workspaceId,
-			user_id: user.id,
-			bot_id: context.appId,
-			is_enterprise_install: false,
-		};
-
-		res.status(200).json(response);
-	});
-
 	conversationsHistory = wrapSlackHandler(
 		async (req: Request, res: Response) => {
 			const parsed = HistorySchema.safeParse(getSlackParams(req));
@@ -277,236 +179,6 @@ export class SlackController {
 			res.status(200).json(slackResponse);
 		},
 	);
-
-	conversationsInfo = wrapSlackHandler(async (req: Request, res: Response) => {
-		const parsed = ConversationsInfoSchema.safeParse(getSlackParams(req));
-		if (!parsed.success) {
-			res.status(200).json({ ok: false, error: "invalid_arguments" });
-			return;
-		}
-
-		const channelId = getResolvedChannelId(req);
-		const channel = await repositories.channels.findById(channelId);
-		if (!channel) {
-			res.status(200).json({ ok: false, error: "channel_not_found" });
-			return;
-		}
-
-		const slackResponse = transformInfoResponse({
-			id: channel.id,
-			name: channel.name,
-			description: channel.description || undefined,
-			type: channel.type,
-			scopeType: channel.scopeType,
-			visibility: channel.visibility,
-			projectId: channel.projectId,
-			createdBy: channel.createdBy,
-			createdAt: channel.createdAt,
-			participantCount: channel.participantCount,
-		});
-		res.status(200).json(slackResponse);
-	});
-
-	conversationsList = wrapSlackHandler(async (req: Request, res: Response) => {
-		const parsed = ConversationsListSchema.safeParse(getSlackParams(req));
-		if (!parsed.success) {
-			res.status(200).json({ ok: false, error: "invalid_arguments" });
-			return;
-		}
-
-		const args = transformList(parsed.data);
-		const channels = await repositories.channels.findManyPaginated({
-			where: args.where,
-			limit: args.limit + 1,
-			cursor: args.cursor,
-		});
-
-		const hasMore = channels.length > args.limit;
-		const items = hasMore ? channels.slice(0, args.limit) : channels;
-		const slackResponse = transformListResponse({
-			items: items.map((channel) => ({
-				id: channel.id,
-				name: channel.name,
-				description: channel.description || undefined,
-				scopeType: channel.scopeType,
-				visibility: channel.visibility,
-				projectId: channel.projectId,
-				createdBy: channel.createdBy,
-				createdAt: channel.createdAt,
-			})),
-			hasMore,
-			nextCursor: hasMore ? items[items.length - 1]?.id : undefined,
-		});
-		res.status(200).json(slackResponse);
-	});
-
-	conversationsOpen = wrapSlackHandler(async (req: Request, res: Response) => {
-		const parsed = ConversationsOpenSchema.safeParse(req.body);
-		if (!parsed.success) {
-			res.status(200).json({ ok: false, error: "invalid_arguments" });
-			return;
-		}
-
-		const { userId } = getSlackAuthContext(req);
-		const botUser = await repositories.users.findById(userId);
-		if (!botUser?.workspaceId) {
-			throw new Error("Workspace not found");
-		}
-
-		if (parsed.data.channel) {
-			const channelId = await resolveSlackChannel(parsed.data.channel);
-			const isParticipant =
-				await repositories.channelParticipants.isParticipant(channelId, userId);
-			if (!isParticipant) {
-				res.status(200).json({ ok: false, error: "not_in_channel" });
-				return;
-			}
-
-			const channel = await repositories.channels.findById(channelId);
-			res
-				.status(200)
-				.json(transformOpenResponse(channelId, channel?.scopeType === "DM"));
-			return;
-		}
-
-		const targetUserIds = (parsed.data.users ?? "")
-			.split(",")
-			.map((user) => user.trim())
-			.filter(Boolean);
-		if (targetUserIds.length === 0) {
-			res.status(200).json({ ok: false, error: "user_not_found" });
-			return;
-		}
-
-		if (targetUserIds.length === 1) {
-			const channel = await unifiedDMService.getOrCreateBotDM(
-				targetUserIds[0],
-				userId,
-				botUser.workspaceId,
-			);
-			res.status(200).json(transformOpenResponse(channel.id, true));
-			return;
-		}
-
-		const channelId = await repositories.channels.findOrCreateDMChannel(
-			userId,
-			targetUserIds,
-			repositories.channelParticipants,
-			botUser.workspaceId,
-		);
-		res.status(200).json(transformOpenResponse(channelId, false));
-	});
-
-	usersInfo = wrapSlackHandler(async (req: Request, res: Response) => {
-		const parsed = UsersInfoSchema.safeParse(getSlackParams(req));
-		if (!parsed.success) {
-			res.status(200).json({ ok: false, error: "invalid_arguments" });
-			return;
-		}
-
-		const args = transformUsersInfo(parsed.data);
-		const result = await getUserData(args.userId);
-		const slackResponse = transformUsersInfoResponse(result);
-		res.status(200).json(slackResponse);
-	});
-
-	usersLookupByEmail = wrapSlackHandler(async (req: Request, res: Response) => {
-		const parsed = UsersLookupByEmailSchema.safeParse(getSlackParams(req));
-		if (!parsed.success) {
-			res.status(200).json({ ok: false, error: "invalid_arguments" });
-			return;
-		}
-
-		const args = transformUsersLookupByEmail(parsed.data);
-		const { userId } = getSlackAuthContext(req);
-		const authUser = await repositories.users.findById(userId);
-		if (!authUser?.workspaceId) {
-			res.status(200).json({ ok: false, error: "users_not_found" });
-			return;
-		}
-
-		const user = await repositories.users.findByEmailCaseInsensitive(
-			args.email,
-			authUser.workspaceId,
-		);
-		if (!user || user.status !== "ACTIVE") {
-			res.status(200).json({ ok: false, error: "users_not_found" });
-			return;
-		}
-
-		res.status(200).json(
-			transformUsersInfoResponse({
-				userId: user.id,
-				name: user.name,
-				email: user.email,
-				picture: user.picture,
-				userType: user.userType,
-				status: user.status,
-				joined: user.createdAt,
-				statusEmoji: user.statusEmoji,
-				statusContent: user.statusContent,
-				statusExpiryAt: user.statusExpiryAt,
-				activityStatus: user.activityStatus,
-			}),
-		);
-	});
-
-	usersConversations = wrapSlackHandler(async (req: Request, res: Response) => {
-		const parsed = UsersConversationsSchema.safeParse(getSlackParams(req));
-		if (!parsed.success) {
-			res.status(200).json({ ok: false, error: "invalid_arguments" });
-			return;
-		}
-
-		const context = getSlackAuthContext(req);
-		// Slack defaults to the authed user when `user` is omitted
-		const targetUserId = parsed.data.user ?? context.userId;
-		if (!targetUserId) {
-			res.status(200).json({ ok: false, error: "user_not_found" });
-			return;
-		}
-
-		if (parsed.data.user) {
-			const targetUser = await repositories.users.findById(targetUserId);
-			if (!targetUser) {
-				res.status(200).json({ ok: false, error: "user_not_found" });
-				return;
-			}
-		}
-
-		const args = transformUsersConversations({
-			...parsed.data,
-			user: targetUserId,
-		});
-		if (args.unknownTypes.length > 0) {
-			res.status(200).json({ ok: false, error: "invalid_types" });
-			return;
-		}
-
-		const channels = await repositories.channels.findManyPaginated({
-			where: args.where,
-			limit: args.limit + 1,
-			cursor: args.cursor,
-		});
-
-		const hasMore = channels.length > args.limit;
-		const items = hasMore ? channels.slice(0, args.limit) : channels;
-		const slackResponse = transformUsersConversationsResponse({
-			items: items.map((channel) => ({
-				id: channel.id,
-				name: channel.name,
-				description: channel.description || undefined,
-				scopeType: channel.scopeType,
-				visibility: channel.visibility,
-				projectId: channel.projectId,
-				createdBy: channel.createdBy,
-				createdAt: channel.createdAt,
-			})),
-			hasMore,
-			nextCursor: hasMore ? items[items.length - 1]?.id : undefined,
-		});
-		res.status(200).json(slackResponse);
-	});
 
 	filesUpload = wrapSlackHandler(async (req: Request, res: Response) => {
 		logger.info("[SLACK-FILES-UPLOAD] Received request", { body: req.body, query: req.query, headers: req.headers });
@@ -607,40 +279,6 @@ export class SlackController {
 				channelName: channel?.name,
 				scopeType: channel?.scopeType,
 				visibility: channel?.visibility,
-			}),
-		);
-	});
-
-	usergroupsList = wrapSlackHandler(async (req: Request, res: Response) => {
-		const parsed = UsergroupsListSchema.safeParse(getSlackParams(req));
-		if (!parsed.success) {
-			res.status(200).json({ ok: false, error: "invalid_arguments" });
-			return;
-		}
-
-		const groups = (await getAllUserGroups()).filter(
-			(group) => parsed.data.include_disabled || group.isActive,
-		);
-		const groupsWithUsers = parsed.data.include_users
-			? await Promise.all(
-					groups.map(async (group) => {
-						const withMappings =
-							await repositories.userGroups.findWithMappings(group.id);
-						return {
-							...group,
-							users:
-								withMappings?.userGroupMappings
-									?.map((mapping) => mapping.userId)
-									.filter(Boolean) ?? [],
-						};
-					}),
-				)
-			: groups;
-
-		res.status(200).json(
-			transformUsergroupsListResponse(groupsWithUsers, {
-				includeUsers: parsed.data.include_users,
-				includeCount: parsed.data.include_count,
 			}),
 		);
 	});

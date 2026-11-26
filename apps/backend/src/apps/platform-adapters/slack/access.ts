@@ -24,9 +24,9 @@ export type SlackChannel = { channelId: string; isDM: boolean };
  * answers as slackChannelValidation: `channel_not_found`, `not_in_channel`, or the error's
  * Slack code.
  */
-export function slackChannel(): AccessCheck<SlackChannel> {
-	return async ({ body, user }) => {
-		const channel = (body as { channel?: unknown } | undefined)?.channel;
+export function slackChannel(source: "body" | "query" = "body"): AccessCheck<SlackChannel> {
+	return async ({ body, query, user }) => {
+		const channel = ((source === "query" ? query : body) as { channel?: unknown } | undefined)?.channel;
 		if (typeof channel !== "string" || !channel) {
 			throw slackError("channel_not_found");
 		}
