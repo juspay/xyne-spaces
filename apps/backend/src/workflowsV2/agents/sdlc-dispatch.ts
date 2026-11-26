@@ -6,7 +6,7 @@ import { logger } from '@/utils/logger';
 import { runScopedClawAgent } from '@/services/clawAgentService';
 import { sdlcAgentContext } from '@/sdlc/SdlcAgentContextService';
 import { buildCallbackUrl, buildTask, clawRunIds, dispatchWithBusyRetry } from './claw-provider';
-import { SDLC_AUTHOR_METADATA_KEY, clawScopeFor, runAuthorOf } from './identity';
+import { SDLC_AUTHOR_METADATA_KEY } from './identity';
 import type { XyneResourceAttrs } from '../types';
 
 /** The bot runs SDLC steps for whoever started the run, else the author: Spaces checks that person's hub rights. */
@@ -15,8 +15,12 @@ export async function sdlcRunActorId(ctx: StepExecutionContext): Promise<string>
     where: { id: ctx.runtime.executionId },
     select: { createdBy: true },
   });
+  // The router stamps the author on every config write: whoever last changed the steps.
+  const author = ctx.runtime.metadata[SDLC_AUTHOR_METADATA_KEY];
   const actorUserId =
-    starter?.createdBy ?? runAuthorOf(ctx) ?? (ctx.runtime.attributes as XyneResourceAttrs).createdByUserId;
+    starter?.createdBy ??
+    (typeof author === 'string' && author ? author : undefined) ??
+    (ctx.runtime.attributes as XyneResourceAttrs).createdByUserId;
   if (!actorUserId) {
     throw new Error(
       `[workflows] SDLC step has no starter or author to act for. Reset the hub's workflows to stamp "${SDLC_AUTHOR_METADATA_KEY}".`
@@ -61,7 +65,9 @@ export async function dispatchSdlcAgent(input: {
       + `channel=${input.channelId} repo=${input.repoId ?? '-'} session=${sessionId}`
   );
   // Slugs are unique per org only: scoping stops another org's "sdlc-agent" from getting the hub's grant.
-  const identity = await clawScopeFor(user.id, attrs.workspaceId);
+  const workspace = await db.workspace.findUnique({ where: { id: attrs.workspaceId }, select: { orgId: true } });
+  if (!workspace?.orgId) throw new Error(`[workflows] workspace ${attrs.workspaceId} has no organization`);
+  const identity = { userId: user.id, workspaceId: attrs.workspaceId, orgId: workspace.orgId };
   const response = await dispatchWithBusyRetry(Boolean(ids.conversationId), () => runScopedClawAgent({
     identity,
     sessionId,

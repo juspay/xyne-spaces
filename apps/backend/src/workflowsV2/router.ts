@@ -57,36 +57,21 @@ const guardSdlcAuthor = async (key: string, request: RouteRequest, ctx: XyneCtx)
   const body = request.body;
   if (!isRecord(body)) return;
 
-  if (key === 'POST /workflows' || key === 'PUT /workflows/:id') {
-    const sent = body['metadata'];
-    const metadata = isRecord(sent) ? { ...sent } : {};
-    delete metadata[SDLC_AUTHOR_METADATA_KEY];
-    if (body['config']) metadata[SDLC_AUTHOR_METADATA_KEY] = ctx.userId;
-    else if (sent !== undefined && key === 'PUT /workflows/:id') {
-      // Metadata replaces whole: keep the author the steps were last saved by.
-      const stored = await db.workflow.findFirst({
-        where: { id: request.params['id'] ?? '', workspaceId: ctx.workspaceId },
-        select: { metadata: true },
-      });
-      const author = sdlcAuthorOf(stored?.metadata);
-      if (author) metadata[SDLC_AUTHOR_METADATA_KEY] = author;
-    }
-    if (sent !== undefined || body['config']) body['metadata'] = metadata;
-    return;
-  }
-
-  if (key === 'POST /executions/:execId/rerun' && body['configOverrides']) {
-    const execution = await db.workflowExecution.findFirst({
-      where: { id: request.params['execId'] ?? '', workspaceId: ctx.workspaceId },
-      select: { workflow: { select: { metadata: true } } },
+  if (key !== 'POST /workflows' && key !== 'PUT /workflows/:id') return;
+  const sent = body['metadata'];
+  const metadata = isRecord(sent) ? { ...sent } : {};
+  delete metadata[SDLC_AUTHOR_METADATA_KEY];
+  if (body['config']) metadata[SDLC_AUTHOR_METADATA_KEY] = ctx.userId;
+  else if (sent !== undefined && key === 'PUT /workflows/:id') {
+    // Metadata replaces whole: keep the author the steps were last saved by.
+    const stored = await db.workflow.findFirst({
+      where: { id: request.params['id'] ?? '', workspaceId: ctx.workspaceId },
+      select: { metadata: true },
     });
-    const author = sdlcAuthorOf(execution?.workflow.metadata);
-    if (author && author !== ctx.userId) {
-      throw Object.assign(new Error('Only the workflow author can rerun it with changed steps'), {
-        statusCode: 403,
-      });
-    }
+    const author = sdlcAuthorOf(stored?.metadata);
+    if (author) metadata[SDLC_AUTHOR_METADATA_KEY] = author;
   }
+  if (sent !== undefined || body['config']) body['metadata'] = metadata;
 };
 
 /** How to find the workflow a request acts on; `undefined` is refused as "not found". */

@@ -15,7 +15,7 @@ import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
 import { runS2SClawAgent } from '@/services/clawAgentService';
 import { parseAgentAttachments } from '@/automations/services/agent-attachment.service';
-import { listDispatchableClawAgents, resolveClawRunIdentity } from './identity';
+import { dispatchableClawAgentsIn, resolveClawRunIdentity } from './identity';
 import type { XyneCtx, XyneResourceAttrs } from '../types';
 
 /**
@@ -57,8 +57,8 @@ export class ClawAgentProvider
   readonly configSchema = ClawAgentConfigSchema;
 
   /** Backs the agent picker on `agentSlug` (served through the step's `getOptions`). */
-  override async listAgents(_ctx: XyneCtx): Promise<AgentDescriptor[]> {
-    const agents = await listDispatchableClawAgents();
+  override async listAgents(ctx: XyneCtx): Promise<AgentDescriptor[]> {
+    const agents = await dispatchableClawAgentsIn(ctx.workspaceId);
     return agents.map((agent) => ({
       id: agent.slug,
       name: agent.name,

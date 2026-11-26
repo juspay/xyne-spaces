@@ -97,8 +97,9 @@ function page<T extends { id: string; name: string }>(
  * the automations picker hid them too — and a private channel the caller is not
  * in must not even be named back to them.
  */
-export async function channelOptions(q: OptionsQuery): Promise<FieldOptionsPage> {
+export async function channelOptions(q: OptionsQuery, only: { type?: 'SDLC' } = {}): Promise<FieldOptionsPage> {
   const visible = {
+    ...only,
     workspaceId: q.workspaceId,
     // Matches automations' picker, which hid DMs and group DMs and nothing else.
     // (`browsableChannels` in zero/queries.ts is stricter — DEFAULT only — but
@@ -138,34 +139,7 @@ export async function channelOptions(q: OptionsQuery): Promise<FieldOptionsPage>
 }
 
 /** SDLC hubs the caller can read, by the same rule as `requireSdlcHubReader`. */
-export async function sdlcHubOptions(q: OptionsQuery): Promise<FieldOptionsPage> {
-  const visible = {
-    workspaceId: q.workspaceId,
-    type: 'SDLC' as const,
-    OR: [
-      { visibility: ChannelVisibility.PUBLIC },
-      { participants: { some: { userId: q.callerUserId } } },
-    ],
-  };
-  const select = { id: true, name: true };
-  const label = (r: { id: string; name: string }): FieldOption => ({ value: r.id, label: r.name, icon: 'hash' });
-
-  if (q.values?.length) {
-    const rows = await db.channel.findMany({
-      where: { AND: [visible, { id: { in: [...q.values] } }] },
-      select,
-      orderBy: BY_NAME,
-    });
-    return { items: rows.map(label) };
-  }
-  const rows = await db.channel.findMany({
-    where: { AND: [visible, nameLike(q.search), after(q.cursor)] },
-    select,
-    orderBy: BY_NAME,
-    take: PAGE + 1,
-  });
-  return page(rows, label);
-}
+export const sdlcHubOptions = (q: OptionsQuery): Promise<FieldOptionsPage> => channelOptions(q, { type: 'SDLC' });
 
 export async function boardOptions(q: OptionsQuery): Promise<FieldOptionsPage> {
   const select = { id: true, name: true };

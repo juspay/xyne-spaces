@@ -46,8 +46,12 @@ export async function authenticateActingUser(req: Request, _res: Response, next:
     const header = req.headers['x-xyne-acting-user-id'];
     const id = typeof header === 'string' ? header.trim() : '';
     if (!id) throw new AppError('SDLC app requests require an initiating user', 403);
+    // The run's bound workspace: a key holder cannot act as a user of another workspace.
+    const workspaceHeader = req.headers['x-xyne-workspace-id'];
+    const workspaceId = typeof workspaceHeader === 'string' ? workspaceHeader.trim() : '';
+    if (!workspaceId) throw new AppError('SDLC app requests require the run workspace', 403);
     const user = await prisma.user.findFirst({
-      where: { id, userType: { notIn: [UserType.APP, UserType.AGENT] }, status: { not: UserStatus.INACTIVE }, leftAt: null },
+      where: { id, workspaceId, userType: { notIn: [UserType.APP, UserType.AGENT] }, status: { not: UserStatus.INACTIVE }, leftAt: null },
       select: {
         id: true,
         providerUserId: true,

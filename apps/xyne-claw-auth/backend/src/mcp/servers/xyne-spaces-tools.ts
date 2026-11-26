@@ -110,6 +110,8 @@ export interface HandlerContext {
    * token against `/api/apps/*` (the `appHandler`).
    */
   authMode: "user" | "app";
+  /** An SDLC tool's bound workspace (set by `sdlcTool`), so Spaces can refuse an acting user from another. */
+  workspaceId?: string;
 }
 
 export interface ToolDef {
@@ -5552,7 +5554,9 @@ function pick(args: Record<string, unknown>, keys: readonly string[]): Record<st
 
 /** Hub routes that take the Actor from the acting-user header. A bot run has no cookie, so it takes their S2S twin. */
 function sdlcClawFetch(path: string, body: Record<string, unknown>, ctx: HandlerContext): Promise<unknown> {
-  if (ctx.authMode === "app") return sdlcInternalFetch(`/api/internal/sdlc/hub${path}`, body, ctx);
+  if (ctx.authMode === "app") {
+    return sdlcInternalFetch(`/api/internal/sdlc/hub${path}`, body, ctx, { "x-xyne-workspace-id": ctx.workspaceId ?? "" });
+  }
   return spacesFetch(`/api/sdlc/claw${path}`, {
     method: "POST",
     headers: { "x-xyne-acting-user-id": ctx.userId },
@@ -5570,14 +5574,19 @@ async function sdlcClawCall(label: string, path: string, body: Record<string, un
 }
 
 /** Internal routes that take the bound Actor pair in the body. */
-async function sdlcInternalFetch(path: string, body: Record<string, unknown>, ctx: HandlerContext): Promise<unknown> {
+async function sdlcInternalFetch(
+  path: string,
+  body: Record<string, unknown>,
+  ctx: HandlerContext,
+  headers: Record<string, string> = {},
+): Promise<unknown> {
   const s2sKey = process.env["INTERNAL_S2S_KEY"] ?? process.env["XYNE_CLAW_S2S_KEY"] ?? "";
   if (!s2sKey) throw new Error("Internal S2S key is unavailable for SDLC tools.");
   return spacesFetch(
     path,
     {
       method: "POST",
-      headers: { "x-xyne-acting-user-id": ctx.userId },
+      headers: { ...headers, "x-xyne-acting-user-id": ctx.userId },
       body: JSON.stringify(body),
     },
     { s2sKey },
@@ -5601,7 +5610,13 @@ function sdlcActor(args: Record<string, unknown>): Record<string, unknown> {
 function sdlcTool(def: Omit<ToolDef, "appHandler">): ToolDef {
   const handler: ToolDef["handler"] = (args, ctx) => {
     const actor = args["actorUserId"];
-    return def.handler(args, typeof actor === "string" && actor ? { ...ctx, userId: actor } : ctx);
+    const workspaceId = args["workspaceId"];
+    return def.handler(
+      args,
+      typeof actor === "string" && actor
+        ? { ...ctx, userId: actor, ...(typeof workspaceId === "string" && workspaceId ? { workspaceId } : {}) }
+        : ctx,
+    );
   };
   return { ...def, handler, appHandler: handler };
 }

@@ -1,7 +1,6 @@
-import type { StepExecutionContext } from '@xyne/workflow-sdk';
 import { db } from '@/database/client';
 import { listS2SClawAgents } from '@/services/clawAgentService';
-import type { S2SClawAgent, ScopedClawIdentity } from '@/services/clawAgentService';
+import type { S2SClawAgent } from '@/services/clawAgentService';
 
 /**
  * Who a workflow's agent run acts as.
@@ -127,6 +126,24 @@ export async function resolveClawRunIdentity(
   };
 }
 
+/** The picker's view of `resolveClawRunIdentity`'s org rule, so activation refuses what a run would. */
+export async function dispatchableClawAgentsIn(workspaceId: string): Promise<S2SClawAgent[]> {
+  const [agents, workspace] = await Promise.all([
+    listDispatchableClawAgents(),
+    db.workspace.findUnique({ where: { id: workspaceId }, select: { orgId: true } }),
+  ]);
+  if (!workspace?.orgId) return [];
+  const users = await db.user.findMany({
+    where: {
+      id: { in: agents.map((agent) => agent.spacesAppUserId as string) },
+      orgMember: { orgId: workspace.orgId },
+    },
+    select: { id: true },
+  });
+  const inOrg = new Set(users.map((user) => user.id));
+  return agents.filter((agent) => inOrg.has(agent.spacesAppUserId as string));
+}
+
 /** Not `attributes.createdByUserId`: the router consumes that at create and never persists it. */
 export const SDLC_AUTHOR_METADATA_KEY = 'sdlcAuthorUserId';
 
@@ -137,20 +154,4 @@ export function sdlcAuthorOf(metadata: string | null | undefined): string | unde
   } catch {
     return undefined;
   }
-}
-
-/** Whoever last changed the steps: the router stamps it on every config write. */
-export function runAuthorOf(ctx: StepExecutionContext): string | undefined {
-  const author = ctx.runtime.metadata[SDLC_AUTHOR_METADATA_KEY];
-  return typeof author === 'string' && author ? author : undefined;
-}
-
-/** Without `orgId` claw-auth cannot narrow to one org, and another org's agent of the same slug can match. */
-export async function clawScopeFor(
-  userId: string,
-  workspaceId: string,
-): Promise<ScopedClawIdentity & { workspaceId: string; orgId: string }> {
-  const workspace = await db.workspace.findUnique({ where: { id: workspaceId }, select: { orgId: true } });
-  if (!workspace?.orgId) throw new Error(`[workflows] workspace ${workspaceId} has no organization`);
-  return { userId, workspaceId, orgId: workspace.orgId };
 }
