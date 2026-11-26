@@ -30,7 +30,7 @@ import { slackAuthenticateApp } from '@/apps/platform-adapters/slack/middleware'
 import { requireTransitProxyIngress } from '@/apps/middelware/requireTransitProxy';
 import type { AuthenticatedUser } from '@/types/express';
 import { logger } from '@/utils/logger';
-import { API_PREFIX, ROUTER_OPTIONS, registerContract } from './contractGate';
+import { ROUTER_OPTIONS, registerContract } from './contractGate';
 
 /**
  * A handler's (or an access check's) answer when it is not the success response: the status
@@ -533,6 +533,6 @@ export function route<C extends AnyRouteContract, A extends AccessChecks = Recor
 
 /** createApp only: mounts the typed router at /api. */
 export function mountTypedRoutes(app: Application): void {
-  app.use(API_PREFIX, typedRouter);
+  app.use('/api', typedRouter);
 }
 
