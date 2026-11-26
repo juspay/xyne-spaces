@@ -5,12 +5,16 @@ import { getChatComposerBottomPadding } from '@/src/features/chat/v2/chatKeyboar
 import {
   TYPING_BAR_DICTATING_WIDTH as DICTATING_WIDTH,
   TYPING_BAR_FIELD_HEIGHT as FIELD_MIN_HEIGHT,
+  TYPING_BAR_FIELD_PADDING_LEFT as TEXT_LEFT,
+  TYPING_BAR_FIELD_PADDING_RIGHT as SHELL_RIGHT,
   TYPING_BAR_PADDING_TOP as BAR_TOP_PADDING,
   TYPING_BAR_SEND_SIZE as SEND_SIZE,
   TYPING_BAR_TRAILING_GUTTER as GUTTER,
 } from '@/src/features/conversation/constants';
+import { composerInputTrailingInset } from '@/src/components/input-composer/composer-input-typography';
 import {
   consumeDictationEcho,
+  fieldTrailingInset,
   getRoomTypingBarMinimumHeight,
   isDictationEcho,
   queueDictationWrite,
@@ -43,6 +47,22 @@ describe('trailingInset', () => {
     assert.equal(trailingInset('send'), SEND_SIZE + GUTTER);
     assert.equal(trailingInset('send'), trailingInset('mic'));
     assert.equal(trailingInset('dictating'), DICTATING_WIDTH + GUTTER);
+  });
+});
+
+describe('fieldTrailingInset', () => {
+  it('clears the trailing control while the field is a pill', () => {
+    for (const action of ['mic', 'send', 'dictating'] as const) {
+      assert.equal(fieldTrailingInset(action, false), trailingInset(action));
+    }
+  });
+
+  it('gives focused text the same inset on the right as on the left', () => {
+    for (const action of ['mic', 'send', 'dictating'] as const) {
+      const right =
+        SHELL_RIGHT + composerInputTrailingInset(true) + fieldTrailingInset(action, true);
+      assert.equal(right, TEXT_LEFT);
+    }
   });
 });
 

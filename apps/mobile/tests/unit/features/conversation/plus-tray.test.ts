@@ -14,7 +14,6 @@ const OPEN: PlusTrayComposer = {
   picking: false,
   canSchedule: true,
   offline: false,
-  formattingVisible: false,
 };
 
 const rowsOf = (state: PlusTrayComposer): readonly PlusTrayRow[] =>
@@ -27,13 +26,13 @@ const rowById = (state: PlusTrayComposer, id: PlusTrayRow['id']): PlusTrayRow =>
 };
 
 describe('plusTraySections', () => {
-  it('groups attachments before the message tools, in Figma order', () => {
+  it('groups attachments before scheduling', () => {
     const sections = plusTraySections(OPEN);
     assert.deepEqual(
       sections.map(section => [section.id, section.rows.map(row => row.id)]),
       [
         ['attach', ['photos', 'camera', 'files']],
-        ['compose', ['emoji', 'formatting', 'schedule']],
+        ['compose', ['schedule']],
       ],
     );
   });
@@ -47,7 +46,7 @@ describe('plusTraySections', () => {
     for (const id of ['photos', 'camera', 'files'] as const) {
       assert.equal(rowById(state, id).disabled, true);
     }
-    assert.equal(rowById(state, 'emoji').disabled, false);
+    assert.equal(rowById(state, 'schedule').disabled, false);
   });
 
   it('turns the pickers off and says why once the attachment limit is reached', () => {
@@ -70,14 +69,6 @@ describe('plusTraySections', () => {
     assert.equal(row.disabled, true);
     assert.equal(row.subtitle, 'Write a message first');
   });
-
-  it('offers to hide the formatting bar once it is showing', () => {
-    assert.equal(
-      rowById({ ...OPEN, formattingVisible: true }, 'formatting').subtitle,
-      'Hide the formatting bar',
-    );
-    assert.equal(rowById(OPEN, 'formatting').subtitle, 'Bold, lists, code and links');
-  });
 });
 
 describe('plus tray state', () => {
@@ -91,11 +82,6 @@ describe('plusTrayExitFocus', () => {
   it('brings a held keyboard back when the tray is put away, and leaves a closed one', () => {
     assert.equal(plusTrayExitFocus(true, 'dismiss'), 'restore');
     assert.equal(plusTrayExitFocus(false, 'dismiss'), 'none');
-  });
-
-  it('always returns to the field for the formatting strip', () => {
-    assert.equal(plusTrayExitFocus(true, 'formatting'), 'restore');
-    assert.equal(plusTrayExitFocus(false, 'formatting'), 'focus');
   });
 
   it('lets go of a held focus for a surface that takes over', () => {
