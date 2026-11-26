@@ -16,6 +16,15 @@ import { toast } from 'sonner';
 import { queries } from '../../../zero/queries';
 import { useUserGroups } from '../../../hooks/useUserGroup';
 import { TicketListRow, TicketListRowLine } from './TicketListRow';
+import {
+  TicketColumnsLine,
+  TicketColumnsRow,
+  TABLE_HEADER_HEIGHT,
+  TicketTableHeader,
+  resolveTableColumns,
+  tableMinWidth,
+} from './TicketColumnsRow';
+import type { ResolvedDisplayFormField } from '../../../utils/board/resolveDisplayFormFields';
 import { SubTicketsTree } from '../SubTickets/SubTickets';
 import { useSubTicketProgress } from '../SubTickets/useSubTickets';
 import { BulkActionToolbar } from './BulkActionToolbar';
@@ -62,6 +71,8 @@ interface TicketTableProps {
   bulkActionsContainer?: HTMLElement | null;
   /** A row's sub-ticket count opens its sub-tickets under it. Boards turn it on; the Desk does not. */
   expandableSubTickets?: boolean;
+  layout?: 'list' | 'columns';
+  dynamicFieldColumns?: readonly ResolvedDisplayFormField[];
 }
 
 // The registry already skips editable targets; these guards cover the rest.
@@ -89,6 +100,7 @@ const TRAILING_ROW_HEIGHT = 44;
 const LOAD_MORE_REMAINING_ROWS = 8;
 // One empty array for every untagged row, so memoised rows don't see a new one each render.
 const NO_TAGS: TicketTag[] = [];
+const NO_FIELDS: readonly ResolvedDisplayFormField[] = [];
 
 export const TicketTable: React.FC<TicketTableProps> = ({
   tickets,
@@ -111,8 +123,22 @@ export const TicketTable: React.FC<TicketTableProps> = ({
   renderRowExtras,
   bulkActionsContainer,
   expandableSubTickets = false,
+  layout = 'list',
+  dynamicFieldColumns = NO_FIELDS,
 }) => {
   const noun = useTicketNoun();
+  const isColumns = layout === 'columns';
+  const tableColumns = useMemo(
+    () => resolveTableColumns(visibleColumns, dynamicFieldColumns),
+    [visibleColumns, dynamicFieldColumns],
+  );
+  const columnsMinWidth = tableMinWidth(tableColumns);
+  const headerInnerRef = useRef<HTMLDivElement | null>(null);
+  const syncHeaderScroll = useCallback((event: React.UIEvent<HTMLDivElement>): void => {
+    if (headerInnerRef.current) {
+      headerInnerRef.current.style.transform = `translateX(${-event.currentTarget.scrollLeft}px)`;
+    }
+  }, []);
   const isPagesMode = paginationMode === 'pages';
   const navigate = useNavigate();
   const { isMobile } = usePlatform();
@@ -294,6 +320,8 @@ export const TicketTable: React.FC<TicketTableProps> = ({
     !isPagesMode && tickets.length > 0 && (hasMore || isLoadingMore || totalCount !== undefined);
   const itemCount = isPagesMode ? 0 : tickets.length + (showTrailingRow ? 1 : 0);
 
+  const listOffset = usesExternalScroller ? scrollMargin : isColumns ? TABLE_HEADER_HEIGHT : 0;
+
   const getScrollElement = useCallback(
     () => (usesExternalScroller ? (scrollElement ?? null) : internalScrollRef.current),
     [usesExternalScroller, scrollElement],
@@ -307,7 +335,8 @@ export const TicketTable: React.FC<TicketTableProps> = ({
     // on rendered rows instead of a blank gap (the ghost shimmer covers what
     // even this can't). Pickers and hover cards do their heavy work on open.
     overscan: 45,
-    scrollMargin: usesExternalScroller ? scrollMargin : 0,
+    scrollMargin: listOffset,
+    scrollPaddingStart: isColumns ? TABLE_HEADER_HEIGHT : 0,
   });
   const virtualItems = virtualizer.getVirtualItems();
 
@@ -433,30 +462,46 @@ export const TicketTable: React.FC<TicketTableProps> = ({
   }, [rowHeight]);
   const ghostRegions: Array<{ top: number; height: number }> = [];
   if (virtualItems.length > 0) {
-    const offset = usesExternalScroller ? scrollMargin : 0;
-    const firstTop = virtualItems[0]!.start - offset;
-    const lastEnd = virtualItems[virtualItems.length - 1]!.end - offset;
+    const firstTop = virtualItems[0]!.start - listOffset;
+    const lastEnd = virtualItems[virtualItems.length - 1]!.end - listOffset;
     const totalSize = virtualizer.getTotalSize();
     if (firstTop > 0) ghostRegions.push({ top: 0, height: firstTop });
     if (lastEnd < totalSize) ghostRegions.push({ top: lastEnd, height: totalSize - lastEnd });
   }
 
-  const renderListRow = (ticket: Ticket): ReactNode => (
-    <TicketListRow
-      ticket={ticket}
-      isSelected={selected.has(ticket.id)}
-      onToggleSelect={toggleSelect}
-      tags={ticketTags?.get(ticket.id) ?? NO_TAGS}
-      availableTags={availableTags}
-      visibleColumns={visibleColumns}
-      subProgress={subProgressByTicketId.get(ticket.id)}
-      boardName={boardNameById.get(ticket.boardId)}
-      isComfortView={isComfortView}
-      extras={renderRowExtras?.(ticket)}
-      onOpen={onOpen}
-      expandableSubTickets={expandableSubTickets}
-    />
-  );
+  const renderListRow = (ticket: Ticket): ReactNode =>
+    isColumns ? (
+      <TicketColumnsRow
+        ticket={ticket}
+        columns={tableColumns}
+        dynamicFieldColumns={dynamicFieldColumns}
+        isSelected={selected.has(ticket.id)}
+        onToggleSelect={toggleSelect}
+        tags={ticketTags?.get(ticket.id) ?? NO_TAGS}
+        availableTags={availableTags}
+        subProgress={subProgressByTicketId.get(ticket.id)}
+        boardName={boardNameById.get(ticket.boardId)}
+        channelName={channelsById.get(ticket.channelId)?.name}
+        extras={renderRowExtras?.(ticket)}
+        onOpen={onOpen}
+        expandableSubTickets={expandableSubTickets}
+      />
+    ) : (
+      <TicketListRow
+        ticket={ticket}
+        isSelected={selected.has(ticket.id)}
+        onToggleSelect={toggleSelect}
+        tags={ticketTags?.get(ticket.id) ?? NO_TAGS}
+        availableTags={availableTags}
+        visibleColumns={visibleColumns}
+        subProgress={subProgressByTicketId.get(ticket.id)}
+        boardName={boardNameById.get(ticket.boardId)}
+        isComfortView={isComfortView}
+        extras={renderRowExtras?.(ticket)}
+        onOpen={onOpen}
+        expandableSubTickets={expandableSubTickets}
+      />
+    );
 
   // A virtual row whose sub-tickets opened or grew: measured now, before paint.
   const remeasureRow = useCallback(
@@ -483,18 +528,34 @@ export const TicketTable: React.FC<TicketTableProps> = ({
             className='border-b border-border hover:bg-muted/60'
             style={{ height: `${rowHeight}px` }}
           >
-            <TicketListRow
-              ticket={subTicket}
-              isSelected={selected.has(subTicket.id)}
-              onToggleSelect={toggleSelect}
-              tags={NO_TAGS}
-              availableTags={availableTags}
-              visibleColumns={visibleColumns}
-              boardName={boardNameById.get(subTicket.boardId)}
-              isComfortView={isComfortView}
-              onOpen={onOpen}
-              treeConnector={connector}
-            />
+            {isColumns ? (
+              <TicketColumnsRow
+                ticket={subTicket}
+                columns={tableColumns}
+                dynamicFieldColumns={dynamicFieldColumns}
+                isSelected={selected.has(subTicket.id)}
+                onToggleSelect={toggleSelect}
+                tags={NO_TAGS}
+                availableTags={availableTags}
+                boardName={boardNameById.get(subTicket.boardId)}
+                channelName={channelsById.get(subTicket.channelId)?.name}
+                onOpen={onOpen}
+                treeConnector={connector}
+              />
+            ) : (
+              <TicketListRow
+                ticket={subTicket}
+                isSelected={selected.has(subTicket.id)}
+                onToggleSelect={toggleSelect}
+                tags={NO_TAGS}
+                availableTags={availableTags}
+                visibleColumns={visibleColumns}
+                boardName={boardNameById.get(subTicket.boardId)}
+                isComfortView={isComfortView}
+                onOpen={onOpen}
+                treeConnector={connector}
+              />
+            )}
           </div>
         )}
         renderListLine={(content, connector, kind) => (
@@ -503,13 +564,17 @@ export const TicketTable: React.FC<TicketTableProps> = ({
             className='border-b border-border'
             style={{ height: `${kind === 'item' ? rowHeight : 32}px` }}
           >
-            <TicketListRowLine
-              visibleColumns={visibleColumns}
-              isComfortView={isComfortView}
-              connector={connector}
-            >
-              {content}
-            </TicketListRowLine>
+            {isColumns ? (
+              <TicketColumnsLine connector={connector}>{content}</TicketColumnsLine>
+            ) : (
+              <TicketListRowLine
+                visibleColumns={visibleColumns}
+                isComfortView={isComfortView}
+                connector={connector}
+              >
+                {content}
+              </TicketListRowLine>
+            )}
           </div>
         )}
       />
@@ -533,7 +598,7 @@ export const TicketTable: React.FC<TicketTableProps> = ({
         />
       ))}
       {virtualItems.map(item => {
-        const start = item.start - (usesExternalScroller ? scrollMargin : 0);
+        const start = item.start - listOffset;
         if (item.index >= tickets.length) {
           return (
             <div
@@ -608,6 +673,7 @@ export const TicketTable: React.FC<TicketTableProps> = ({
 
   const pagesBody = (
     <>
+      {isColumns && <TicketTableHeader columns={tableColumns} />}
       <div role='list'>
         {pageTickets.map((ticket, index) => (
           <div key={ticket.id} role='listitem'>
@@ -678,7 +744,33 @@ export const TicketTable: React.FC<TicketTableProps> = ({
           No {noun.plural} match the current filters.
         </div>
       ) : isPagesMode ? (
-        pagesBody
+        isColumns ? (
+          <div className='overflow-x-auto'>
+            <div style={{ minWidth: columnsMinWidth }}>{pagesBody}</div>
+          </div>
+        ) : (
+          pagesBody
+        )
+      ) : isColumns && usesExternalScroller ? (
+        <>
+          <div className='sticky top-0 z-10 overflow-hidden'>
+            <div ref={headerInnerRef} style={{ minWidth: columnsMinWidth }}>
+              <TicketTableHeader columns={tableColumns} />
+            </div>
+          </div>
+          <div className='overflow-x-auto' onScroll={syncHeaderScroll}>
+            <div style={{ minWidth: columnsMinWidth }}>{listBody}</div>
+          </div>
+        </>
+      ) : isColumns ? (
+        <div ref={internalScrollRef} className='min-h-0 flex-1 overflow-auto'>
+          <div style={{ minWidth: columnsMinWidth }}>
+            <div className='sticky top-0 z-10'>
+              <TicketTableHeader columns={tableColumns} />
+            </div>
+            {listBody}
+          </div>
+        </div>
       ) : usesExternalScroller ? (
         listBody
       ) : (

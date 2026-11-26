@@ -3,9 +3,6 @@ import {
   listProviderCredentials,
   upsertProviderCredential,
   deleteProviderCredential,
-  listSubagentRouting,
-  upsertSubagentRouting,
-  deleteSubagentRouting,
   initiateCopilotGitHubLogin,
   pollCopilotGitHubLogin,
   listCopilotModelsForUser,
@@ -13,16 +10,10 @@ import {
   listCodexModelsForUser,
   startCodexOauth,
   exchangeCodexOauth,
-  getAvailableTools,
   type ProviderCredential,
-  type SubagentRouting,
   type GitHubDeviceCode,
   type ClaudeModelInfo,
 } from "../lib/api";
-
-// Fallback list — used only if /api/v1/tools/available 404s. The canonical
-// list lives in xyne-claw-shared SUBAGENT_DEFINITIONS and is fetched at runtime.
-const FALLBACK_SUBAGENTS = ["spaces", "bitbucket", "grafana", "deepwiki", "context7"];
 
 const PROVIDER_META: Record<string, { label: string; defaultModel: string; defaultBaseUrl: string }> = {
   copilot: { label: "GitHub Copilot", defaultModel: "gpt-4o", defaultBaseUrl: "https://api.githubcopilot.com" },
@@ -36,8 +27,6 @@ interface Props {
 
 export function SettingsTab({ userId }: Props) {
   const [creds, setCreds] = useState<ProviderCredential[]>([]);
-  const [routing, setRouting] = useState<SubagentRouting[]>([]);
-  const [subagents, setSubagents] = useState<string[]>(FALLBACK_SUBAGENTS);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState<string | null>(null);
@@ -45,18 +34,8 @@ export function SettingsTab({ userId }: Props) {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [c, r, available] = await Promise.all([
-        listProviderCredentials(userId),
-        listSubagentRouting(userId),
-        getAvailableTools().catch(() => null),
-      ]);
+      const c = await listProviderCredentials(userId);
       setCreds(c);
-      setRouting(r);
-      if (available?.subagents && available.subagents.length > 0) {
-        // Canonical list from xyne-claw-shared SUBAGENT_DEFINITIONS — keeps the
-        // UI in sync as new subagents are added (hubspot, mixpanel, sandbox, ...).
-        setSubagents(available.subagents.map((s) => s.name));
-      }
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load settings");
@@ -68,9 +47,6 @@ export function SettingsTab({ userId }: Props) {
   useEffect(() => { load(); }, [load]);
 
   const credByProvider = new Map(creds.map((c) => [c.provider, c] as const));
-  const routingBySubagent = new Map(routing.map((r) => [r.subagentName, r.provider] as const));
-
-  const availableProvidersForSubagent = ["default", ...creds.filter((c) => c.hasApiKey).map((c) => c.provider)];
 
   return (
     <div className="space-y-8">
@@ -140,56 +116,6 @@ export function SettingsTab({ userId }: Props) {
                 finally { setSaving(null); }
               }}
             />
-          </div>
-        )}
-      </section>
-
-      {/* Subagent Routing */}
-      <section>
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-zinc-300">Subagent Provider Routing</h2>
-        <p className="mb-4 text-xs text-zinc-500">
-          Choose which provider each subagent should use. "Default" means use whatever the parent agent is using.
-        </p>
-        {loading ? (
-          <p className="text-sm text-zinc-500">Loading…</p>
-        ) : (
-          <div className="space-y-2">
-            {subagents.map((name) => {
-              const current = routingBySubagent.get(name) ?? "default";
-              return (
-                <div key={name} className="flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-900 p-3">
-                  <div className="flex flex-col">
-                    <span className="text-sm font-medium capitalize text-zinc-200">{name}</span>
-                    <span className="text-xs text-zinc-500">{name} subagent</span>
-                  </div>
-                  <select
-                    className="rounded-md border border-zinc-700 bg-zinc-950 px-3 py-1.5 text-sm text-zinc-100 shadow-sm transition-colors hover:border-zinc-600 focus:border-purple-500 focus:outline-none focus:ring-2 focus:ring-purple-500/20"
-                    value={current}
-                    disabled={saving === `sa:${name}`}
-                    onChange={async (e) => {
-                      const choice = e.target.value;
-                      setSaving(`sa:${name}`);
-                      try {
-                        if (choice === "default") {
-                          await deleteSubagentRouting(userId, name);
-                        } else {
-                          await upsertSubagentRouting(userId, name, choice);
-                        }
-                        await load();
-                      } catch (err) {
-                        setError(err instanceof Error ? err.message : "Save failed");
-                      } finally {
-                        setSaving(null);
-                      }
-                    }}
-                  >
-                    {availableProvidersForSubagent.map((p) => (
-                      <option key={p} value={p}>{p === "default" ? "Default (parent agent)" : (PROVIDER_META[p]?.label ?? p)}</option>
-                    ))}
-                  </select>
-                </div>
-              );
-            })}
           </div>
         )}
       </section>

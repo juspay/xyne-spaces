@@ -9,7 +9,6 @@ import { logger } from '@/utils/logger';
 import { DatabaseClient } from '@/database/client';
 import { PRStatusEvent } from '@xyne/shared';
 import { prCheckApprovalService } from '@/services/prCheckApprovalService';
-import { syncReleaseOnPRMerge } from '@/services/release/releaseWebhookSync';
 import { VCSProviderType } from '@xyne/shared';
 import { runGitHubWebhook } from '@/bypassAcl/webhookIngestServices';
 import { forwardPrCardStatus, type PrCardStatus } from '@/services/prCardStatusForwarder';
@@ -168,27 +167,7 @@ export class GitHubWebhookService {
 
       const context = this.extractPRContext(payload, workspaceId);
 
-      // Release sync is BRANCH-scoped (matched on base branch + repo), not gated
-      // on PR-title validation. A hotfix whose dev ticket doesn't exist in the
-      // workspace yet fails validation below — but must still sync — so fire here,
-      // before the gate, on merge only. Fire-and-forget (see handlePRMerged note);
-      // non-release branches simply no-op inside syncReleaseOnPRMerge.
       if (action === GitHubPREventType.PR_CLOSED && pr.merged) {
-        // merge_commit_sha can be absent on some payloads (squash merges) —
-        // hotfix detection then degrades to a plain re-run; log so it's diagnosable.
-        if (!context.pr.merge_commit_sha) {
-          logger.warn(`[GitHub-Webhook] PR #${pr.number} merged with no merge_commit_sha — hotfix delta will fall back to a plain re-run`);
-        }
-        syncReleaseOnPRMerge({
-          workspaceId: context.workspace,
-          provider: VCSProviderType.GITHUB,
-          projectKey: context.projectName, // repo owner
-          repoSlug: context.repoName,
-          baseBranch: context.destinationBranch,
-          mergeCommitSha: context.pr.merge_commit_sha,
-          source: 'GitHub-Webhook',
-        }).catch(err => logger.error('[GitHub-Webhook] release sync failed:', err));
-
         // Radar asks about this PR ("review/merge #42") are settled by the merge
         // whether or not its title names a ticket, so this also fires before the
         // gate. Fire-and-forget: it may call the LLM, and GitHub waits on us.

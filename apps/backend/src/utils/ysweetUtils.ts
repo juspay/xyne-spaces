@@ -171,8 +171,8 @@ export interface YSweetAuthRequest {
   userId: string;
   validForSeconds?: number;
   ticket?: boolean;
-  /** Base64 SHA-256 of the browser's WebSocket handshake frame. Binds the ticket to it. */
-  wsHandshakeHash?: string;
+  /** The socket key wrapped by the encryption service. Only y-sweet can open it. */
+  wsKey?: string;
 }
 
 function withDocId(base: string, path: string, docId: string): string {
@@ -198,6 +198,15 @@ async function ysweetJson<T>(base: string, path: string, docId: string, body: un
     body: JSON.stringify(body),
   });
   return (await res.json()) as T;
+}
+
+/** Closes y-sweet sockets of revoked auth sessions and refuses their tickets. */
+export async function ysweetCloseSessions(sids: string[]): Promise<void> {
+  await ysweetRequest(`${config.ysweet.url.replace(/\/$/, '')}/internal/close-sessions`, 'internal/close-sessions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...serverTokenHeaders() },
+    body: JSON.stringify({ sids }),
+  });
 }
 
 /** POST /doc/new */

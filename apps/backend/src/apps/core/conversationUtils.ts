@@ -1,5 +1,5 @@
 import { conversationService } from '@/services/conversationService';
-import { AttachmentEntityType, MessageType } from '@xyne/shared';
+import { AttachmentEntityType, MessageType, type DerivedFacts } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 import { ChatEventType, ChatActionResponse, ChannelHistoryResponse, ChannelHistoryCursor, ChannelHistoryItem, ConversationRepliesResponse, ConversationRepliesCursor, ConversationRepliesItem } from '../types';
 import { UploadedFileResult } from '@/services/fileUploadService';
@@ -39,6 +39,9 @@ export async function findOrCreateConversation(
     uploadedFiles?: UploadedFileResult[],
     msgType?: MessageType,
     metadata?: Record<string, any>,
+    // Facts the encryption service extracted from encrypted content (postMessage through the
+    // transit proxy): the insert side effects use them instead of parsing `content`.
+    derived?: DerivedFacts,
 ): Promise<ChatActionResponse> {
   try {
     // Default to USER message type if not provided
@@ -64,7 +67,8 @@ export async function findOrCreateConversation(
       handler.onInsert({
         entityId: result.message.messageId,
         entityType: 'messages',
-        operation: 'insert'
+        operation: 'insert',
+        ...(derived ? { derived } : {}),
       }).catch(err => logger.error('[INGEST-CONVERSATION] Side-effect handler error: addMessageToConversation', err));
 
       return {
@@ -93,7 +97,8 @@ export async function findOrCreateConversation(
       handler.onInsert({
         entityId: result.message.messageId,
         entityType: 'messages',
-        operation: 'insert'
+        operation: 'insert',
+        ...(derived ? { derived } : {}),
       }).catch(err => logger.error('[INGEST-CONVERSATION] Side-effect handler error: createConversationWithMessage', err));
 
       return {

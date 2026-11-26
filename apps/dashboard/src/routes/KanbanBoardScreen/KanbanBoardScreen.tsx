@@ -389,6 +389,7 @@ interface BoardKanbanScreenProps {
   onOpenTicket?: (ticket: Ticket) => void;
   /** Beside New ticket in the header: a host's own action (a track's Chat). */
   headerEndSlot?: React.ReactNode;
+  tableLayout?: 'list' | 'columns';
   /** What this screen calls its tickets; every label under the board uses it. */
   noun?: TicketNoun;
 }
@@ -538,6 +539,7 @@ const KanbanBoardScreenContent: React.FC<Omit<BoardKanbanScreenProps, 'noun'>> =
   trackId,
   onOpenTicket,
   headerEndSlot,
+  tableLayout = 'columns',
 }) => {
   const noun = useTicketNoun();
   const isTrackView = Boolean(trackId && channelId);
@@ -5445,7 +5447,7 @@ const KanbanBoardScreenContent: React.FC<Omit<BoardKanbanScreenProps, 'noun'>> =
               <div
                 key={group.key}
                 data-group-key={group.key}
-                className='flex flex-col rounded-lg border border-border overflow-hidden'
+                className='flex flex-col rounded-lg border border-border overflow-clip'
               >
                 {showGroupHeader && (
                   <button
@@ -5521,6 +5523,7 @@ const KanbanBoardScreenContent: React.FC<Omit<BoardKanbanScreenProps, 'noun'>> =
                     visibleColumns={tableVisibleColumns}
                     isComfortView={isComfortView}
                     availableTags={availableTags || []}
+                    layout={tableLayout}
                   />
                 )}
               </div>

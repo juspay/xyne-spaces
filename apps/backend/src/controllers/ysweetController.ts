@@ -2,10 +2,11 @@ import { Request, Response } from 'express';
 import { resolveYSweetDocWorkspaceId } from '@/bypassAcl/ysweetServices';
 import { canvasAuthService } from '@/services/canvasAuthService';
 import { config } from '@/config/env';
-import { getEncryptionProvider } from '@/services/encryption';
+import { getEncryptionProvider, type YSweetSocketKey } from '@/services/encryption';
 import { logger } from '@/utils/logger';
 import { getTrustedOriginalHost } from '@/utils/publicUrls';
-import { ysweetGetOrCreateDocAndToken } from '@/utils/ysweetUtils';
+import { YSweetHttpError, ysweetGetOrCreateDocAndToken } from '@/utils/ysweetUtils';
+import type { ClientToken } from '@y-sweet/sdk';
 import { DatabaseClient, readReplicaDb } from '@/database/client';
 import { superpositionClient } from '@/services/superpositionClient';
 
@@ -37,9 +38,6 @@ async function getValidateDbInstance() {
 }
 
 const TOKEN_VALID_SECONDS = 30;
-// Dashboard bundles from before tickets send no tokenType and reuse one token until reload.
-// TODO: remove once those bundles are gone.
-const LEGACY_TOKEN_VALID_SECONDS = 3600;
 const TOKEN_TYPES = ['ticket', 'none'];
 
 const isDevelopment = config.env === 'development' || config.isTestEnv;
@@ -147,7 +145,7 @@ export class YSweetController {
 
   async getClientToken(req: Request, res: Response): Promise<void> {
     try {
-      const { docId, channelId, projectId, folderId, title, tokenType, wsHandshakeHash } = req.body;
+      const { docId, channelId, projectId, folderId, title, tokenType } = req.body;
 
       if (!docId || typeof docId !== 'string') {
         res.status(400).json({
@@ -157,21 +155,11 @@ export class YSweetController {
         return;
       }
 
-      if (tokenType !== undefined && !TOKEN_TYPES.includes(tokenType)) {
+      // No legacy reusable token: a leaked one would open the doc's HTTP routes for its lifetime.
+      if (!TOKEN_TYPES.includes(tokenType)) {
         res.status(400).json({
           error: 'Invalid request',
           message: "tokenType must be 'ticket' or 'none'"
-        });
-        return;
-      }
-
-      if (
-        wsHandshakeHash !== undefined &&
-        (tokenType !== 'ticket' || typeof wsHandshakeHash !== 'string' || wsHandshakeHash.length !== 44)
-      ) {
-        res.status(400).json({
-          error: 'Invalid request',
-          message: 'wsHandshakeHash must be a base64 SHA-256 and needs tokenType ticket'
         });
         return;
       }
@@ -256,15 +244,40 @@ export class YSweetController {
         ysweetUrl: config.ysweet.url,
       });
 
-      const clientToken = await ysweetGetOrCreateDocAndToken(canonicalDocId, {
-        authorization,
-        userId,
-        validForSeconds: tokenType ? TOKEN_VALID_SECONDS : LEGACY_TOKEN_VALID_SECONDS,
-        ticket: tokenType === 'ticket',
-        ...(wsHandshakeHash ? { wsHandshakeHash } : {}),
-      });
+      const sid = req.user?.sid;
+      const transitOn = config.enc.clientEncryptionEnabled || config.enc.apiClientEncryptionEnabled;
+      let socketKey: YSweetSocketKey | undefined;
+      if (tokenType === 'ticket' && transitOn && sid) {
+        try {
+          socketKey = await getEncryptionProvider().mintYSweetSocketKey(sid, canonicalDocId);
+        } catch (error) {
+          // A plain ticket still works when y-sweet is plain. An encrypted y-sweet answers 409, sent
+          // on as 503 SOCKET_KEY_UNAVAILABLE. Mint 503: socket encryption not configured.
+          const status = (error as { status?: number }).status;
+          logger[status === 503 ? 'debug' : 'warn']('[YSweet] Socket key mint failed, issuing a plain ticket', {
+            docId: canonicalDocId,
+            status,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+
+      const clientToken: ClientToken & { wsEncrypted?: boolean; nonce?: string; keyVersion?: number } =
+        await ysweetGetOrCreateDocAndToken(canonicalDocId, {
+          authorization,
+          userId,
+          validForSeconds: TOKEN_VALID_SECONDS,
+          ticket: tokenType === 'ticket',
+          ...(socketKey ? { wsKey: socketKey.wrappedKey } : {}),
+        });
       // Only the socket needs a token. Every other caller reads docId and authorization.
       if (tokenType === 'none') delete clientToken.token;
+      // y-sweet without a socket grant key ignores wsKey: the client then opens a plain socket.
+      if (socketKey && clientToken.wsEncrypted) {
+        clientToken.nonce = socketKey.nonce;
+        clientToken.keyVersion = socketKey.keyVersion;
+      }
+      delete clientToken.wsEncrypted;
 
       logger.debug('[YSweet] Received client token from y-sweet', {
         baseUrl: clientToken.baseUrl,
@@ -283,6 +296,11 @@ export class YSweetController {
       res.json(clientToken);
     } catch (error) {
       logger.error('Error in getClientToken:', error);
+      // y-sweet encrypts sockets and the mint failed: retrying gets the same answer.
+      if (error instanceof YSweetHttpError && error.status === 409) {
+        res.status(503).json({ error: 'Socket key unavailable', code: 'SOCKET_KEY_UNAVAILABLE' });
+        return;
+      }
       res.status(500).json({
         error: 'Failed to get client token'
       });

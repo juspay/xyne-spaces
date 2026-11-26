@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect, useCallback, useImperativeHandle } 
 import { Play, Pause, Volume2, VolumeX, Maximize2, Minimize2, Settings } from 'lucide-react';
 import { BaseViewerProps } from './utils';
 import { apiInstance, getAttachmentStreamUrl } from '../../services/clients/apiClient';
+import { useDecryptedAttachment, useObjectUrl } from '../FilePreview/useDecryptedAttachment';
 import { useScope, useShortcutById } from '../../shortcuts';
 import { usePlatform } from '../../hooks/usePlatform';
 import { useMobileZoom } from '../../hooks/useMobileZoom';
@@ -76,8 +77,15 @@ const VideoViewer = React.forwardRef<HTMLVideoElement, VideoViewerProps>(
     const showVerticalVolumeSlider = !isImmersiveMode && !isMobile && !showVolumeSlider;
     const showTimeDisplay = width === undefined || width > 220;
 
+    // An encrypted attachment with no service worker to stream it is played downloaded whole.
+    const decrypted = useDecryptedAttachment({ id: attachmentId });
+    const decryptedUrl = useObjectUrl(decrypted.blob);
+
     // Memoize the streaming URL to prevent recreation on every render
     const streamUrl = React.useMemo((): string => {
+      if (attachmentId && decrypted.decrypting) {
+        return decryptedUrl ?? '';
+      }
       if (attachmentId) {
         // Use the streaming endpoint for range request support
         return getAttachmentStreamUrl(attachmentId);
@@ -87,7 +95,7 @@ const VideoViewer = React.forwardRef<HTMLVideoElement, VideoViewerProps>(
         return URL.createObjectURL(source);
       }
       return '';
-    }, [attachmentId, source]);
+    }, [attachmentId, source, decrypted.decrypting, decryptedUrl]);
 
     // Mobile zoom hook for pinch-to-zoom and pan
     const {

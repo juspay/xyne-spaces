@@ -1,4 +1,4 @@
-import { Router, type RequestHandler } from 'express';
+import { Router } from 'express';
 import { ChatController } from '../controllers/chatController';
 import { validateChannelAccessForGet, validateChannelAccessForPost, validateChannelAccessForPostWithDm } from '../middelware/channelValidation';
 import { requirePermission } from '@/middleware/requirePermission';
@@ -12,19 +12,19 @@ const chatController = new ChatController();
 // bot's DM with that user, matching the Slack adapter's chat.postMessage.
 // encryptedRoute: fields the transit proxy encrypted become workspace-DEK ciphertext (and the
 // reply goes back encrypted to the proxy); a no-op unless API client encryption is on.
-// Bots that call the backend directly (no transit proxy in front yet) post plaintext as
-// before; the Prisma extension still encrypts it at rest. Proxy traffic keeps the transit lane.
-const viaTransitProxy = (handlers: RequestHandler[]): RequestHandler[] =>
-  handlers.map((handler) => (req, res, next) => (req.proxyClient ? handler(req, res, next) : next()));
-
-const encryptedPostMessage = viaTransitProxy(encryptedRoute(appsChatPostMessageClient, {
+// transitProxyIngress: only where the ingress transit proxy is deployed
+// (TRANSIT_PROXY_INGRESS_ENABLED); without it these routes take plaintext as before and the
+// Prisma extension still encrypts it at rest.
+const encryptedPostMessage = encryptedRoute(appsChatPostMessageClient, {
   resolveWorkspaceId: async (req) => req.user!.workspaceId,
-}));
+  transitProxyIngress: true,
+});
 router.post('/postMessage', requirePermission('chat:write'), validateChannelAccessForPostWithDm, ...encryptedPostMessage, chatController.postMessage);
 router.post('/postEphemeral', requirePermission('chat:write'), validateChannelAccessForPost, chatController.postEphemeral);
-const encryptedUpdateMessage = viaTransitProxy(encryptedRoute(appsChatUpdateMessageClient, {
+const encryptedUpdateMessage = encryptedRoute(appsChatUpdateMessageClient, {
   resolveWorkspaceId: async (req) => req.user!.workspaceId,
-}));
+  transitProxyIngress: true,
+});
 router.post('/updateMessage', requirePermission('chat:write'), validateChannelAccessForPost, ...encryptedUpdateMessage, chatController.updateMessage);
 router.post('/deleteMessage', requirePermission('chat:delete'), validateChannelAccessForPost, chatController.deleteMessage);
 router.post('/agentProgress', requirePermission('chat:write'), validateChannelAccessForPost, chatController.agentProgress);

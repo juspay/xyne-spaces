@@ -452,6 +452,9 @@ const envSchema = Joi.object({
   SUPERPOSITION_LOTUS_WORKSPACE_ID: Joi.string().allow('').default('lotus'),
   SUPERPOSITION_POLLING_INTERVAL: Joi.number().default(60000), // 60 seconds in milliseconds
   SUPERPOSITION_TIMEOUT: Joi.number().default(30000), // 30 seconds in milliseconds
+  // JSON object of Superposition key -> value: the default a read gets when Superposition has no
+  // value for the key (see superpositionDefault). Unset keys keep the code's own default.
+  SUPERPOSITION_DEFAULTS: Joi.string().allow('').default(''),
   // Jenkins Configuration
   JENKINS_BASE_URL: Joi.string().uri().default(''),
   JENKINS_JOB_PATH: Joi.string().default(''),
@@ -565,6 +568,8 @@ const envSchema = Joi.object({
   MICROSOFT_GRAPH_BASE_URL: Joi.string().uri().default('https://graph.microsoft.com/v1.0'),
   MICROSOFT_GRAPH_CLIENT_STATE_BACKFILL_ENABLED: Joi.boolean().default(false),
   // XYNE Claw Integration (Ask AI v2)
+  // Off on a stack with no Claw (no claw-auth to ask): every installed app is then an APP, never an AGENT.
+  XYNE_CLAW_ENABLED: Joi.boolean().default(true),
   XYNE_CLAW_URL: Joi.string().uri().default('http://localhost:3002'),
   XYNE_CLAW_S2S_KEY: Joi.string().allow('').default(''),
   XYNE_CLAW_AUTH_URL: Joi.string().uri().default('http://localhost:3003'),
@@ -591,6 +596,13 @@ const envSchema = Joi.object({
   ENC_S2S_KEY: Joi.string().allow(''),
   ENCRYPTION_SERVICE_URL: Joi.string().uri().default('http://localhost:3012'),
   ENCRYPTION_REQUEST_TIMEOUT_MS: Joi.number().integer().min(1).default(5000),
+  // Ingress transit proxy for the Xyne Apps API. true: bots reach /api/apps only through the
+  // proxy, so chat/postMessage and chat/updateMessage always go through their encryption
+  // contract and a bot that calls the backend directly is refused (TRANSIT_KEY_REQUIRED).
+  // false (default, no proxy deployed): those routes take plaintext as before, and a request
+  // that came through the proxy is refused (TRANSIT_PROXY_NOT_ENABLED) rather than stored as
+  // transit ciphertext the backend cannot use.
+  TRANSIT_PROXY_INGRESS_ENABLED: Joi.boolean().default(false),
   // Egress transit proxy for app event webhooks. Set: external deliveries are sealed by the
   // encryption service and posted by the proxy, never by the backend. Empty = direct (default).
   TRANSIT_PROXY_EGRESS_URL: Joi.string().uri().allow('').default(''),
@@ -836,6 +848,21 @@ const { error, value: envVars } = envSchema.validate({ ...process.env, ...getKms
 
 if (error) {
   throw new Error(`Config validation error: ${error.message}`);
+}
+
+/** SUPERPOSITION_DEFAULTS as a key -> value map; a malformed value stops the boot. */
+function parseSuperpositionDefaults(raw: string): Readonly<Record<string, unknown>> {
+  if (!raw.trim()) return {};
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (e) {
+    throw new Error(`Config validation error: SUPERPOSITION_DEFAULTS is not valid JSON (${(e as Error).message})`);
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('Config validation error: SUPERPOSITION_DEFAULTS must be a JSON object of key -> value');
+  }
+  return parsed as Record<string, unknown>;
 }
 
 export const config = {
@@ -1293,6 +1320,7 @@ export const config = {
     lotusWorkspaceId: envVars.SUPERPOSITION_LOTUS_WORKSPACE_ID,
     pollingInterval: envVars.SUPERPOSITION_POLLING_INTERVAL,
     timeout: envVars.SUPERPOSITION_TIMEOUT,
+    defaults: parseSuperpositionDefaults(envVars.SUPERPOSITION_DEFAULTS as string),
   },
   jenkins: {
     baseUrl: envVars.JENKINS_BASE_URL,
@@ -1461,6 +1489,7 @@ export const config = {
     clientStateBackfillEnabled: envVars.MICROSOFT_GRAPH_CLIENT_STATE_BACKFILL_ENABLED as boolean,
   },
   xyneClaw: {
+    enabled: envVars.XYNE_CLAW_ENABLED as boolean,
     url: envVars.XYNE_CLAW_URL as string,
     s2sKey: envVars.XYNE_CLAW_S2S_KEY as string,
     authUrl: envVars.XYNE_CLAW_AUTH_URL as string,
@@ -1510,6 +1539,7 @@ export const config = {
   internal: {
     encryptionS2sKey: envVars.ENC_S2S_KEY as string,
     encryptionServiceUrl: envVars.ENCRYPTION_SERVICE_URL as string,
+    transitProxyIngressEnabled: envVars.TRANSIT_PROXY_INGRESS_ENABLED as boolean,
     transitProxyEgressUrl: (envVars.TRANSIT_PROXY_EGRESS_URL as string).trim().replace(/\/+$/, ''),
     transitProxyEgressKeyVersion: envVars.TRANSIT_PROXY_EGRESS_KEY_VERSION as number,
     transitProxyEgressTimeoutMs: envVars.TRANSIT_PROXY_EGRESS_TIMEOUT_MS as number,
@@ -1714,3 +1744,12 @@ export const config = {
     connectMaxDelayMs: envVars.CONNECT_RETRY_MAX_DELAY_MS as number,
   },
 };
+
+/**
+ * The default to pass a Superposition read for `key`: this stack's SUPERPOSITION_DEFAULTS value
+ * when it has the code default's type, else the code default itself.
+ */
+export function superpositionDefault<T>(key: string, codeDefault: T): T {
+  const value = config.superposition.defaults[key];
+  return value !== undefined && typeof value === typeof codeDefault ? (value as T) : codeDefault;
+}

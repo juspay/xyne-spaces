@@ -3,7 +3,6 @@ import crypto from "node:crypto";
 import { asyncHandler, ok, badRequest, unauthorized, forbidden, notFound, HttpError } from "../lib/http.js";
 import {
   userProviderCredentialsRepository,
-  userSubagentConfigRepository,
   sharedProviderCredentialRepository,
   agentProviderCredentialsRepository,
 } from "../repositories/index.js";
@@ -288,32 +287,6 @@ router.post("/provider-credentials/:provider/share", asyncHandler(async (req: Re
   }
 
   ok(res, { sharedCredentialId: sharedId, results });
-}));
-
-// GET /settings/subagent-routing — list user's per-subagent provider preferences
-router.get("/subagent-routing", asyncHandler(async (req: Request, res: Response) => {
-  const userId = requireRequester(req);
-  const rows = await userSubagentConfigRepository.listByUser(userId);
-  const data = rows.map((r) => ({ subagentName: r.subagentName, provider: r.provider }));
-  ok(res, data);
-}));
-
-// PUT /settings/subagent-routing/:subagentName — set provider for a subagent
-router.put("/subagent-routing/:subagentName", asyncHandler(async (req: Request<{ subagentName: string }>, res: Response) => {
-  const userId = requireRequester(req);
-  const { provider } = req.body as { provider?: string };
-  if (!provider || !VALID_PROVIDERS.has(provider)) {
-    throw badRequest(`provider must be one of ${[...VALID_PROVIDERS].join(", ")}`);
-  }
-  const row = await userSubagentConfigRepository.upsert(userId, req.params.subagentName, provider);
-  ok(res, { subagentName: row.subagentName, provider: row.provider });
-}));
-
-// DELETE /settings/subagent-routing/:subagentName — clear override (falls back to parent agent provider)
-router.delete("/subagent-routing/:subagentName", asyncHandler(async (req: Request<{ subagentName: string }>, res: Response) => {
-  const userId = requireRequester(req);
-  await userSubagentConfigRepository.delete(userId, req.params.subagentName);
-  ok(res);
 }));
 
 // ── GitHub Copilot device-code login (user-level) ──────────────────

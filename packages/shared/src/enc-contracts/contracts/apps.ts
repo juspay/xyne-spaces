@@ -1,15 +1,19 @@
 import { z } from 'zod';
 import { defineRequestContract, type RequestOf } from '../define.js';
+import { conversationsSendClient } from './conversations.js';
 
 /**
  * Xyne Apps `POST /apps/chat/postMessage`, sent by bots through the transit proxy, which
  * encrypts `markdownText` under the apps transit keys; the handler stores the workspace-DEK
- * ciphertext as-is. `text` stays plaintext for now: the handler resolves Slack mentions and
- * parses BlockKit in it, which cannot run on ciphertext until that processing moves into the
- * encryption service's extractor.
+ * ciphertext as-is. The message's insert side effects read these facts instead of parsing the
+ * content (mentions, `@channel` / `@here`, link preview, PR links, Meet links, bot command):
+ * the same facts, under the same names, as the dashboard's `conversations.send`, because both
+ * end in the same message insert job (`derived.fields.content`).
+ * `text` stays plaintext for now: the handler resolves Slack mentions and parses BlockKit in
+ * it, which cannot run on ciphertext until that processing moves into the extractor.
  */
 export const appsChatPostMessageClient = defineRequestContract({
-  sourceToDerived: { markdownText: {} },
+  sourceToDerived: { markdownText: conversationsSendClient.sourceToDerived.content },
   schema: z.object({
     channelId: z.string().optional(),
     channelName: z.string().optional(),

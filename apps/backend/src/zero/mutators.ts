@@ -85,9 +85,6 @@ import {
   parseFieldOptions,
   serializeFieldOptions,
   ReleaseTrackingMode,
-  parseRepliesMd,
-  addReplyToData,
-  serializeRepliesMd,
   type CallParticipantMetadata,
   SUMMARY_PROMPT_MAX_LENGTH,
   MAX_NOTIFICATION_KEYWORDS,
@@ -106,7 +103,6 @@ import {
   entityLinkContextSchema,
   withExtension,
   updateSubTicketsMdFromZero,
-  linkSubTicketConversationToParentFromZero,
   parseBoardEtaManagement,
   mergeBoardEtaManagement,
   parseTicketEtaManagement,
@@ -131,7 +127,7 @@ import {
 } from '@xyne/shared';
 import { ConnectEntityType } from '@xyne/shared';
 import type { ExtractorOutput } from '@xyne/shared';
-import { forwardedMessageEditTemplate, forwardedMessageTemplate } from '@xyne/shared';
+import { forwardedMessageEditTemplate, forwardedMessageTemplate, repliesMdAddReplierTemplate } from '@xyne/shared';
 import {
   conversationsForwardMessageClient,
   messagesUpdateClient,
@@ -219,13 +215,13 @@ import {
   upsertManyFormEntityValuesArgs,
   writeFormEntityValueCreate,
   writeFormEntityValueUpdate,
-  type FormEntityValueWrite,
   deleteFormEntityValue,
   moveFormEntityValue,
 } from './formsMutatorHelpers';
 import { v4 as uuidv4 } from 'uuid';
 import { defineContractMutator, getMutationFacts } from './encryptedMutation';
 import type { AnyTransaction } from './unreadableTransaction';
+import { composeSubTicketAnchorMd } from './mutation-sync/composeMd';
 import { detectVcsProvider } from '@/utils/repoUrlParser';
 import { getStorageService } from '@/services/storage';
 import { summaryTemplateService } from '@/services/summaryTemplateService';
@@ -246,7 +242,6 @@ import type { CallEncryptionState } from '@/database/repositories/callRepository
 import { config } from '@/config/env';
 import { processMeetLinksFromChatMessage } from '@/services/meetLinkService';
 import { bookmarkReminderService } from '@/services/bookmarkReminderService';
-import { versionReleaseMappingService } from '@/services/release/versionReleaseMappingService';
 import { releaseDevTicketNotifyService } from '@/services/release/releaseDevTicketNotifyService';
 import { EntitySequenceService } from '@/services/entitySequenceService';
 import { syncToYSweet } from '@/utils/ysweetUtils';
@@ -1211,25 +1206,6 @@ export function createMutators(
     }
   };
 
-  // A ticket's releaseVersion form value drives its release mapping; resync once per ticket
-  // after the form write commits.
-  const queueReleaseMappingSyncForFormWrites = (writes: readonly FormEntityValueWrite[]): void => {
-    const ticketIds = new Set(
-      writes
-        .filter(write => write.entityType === FormEntityType.TICKET && write.fieldName === 'releaseVersion')
-        .map(write => write.entityId),
-    );
-    ticketIds.forEach(entityId => {
-      asyncTasks.push(async () => {
-        try {
-          await versionReleaseMappingService.syncTicketById(entityId);
-        } catch (error) {
-          logger.error('release_mapping_sync_failed', { entityId, error });
-        }
-      });
-    });
-  };
-
   const bookmarkByEntityQuery = (entityId: string, entityType: BookmarkEntityType) =>
     zql.bookmarks
       .where('userId', authData.sub)
@@ -1999,13 +1975,19 @@ export function createMutators(
           const uniqueSourceIds = [...activityBySourceId.keys()];
 
           const messages = await tx.run(
-            zql.messages
-              .where('messageId', 'IN', uniqueSourceIds)
-              .related('conversation'),
+            zql.messages.where('messageId', 'IN', uniqueSourceIds),
+          );
+          // Read on their own: conversations has unreadable columns, so tx.run refuses .related('conversation').
+          const conversationIds = [...new Set(messages.map(m => m.conversationId))];
+          const conversations = conversationIds.length > 0
+            ? await tx.run(zql.conversations.where('conversationId', 'IN', conversationIds))
+            : [];
+          const conversationById = new Map(
+            conversations.map(c => [c.conversationId, c]),
           );
 
           const messageByMessageId = new Map(
-            messages.map(m => [m.messageId, m]),
+            messages.map(m => [m.messageId, { ...m, conversation: conversationById.get(m.conversationId) }]),
           );
 
           for (const [sourceId, activity] of activityBySourceId) {
@@ -3995,15 +3977,21 @@ export function createMutators(
             }
           }
 
-          const repliesData = parseRepliesMd(conversation.replies_md);
-          const updatedRepliesData = addReplyToData(repliesData, authData.sub);
-          const updatedRepliesMd = serializeRepliesMd(updatedRepliesData);
+          // replies_md is unreadable: the encryption service adds the replier (repliesMdAddReplierTemplate).
+          const replies = await compose(
+            {
+              template: repliesMdAddReplierTemplate,
+              inputs: { repliesMd: conversation.replies_md ?? null, replierId: authData.sub },
+              current: conversation.replies_md ?? null,
+            },
+            { workspaceId: authData.workspaceId },
+          );
 
           await tx.mutate.conversations.update({
             conversationId,
             replyCount: conversation.replyCount + 1,
             lastActivityAt: timestamp,
-            ...(updatedRepliesMd !== conversation.replies_md && { replies_md: updatedRepliesMd }),
+            ...(!replies.unchanged && { replies_md: replies.value }),
           });
 
           if (showInChannel) {
@@ -4970,7 +4958,8 @@ export function createMutators(
               content: '',
               hasAttachment: false,
               edited: false,
-              link_preview_md: '',
+              // null, not '': an empty string would be encrypted at rest like any plaintext.
+              link_preview_md: null,
             });
           } else {
             // SCENARIO 2: Hard Delete (Reply OR Root with no replies)
@@ -7192,26 +7181,6 @@ export function createMutators(
             }
           }
 
-          if (
-            params.statusV2 === TicketStatusV2.COMPLETED
-            && ticket.statusV2 !== TicketStatusV2.COMPLETED
-            && isReleaseTicket(ticket.ticketType as BaseTicketType | null)
-          ) {
-            const completionTimestamp = new Date(params.updatedAt);
-            asyncTasks.push(async () => {
-              try {
-                await versionReleaseMappingService.updateDeployedVersionOnCompletion(
-                  params.id,
-                  completionTimestamp,
-                );
-              } catch (error) {
-                logger.error(
-                  `[VersionReleaseMapping] failed to update deployedVersion for ticket ${params.id}:`,
-                  error,
-                );
-              }
-            });
-          }
 
           // Mirror every release-ticket status change into the bundled dev
           // tickets' threads. Keyed on the canonical statusV2 (never on board
@@ -8016,12 +7985,8 @@ export function createMutators(
               await updateSubTicketsMdFromZero(tx, zql, mapping.ticketId);
             }
             if (mappedTicketId && mappings[0]) {
-              await linkSubTicketConversationToParentFromZero(
-                tx,
-                zql,
-                mappedTicketId,
-                mappings[0].ticketId,
-              );
+              // parent_message_md is stored encrypted: the encryption service builds the anchor.
+              await composeSubTicketAnchorMd(tx, mappedTicketId, mappings[0].ticketId);
             }
           }
         },
@@ -13475,7 +13440,6 @@ export function createMutators(
             workspaceId: authData.workspaceId,
           });
           await assertFormEntityValueWrites(tx, [write]);
-          queueReleaseMappingSyncForFormWrites([write]);
         },
       ),
       createV2: defineMutator(
@@ -13493,7 +13457,6 @@ export function createMutators(
         async ({ tx, args }) => {
           const write = await writeFormEntityValueCreate(tx, { ...args, workspaceId: authData.workspaceId });
           await assertFormEntityValueWrites(tx, [write]);
-          queueReleaseMappingSyncForFormWrites([write]);
         },
       ),
       update: defineMutator(
@@ -13506,15 +13469,13 @@ export function createMutators(
         async ({ tx, args }) => {
           const write = await writeFormEntityValueUpdate(tx, args);
           await assertFormEntityValueWrites(tx, [write]);
-          queueReleaseMappingSyncForFormWrites([write]);
         },
       ),
       // Saves a whole form (e.g. a stage form) in one transaction. Use this instead of one
       // createV2/update per field whenever several values change together: branch fields are
       // validated after every value is written, so their order doesn't matter.
       upsertMany: defineMutator(upsertManyFormEntityValuesArgs, async ({ tx, args }) => {
-        const writes = await upsertManyFormEntityValues(tx, authData.workspaceId, args);
-        queueReleaseMappingSyncForFormWrites(writes);
+        await upsertManyFormEntityValues(tx, authData.workspaceId, args);
       }),
     },
     dashboard: {

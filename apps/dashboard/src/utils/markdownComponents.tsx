@@ -31,6 +31,10 @@ export interface ClawCitationContext {
   toolInvocations: ToolInvocation[];
   /** Stable `toolCallId → display number` map (from buildClawCitationToolNumbers). */
   toolNumbers: ReadonlyMap<string, number>;
+  /** Extra classes for the chips' tooltip and source list, e.g. a z-index above a modal they sit in. */
+  overlayClassName?: string;
+  /** Called when a source link is clicked, e.g. to close the modal the answer sits in. */
+  onSourceOpen?: () => void;
 }
 
 // ─── Code Block ──────────────────────────────────────────────────────────────
@@ -264,7 +268,14 @@ export const createMarkdownComponents = (
         const groupRefs = parseCiteGroupHref(href);
         if (groupRefs.length >= 2) {
           return (
-            <ClawCitationGroup refs={groupRefs} toolInvocations={citationCtx.toolInvocations} />
+            <ClawCitationGroup
+              refs={groupRefs}
+              toolInvocations={citationCtx.toolInvocations}
+              {...(citationCtx.overlayClassName && {
+                popoverClassName: citationCtx.overlayClassName,
+              })}
+              {...(citationCtx.onSourceOpen && { onSourceOpen: citationCtx.onSourceOpen })}
+            />
           );
         }
       }
@@ -282,6 +293,10 @@ export const createMarkdownComponents = (
                 chunkIndex={chunkIndex}
                 toolNumber={toolNumber}
                 toolInvocations={citationCtx.toolInvocations}
+                {...(citationCtx.overlayClassName && {
+                  tooltipClassName: citationCtx.overlayClassName,
+                })}
+                {...(citationCtx.onSourceOpen && { onSourceOpen: citationCtx.onSourceOpen })}
               />
             );
           }

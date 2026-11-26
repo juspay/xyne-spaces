@@ -21,11 +21,6 @@ export interface ProviderCredentialPayload {
   reasoningEffort?: ReasoningEffort | null;
 }
 
-export interface SubagentRouting {
-  subagentName: string;
-  provider: string;
-}
-
 export interface GitHubDeviceCode {
   userCode: string;
   verificationUri: string;

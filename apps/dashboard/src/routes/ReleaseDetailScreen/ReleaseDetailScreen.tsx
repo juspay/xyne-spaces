@@ -6,7 +6,6 @@ import {
   Check,
   Download,
   Plus,
-  RefreshCw,
   // Disabled (LLM)
   // Sparkles,
   SquareArrowOutUpRight,
@@ -16,7 +15,6 @@ import * as Tabs from '@radix-ui/react-tabs';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { FormContextType, FormEntityType, type VCSProviderType } from '@xyne/shared';
 import { toast } from 'sonner';
-import { getApiErrorMessage } from '../../utils/apiError';
 
 import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { useZero } from '../../hooks/useZero';
@@ -221,7 +219,6 @@ const ReleaseDetailScreen = (): ReactElement => {
 
   // release_repositories lives in the non_zero schema (server-only, not
   // Zero-replicated), so it's fetched over HTTP instead of synced via Zero.
-  // Refetched after a re-run — the only in-screen action that changes these rows.
   const [releaseRepositories, setReleaseRepositories] = useState<ReleaseRepositoryRow[]>([]);
   const [analysisCanvasId, setAnalysisCanvasId] = useState<string | null>(null);
   const fetchReleaseRepositories = useCallback(async (): Promise<void> => {
@@ -366,31 +363,6 @@ const ReleaseDetailScreen = (): ReactElement => {
   const stagesByBoard = useMemo(() => {
     return buildStagesByBoard(stages);
   }, [stages]);
-
-  // Re-run commit analysis for this release. Hits the existing backend endpoint
-  // which loads the release ticket's deployedCommitId / newCommitId / branch
-  // from form values, then dispatches the same analysis pipeline as create.
-  const [isReRunning, setIsReRunning] = useState(false);
-  const handleReRunAnalysis = async (): Promise<void> => {
-    if (!releaseTicketId) return;
-    setIsReRunning(true);
-    try {
-      const response = await apiInstance.post<{ success: boolean; error?: string }>(
-        `/commits/analyze/re-run/${releaseTicketId}`,
-        {},
-      );
-      if (response.data?.success) {
-        void fetchReleaseRepositories();
-        toast.success('Commit analysis re-run — check the conversation for the new summary.');
-      } else {
-        toast.error(response.data?.error ?? 'Re-run failed');
-      }
-    } catch (err) {
-      toast.error(getApiErrorMessage(err, 'Re-run failed'));
-    } finally {
-      setIsReRunning(false);
-    }
-  };
 
   const releaseInsights = useMemo(
     () => readReleaseInsights(releaseTicket?.metadata),
@@ -764,21 +736,6 @@ const ReleaseDetailScreen = (): ReactElement => {
                   )}
                   <button
                     type='button'
-                    onClick={() => void handleReRunAnalysis()}
-                    disabled={isReRunning || !releaseTicketId}
-                    data-track-event='BUTTON_CLICK'
-                    data-track-category='Release'
-                    data-track-name='ReRunCommitAnalysis'
-                    data-track-metadata={JSON.stringify({ releaseTicketId })}
-                    data-testid='rerun-commit-analysis'
-                    title='Re-run commit analysis with the current release configuration — useful after fixing Application regex / paths.'
-                    className='inline-flex items-center gap-2 rounded border border-border px-3 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50'
-                  >
-                    <RefreshCw size={15} className={isReRunning ? 'animate-spin' : ''} />
-                    {isReRunning ? 'Re-running…' : 'Re-run Analysis'}
-                  </button>
-                  <button
-                    type='button'
                     onClick={() => void exportDevTickets()}
                     disabled={isExportingArt || (artRows.length === 0 && artPageIndex === 0)}
                     data-track-event='BUTTON_CLICK'
@@ -927,7 +884,7 @@ const ReleaseDetailScreen = (): ReactElement => {
                   <div className='text-center py-8 bg-muted rounded-lg border border-dashed border-border'>
                     <p className='text-sm text-muted-foreground'>
                       No release notes yet. They appear here once commit analysis has run for this
-                      release — use “Re-run Analysis” on the Dev Tickets tab to generate them.
+                      release.
                     </p>
                   </div>
                 )}

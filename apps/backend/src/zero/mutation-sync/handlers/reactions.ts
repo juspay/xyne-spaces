@@ -6,10 +6,10 @@ import {
   parseReactionsMd,
   removeReactionFromData,
   serializeReactionsMd,
-  buildInitialMessageMd,
 } from '@xyne/shared';
 import type { ReactionPreviousValue } from '../types';
 import { BaseMutationSyncHandler } from '../base-handler';
+import { composeInitialMessageMd } from '../composeMd';
 
 export class ReactionsMutationSyncHandler extends BaseMutationSyncHandler {
   async onInsert(args: unknown, tx: Transaction<Schema>): Promise<void> {
@@ -37,16 +37,8 @@ async function syncInitialMessageMdAfterReaction(
     zql.conversations.where('initialMessageId', message.messageId)
   );
 
-  if (conversations.length === 0) return;
-
-  const md = buildInitialMessageMd({ ...message, reactions_md: updatedReactionsMd });
-
   for (const conversation of conversations) {
-    if (conversation.initial_message_md === md) continue;
-    await tx.mutate.conversations.update({
-      conversationId: conversation.conversationId,
-      initial_message_md: md,
-    });
+    await composeInitialMessageMd(tx, { ...message, reactions_md: updatedReactionsMd }, conversation);
   }
 }
 

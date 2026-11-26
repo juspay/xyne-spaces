@@ -13,6 +13,9 @@ const GRAFANA_ENABLED_TOOLS = [
   "examples", "cloudwatch", "elasticsearch", "clickhouse",
 ].join(",");
 
+/** Keep in step with the Dockerfile's `uv tool install mcp-grafana==…`. */
+export const GRAFANA_MCP_VERSION = "1.6.1";
+
 export const grafanaAdapter: StdioMcpAdapter = {
   transport: "stdio",
   type: "grafana",
@@ -24,9 +27,12 @@ export const grafanaAdapter: StdioMcpAdapter = {
   buildCommand(credentials) {
     const url = credentials["url"] as string;
     const token = credentials["token"] as string;
+    // The image installs mcp-grafana at build time (Dockerfile, MCP_GRAFANA_BIN): prod can't
+    // reach PyPI. Elsewhere uvx fetches the same pinned version.
+    const bin = process.env["MCP_GRAFANA_BIN"];
     return {
-      cmd: "uvx",
-      args: ["mcp-grafana==1.6.1", "--enabled-tools", GRAFANA_ENABLED_TOOLS],
+      cmd: bin || "uvx",
+      args: [...(bin ? [] : [`mcp-grafana==${GRAFANA_MCP_VERSION}`]), "--enabled-tools", GRAFANA_ENABLED_TOOLS],
       env: {
         GRAFANA_URL: url,
         GRAFANA_SERVICE_ACCOUNT_TOKEN: token,

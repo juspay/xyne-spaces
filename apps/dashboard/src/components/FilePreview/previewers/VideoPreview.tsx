@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { getAttachmentStreamUrl } from '../../../services/clients/apiClient';
 import { streamSourceOf } from '../streamSource';
+import { useDecryptedAttachment, useObjectUrl } from '../useDecryptedAttachment';
 import { cn } from '../../../utils/classNames';
 import {
   PreviewButton,
@@ -63,6 +64,11 @@ const SMALLEST_FIT = 0.02;
  * offered for download instead.
  */
 export default function VideoPreview(props: PreviewerProps): ReactElement {
+  const decrypted = useDecryptedAttachment(props.file);
+  const decryptedUrl = useObjectUrl(decrypted.blob);
+  const videoSource = decrypted.decrypting
+    ? decryptedUrl
+    : streamSourceOf(props.file, getAttachmentStreamUrl);
   const download = usePreviewDownload();
   const stageRef = useRef<HTMLDivElement | null>(null);
   const scrollRef = useRef<HTMLDivElement | null>(null);
@@ -327,7 +333,7 @@ export default function VideoPreview(props: PreviewerProps): ReactElement {
             <video
               ref={setVideo}
               key={`${props.file.id}:${attempt}`}
-              src={streamSourceOf(props.file, getAttachmentStreamUrl)}
+              src={videoSource}
               // The stream may be another origin's; its cookies still have to go.
               crossOrigin='use-credentials'
               playsInline

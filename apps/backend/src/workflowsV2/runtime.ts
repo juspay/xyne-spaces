@@ -1,25 +1,26 @@
 import {
   ApprovalRequirement,
-  // Disabled (Claw)
-  // BaseConnector,
+  BaseConnector,
   ConnectorRegistry,
   ServiceRegistry,
   WorkflowExecutor,
   WorkflowRuntime,
-  // Disabled (Claw)
-  // type AnyStep,
+  type AnyStep,
   type ApprovalConfig,
   type ExecutorLogger,
 } from '@xyne/workflow-sdk';
-// Disabled (Claw)
-// import { HostAgentStep } from '@xyne/workflow-sdk/agents/host';
+import { HostAgentStep } from '@xyne/workflow-sdk/agents/host';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
 import { workflowsQueue } from '@/queues/workflowsQueue';
 import { workflowsCronQueue } from '@/queues/workflowsCronQueue';
 import { conversationalFlowQueue } from '@/queues/conversationalFlowQueue';
+import { BitbucketConnector } from '@xyne/connector-sdk/bitbucket';
+import { GitHubConnector } from '@xyne/connector-sdk/github';
+import { XyneSpacesConnector } from './connectors/xyne-spaces';
+import { ReleaseConnector } from './connectors/release';
+import { ClawAgentProvider } from './agents/claw-provider';
 // Disabled (Claw)
-// import { ClawAgentProvider } from './agents/claw-provider';
 // import { SdlcArtifactAgentProvider } from './agents/sdlc-artifact-provider';
 // import { SDLC_AGENT_STEP_TYPE, SdlcAgentProvider } from './agents/sdlc-agent-provider';
 // import { SdlcWikiPlanStep } from '@/sdlc/wiki/wikiPlanStep';
@@ -51,6 +52,10 @@ const sandbox = createWorkflowSandboxAdapter();
 const services = new ServiceRegistry();
 
 const connectors = new ConnectorRegistry();
+connectors.register(new XyneSpacesConnector());
+connectors.register(new ReleaseConnector());
+connectors.register(new GitHubConnector());
+connectors.register(new BitbucketConnector({ apiBaseUrl: config.bitbucket.baseUrl }));
 
 /**
  * RUN_AGENT — runs on xyne-claw. See docs/guidelines/workflows/AGENTS.md.
@@ -66,25 +71,25 @@ const connectors = new ConnectorRegistry();
  * removal is what lets the backend drop the pi peer dependencies: `@xyne/workflow-sdk/agents/host`
  * is pi-free, and nothing else here imports the pi-ful `/agents` barrel.
  */
-// Disabled (Claw)
-// class ClawConnector extends BaseConnector {
-//   readonly id = 'claw';
-//   readonly version = '1.0.0';
-//   readonly name = 'Xyne Claw';
-//   readonly description = 'Agents configured on xyne-claw';
-//   readonly icon = 'bot';
-//   readonly credentials = [];
-//   readonly triggers = [];
-//   readonly steps: readonly AnyStep[] = [
-//     new HostAgentStep(new ClawAgentProvider(), {
-//       type: 'RUN_AGENT',
-//       name: 'Run Agent',
-//       description: "Run one of your workspace's agents and use its response",
-//       category: 'ai',
-//     }),
-//   ];
-// }
+class ClawConnector extends BaseConnector {
+  readonly id = 'claw';
+  readonly version = '1.0.0';
+  readonly name = 'Xyne Claw';
+  readonly description = 'Agents configured on xyne-claw';
+  readonly icon = 'bot';
+  readonly credentials = [];
+  readonly triggers = [];
+  readonly steps: readonly AnyStep[] = [
+    new HostAgentStep(new ClawAgentProvider(), {
+      type: 'RUN_AGENT',
+      name: 'Run Agent',
+      description: "Run one of your workspace's agents and use its response",
+      category: 'ai',
+    }),
+  ];
+}
 
+// Disabled (Claw)
 // /** SDLC hub steps. The agent steps dispatch to claw's sdlc-agent, so they share its gate. */
 // class SdlcConnector extends BaseConnector {
 //   readonly id = 'sdlc';
@@ -111,15 +116,15 @@ const connectors = new ConnectorRegistry();
 //   ];
 // }
 
-// Disabled (Claw)
-// if (config.xyneClaw.s2sKey && config.xyneClaw.authUrl) {
-//   connectors.register(new ClawConnector());
-//   logger.info('[workflows] RUN_AGENT registered (xyne-claw, S2S dispatch)');
-//   connectors.register(new SdlcConnector());
-//   logger.info('[workflows] CREATE_SDLC_ARTIFACT, SDLC_AGENT and SDLC_WIKI_PLAN registered');
-// } else {
-//   logger.warn('[workflows] xyne-claw not configured — RUN_AGENT will not be available');
-// }
+if (config.xyneClaw.s2sKey && config.xyneClaw.authUrl) {
+  connectors.register(new ClawConnector());
+  logger.info('[workflows] RUN_AGENT registered (xyne-claw, S2S dispatch)');
+  // Disabled (Claw)
+  // connectors.register(new SdlcConnector());
+  // logger.info('[workflows] CREATE_SDLC_ARTIFACT, SDLC_AGENT and SDLC_WIKI_PLAN registered');
+} else {
+  logger.warn('[workflows] xyne-claw not configured — RUN_AGENT will not be available');
+}
 
 const APPROVAL_POLICY = {
   default: ApprovalRequirement.NOT_REQUIRED,

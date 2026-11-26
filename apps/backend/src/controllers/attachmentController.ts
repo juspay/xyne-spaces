@@ -32,6 +32,8 @@ import { isSupportedMimeType } from '@/services/fileProcessor';
 import { cacheManager } from '../utils/cacheManager';
 import { pipeline } from 'node:stream/promises';
 import { findFormEntityValue } from '@/database/repositories/formEntityValueRepository';
+import { isClientFileEncryption } from '@/middleware/clientFileEncryption';
+import { SafeStorageService, type EncryptedLayout } from '@/services/storage/safeStorageService';
 
 const db = DatabaseClient.getInstance();
 
@@ -392,7 +394,8 @@ export class AttachmentController {
       const fileSize = parseInt(String(metadata.size || '0'), 10);
 
       res.setHeader('Content-Type', 'image/jpeg');
-      res.setHeader('Content-Length', fileSize);
+      // An encrypted file goes out as the caller's transit container, not the stored size.
+      if (!isClientFileEncryption(req)) res.setHeader('Content-Length', fileSize);
       res.setHeader('Content-Disposition', `inline; filename="thumbnail.jpg"`);
       res.setHeader('Cache-Control', 'private, max-age=3600');
 
@@ -584,6 +587,76 @@ export class AttachmentController {
    * Stream video/audio files with range request support (HTTP 206 Partial Content)
    * This enables seeking in video players
    */
+  /**
+   * The chunks of an encrypted file that cover the requested plaintext range, re-encrypted for
+   * the caller: a transit container whose first chunk is `x-file-chunk-start`. The dashboard's
+   * service worker (public/sw.js) decrypts them and answers the player with exactly
+   * `x-file-range-start`..`x-file-range-end` of the `x-file-size`-byte file, so range reads
+   * (seeking, pdf.js) work without the plaintext passing through here. An open-ended range is
+   * answered with at most RANGE_CHUNK_SIZE bytes, as for a plain file.
+   */
+  private async streamEncryptedRange(
+    req: Request,
+    res: Response,
+    service: SafeStorageService,
+    filePath: string,
+    layout: EncryptedLayout,
+    mimetype: string | null | undefined,
+  ): Promise<void> {
+    const size = layout.plaintextSize;
+    let start = 0;
+    let end = size - 1;
+    const range = req.headers.range;
+    if (range) {
+      const parts = range.replace(/bytes=/, '').split('-');
+      start = parseInt(parts[0] ?? '', 10);
+      if (isNaN(start) || start < 0) {
+        res.status(400).json({ error: 'Invalid Range header' });
+        return;
+      }
+      if (size <= 0 || start >= size) {
+        res.setHeader('Content-Range', `bytes */${size}`);
+        res.status(416).json({ error: 'Requested range not satisfiable' });
+        return;
+      }
+      end = parts[1] ? parseInt(parts[1], 10) : Math.min(start + RANGE_CHUNK_SIZE - 1, size - 1);
+      if (parts[1] && (isNaN(end) || end < start)) {
+        res.status(400).json({ error: 'Invalid Range header' });
+        return;
+      }
+      end = Math.min(end, size - 1);
+    }
+
+    const chunkSize = layout.header.chunkSize;
+    const first = Math.floor(start / chunkSize);
+    const last = size === 0 ? 0 : Math.floor(end / chunkSize);
+    const stream = await service.openContainerChunks(filePath, layout, first, last);
+
+    const contentType = mimetype && /^[\w.+-]+\/[\w.+-]+$/.test(mimetype) ? mimetype : 'application/octet-stream';
+    const layoutHeaders: Record<string, string> = {
+      'x-file-size': String(size),
+      'x-file-chunk-start': String(first),
+      'x-file-chunk-count': String(layout.totalChunks),
+      'x-file-range-start': String(start),
+      'x-file-range-end': String(end),
+      'x-file-content-type': contentType,
+    };
+    res.setHeader('Content-Type', 'application/octet-stream');
+    res.setHeader('Cache-Control', 'private, no-store');
+    for (const [name, value] of Object.entries(layoutHeaders)) res.setHeader(name, value);
+    // The service worker reads them cross-origin (the API is another origin in dev and desktop).
+    res.setHeader('Access-Control-Expose-Headers', Object.keys(layoutHeaders).join(', '));
+
+    try {
+      await pipeline(stream, res);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException)?.code === 'ERR_STREAM_PREMATURE_CLOSE') return;
+      logger.error('Encrypted stream error:', error);
+      if (!res.headersSent && !res.destroyed) res.status(500).json({ error: 'Stream error' });
+      else if (!res.destroyed) res.destroy();
+    }
+  }
+
   streamAttachment = async (req: Request, res: Response): Promise<void> => {
     try {
       const { attachmentId } = req.params;
@@ -603,6 +676,16 @@ export class AttachmentController {
 
       const { attachment } = resolved.target;
       const service = getAttachmentStorage(attachment);
+
+      // An encrypted file for a client that decrypts it: the chunks covering the range, still
+      // encrypted (for the dashboard's service worker to open), never the plaintext.
+      if (isClientFileEncryption(req) && service instanceof SafeStorageService) {
+        const layout = await service.encryptedLayout(resolved.target.filePath);
+        if (layout) {
+          await this.streamEncryptedRange(req, res, service, resolved.target.filePath, layout, attachment.mimetype);
+          return;
+        }
+      }
 
       // `?variant=compat` asks for the H.264 SDR rendition (see
       // videoRenditionService). Any other value, or no value, keeps the

@@ -1,6 +1,15 @@
 import { z } from 'zod';
 import { UnreadableString, isUnreadableSchema, reveal, unreadableString } from './unreadable-string.js';
 import { buildForwardedMessageContent, createForwardedMessageXml, parseForwardedMessageXml } from '../forwardedMessage.js';
+import {
+  addReplyToData,
+  buildInitialMessageMd,
+  parseRepliesMd,
+  serializeParentMessageMd,
+  serializeRepliesMd,
+} from '../utils/activityMetadataParser.js';
+import type { ConversationAnchorType } from '../utils/activityMetadataParser.js';
+import type { MessageType } from '../zero/schema.js';
 
 /**
  * A value the server stores encrypted but cannot build itself, because it is made from values it
@@ -100,10 +109,81 @@ export const forwardedMessageEditTemplate = defineComposeTemplate({
   },
 });
 
+/** `conversations.initial_message_md`: the conversation's first message, as `buildInitialMessageMd` writes it. */
+export const initialMessageMdTemplate = defineComposeTemplate({
+  name: 'initialMessageMd',
+  inputs: z.object({
+    messageId: z.string().min(1),
+    conversationId: z.string(),
+    workspaceId: z.string().nullable().optional(),
+    senderId: z.string(),
+    content: unreadableString(),
+    msgType: z.string(),
+    createdAt: z.number(),
+    hasAttachment: z.boolean().optional(),
+    edited: z.boolean().optional(),
+    isDeleted: z.boolean().optional(),
+    showInChannel: z.boolean().optional(),
+    visibleTo: z.string().nullable().optional(),
+    metadata: z.unknown().optional(),
+    nudgeCount: z.number().nullable().optional(),
+    isSent: z.boolean().optional(),
+    reactions_md: z.string().nullable().optional(),
+    link_preview_md: unreadableString().nullable().optional(),
+    childConversationId: z.string().nullable().optional(),
+  }),
+  build: inputs => {
+    const md = buildInitialMessageMd({ ...inputs, msgType: inputs.msgType as MessageType });
+    if (md === null) throw new Error('initialMessageMd: no messageId');
+    return md;
+  },
+});
+
+/** `conversations.parent_message_md`: the message a thread or sub-ticket hangs off, as `serializeParentMessageMd` writes it. */
+export const parentMessageMdTemplate = defineComposeTemplate({
+  name: 'parentMessageMd',
+  inputs: z.object({
+    messageId: z.string().min(1),
+    conversationId: z.string().nullable().optional(),
+    channelId: z.string().nullable().optional(),
+    senderId: z.string(),
+    content: unreadableString(),
+    msgType: z.string(),
+    createdAt: z.number(),
+    anchorType: z.string().nullable().optional(),
+  }),
+  build: inputs => {
+    const md = serializeParentMessageMd({
+      ...inputs,
+      msgType: inputs.msgType as MessageType,
+      anchorType: inputs.anchorType as ConversationAnchorType | null | undefined,
+    });
+    if (md === null) throw new Error('parentMessageMd: no messageId');
+    return md;
+  },
+});
+
+/** `conversations.replies_md` with `replierId` added as the latest replier, as `addReplyToData` does. */
+export const repliesMdAddReplierTemplate = defineComposeTemplate({
+  name: 'repliesMdAddReplier',
+  inputs: z.object({
+    repliesMd: unreadableString().nullable(),
+    replierId: z.string().min(1),
+  }),
+  build: inputs => {
+    const md = serializeRepliesMd(addReplyToData(parseRepliesMd(inputs.repliesMd), inputs.replierId));
+    if (md === null) throw new Error('repliesMdAddReplier: no repliers');
+    return md;
+  },
+});
+
 /** Every compose template, by name: the names the encryption service and the transformer accept. */
 export const COMPOSE_TEMPLATES = {
   forwardedMessage: forwardedMessageTemplate,
   forwardedMessageEdit: forwardedMessageEditTemplate,
+  initialMessageMd: initialMessageMdTemplate,
+  parentMessageMd: parentMessageMdTemplate,
+  repliesMdAddReplier: repliesMdAddReplierTemplate,
 } as const;
 
 export type ComposeTemplateName = keyof typeof COMPOSE_TEMPLATES;
