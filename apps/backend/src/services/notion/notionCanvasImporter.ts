@@ -361,6 +361,14 @@ export async function importNotionTree(root: string, target: NotionImportTarget,
       const blocks = toJsonSafeValue(parsed) as unknown as Prisma.InputJsonValue;
       const previous = (await db.canvas.findUnique({ where: { id: canvasId }, select: { metadata: true } }))?.metadata as
         { notionImport?: StoredNotionMeta } | null;
+      // Same content and no new Notion comments as last time: leave the canvas (and any edits made in Spaces) alone.
+      const known = new Set(previous?.notionImport?.commentIds ?? []);
+      const newComments = (commentsByPage.get(node.key) ?? []).some(c => !known.has(c.id));
+      if (!node.created && previous?.notionImport?.checksum === sha(markdown) && !newComments) {
+        await mergeNotionMeta(canvasId, importMeta(placement, plan));
+        summary.skipped++;
+        continue;
+      }
       const stored = previous?.notionImport ?? {};
       const notionMeta = (comments: { commentThreads: Record<string, string>; commentIds: string[] }) => ({
         notionImport: {
