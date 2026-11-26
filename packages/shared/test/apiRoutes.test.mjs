@@ -295,5 +295,17 @@ test('organizations, reactions, channels and labels contracts keep the controlle
   assert.equal(API.channels.memberCounts.body.safeParse({ channelIds: Array.from({ length: 10001 }, (_, i) => String(i)) }).success, false);
   assert.equal(API.conversationLabels.unreadCounts.query.safeParse({}).success, false, 'channelId is required');
   assert.equal(API.analytics.activeUsers.query.safeParse({ groupBy: 'anything' }).success, true, 'groupBy is passed through, as before');
+});
+
+// Every response says what comes back. The few open ones are answers that belong to someone else
+// (claw-auth's daily-brief answers) and are listed here on purpose; a new route with `z.unknown()`
+// as its whole response fails this test.
+test('API table: no route has an open (z.unknown()) response unless it is a listed passthrough', () => {
+  const PASSTHROUGH = new Set(['GET /daily-brief/config', 'PUT /daily-brief/config', 'GET /daily-brief/settings', 'PUT /daily-brief/settings']);
+  const open = routeContracts(API)
+    .filter((c) => (c.response._zod?.def?.type ?? c.response.def?.type) === 'unknown')
+    .map((c) => c.key)
+    .filter((key) => !PASSTHROUGH.has(key));
+  assert.deepEqual(open, []);
   assert.equal(API.subTickets.link.body.safeParse({ ticketId: ' ', mappedTicketId: 'x' }).success, false, 'blank ticketId');
 });

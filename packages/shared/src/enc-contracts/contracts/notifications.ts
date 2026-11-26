@@ -48,7 +48,8 @@ export const notificationsMobileUnregister = defineRoute({
 export const notificationsQueueStats = defineRoute({
   method: 'GET',
   path: '/notifications/queue-stats',
-  response: z.unknown(),
+  // Passthrough: the real-time service's own stats (typed `any` there), so no shape to pin.
+  response: z.record(z.string(), z.unknown()),
 });
 
 export const notificationsUnreadCount = defineRoute({
@@ -60,7 +61,7 @@ export const notificationsUnreadCount = defineRoute({
 export const notificationsWorkspaceCounts = defineRoute({
   method: 'GET',
   path: '/notifications/workspace-counts',
-  response: z.object({ counts: z.unknown() }),
+  response: z.object({ counts: z.array(z.object({ workspaceId: z.string(), userId: z.string(), count: z.number() })) }),
 });
 
 export const notificationsTest = defineRoute({
@@ -113,7 +114,7 @@ const NOTIFICATION_TYPES = [
 export const notificationsPreferences = defineRoute({
   method: 'GET',
   path: '/notifications/preferences',
-  response: z.unknown(),
+  response: z.record(z.string(), z.object({ browserEnabled: z.boolean(), emailEnabled: z.boolean(), slackEnabled: z.boolean() })),
 });
 
 /** Keys that are not a known notification type are dropped first (old types such as SYSTEM_ALERTS), then the rest are checked. */

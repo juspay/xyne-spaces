@@ -21,7 +21,7 @@ function notFoundOr500(error: unknown, logMessage: string): ContractError {
 }
 
 /** GET /apps/user/info */
-export async function userInfo(input: { query: { userId: string } }): Promise<unknown> {
+export async function userInfo(input: { query: { userId: string } }) {
   try {
     return await getUserData(input.query.userId);
   } catch (error) {
@@ -30,7 +30,7 @@ export async function userInfo(input: { query: { userId: string } }): Promise<un
 }
 
 /** GET /apps/usergroups/list */
-export async function listUserGroups(): Promise<unknown> {
+export async function listUserGroups() {
   try {
     return await getAllUserGroups();
   } catch (error) {
@@ -59,21 +59,21 @@ async function guestAction<T>(action: string, run: () => Promise<T>): Promise<T>
 type GuestInput<B> = { body: B; user: AuthenticatedUser | undefined; app: AppCaller | undefined };
 
 /** POST /apps/guests/create */
-export function createAppGuest(input: GuestInput<Parameters<typeof createGuest>[1]>): Promise<unknown> {
+export function createAppGuest(input: GuestInput<Parameters<typeof createGuest>[1]>) {
   return guestAction('create', () => createGuest(guestApp(input.user, input.app), input.body));
 }
 
 /** POST /apps/guests/get */
-export function listAppGuests(input: GuestInput<Parameters<typeof listGuests>[1]>): Promise<unknown> {
+export function listAppGuests(input: GuestInput<Parameters<typeof listGuests>[1]>) {
   return guestAction('list', () => listGuests(guestApp(input.user, input.app), input.body));
 }
 
 /** POST /apps/guests/update */
-export function updateAppGuest(input: GuestInput<Parameters<typeof updateGuest>[1]>): Promise<unknown> {
+export function updateAppGuest(input: GuestInput<Parameters<typeof updateGuest>[1]>) {
   return guestAction('update', () => updateGuest(guestApp(input.user, input.app), input.body));
 }
 
 /** POST /apps/guests/token */
-export function appGuestToken(input: GuestInput<{ email: string }>): Promise<unknown> {
+export function appGuestToken(input: GuestInput<{ email: string }>) {
   return guestAction('token', () => issueGuestToken(guestApp(input.user, input.app), input.body.email));
 }

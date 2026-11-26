@@ -20,7 +20,6 @@ const internal = (error: unknown, logMessage: string) => {
   logger.error(logMessage, error);
   return new ContractError(500, { error: 'Internal server error' });
 };
-const asList = (reactions: unknown) => reactions as unknown[];
 
 /** POST /messages/:messageId/reactions */
 export async function addReaction(input: { params: { messageId: string }; body: { emojiName: string }; user: AuthenticatedUser | undefined }) {
@@ -34,7 +33,7 @@ export async function addReaction(input: { params: { messageId: string }; body: 
     await reactionRepository.addReaction({ messageId, userId, emojiName: emojiName.trim() });
     const reactions = await reactionRepository.getMessageReactions(messageId, userId);
     logger.info(`Reaction added: ${emojiName} by user ${userId} to message ${messageId}`);
-    return { success: true as const, message: 'Reaction added successfully', reactions: asList(reactions) };
+    return { success: true as const, message: 'Reaction added successfully', reactions };
   } catch (error) {
     // Unique constraint violation: the user already reacted with this emoji
     if ((error as { code?: string }).code === 'P2002') {
@@ -52,7 +51,7 @@ export async function removeReaction(input: { params: { messageId: string; emoji
     await reactionRepository.removeReaction({ messageId, userId, emojiName: decodeURIComponent(emojiName) });
     const reactions = await reactionRepository.getMessageReactions(messageId, userId);
     logger.info(`Reaction removed: ${emojiName} by user ${userId} from message ${messageId}`);
-    return { success: true as const, message: 'Reaction removed successfully', reactions: asList(reactions) };
+    return { success: true as const, message: 'Reaction removed successfully', reactions };
   } catch (error) {
     throw internal(error, 'Error removing reaction:');
   }
@@ -78,7 +77,7 @@ export async function toggleReaction(input: { params: { messageId: string; emoji
       success: true as const,
       message: result.added ? 'Reaction added successfully' : 'Reaction removed successfully',
       added: result.added,
-      reactions: asList(reactions),
+      reactions,
     };
   } catch (error) {
     throw internal(error, 'Error toggling reaction:');
@@ -110,7 +109,7 @@ async function broadcastReactionUpdate(messageId: string, reactions: unknown, em
 /** GET /messages/:messageId/reactions */
 export async function getMessageReactions(input: { params: { messageId: string }; user: AuthenticatedUser | undefined }) {
   try {
-    return { reactions: asList(await reactionRepository.getMessageReactions(input.params.messageId, userIdOf(input.user))) };
+    return { reactions: await reactionRepository.getMessageReactions(input.params.messageId, userIdOf(input.user)) };
   } catch (error) {
     throw internal(error, 'Error getting message reactions:');
   }

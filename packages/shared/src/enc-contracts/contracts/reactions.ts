@@ -5,7 +5,14 @@ import { defineRoute } from '../api-route.js';
 
 const messageId = z.object({ messageId: z.string().min(1) });
 const reactionParams = z.object({ messageId: z.string().min(1), emojiName: z.string().min(1) });
-const reactions = z.array(z.unknown());
+/** One emoji on a message: who reacted, and whether the caller did. */
+const messageReactions = z.object({
+  emojiName: z.string(),
+  count: z.number(),
+  userHasReacted: z.boolean(),
+  users: z.array(z.object({ userId: z.string(), name: z.string(), email: z.string().optional() })),
+});
+const reactions = z.array(messageReactions);
 const change = z.object({
   success: z.literal(true),
   message: z.string(),
@@ -47,5 +54,5 @@ export const reactionsBulk = defineRoute({
   method: 'POST',
   path: '/messages/reactions/bulk',
   body: z.object({ messageIds: z.array(z.string()).min(1, 'Message IDs array is required').max(100, 'Too many message IDs (max 100)') }),
-  response: z.object({ success: z.literal(true), reactions: z.unknown() }),
+  response: z.object({ success: z.literal(true), reactions: z.record(z.string(), reactions) }),
 });

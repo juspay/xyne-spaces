@@ -9,7 +9,74 @@ import { AppIncomingWebhookAction, AppIncomingWebhookType, CommandAccessibility,
 // FetchConfigController, IncomingWebhookController), moved here. Responses the controllers
 // build from repository rows are not pinned yet (z.unknown()).
 
-const anyResponse = z.unknown();
+const dateish = z.union([z.date(), z.string()]);
+/** An app, as stored (its signing secret is returned to its creator on create; see `signing-secret`). */
+const appRow = z.object({
+  id: z.string(),
+  name: z.string(),
+  description: z.string().nullable(),
+  createdAt: dateish,
+  updatedAt: dateish,
+  createdBy: z.string(),
+  workspaceId: z.string(),
+  webhookUrl: z.string().nullable(),
+  signingSecret: z.string(),
+  version: z.number(),
+  orgId: z.string(),
+  scope: z.string(),
+});
+const appCommand = z.object({
+  id: z.string(),
+  appId: z.string(),
+  commandName: z.string(),
+  description: z.string(),
+  commandType: z.nativeEnum(CommandType),
+  commandAccessibility: z.nativeEnum(CommandAccessibility),
+  isForThread: z.boolean().nullable().optional(),
+  isForChat: z.boolean().nullable().optional(),
+  createdAt: dateish,
+  updatedAt: dateish,
+});
+const incomingWebhook = z.object({
+  id: z.string(),
+  name: z.string(),
+  channelId: z.string(),
+  channelName: z.string(),
+  channelVisibility: z.string(),
+  boardId: z.string().nullable(),
+  boardName: z.string().nullable(),
+  type: z.nativeEnum(AppIncomingWebhookType),
+  action: z.nativeEnum(AppIncomingWebhookAction),
+  isActive: z.boolean(),
+  createdAt: dateish,
+  webhookUrl: z.string(),
+});
+const installedCommand = z.object({
+  id: z.string(),
+  installedAppId: z.string(),
+  sourceCommandId: z.string(),
+  workspaceId: z.string(),
+  commandName: z.string(),
+  description: z.string(),
+  commandType: z.string(),
+  commandAccessibility: z.string(),
+  createdAt: dateish,
+  updatedAt: dateish,
+});
+const permissionStatus = z.object({ scope: z.string(), status: z.string() });
+/** The app's history-fetch config as stored, secret header values redacted (appFetchConfig.ts owns the schema). */
+const fetchConfig = z.object({
+  url: z.string(),
+  method: z.enum(['GET', 'POST']),
+  encoding: z.enum(['JSON', 'FORM', 'RAW']),
+  timeoutMs: z.number(),
+  pagination: z.enum(['cursor', 'offset']),
+  pageSize: z.number(),
+  headers: z.record(z.string(), z.string()).optional(),
+  secretHeaders: z.array(z.string()).optional(),
+  body: z.string().optional(),
+  response: z.object({ messagesPath: z.string(), nextCursorPath: z.string(), fields: z.record(z.string(), z.string()) }),
+});
 const ok = z.object({ ok: z.literal(true) });
 
 const appId = z.object({ appId: z.string().min(1, 'App ID is required').trim() });
@@ -24,22 +91,22 @@ export const appsCreate = defineRoute({
     name: z.string().min(1, 'App name cannot be empty').trim(),
     description: z.string().trim().optional(),
   }),
-  response: anyResponse,
+  response: appRow,
 });
 
-export const appsInstall = defineRoute({ method: 'POST', path: '/apps/install/:appId', params: appId, response: anyResponse });
-export const appsPromote = defineRoute({ method: 'POST', path: '/apps/promote/:appId', params: appId, response: anyResponse });
+export const appsInstall = defineRoute({ method: 'POST', path: '/apps/install/:appId', params: appId, response: z.object({ jwtToken: z.string() })});
+export const appsPromote = defineRoute({ method: 'POST', path: '/apps/promote/:appId', params: appId, response: appRow});
 
 export const appsConfigureWebhook = defineRoute({
   method: 'POST',
   path: '/apps/configureWebhook/:appId',
   params: appId,
   body: z.object({ webhookUrl: z.string().url('Invalid webhook URL format').min(1, 'Webhook URL is required').trim() }),
-  response: anyResponse,
+  response: z.object({ message: z.string(), webhookUrl: z.string().nullable() }),
 });
 
-export const appsRegenerateJwt = defineRoute({ method: 'POST', path: '/apps/regenerate-jwt/:appId', params: appId, response: anyResponse });
-export const appsSigningSecret = defineRoute({ method: 'POST', path: '/apps/signing-secret/:appId', params: appId, response: anyResponse });
+export const appsRegenerateJwt = defineRoute({ method: 'POST', path: '/apps/regenerate-jwt/:appId', params: appId, response: z.object({ jwtToken: z.string() })});
+export const appsSigningSecret = defineRoute({ method: 'POST', path: '/apps/signing-secret/:appId', params: appId, response: z.object({ signingSecret: z.string() })});
 
 // ── Lookups ─────────────────────────────────────────────────────────────────
 
@@ -47,14 +114,14 @@ export const appsBotChannels = defineRoute({
   method: 'GET',
   path: '/apps/bot-channels/:appId',
   params: appId,
-  response: z.object({ channels: z.array(z.record(z.string(), z.unknown())) }),
+  response: z.object({ channels: z.array(z.object({ id: z.string(), name: z.string(), visibility: z.string(), projectId: z.string() })) }),
 });
 
 export const appsProjectBoards = defineRoute({
   method: 'GET',
   path: '/apps/project-boards/:projectId',
   params: z.object({ projectId: z.string().min(1, 'Project ID is required').trim() }),
-  response: z.object({ boards: z.array(z.record(z.string(), z.unknown())) }),
+  response: z.object({ boards: z.array(z.object({ id: z.string(), name: z.string(), projectId: z.string() })) }),
 });
 
 /** Org ids → org names, for app attribution (the client only syncs its own org). */
@@ -80,7 +147,7 @@ export const appsInstalledPermissions = defineRoute({
   method: 'GET',
   path: '/apps/installed/:installedAppId/permissions',
   params: installedAppId,
-  response: anyResponse,
+  response: z.object({ permissions: z.array(z.string()), permissionsPending: z.boolean(), statuses: z.array(permissionStatus) }),
 });
 
 export const appsInstalledPermissionsSet = defineRoute({
@@ -105,7 +172,7 @@ export const appsInstalledCommands = defineRoute({
   path: '/apps/installed/:installedAppId/commands',
   params: installedAppId,
   query: commandTypeQuery,
-  response: anyResponse,
+  response: z.array(installedCommand),
 });
 
 const resourceParams = z.object({ installedAppId: z.string().min(1).trim(), resourceType: z.string().min(1) });
@@ -134,7 +201,7 @@ export const appsInstalledFetchConfig = defineRoute({
   method: 'GET',
   path: '/apps/installed/:installedAppId/fetch-config',
   params: installedAppId,
-  response: anyResponse,
+  response: z.union([z.object({ configured: z.boolean(), config: fetchConfig.nullable() }), z.object({ configured: z.literal(true), config: z.null(), invalid: z.literal(true), error: z.string() })]),
 });
 
 export const appsInstalledFetchConfigDelete = defineRoute({
@@ -160,7 +227,7 @@ export const appsIncomingWebhooksCreate = defineRoute({
     type: z.nativeEnum(AppIncomingWebhookType).default(AppIncomingWebhookType.SLACK),
     action: z.nativeEnum(AppIncomingWebhookAction).default(AppIncomingWebhookAction.MESSAGE),
   }),
-  response: anyResponse,
+  response: incomingWebhook,
 });
 
 export const appsIncomingWebhooksList = defineRoute({
@@ -177,7 +244,7 @@ export const appsIncomingWebhooksList = defineRoute({
       return value;
     }, z.boolean()),
   }),
-  response: anyResponse,
+  response: z.object({ webhooks: z.array(incomingWebhook), total: z.number(), limit: z.number(), offset: z.number() }),
 });
 
 export const appsIncomingWebhooksUpdate = defineRoute({
@@ -200,14 +267,14 @@ export const appsIncomingWebhooksRevoke = defineRoute({
 export const appsPermissions = defineRoute({
   method: 'GET',
   path: '/apps/permissions',
-  response: z.object({ permissions: z.array(z.unknown()) }),
+  response: z.object({ permissions: z.array(z.object({ id: z.string(), name: z.string(), description: z.string().nullable(), type: z.string(), createdAt: dateish })) }),
 });
 
 export const appsPermissionsGet = defineRoute({
   method: 'GET',
   path: '/apps/permissions/:appId',
   params: z.object({ appId: z.string() }),
-  response: anyResponse,
+  response: z.object({ permissions: z.array(z.string()), permissionsPending: z.literal(false), statuses: z.array(permissionStatus) }),
 });
 
 export const appsPermissionsSet = defineRoute({
@@ -226,7 +293,7 @@ export const appsChannelCommands = defineRoute({
   path: '/apps/channel/:channelId/commands',
   params: z.object({ channelId: z.string().min(1).trim() }),
   query: z.object({ commandType: z.nativeEnum(CommandType), commandAccessibility: z.string().optional() }),
-  response: anyResponse,
+  response: z.array(appCommand.extend({ appName: z.string().optional() })),
 });
 
 const commandAppId = z.object({ appId: z.string().min(1).trim() });
@@ -247,21 +314,21 @@ export const appsCommands = defineRoute({
   path: '/apps/:appId/commands',
   params: commandAppId,
   query: commandTypeQuery,
-  response: anyResponse,
+  response: z.array(appCommand),
 });
 export const appsCommandsCreate = defineRoute({
   method: 'POST',
   path: '/apps/:appId/commands',
   params: commandAppId,
   body: upsertCommandBody,
-  response: anyResponse,
+  response: appCommand,
 });
 export const appsCommandsUpdate = defineRoute({
   method: 'PUT',
   path: '/apps/:appId/commands',
   params: commandAppId,
   body: upsertCommandBody,
-  response: anyResponse,
+  response: appCommand,
 });
 export const appsCommandsDelete = defineRoute({
   method: 'DELETE',

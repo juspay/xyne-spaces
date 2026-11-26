@@ -27,7 +27,7 @@ const hourOrDay = (value: string | undefined): 'day' | 'hour' | undefined =>
   value === 'day' || value === 'hour' ? value : undefined;
 
 /** Runs one analytics read: the number, the way the controller wrapped it, or its 500. */
-async function answer(label: string, read: () => Promise<unknown>, suffix = ' analytics') {
+async function answer<T>(label: string, read: () => Promise<T>, suffix = ' analytics') {
   try {
     return { success: true as const, data: await read(), timestamp: new Date().toISOString() };
   } catch (error) {
@@ -41,13 +41,13 @@ async function answer(label: string, read: () => Promise<unknown>, suffix = ' an
 }
 
 /** A count that becomes a time series when `groupBy` is `day` or `hour`. */
-const countOrSeries = (
+const countOrSeries = <C, S>(
   label: string,
-  count: (filters: AnalyticsFilters) => Promise<unknown>,
-  series: (filters: AnalyticsFilters, groupBy: 'day' | 'hour') => Promise<unknown>,
+  count: (filters: AnalyticsFilters) => Promise<C>,
+  series: (filters: AnalyticsFilters, groupBy: 'day' | 'hour') => Promise<S>,
 ) =>
   (input: Input) =>
-    answer(label, () => {
+    answer<C | S>(label, () => {
       const groupBy = hourOrDay(input.query.groupBy);
       return groupBy ? series(filtersOf(input), groupBy) : count(filtersOf(input));
     });
@@ -94,14 +94,14 @@ export const totalCallsDuration = countOrSeries(
 
 /** Messages today is the caller's workspace only, whatever the time range. */
 export const messagesToday = (input: Input) =>
-  answer('messages today', () => {
+  answer<number | { date: string; value: number }[]>('messages today', () => {
     const workspaceId = workspaceOf(input.user);
     return hourOrDay(input.query.groupBy) ? repo.getMessagesTodayTimeSeries(workspaceId) : repo.getMessagesToday(workspaceId);
   });
 
 /** Users onboarded: only `groupBy=day` makes a series. */
 export const usersOnboarded = (input: Input) =>
-  answer('users onboarded', () =>
+  answer<number | { date: string; value: number }[]>('users onboarded', () =>
     input.query.groupBy === 'day' ? repo.getUsersOnboardedTimeSeries(filtersOf(input)) : repo.getUsersOnboarded(filtersOf(input)),
   );
 

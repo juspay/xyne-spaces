@@ -101,10 +101,13 @@ export async function searchForMentions(input: { query: z.infer<(typeof channels
     const { q, limit = '10', types = 'users,groups' } = input.query;
     const searchLimit = Math.min(parseInt(limit) || 10, 15); // Max 15 results
     const searchTypes = types.split(',').map((type) => type.trim());
-    const results: Record<string, unknown>[] = [];
+    type Mention =
+      | { id: string; name: string; email: string; picture: string | null; type: 'user' }
+      | { id: string; name: string; alias: string | null; description: string | null; memberCount: number; type: 'group' };
+    const results: Mention[] = [];
 
     try {
-      const searches: Promise<Record<string, unknown>[]>[] = [];
+      const searches: Promise<Mention[]>[] = [];
       if (searchTypes.includes('users')) {
         searches.push(
           userRepository.findBySearch(q.trim(), { page: 1, pageSize: searchLimit }).then((found) => {
@@ -112,7 +115,7 @@ export async function searchForMentions(input: { query: z.infer<(typeof channels
             return users
               .filter((user) => user.status === 'ACTIVE' && user.id !== userId)
               .slice(0, searchLimit)
-              .map((user) => ({ id: user.id, name: user.displayName || user.name, email: user.email, picture: user.picture, type: 'user' }));
+              .map((user) => ({ id: user.id, name: user.displayName || user.name, email: user.email, picture: user.picture, type: 'user' as const }));
           }),
         );
       }
@@ -128,7 +131,7 @@ export async function searchForMentions(input: { query: z.infer<(typeof channels
                 } catch (error) {
                   logger.warn(`Failed to get member count for group ${group.id}:`, error);
                 }
-                return { id: group.id, name: group.name, alias: group.alias, description: group.description, memberCount, type: 'group' };
+                return { id: group.id, name: group.name, alias: group.alias, description: group.description, memberCount, type: 'group' as const };
               }),
             );
           }),

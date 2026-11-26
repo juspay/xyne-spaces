@@ -4,7 +4,8 @@ import { defineRoute } from '../api-route.js';
 // ─── Daily brief settings (/daily-brief/config and /settings): dashboard login. ───────────
 // The enable flag, the user's own brief instructions (plain text today, as before), and which
 // agent runs the brief. The briefs themselves (latest, history, by-date) are not here.
-// The answers are claw-auth's, passed through unwrapped.
+// The answers are claw-auth's, passed through unwrapped: their shape is claw-auth's to define,
+// so the responses stay open (z.unknown()) on purpose, not for lack of a type here.
 
 export const dailyBriefConfig = defineRoute({
   method: 'GET',

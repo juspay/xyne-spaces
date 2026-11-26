@@ -362,7 +362,7 @@ export async function getAppPermissions(input: { params: { appId: string } }) {
         statuses: [],
       });
     }
-    return { permissions, permissionsPending: false, statuses: [] };
+    return { permissions, permissionsPending: false as const, statuses: [] as { scope: string; status: string }[] };
   } catch (error) {
     if (error instanceof ContractError) throw error;
     throw new ContractError(500, { error: 'Internal server error' });

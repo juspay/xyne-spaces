@@ -10,14 +10,64 @@ export const appsCallsGet = defineRoute({
   method: 'GET',
   path: '/apps/calls/:callId',
   params: z.object({ callId: z.string().min(1, 'callId is required') }),
-  response: z.object({ success: z.literal(true), call: z.record(z.string(), z.unknown()) }),
+  response: z.object({
+    success: z.literal(true),
+    call: z.object({
+      callId: z.string(),
+      title: z.string().nullable(),
+      description: z.string().nullable(),
+      status: z.string(),
+      callType: z.string(),
+      callOrigin: z.string(),
+      channelId: z.string().nullable(),
+      createdByUserId: z.string(),
+      organizerId: z.string().nullable(),
+      roomLink: z.string().nullable(),
+      scheduledStartsAt: z.string().nullable(),
+      scheduledEndsAt: z.string().nullable(),
+      timezone: z.string(),
+      startedAt: z.string(),
+      endedAt: z.string().nullable(),
+      durationSeconds: z.number().nullable(),
+      summaryTemplateId: z.string().nullable(),
+      hasTranscript: z.boolean(),
+      summaryStatus: z.string().nullable(),
+      detailedSummaryCanvasId: z.string().nullable(),
+      participants: z.array(
+        z.object({
+          joinedAt: z.string().nullable(),
+          leftAt: z.string().nullable(),
+          userId: z.string().nullable(),
+          name: z.string(),
+          email: z.string().nullable(),
+          isExternal: z.boolean(),
+        }),
+      ),
+    }),
+  }),
 });
 
 /** GET /apps/calls/summary-templates: summary rows of every template visible to the app's user. */
 export const appsCallsSummaryTemplates = defineRoute({
   method: 'GET',
   path: '/apps/calls/summary-templates',
-  response: z.object({ success: z.literal(true), templates: z.array(z.record(z.string(), z.unknown())) }),
+  response: z.object({
+    success: z.literal(true),
+    templates: z.array(
+      z.object({
+        id: z.string(),
+        name: z.string(),
+        visibility: z.string(),
+        defaultOutlet: z.string(),
+        version: z.number(),
+        sectionCount: z.number(),
+        createdBy: z.string(),
+        createdAt: z.union([z.date(), z.string()]),
+        canEdit: z.boolean(),
+        isSystem: z.boolean(),
+      }),
+    ),
+  }),
 });
 
 /** GET /apps/calls/summary-templates/:templateId: one template in full. */
@@ -25,7 +75,23 @@ export const appsCallsSummaryTemplate = defineRoute({
   method: 'GET',
   path: '/apps/calls/summary-templates/:templateId',
   params: z.object({ templateId: z.string().min(1) }),
-  response: z.object({ success: z.literal(true), template: z.unknown() }),
+  response: z.object({
+    success: z.literal(true),
+    template: z.object({
+      id: z.string(),
+      name: z.string(),
+      workspaceId: z.string(),
+      visibility: z.string(),
+      autoTriggerPrompt: z.string().nullable(),
+      // The sections are the template's own JSON document (any shape), so they stay open.
+      sections: z.unknown(),
+      version: z.number(),
+      systemPrompt: z.string(),
+      defaultOutlet: z.string(),
+      createdBy: z.string(),
+      createdAt: z.union([z.date(), z.string()]),
+    }),
+  }),
 });
 
 /** GET /apps/ticket/boards */
@@ -33,7 +99,19 @@ export const appsTicketBoards = defineRoute({
   method: 'GET',
   path: '/apps/ticket/boards',
   query: z.object({ projectId: z.string().min(1, 'projectId must not be empty').trim().optional() }),
-  response: z.object({ boards: z.array(z.record(z.string(), z.unknown())) }),
+  response: z.object({
+    boards: z.array(
+      z.object({
+        boardId: z.string(),
+        name: z.string(),
+        boardType: z.string(),
+        description: z.string().nullable(),
+        projectId: z.string(),
+        createdAt: z.union([z.date(), z.string()]),
+        updatedAt: z.union([z.date(), z.string()]).nullable(),
+      }),
+    ),
+  }),
 });
 
 /** GET /apps/ticket/boards/:boardId/stages */
@@ -45,7 +123,15 @@ export const appsTicketBoardStages = defineRoute({
     boardId: z.string(),
     boardName: z.string(),
     projectId: z.string().nullable(),
-    stages: z.array(z.record(z.string(), z.unknown())),
+    stages: z.array(
+      z.object({
+        stageId: z.string(),
+        name: z.string(),
+        sequenceNumber: z.number(),
+        eta: z.number().nullable(),
+        defaultTicketStatusV2: z.string(),
+      }),
+    ),
   }),
 });
 

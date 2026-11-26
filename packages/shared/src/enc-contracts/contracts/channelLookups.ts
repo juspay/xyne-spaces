@@ -6,7 +6,25 @@ import { defineRoute } from '../api-route.js';
 // channel, DMs and conversations are not here.
 
 const channelId = z.object({ channelId: z.string().min(1, 'channelId is required') });
-const record = z.record(z.string(), z.unknown());
+const deskApp = z.object({
+  id: z.string(),
+  displayName: z.string(),
+  externalIdentifier: z.string().nullable(),
+  packageName: z.string().nullable(),
+  isActive: z.boolean(),
+});
+/** A mention candidate: a user or a group (told apart by `type`). */
+const mentionResult = z.union([
+  z.object({ id: z.string(), name: z.string(), email: z.string(), picture: z.string().nullable(), type: z.literal('user') }),
+  z.object({
+    id: z.string(),
+    name: z.string(),
+    alias: z.string().nullable(),
+    description: z.string().nullable(),
+    memberCount: z.number(),
+    type: z.literal('group'),
+  }),
+]);
 
 export const channelsCheckDuplicate = defineRoute({
   method: 'POST',
@@ -26,7 +44,7 @@ export const channelsSearch = defineRoute({
     types: z.string().optional(),
   }),
   response: z.object({
-    results: z.array(record),
+    results: z.array(mentionResult),
     total: z.number(),
     query: z.string(),
     limit: z.number(),
@@ -45,7 +63,7 @@ export const channelsMemberCounts = defineRoute({
 export const channelsPublishTargets = defineRoute({
   method: 'GET',
   path: '/channels/publish-targets',
-  response: z.object({ channels: z.array(record) }),
+  response: z.object({ channels: z.array(z.object({ id: z.string(), name: z.string(), projectId: z.string(), scopeType: z.string() })) }),
 });
 
 export const channelsConnectedEmail = defineRoute({
@@ -59,8 +77,8 @@ export const channelsConnectedEmail = defineRoute({
     sourceType: z.string().nullable(),
     connectedLabel: z.string().nullable(),
     outboundConfigured: z.boolean(),
-    deskApps: z.array(record),
-    googlePlayApps: z.array(record),
+    deskApps: z.array(deskApp),
+    googlePlayApps: z.array(deskApp),
   }),
 });
 
@@ -68,7 +86,13 @@ export const channelsEmailAlias = defineRoute({
   method: 'GET',
   path: '/channels/:channelId/email-alias',
   params: channelId,
-  response: z.unknown(),
+  response: z.object({
+    emailAlias: z.string().nullable(),
+    configured: z.boolean(),
+    isActive: z.boolean(),
+    sourceType: z.string().nullable(),
+    mailboxEmail: z.string().nullable(),
+  }),
 });
 
 export const channelsVespaParticipants = defineRoute({
@@ -82,7 +106,7 @@ export const channelsMembers = defineRoute({
   method: 'GET',
   path: '/channels/:channelId/members',
   params: channelId,
-  response: z.object({ success: z.literal(true), data: z.object({ members: z.array(record) }) }),
+  response: z.object({ success: z.literal(true), data: z.object({ members: z.array(z.object({ id: z.string(), name: z.string() })) }) }),
 });
 
 /** Whether the caller may link boards to this channel (a UI gate; the ACL still enforces). */
@@ -102,5 +126,14 @@ export const channelsShareAgentStatus = defineRoute({
     sourceConversationId: z.string().min(1, 'sourceConversationId is required'),
     activePathTipMessageId: z.string().optional(),
   }),
-  response: z.unknown(),
+  response: z.object({
+    previouslyShared: z.boolean(),
+    lastSharedAt: z.string().nullable(),
+    hasNewSinceLastShare: z.boolean(),
+    agentInChannel: z.boolean(),
+    canAddAgent: z.boolean(),
+    agentInstalled: z.boolean(),
+    channelVisibility: z.string(),
+    channelScopeType: z.string(),
+  }),
 });

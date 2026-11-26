@@ -7,6 +7,25 @@ import { TagsConfigShapeSchema } from '../../tags/index.js';
 // Ids, names and settings only: nothing encrypted. Rules are the controllers' own, moved here.
 
 const timestamp = z.union([z.date(), z.string()]);
+const alias = z.object({
+  id: z.string(),
+  createdAt: timestamp,
+  updatedAt: timestamp,
+  eventName: z.string(),
+  eventCategory: z.string(),
+  aliasEventName: z.string(),
+  aliasEventCategory: z.string(),
+  isBlacklisted: z.boolean(),
+});
+const categoryConfig = z.object({
+  method: z.enum(['manual', 'llm']),
+  color: z.string().optional(),
+  count: z.number().optional(),
+  tags: z.array(z.string()).optional(),
+  is_new_tag_allowed: z.boolean().optional(),
+  blacklist: z.array(z.string()).optional(),
+  prompt: z.string().optional(),
+});
 
 // ── Activity aliases (/activity-aliases) ────────────────────────────────────
 
@@ -15,7 +34,7 @@ const aliasId = z.object({ id: z.string().min(1) });
 export const activityAliasesList = defineRoute({
   method: 'GET',
   path: '/activity-aliases',
-  response: z.object({ aliases: z.array(z.record(z.string(), z.unknown())) }),
+  response: z.object({ aliases: z.array(alias) }),
 });
 
 export const activityAliasesCreate = defineRoute({
@@ -33,7 +52,7 @@ export const activityAliasesCreate = defineRoute({
       message: 'aliasEventName and aliasEventCategory are required when not blacklisted',
       path: ['aliasEventName'],
     }),
-  response: z.object({ alias: z.record(z.string(), z.unknown()) }),
+  response: z.object({ alias }),
 });
 
 export const activityAliasesUpdate = defineRoute({
@@ -45,7 +64,7 @@ export const activityAliasesUpdate = defineRoute({
     aliasEventCategory: z.string().optional(),
     isBlacklisted: z.boolean().optional(),
   }),
-  response: z.object({ alias: z.record(z.string(), z.unknown()) }),
+  response: z.object({ alias }),
 });
 
 export const activityAliasesDelete = defineRoute({
@@ -75,7 +94,7 @@ export const clientEventsMine = defineRoute({
 export const clientEventsList = defineRoute({
   method: 'GET',
   path: '/client-events',
-  response: z.record(z.string(), z.unknown()),
+  response: z.record(z.string(), z.record(z.string(), z.string())),
 });
 
 export const clientEventsPost = defineRoute({
@@ -87,7 +106,7 @@ export const clientEventsPost = defineRoute({
     payload: z.unknown().optional(),
     ...switchOptions,
   }),
-  response: z.object({ success: z.literal(true), event: z.string(), results: z.array(z.record(z.string(), z.unknown())) }),
+  response: z.object({ success: z.literal(true), event: z.enum(CLIENT_EVENTS), results: z.array(z.object({ userId: z.string(), published: z.boolean() })) }),
 });
 
 export const clientEventsRemove = defineRoute({
@@ -98,7 +117,7 @@ export const clientEventsRemove = defineRoute({
     headerNames: z.array(z.string().min(1)).optional(),
     ...switchOptions,
   }),
-  response: z.object({ success: z.literal(true), results: z.array(z.record(z.string(), z.unknown())) }),
+  response: z.object({ success: z.literal(true), results: z.array(z.object({ userId: z.string(), headers: z.record(z.string(), z.string()), published: z.boolean() })) }),
 });
 
 // ── Custom emojis (/emojis): reads and delete (upload and image streaming not moved) ──
@@ -140,7 +159,7 @@ export const channelTagsConfigGet = defineRoute({
   method: 'GET',
   path: '/channels/:channelId/tags-config',
   params: channelId,
-  response: z.object({ categories: z.record(z.string(), z.unknown()), isDefault: z.boolean() }),
+  response: z.object({ categories: z.record(z.string(), categoryConfig), isDefault: z.boolean() }),
 });
 
 /** Replaces the categories. Desk owner, channel admin or channel creator only. */
@@ -149,7 +168,7 @@ export const channelTagsConfigUpdate = defineRoute({
   path: '/channels/:channelId/tags-config',
   params: channelId,
   body: TagsConfigShapeSchema,
-  response: z.object({ categories: z.record(z.string(), z.unknown()) }),
+  response: z.object({ categories: z.record(z.string(), categoryConfig) }),
 });
 
 // ── A file's metadata, for a Xyne App (/apps/files/info/:attachmentId), bot token ──

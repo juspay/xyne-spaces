@@ -27,7 +27,7 @@ export const subTicketsLink = defineRoute({
     mappedTicketId: requiredId('mappedTicketId is required'),
     subTicketTitle: z.unknown().optional(),
   }),
-  response: z.unknown(),
+  response: z.object({ subTicketId: z.string(), mappingId: z.string() }),
 });
 
 export const subTicketsUnlink = defineRoute({
@@ -39,13 +39,19 @@ export const subTicketsUnlink = defineRoute({
 
 // ── Conversation labels (/conversation-labels/...) ──────────────────────────
 
+const labelImpact = z.object({
+  label: z.object({ id: z.string(), name: z.string(), channelId: z.string() }),
+  mappingCount: z.number(),
+  linkedDeskRuleCount: z.number(),
+});
+const labelDeleteResult = labelImpact.extend({ archivedDeskRuleCount: z.number(), removedMappingCount: z.number() });
 const labelsOk = <T extends z.ZodType>(data: T) => z.object({ success: z.literal(true), data, timestamp: z.string() });
 
 export const conversationLabelsUnreadCounts = defineRoute({
   method: 'GET',
   path: '/conversation-labels/unread-counts',
   query: z.object({ channelId: z.string().min(1, 'channelId query param is required') }),
-  response: labelsOk(z.object({ counts: z.unknown() })),
+  response: labelsOk(z.object({ counts: z.record(z.string(), z.number()) })),
 });
 
 const unreadCountsFilters = z.object({
@@ -85,12 +91,12 @@ export const conversationLabelsDeleteImpact = defineRoute({
   method: 'GET',
   path: '/conversation-labels/:labelId/delete-impact',
   params: z.object({ labelId: z.string().min(1) }),
-  response: labelsOk(z.unknown()),
+  response: labelsOk(labelImpact),
 });
 
 export const conversationLabelsDelete = defineRoute({
   method: 'DELETE',
   path: '/conversation-labels/:labelId',
   params: z.object({ labelId: z.string().min(1) }),
-  response: labelsOk(z.unknown()),
+  response: labelsOk(labelDeleteResult),
 });

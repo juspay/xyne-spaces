@@ -183,7 +183,7 @@ export async function dismiss(input: { params: { id: string }; user: Authenticat
 }
 
 /** GET /notifications/preferences */
-export async function getPreferences(input: { user: AuthenticatedUser | undefined }): Promise<unknown> {
+export async function getPreferences(input: { user: AuthenticatedUser | undefined }): Promise<Record<string, { browserEnabled: boolean; emailEnabled: boolean; slackEnabled: boolean }>> {
   try {
     return await notificationService.getUserPreferences(requireUserId(input.user));
   } catch (error) {
