@@ -85,6 +85,12 @@
       "note": "V2 additionally records formId."
     },
     {
+      "name": "formEntityValue.upsertMany",
+      "kind": "mutator",
+      "reason": "deferred:batch form save for the dashboard stage form",
+      "note": "Saves one entity's form values in a single transaction so branch fields are checked against their parent's new value. API clients can already write values one at a time with forms.createValue / forms.updateValue; exposing the batch shape is a product decision."
+    },
+    {
       "name": "getAllTicketEntityMappings",
       "kind": "query",
       "reason": "legacy-unused",
