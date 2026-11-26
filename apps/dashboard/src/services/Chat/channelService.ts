@@ -41,10 +41,6 @@ export interface CreateChannelRequest {
   slackChannelId?: string;
   installedAppId?: string;
   boardId?: string;
-  /** CALL desks: the call connection, its routing keys, and whether it takes unrouted calls. */
-  callConnectionId?: string;
-  callRoutingKeys?: string[];
-  callIsDefault?: boolean;
 }
 
 export type EmailDeskOpts =
@@ -52,12 +48,7 @@ export type EmailDeskOpts =
   | { deskType: DeskType.DL; dlEmail: string }
   | { deskType: DeskType.SLACK; slackChannelId: string }
   | { deskType: DeskType.APP; installedAppId: string }
-  | {
-      deskType: DeskType.CALL;
-      callConnectionId?: string;
-      callRoutingKeys?: string[];
-      callIsDefault?: boolean;
-    }
+  | { deskType: DeskType.CALL }
   | { deskType: DeskType.CHANNELS; installedAppId: string };
 
 export interface CreateChannelResponse {
@@ -171,11 +162,6 @@ export class ChannelService {
         emailDeskOpts &&
         emailDeskOpts.deskType === DeskType.CALL && {
           deskType: emailDeskOpts.deskType,
-          ...(emailDeskOpts.callConnectionId && {
-            callConnectionId: emailDeskOpts.callConnectionId,
-            callRoutingKeys: emailDeskOpts.callRoutingKeys ?? [],
-            callIsDefault: emailDeskOpts.callIsDefault === true,
-          }),
         }),
       ...(channelType === 'CHANNELS' &&
         emailDeskOpts &&

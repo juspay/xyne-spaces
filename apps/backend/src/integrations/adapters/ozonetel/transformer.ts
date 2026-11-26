@@ -1,4 +1,3 @@
-import { getCallProvider } from '@/services/telephony/callProviderRegistry';
 import { BaseTransformer } from '../../core/baseTransformer';
 import type { NormalizedData, ParseResult } from '../../core/types';
 import type { OzonetelPreprocessedPayload, TelephonyEvent } from './types';
@@ -63,7 +62,7 @@ export class OzonetelTransformer extends BaseTransformer<OzonetelPreprocessedPay
         externalThreadId: event.externalId,
         creatorUserId: payload.creatorUserId,
         author: {
-          name: getCallProvider(event.provider)?.displayName ?? event.provider,
+          name: 'Ozonetel',
           externalId: event.externalId,
         },
         content: buildContent(event),
@@ -73,10 +72,10 @@ export class OzonetelTransformer extends BaseTransformer<OzonetelPreprocessedPay
           to,
         },
         metadata: {
-          eventType: `${event.provider}.call`,
+          eventType: 'ozonetel.call',
           timestamp,
-          source: event.provider,
-          telephonyChannelId: payload.channelId,
+          source: 'ozonetel',
+          ozonetelChannelId: payload.channelId,
           targetConversationId: payload.targetConversationId,
           ozonetelWorkspaceId: event.workspaceId,
           ozonetelStatus: event.status,
