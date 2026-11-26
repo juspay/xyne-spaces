@@ -242,16 +242,14 @@ function triggerSourceForEventType(eventType: unknown, requested: unknown): Agen
   return "spaces";
 }
 
-// ── Resolve identity: gateway call → Xyne Spaces userId ──
+// ── Resolve identity: body userId → canonical Claw user ──
 
 async function resolveUserId(
   body: Record<string, unknown>,
 ): Promise<{ userId: string; userName: string; userEmail: string; orgId?: string } | { error: string }> {
-  const { userId, userName, gatewayType, externalUserId } = body as {
+  const { userId, userName } = body as {
     userId?: string;
     userName?: string;
-    gatewayType?: string;
-    externalUserId?: string;
   };
 
   // Direct call with userId (e.g., from Xyne Spaces)
@@ -279,34 +277,7 @@ async function resolveUserId(
     };
   }
 
-  // Gateway call — resolve externalUserId → Xyne Spaces userId
-  if (gatewayType && externalUserId) {
-    const gateway = await prisma.gateway.findUnique({ where: { type: gatewayType } });
-    if (!gateway) {
-      return { error: `Unknown gateway type: ${gatewayType}` };
-    }
-    if (!gateway.enabled) {
-      return { error: `Gateway '${gatewayType}' is disabled` };
-    }
-
-    const identity = await prisma.gatewayIdentity.findFirst({
-      where: { gatewayId: gateway.id, externalUserId: externalUserId.trim() },
-      include: { user: true },
-    });
-
-    if (!identity) {
-      return { error: `No linked Xyne Spaces account for ${gatewayType} user '${externalUserId}'` };
-    }
-
-    return {
-      userId: identity.userId,
-      userName: identity.user.name,
-      userEmail: identity.user.email,
-      ...(identity.user.orgId ? { orgId: identity.user.orgId } : {}),
-    };
-  }
-
-  return { error: "Either userId or (gatewayType + externalUserId) is required" };
+  return { error: "userId is required" };
 }
 
 // ── Resolve agent config ──
@@ -563,7 +534,7 @@ export async function prepareRun(
   const serviceToken = caller.serviceToken;
   const isServiceTokenCaller = serviceToken?.client === "service";
   {
-    const { task, context, conversationId, piSessionConversationId, agentSlug, callbackUrl, callbackSecret, channelId, deliverTo, projectId, projectName, cwd, eventType, triggerSource, slackDelivery, channelDelivery, traceId, provider, providerOrder, providerOverride, subagentProviders, subagentProviderMode, providerConfigs, progressUrl, attachments, recordingRefs, contextFiles, skills: bodySkills, attachedContext, ticketIds, canvasIds, callIds, idempotencyKey: requestedIdempotencyKey, isRegenerate, detached, fastMode, resumedFromHandoff, optimizations, generateFollowUpSuggestions } = body as {
+    const { task, context, conversationId, piSessionConversationId, agentSlug, callbackUrl, callbackSecret, channelId, deliverTo, projectId, projectName, eventType, triggerSource, slackDelivery, channelDelivery, traceId, provider, providerOrder, providerOverride, subagentProviders, subagentProviderMode, providerConfigs, progressUrl, attachments, recordingRefs, contextFiles, skills: bodySkills, attachedContext, ticketIds, canvasIds, callIds, idempotencyKey: requestedIdempotencyKey, isRegenerate, detached, fastMode, resumedFromHandoff, optimizations, generateFollowUpSuggestions } = body as {
       task?: string;
       context?: string;
       conversationId?: string;
@@ -579,7 +550,6 @@ export async function prepareRun(
       deliverTo?: "dm";
       projectId?: string;
       projectName?: string;
-      cwd?: string;
       eventType?: string;
       triggerSource?: string;
       slackDelivery?: SessionContext["slackDelivery"];
@@ -1595,7 +1565,6 @@ export async function prepareRun(
       ...(effectiveProviderConfigs && Object.keys(effectiveProviderConfigs).length > 0
         ? { providerConfigs: effectiveProviderConfigs }
         : {}),
-      ...(cwd ? { cwd } : {}),
       ...(mergedSkills.length > 0 ? { skills: mergedSkills } : {}),
       ...(awakeningBlock ? { awakening: awakeningBlock } : {}),
       ...(progressUrl ? { progressUrl } : {}),
