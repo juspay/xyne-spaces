@@ -18,6 +18,10 @@ import {
   finalTurnFields,
   normalizeAssistantParts,
   reasoningText,
+  SESSION_LOCKED_MESSAGE,
+  isSessionLockedError,
+  widgetErrorContent,
+  normalizeRunStatus,
   type AssistantPart,
 } from "../lib/chat-run-record.js";
 import { isDirectChatConversation } from "../lib/conversation-kind.js";
@@ -134,16 +138,6 @@ function withoutFollowUpRecorderInvocations(value: unknown[]): unknown[] {
 // Match the SLIDE_JSON_START/END markers emitted by create-ppt / edit-ppt so
 // we can persist the slide JSON on the attachment's metadata for the viewer.
 const SLIDE_JSON_RE = /SLIDE_JSON_START\s*([\s\S]+?)\s*SLIDE_JSON_END/;
-const SESSION_LOCKED_MESSAGE = "Still finishing your previous answer - try again in a few seconds.";
-
-function isSessionLockedError(error: unknown): boolean {
-  return error === "session_locked" || error === "sessionLocked";
-}
-
-function widgetErrorContent(error: unknown, fallback: string): string {
-  return isSessionLockedError(error) ? SESSION_LOCKED_MESSAGE : fallback;
-}
-
 /**
  * Coerce a pi-coding-agent tool result into plain text. The persisted shape is
  * often a JSON-encoded string wrapping the MCP envelope
@@ -694,12 +688,6 @@ async function persistAssistantResult(args: {
   return { messageId: finalAssistantMsg.id, persistedAttachments };
 }
 
-function normalizeRunStatus(status: unknown): "completed" | "failed" | "cancelled" {
-  if (status === "completed") return "completed";
-  if (status === "cancelled") return "cancelled";
-  return "failed";
-}
-
 async function resolveCallbackOrgId(req: Request, sessionId?: string, userId?: string): Promise<string | undefined> {
   const headerOrgId = getOrgId(req);
   if (headerOrgId) return headerOrgId;
@@ -1238,6 +1226,7 @@ function evalRunSwitches(req: Request, optimizations: unknown): { optimizations?
 }
 
 router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response) => {
+  log.info(`[run-entry] entry=agent-chat path=${req.originalUrl}`);
   // Visible to the outer catch. A turn that throws after these are set owns a
   // placeholder and a run row that must both be driven to a terminal state —
   // otherwise the assistant row sits at "running" forever and the run row (if it

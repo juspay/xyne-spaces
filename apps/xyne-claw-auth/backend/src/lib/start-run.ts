@@ -1,6 +1,7 @@
 import { sanitizeAgentHandoff } from "./multi-agent-chat.js";
 import { scopeReplyFormat } from "./reply-format-scope.js";
 import { randomUUID } from "crypto";
+import { mintChatSessionId } from "./chat-run-record.js";
 import { isMessagingChannelKey, type MessagingChannelKey } from "../surfaces/messaging/plugin.js";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "../db.js";
@@ -612,9 +613,9 @@ export async function prepareRun(
       );
     }
 
-    if (!task || typeof task !== "string" || task.trim().length === 0) {
-      return { ok: false, status: 400, error: "task is required and must be a non-empty string" };
-    }
+    const taskResult = prepareRunTask(task);
+    if (!taskResult.ok) return taskResult;
+    const normalizedTask = taskResult.task;
     if (callbackUrl !== undefined && typeof callbackUrl !== "string") {
       return { ok: false, status: 400, error: "callbackUrl must be a string" };
     }
@@ -751,10 +752,8 @@ export async function prepareRun(
     // external-API runs (they all enter here). Enforced on the RESOLVED caller
     // (resolved.userId), in addition to any service-token scope gate. Refused
     // like a disabled agent so every surface behaves consistently.
-    if (!isAgentInvocableBy(agent.config as Record<string, unknown> | null, resolved.userId)) {
-      log.warn(`[run] invocation denied (not whitelisted) agentSlug=${agentSlug} userId=${resolved.userId}`);
-      return { ok: false, status: 403, error: `agent "${agentSlug}" is restricted — you don't have access to it` };
-    }
+    const invocationRefusal = authorizeRunInvocation(agent.config as Record<string, unknown> | null, resolved.userId, agentSlug);
+    if (invocationRefusal) return invocationRefusal;
 
     // Per-run provider/model pin. Validate up-front (clean 400) — once the SSE
     // stream opens we can only fail mid-stream. Mirrors the agent-chat route.
@@ -1115,14 +1114,7 @@ export async function prepareRun(
             })
           : [];
 
-    const requestedSessionId = (body as { sessionId?: unknown }).sessionId;
-    const internalSessionId =
-      isInternalRun &&
-      typeof requestedSessionId === "string" &&
-      /^[A-Za-z0-9_-]{1,128}$/.test(requestedSessionId)
-        ? requestedSessionId
-        : undefined;
-    const sessionId = internalSessionId ?? randomUUID();
+    const { sessionId, internalSessionId } = mintRunContext(body, isInternalRun);
     const bodyIdempotencyKey =
       typeof requestedIdempotencyKey === "string" && requestedIdempotencyKey.trim().length > 0
         ? requestedIdempotencyKey.trim()
@@ -1323,7 +1315,7 @@ export async function prepareRun(
           channelId: "",
           channelName: "",
           conversationId: conversationId ?? "",
-          task: task.trim(),
+          task: normalizedTask,
           agentId: agent.id,
           agentOrgId: agent.orgId,
           agentSlug: agentSlug || "assistant",
@@ -1401,7 +1393,7 @@ export async function prepareRun(
           channelId: effectiveChannelId ?? "",
           channelName: effectiveChannelId ?? "",
           conversationId: conversationId ?? "",
-          task: task.trim(),
+          task: normalizedTask,
           agentId: agent.id,
           agentOrgId: agent.orgId,
           agentSlug: agentSlug || "assistant",
@@ -1544,7 +1536,7 @@ export async function prepareRun(
       userId: resolved.userId,
       userName: resolved.userName,
       userEmail: resolved.userEmail,
-      task: task.trim(),
+      task: normalizedTask,
       context: mergedContext,
       conversationId,
       ...(piSessionConversationId ? { piSessionConversationId } : {}),
@@ -1633,7 +1625,7 @@ export async function prepareRun(
         conversationId,
         agentSlug,
         eventType,
-        task: task.trim(),
+        task: normalizedTask,
         userId: resolved.userId,
         orgId: agent.orgId,
         effectiveFastMode,
@@ -1678,4 +1670,39 @@ export async function startRun(input: StartRunInput, caller: RunCaller): Promise
     log.error("[run] Error forwarding to xyne-claw:", err);
     return { ok: false, status: 502, error: "Failed to reach agent service" };
   }
+}
+
+export function mintRunContext(
+  body: Record<string, unknown>,
+  isInternalRun: boolean,
+): { sessionId: string; internalSessionId: string | undefined } {
+  const requestedSessionId = (body as { sessionId?: unknown }).sessionId;
+  const internalSessionId =
+    isInternalRun &&
+    typeof requestedSessionId === "string" &&
+    /^[A-Za-z0-9_-]{1,128}$/.test(requestedSessionId)
+      ? requestedSessionId
+      : undefined;
+  return { sessionId: internalSessionId ?? mintChatSessionId(), internalSessionId };
+}
+
+export function authorizeRunInvocation(
+  agentConfig: Record<string, unknown> | null,
+  userId: string,
+  agentSlug: string | undefined,
+): { ok: false; status: number; error: string } | undefined {
+  if (isAgentInvocableBy(agentConfig, userId)) return undefined;
+  log.warn(`[run] invocation denied (not whitelisted) agentSlug=${agentSlug} userId=${userId}`);
+  return { ok: false, status: 403, error: `agent "${agentSlug}" is restricted — you don't have access to it` };
+}
+
+export function prepareRunTask(task: unknown): { ok: true; task: string } | { ok: false; status: number; error: string } {
+  if (!task || typeof task !== "string" || task.trim().length === 0) {
+    return { ok: false, status: 400, error: "task is required and must be a non-empty string" };
+  }
+  return { ok: true, task: task.trim() };
+}
+
+export async function startRunInProcess(input: StartRunInput, caller: RunCaller): Promise<StartRunResult> {
+  return startRun(input, caller);
 }

@@ -45,7 +45,7 @@ import {
   parseLateFollowUpCallback,
 } from "../lib/follow-up-suggestions.js";
 import { consumeClawStream } from "../lib/consume-claw-stream.js";
-import { mintChatSessionId, beginChatRun, failChatRun } from "../lib/chat-run-record.js";
+import { mintChatSessionId, beginChatRun, failChatRun, SESSION_LOCKED_MESSAGE, isSessionLockedError, widgetErrorContent, normalizeRunStatus } from "../lib/chat-run-record.js";
 import { recordUploadedArtifacts } from "../lib/conversation-artifact-signals.js";
 import { attachArtifactToApp, type ArtifactAppTarget } from "../lib/artifact-app-session.js";
 import { recordDeliveredArtifacts } from "../lib/delivered-artifacts.js";
@@ -72,7 +72,6 @@ import { internalServiceHeaders } from "../lib/internal-service-auth.js";
 import { callerService, requireRuntime, requireSpacesService, serviceAuthHeaders } from "../lib/service-assertion.js";
 import { selfAuthHeaders } from "../lib/internal-call.js";
 const log = createLogger("run-stream");
-const SESSION_LOCKED_MESSAGE = "Still finishing your previous answer - try again in a few seconds.";
 
 const publicRouter = Router();
 const internalRouter = Router();
@@ -133,20 +132,6 @@ interface StreamMeta {
 
 const pendingStreams = new Map<string, PendingStream>();
 const streamMeta = new Map<string, StreamMeta>();
-
-function normalizeRunStatus(status: unknown): "completed" | "failed" | "cancelled" {
-  if (status === "completed") return "completed";
-  if (status === "cancelled") return "cancelled";
-  return "failed";
-}
-
-function isSessionLockedError(error: unknown): boolean {
-  return error === "session_locked" || error === "sessionLocked";
-}
-
-function widgetErrorContent(error: unknown, fallback: string): string {
-  return isSessionLockedError(error) ? SESSION_LOCKED_MESSAGE : fallback;
-}
 
 // `session_locked` is an internal HA signal (another worker owns the
 // conversation lock, or claw fail-closed because the lock service was briefly
@@ -537,6 +522,7 @@ export async function persistRunStreamResult(args: {
  * from xyne-claw, proxying them as SSE events.
  */
 publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, res: Response) => {
+  log.info(`[run-entry] entry=run-stream path=${req.originalUrl}`);
   const streamId = randomUUID();
   // Periodic keepalive on the frontend leg (Spaces backend ← claw-auth).
   // Started once the SSE response is open, stopped on disconnect and in the

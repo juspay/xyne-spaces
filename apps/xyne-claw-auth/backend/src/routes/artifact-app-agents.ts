@@ -44,6 +44,7 @@ import { resolveFastMode } from "../lib/fast-mode.js";
 import { agentRunRepository, chatMessageRepository, chatAttachmentRepository } from "../repositories/index.js";
 import { createLogger } from "../logger.js";
 import { serviceAuthHeaders } from "../lib/service-assertion.js";
+import { startRunInProcess } from "../lib/start-run.js";
 
 const log = createLogger("artifact-app-agents");
 export const artifactAppAgentsRouter: Router = Router();
@@ -273,6 +274,7 @@ artifactAppAgentsRouter.get("/agents", async (req: Request, res: Response): Prom
 
 /** POST /runs — dispatch a detached run and return its ids immediately. */
 artifactAppAgentsRouter.post("/runs", async (req: Request, res: Response): Promise<void> => {
+  log.info(`[run-entry] entry=artifact-app path=${req.originalUrl}`);
   const requesterId = getRequesterId(req);
   const orgId = getOrgId(req);
   if (!requesterId || !orgId) {
@@ -360,6 +362,7 @@ artifactAppAgentsRouter.post("/runs", async (req: Request, res: Response): Promi
       row,
       agentRow,
       userId: requesterId,
+      orgId,
       prompt,
       conversationId,
       agentSlug: chosen.slug,
@@ -465,6 +468,7 @@ async function dispatchRun(input: {
   row: { id: string };
   agentRow: { id: string; config: unknown; orgId: string };
   userId: string;
+  orgId: string;
   prompt: string;
   conversationId: string;
   agentSlug: string;
@@ -504,10 +508,8 @@ async function dispatchRun(input: {
   const query = `callbackId=${callbackId}&assistantMessageId=${assistantMsg.id}`;
 
   const dispatchPayload = {
-    userId: input.userId,
     task: input.prompt,
     agentSlug: input.agentSlug,
-    orgId: input.agentRow.orgId,
     conversationId: input.conversationId,
     traceId: input.conversationId,
     callbackUrl: `${base}/callback?${query}`,
@@ -532,31 +534,29 @@ async function dispatchRun(input: {
     fastMode: fastModeEnabled,
   };
 
-  const runUrl = `${CONFIG.internalUrl}/claw/api/v1/internal/run`;
-  const res = await fetch(runUrl, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...serviceAuthHeaders("xyne-claw-auth", "POST", runUrl),
+  const started = await startRunInProcess(
+    {
+      body: dispatchPayload,
+      isInternalRun: true,
+      isInternalS2SCaller: true,
+      wantsSse: false,
+      authenticatedUserId: input.userId,
+      headerOrgId: input.orgId,
     },
-    body: JSON.stringify(dispatchPayload),
-  });
-
-  const body = (await res.json().catch(() => null)) as
-    | { success?: boolean; sessionId?: string; error?: string }
-    | null;
-  if (!res.ok || !body?.success || !body.sessionId) {
-    throw new Error(body?.error ?? `HTTP ${res.status}`);
+    {},
+  );
+  if (!started.ok) {
+    throw new Error(started.error);
   }
 
   await prisma.artifactAppAgentRun.update({
     where: { id: input.row.id },
-    data: { sessionId: body.sessionId, status: "running" },
+    data: { sessionId: started.sessionId, status: "running" },
   });
 
   await agentRunRepository
     .start({
-      sessionId: body.sessionId,
+      sessionId: started.sessionId,
       userId: input.userId,
       agentSlug: input.agentSlug,
       orgId: input.agentRow.orgId,
@@ -570,7 +570,7 @@ async function dispatchRun(input: {
     })
     .catch((e) => log.warn(`AgentRun.start failed: ${e instanceof Error ? e.message : String(e)}`));
 
-  return { sessionId: body.sessionId };
+  return { sessionId: started.sessionId };
 }
 
 /**

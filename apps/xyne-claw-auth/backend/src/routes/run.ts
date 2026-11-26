@@ -526,6 +526,7 @@ router.get(
 // ── POST /run — accept task, resolve identity + agent, forward to xyne-claw ──
 
 router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
+  log.info(`[run-entry] entry=run mount=${req.originalUrl.includes("/internal/run") ? "internal" : "public"} path=${req.originalUrl}`);
   // Service tokens get the EXTERNAL body contract: unknown fields (provider
   // overrides, eventType, session plumbing) are stripped before the shared
   // destructure below ever sees them — external traffic must not be able to
