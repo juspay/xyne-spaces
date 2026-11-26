@@ -59,7 +59,7 @@ export function ChannelInfoRow({
           caption
             ? 'text-[12px] leading-4 text-spaces-muted'
             : 'text-[16px] font-medium leading-5 tracking-[-0.24px]',
-          !caption && (destructive ? 'text-status-danger' : 'text-spaces-foreground'),
+          !caption && (destructive ? 'text-spaces-negative' : 'text-spaces-foreground'),
         )}
       >
         {label}

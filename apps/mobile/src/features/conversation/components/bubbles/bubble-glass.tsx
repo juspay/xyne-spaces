@@ -6,7 +6,7 @@ import { useUniwind } from 'uniwind';
 import { BUBBLE_GLASS_BLUR } from '../../constants';
 
 type BubbleGlassProps = {
-  /** The tint's class (`bg-spaces-foreground`, `bg-status-danger`). */
+  /** The tint's class (`bg-spaces-foreground`, `bg-spaces-negative`). */
   tintClassName: string;
   tintOpacity: number;
 };

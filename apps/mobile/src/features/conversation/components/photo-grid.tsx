@@ -20,7 +20,7 @@ import { useMtlsImage } from '@/src/hooks/useMtlsImage';
 import { useMtlsThumbnail } from '@/src/hooks/useMtlsThumbnail';
 
 import {
-  PHOTO_CELL_EDGE_COLOR,
+  PHOTO_CELL_EDGE_OPACITY,
   PHOTO_GRID_RADIUS,
   PHOTO_LENGTH_INSET,
   PHOTO_LENGTH_PADDING_X,
@@ -56,7 +56,7 @@ const styles = StyleSheet.create({
   edge: {
     ...StyleSheet.absoluteFill,
     borderWidth: 1,
-    borderColor: PHOTO_CELL_EDGE_COLOR,
+    opacity: PHOTO_CELL_EDGE_OPACITY,
   },
   wash: {
     ...StyleSheet.absoluteFill,
@@ -232,7 +232,7 @@ const PhotoGridCell = memo(function PhotoGridCell({
           )}
         </View>
       ) : null}
-      <View pointerEvents='none' style={styles.edge} />
+      <View pointerEvents='none' className='border-spaces-foreground' style={styles.edge} />
       {isVideo && overflowCount === 0 ? (
         <View pointerEvents='none' style={styles.centre}>
           <View style={styles.play}>

@@ -21,7 +21,7 @@ export const SendFailedNote = memo(function SendFailedNote({
   if (status !== 'failed') return null;
   return (
     <Text
-      className='text-[12px] leading-4 font-medium text-status-danger'
+      className='text-[12px] leading-4 font-medium text-spaces-negative'
       style={{ marginTop }}
       accessibilityRole='alert'
     >

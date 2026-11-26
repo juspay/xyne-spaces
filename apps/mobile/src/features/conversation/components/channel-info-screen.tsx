@@ -88,7 +88,7 @@ export function ChannelInfoScreen(): ReactElement {
     '--color-spaces-foreground',
     '--color-spaces-subtle',
     '--color-spaces-outline',
-    '--color-status-danger',
+    '--color-spaces-negative',
   ]);
   const foreground = colorOf(foregroundToken);
   const subtle = colorOf(subtleToken);

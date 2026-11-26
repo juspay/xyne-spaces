@@ -110,7 +110,7 @@ export function HoldMenu({
   const [overlaySize, setOverlaySize] = useState<{ width: number; height: number } | null>(null);
   const reduceMotion = useReducedMotion();
   const foreground = colorOf(useCSSVariable('--color-spaces-foreground'));
-  const danger = colorOf(useCSSVariable('--color-status-danger'));
+  const danger = colorOf(useCSSVariable('--color-spaces-negative'));
 
   const rootRef = useRef<View>(null);
   const [rect, setRect] = useState<HoldRect | null>(null);

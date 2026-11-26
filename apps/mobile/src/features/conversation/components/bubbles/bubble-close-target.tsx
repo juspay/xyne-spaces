@@ -96,7 +96,7 @@ export const BubbleCloseTarget = memo(function BubbleCloseTarget({
           className='absolute inset-0 flex-row items-center justify-center'
           style={[overStyle, { columnGap: BUBBLE_CLOSE_GAP }]}
         >
-          <BubbleGlass tintClassName='bg-status-danger' tintOpacity={BUBBLE_CLOSE_OVER_OPACITY} />
+          <BubbleGlass tintClassName='bg-spaces-negative' tintOpacity={BUBBLE_CLOSE_OVER_OPACITY} />
           {content(colorOf(onAccentToken))}
         </Animated.View>
       </Animated.View>

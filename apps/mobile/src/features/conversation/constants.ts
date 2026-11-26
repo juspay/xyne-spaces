@@ -163,7 +163,8 @@ export const PHOTO_MIN_ASPECT = 4 / 5;
 export const PHOTO_MAX_ASPECT = 2;
 /** A lone photo whose size the message doesn't carry: the chat's default 4:3. */
 export const PHOTO_UNKNOWN_ASPECT = 4 / 3;
-export const PHOTO_CELL_EDGE_COLOR = 'rgba(0, 0, 0, 0.05)';
+/** The hairline around each photo: the foreground at 5%, so it holds in light and dark. */
+export const PHOTO_CELL_EDGE_OPACITY = 0.05;
 /** The "+N" on the fourth photo: 22 medium white over the 20% scrim. */
 export const PHOTO_OVERFLOW_FONT_SIZE = 22;
 /** A video's play button: a 44 circle of 20% black with a 20 white triangle. */

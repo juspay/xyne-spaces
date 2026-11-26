@@ -100,7 +100,7 @@ export const BubbleWorkingBadge = memo(function BubbleWorkingBadge(): ReactEleme
 export function BubbleReadyDot(): ReactElement {
   return (
     <View
-      className='absolute border-spaces-background bg-status-success'
+      className='absolute border-spaces-background bg-spaces-positive'
       style={{
         left: BUBBLE_READY_LEFT - BUBBLE_READY_RING,
         top: BUBBLE_READY_TOP - BUBBLE_READY_RING,
