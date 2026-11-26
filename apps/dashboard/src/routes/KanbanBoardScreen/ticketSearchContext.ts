@@ -23,6 +23,7 @@ export interface TicketScreenState {
   dynamicFieldVespaTokens: string[];
   dynamicFieldDateRanges: Record<string, { start?: number; end?: number }>;
   zeroOnlyDynamicFieldIds: string[];
+  dynamicFieldTypes: Record<string, string>;
   showOverdueOnly: boolean;
   /** The screen's ticket query scope, as the table view pages it. */
   ticketsQueryParams: Pick<
@@ -128,6 +129,7 @@ const buildZeroQueryArgs = (state: TicketScreenState): TicketZeroQueryArgs => {
     dynamicFieldScalarFilters: getDynamicFieldScalarFilters(
       state.filters,
       state.zeroOnlyDynamicFieldIds,
+      state.dynamicFieldTypes,
     ),
     filters: toQueryFilters(state.filters),
     formEntityValueFieldIds: query.formEntityValueFieldIds,

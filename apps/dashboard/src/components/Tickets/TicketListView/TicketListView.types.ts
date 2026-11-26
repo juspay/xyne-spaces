@@ -1,4 +1,5 @@
 import { TicketStatus, TicketPriority } from '@xyne/shared';
+import type { FormEntityValueLike } from '../../../utils/board/dynamicFieldFilters';
 
 export interface TicketListItem {
   id: string;
@@ -20,6 +21,6 @@ export interface TicketListItem {
   emailDrafts?: readonly { userId: string | null; autoDraftStatus?: string | null }[] | null;
   emailReads?: readonly unknown[] | null;
   conversation?: unknown;
-  formEntityValues?: readonly { fieldId: string; actualFieldValue?: unknown }[] | null;
+  formEntityValues?: readonly FormEntityValueLike[] | null;
   _raw?: Record<string, unknown>;
 }

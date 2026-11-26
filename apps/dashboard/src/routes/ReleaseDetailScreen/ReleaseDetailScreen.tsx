@@ -13,7 +13,12 @@ import {
 } from 'lucide-react';
 import * as Tabs from '@radix-ui/react-tabs';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
-import { FormContextType, FormEntityType, type VCSProviderType } from '@xyne/shared';
+import {
+  FormContextType,
+  FormEntityType,
+  readFormEntityValue,
+  type VCSProviderType,
+} from '@xyne/shared';
 import { toast } from 'sonner';
 
 import { useCachedQuery } from '../../hooks/useCachedQuery';
@@ -301,9 +306,9 @@ const ReleaseDetailScreen = (): ReactElement => {
     [changeFormValues, changeLogValues],
   );
   const releaseVersion = useMemo(() => {
-    const value = releaseFormValues?.find(
-      fv => fv.formField?.fieldName === 'releaseVersion',
-    )?.actualFieldValue;
+    const value = readFormEntityValue(
+      releaseFormValues?.find(fv => fv.formField?.fieldName === 'releaseVersion'),
+    );
 
     return typeof value === 'string' && value.trim() ? value.trim() : null;
   }, [releaseFormValues]);

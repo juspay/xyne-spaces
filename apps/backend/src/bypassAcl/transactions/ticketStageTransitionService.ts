@@ -6,7 +6,7 @@ import { decideVisitVersion } from '@/services/stageTransition/visitVersioning';
 import { syncStageOverdueFlag } from '@/services/tickets/syncStageOverdueFlag';
 import { calculateETADeadline } from '@/utils/etaCalculation';
 import { Prisma } from '@prisma/client';
-import { ReenterMode, BoardType, parseTicketEtaManagement, mergeTicketEtaManagement, FormEntityType } from '@xyne/shared';
+import { ReenterMode, BoardType, parseTicketEtaManagement, mergeTicketEtaManagement, FormEntityType, asStoredFormEntityValue } from '@xyne/shared';
 import { logger } from '@/utils/logger';
 import { formService } from '@/services/formService';
 import { lockTicketMetadataAndEta } from '@/bypassAcl/rowLockServices';
@@ -103,7 +103,17 @@ export function transitionTicketTx(currentStage: any, ticketId: string, userId: 
             if (row.value !== null && name) folded[name] = row.value;
           }
           latestValues = folded;
-          submittedValues = formValues ?? {};
+          // Stored values read back typed (a DATE as its ISO string, a NUMBER as a number), so
+          // the submission is put in the same shape before the two are compared.
+          const fieldTypeByName = new Map(
+            formFieldsForVersioning.map(f => [f.globalField?.fieldName ?? f.fieldName, f.globalField?.fieldType ?? f.fieldType] as const),
+          );
+          submittedValues = Object.fromEntries(
+            Object.entries(formValues ?? {}).map(([name, value]) => {
+              const fieldType = fieldTypeByName.get(name);
+              return [name, fieldType ? asStoredFormEntityValue(fieldType, value) : value];
+            }),
+          );
         }
       }
 

@@ -13,7 +13,8 @@ interface DynamicFieldCellProps {
   className?: string | undefined;
 }
 
-const DATE_ONLY = /^(\d{4})-(\d{2})-(\d{2})$/;
+// Also matches the UTC-midnight ISO string a date-only value is read back as.
+const DATE_ONLY = /^(\d{4})-(\d{2})-(\d{2})(?:T00:00:00(?:\.000)?Z)?$/;
 
 const formatDateValue = (raw: string): string => {
   // Date-only values would parse as UTC midnight and render a day early west of UTC.

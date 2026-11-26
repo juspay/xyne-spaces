@@ -5,7 +5,7 @@ import { SortableContext, useSortable, verticalListSortingStrategy } from '@dnd-
 import { CSS } from '@dnd-kit/utilities';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useScrollFade } from '../../../hooks/useScrollFade';
-import type { Ticket, TicketTagMapping, FormEntityValues } from '@xyne/shared';
+import type { Ticket, TicketTagMapping } from '@xyne/shared';
 import { TicketStatusV2 } from '@xyne/shared';
 
 /**
@@ -27,7 +27,10 @@ import type {
   Stage,
 } from '../../../routes/KanbanBoardScreen/KanbanBoardScreen.types';
 import type { BoardSlaPolicy } from '../../../hooks/useChannelSlaPolicy';
-import { ticketBoardSnapshotSignature } from '../../../routes/KanbanBoardScreen/KanbanBoardScreen.utils';
+import {
+  ticketBoardSnapshotSignature,
+  type TicketFormEntityValue,
+} from '../../../routes/KanbanBoardScreen/KanbanBoardScreen.utils';
 import {
   type KanbanTicketsPageBaseArgs,
   useKanbanTicketsPage,
@@ -685,7 +688,7 @@ interface KanbanColumnsProps {
    */
   slaPolicies?: BoardSlaPolicy[];
   /** Form field values by ticket ID - used for validating group membership when groupBy is a form field */
-  formValuesByTicketId?: Map<string, FormEntityValues[]>;
+  formValuesByTicketId?: Map<string, TicketFormEntityValue[]>;
   /** User names by ID - used for resolving user IDs to names in form field group validation */
   userNamesById?: Map<string, string>;
   /** Shows each ticket's sub-tickets under its card. Boards turn it on; the Desk does not. */

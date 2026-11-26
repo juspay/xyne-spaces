@@ -37,6 +37,7 @@ import type {
   TicketReferenceMapping,
   FormFields,
   FormEntityValues,
+  TypedFormEntityValueRow,
   TicketStageRequest,
   BoardMetadata,
   FlowPlan,
@@ -67,6 +68,7 @@ import {
   parseTicketEtaManagement,
   parseBoardEtaManagement,
   resolveTicketDescription,
+  readFormEntityValue,
 } from '@xyne/shared';
 import { useNavigate, Link, useLocation, useNavigationType } from 'react-router-dom';
 import { usePlatform } from '../../../hooks/usePlatform';
@@ -275,6 +277,7 @@ interface TicketReferenceWithTicket extends TicketReferenceMapping {
 
 // Type for form entity values with the related form field
 interface FormEntityValueWithField extends FormEntityValues {
+  items: TypedFormEntityValueRow['items'];
   formField?:
     | (FormFields & {
         globalField?:
@@ -345,8 +348,9 @@ const formatLeftoverFieldValue = (
   field: LeftoverFieldValue,
   userById: ReadonlyMap<string, { id: string; name?: string | null; email?: string | null }>,
 ): string => {
-  const raw = field.actualFieldValue ?? field.fieldValue;
-  if (raw === null || raw === undefined || raw === '') return '—';
+  const raw = readFormEntityValue(field);
+  if (raw === null || raw === '') return '—';
+  if (field.fieldType === FormFieldType.DATE && typeof raw === 'string') return raw.slice(0, 10);
 
   if (field.fieldType === FormFieldType.BOOLEAN) {
     if (typeof raw === 'boolean') return raw ? 'Yes' : 'No';
@@ -1595,7 +1599,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     }));
     const getFieldEffectiveValue = (fieldId: string): string | undefined => {
       const parentEntry = allFields.find(fv => fv.fieldId === fieldId);
-      const parentRaw = parentEntry?.actualFieldValue ?? parentEntry?.fieldValue;
+      const parentRaw = readFormEntityValue(parentEntry);
       return typeof parentRaw === 'string' ? parentRaw : undefined;
     };
 
@@ -1635,8 +1639,8 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     const fields = resolveDisplayFormFields(gateFormId, rows);
     const valueByFieldId = new Map<string, unknown>();
     (formEntityValues ?? []).forEach(value => {
-      const raw = value.actualFieldValue ?? value.fieldValue;
-      if (raw === null || raw === undefined || raw === '') return;
+      const raw = readFormEntityValue(value);
+      if (raw === null || raw === '') return;
       valueByFieldId.set(value.fieldId, raw);
     });
     const getFieldEffectiveValue = (fieldId: string): string | undefined => {
@@ -1658,8 +1662,8 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   const [showEmptyFields, setShowEmptyFields] = useState(false);
 
   const isFormFieldEmpty = (fieldValue: (typeof allFormFields)[number]): boolean => {
-    const raw = fieldValue.actualFieldValue ?? fieldValue.fieldValue;
-    if (raw === null || raw === undefined) return true;
+    const raw = readFormEntityValue(fieldValue);
+    if (raw === null) return true;
     if (typeof raw === 'string') return raw.trim() === '';
     if (Array.isArray(raw)) {
       return raw.every(
@@ -4960,7 +4964,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                 key={fieldValue.resolvedFieldId}
                 readOnly={fieldsAreReadOnly}
                 fieldName={getFormEntityFieldName(fieldValue)}
-                fieldValue={fieldValue.actualFieldValue ?? fieldValue.fieldValue}
+                fieldValue={readFormEntityValue(fieldValue)}
                 fieldType={getFormEntityFieldType(fieldValue)}
                 fieldEnum={getFormEntityFieldEnum(fieldValue)}
                 onSave={newValue =>

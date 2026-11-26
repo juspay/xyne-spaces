@@ -2017,6 +2017,20 @@ interface SummaryShape {
   membersWithNoTickets?: string[];
 }
 
+type TypedFormValueColumns = {
+  textValue?: string | null;
+  plainValue?: string | null;
+  numberValue?: number | null;
+  boolValue?: boolean | null;
+  dateValue?: string | null;
+};
+
+// MULTI_SELECT / USER values live in form_entity_value_items, which the gateway does not serve.
+function readTypedFormValue(v: TypedFormValueColumns): string | null {
+  const value = v.textValue ?? v.plainValue ?? v.numberValue ?? v.boolValue ?? v.dateValue ?? null;
+  return value === null ? null : String(value);
+}
+
 async function formatTickets(rows: TicketRow[], opts: FormatOptions = {}): Promise<ToolResult> {
   if (!rows || rows.length === 0) {
     // Even with zero tickets, the caller may want the expectedUserGroup as
@@ -2093,10 +2107,7 @@ async function formatTickets(rows: TicketRow[], opts: FormatOptions = {}): Promi
   // fetch both with two batched gateway calls and join by fieldId in memory.
   // Non-fatal: any failure (e.g. gateway rejects the model) falls through to
   // rendering tickets without a Form fields line.
-  const formValuesByTicket = new Map<
-    string,
-    Array<{ fieldId: string; fieldValue: string; actualFieldValue?: unknown }>
-  >();
+  const formValuesByTicket = new Map<string, Array<{ fieldId: string; value: string }>>();
   let fieldNameMap = new Map<string, string>();
   try {
     const ticketIds = rows.map((t) => t.id);
@@ -2105,11 +2116,13 @@ async function formatTickets(rows: TicketRow[], opts: FormatOptions = {}): Promi
       operation: "findMany",
       where: { entityId: { in: ticketIds }, entityType: "TICKET" },
       take: 1000,
-    })) as Array<{ entityId: string; fieldId: string; fieldValue: string; actualFieldValue?: unknown }>;
+    })) as Array<{ entityId: string; fieldId: string } & TypedFormValueColumns>;
     if (values && values.length > 0) {
       for (const v of values) {
+        const value = readTypedFormValue(v);
+        if (value === null) continue;
         const arr = formValuesByTicket.get(v.entityId) ?? [];
-        arr.push({ fieldId: v.fieldId, fieldValue: v.fieldValue, actualFieldValue: v.actualFieldValue });
+        arr.push({ fieldId: v.fieldId, value });
         formValuesByTicket.set(v.entityId, arr);
       }
       const fieldIds = Array.from(new Set(values.map((v) => v.fieldId)));
@@ -2193,13 +2206,7 @@ async function formatTickets(rows: TicketRow[], opts: FormatOptions = {}): Promi
       const rendered = formVals
         .map((fv) => {
           const label = fieldNameMap.get(fv.fieldId) ?? fv.fieldId;
-          const raw =
-            fv.actualFieldValue !== undefined && fv.actualFieldValue !== null
-              ? typeof fv.actualFieldValue === "string"
-                ? fv.actualFieldValue
-                : JSON.stringify(fv.actualFieldValue)
-              : fv.fieldValue;
-          return `${label}: ${raw}`;
+          return `${label}: ${fv.value}`;
         })
         .join(" · ");
       parts.push(`  Form fields: ${rendered}`);
@@ -9222,8 +9229,9 @@ const spacesDeskMetrics: ToolDef = {
           perKeyFilters: {
             type: "object",
             description:
-              "Per field name: { values: [exact matches] } or { textTerms: [substrings] }. Use values " +
-              "for dropdowns/multi-selects, textTerms for free-text fields.",
+              "Per field name: { values: [exact matches] } or { textTerms: [full values] }. Use values " +
+              "for dropdowns/multi-selects, textTerms for free-text fields; a text term matches the whole " +
+              "field value, ignoring case and surrounding spaces, not part of it.",
           },
         },
         required: ["keys"],

@@ -55,6 +55,8 @@ export type KanbanTicketsPageBaseArgs = FlowStepVisibilityOptions & {
   dynamicFieldVespaTokens?: string[];
   dynamicFieldDateRanges?: Record<string, { start?: number; end?: number }>;
   zeroOnlyDynamicFieldIds?: string[];
+  /** Field type per custom field, so scalar filters match on the typed columns. */
+  dynamicFieldTypes?: Record<string, string>;
   vespaTicketIds?: string[];
   showOverdueOnly?: boolean;
   overdueReferenceTime?: number | null;
@@ -219,6 +221,7 @@ const canRepresentGroupInVespa = (
 export const getDynamicFieldScalarFilters = (
   filters: TicketFilters | undefined,
   zeroOnlyDynamicFieldIds: string[] | undefined,
+  dynamicFieldTypes?: Record<string, string>,
 ): DynamicFieldScalarFilter[] | undefined => {
   const dynamicFields = filters?.dynamicFields;
   if (!dynamicFields) return undefined;
@@ -232,7 +235,8 @@ export const getDynamicFieldScalarFilters = (
 
     // Zero can express scalar equality for JSON values. Date ranges and array containment
     // still use the existing all-ticket path until those values are normalized/indexed.
-    scalarFilters.push({ fieldId, values: value });
+    const fieldType = dynamicFieldTypes?.[fieldId];
+    scalarFilters.push({ fieldId, values: value, ...(fieldType && { fieldType }) });
   }
 
   return scalarFilters.length > 0 ? scalarFilters : undefined;
@@ -328,6 +332,7 @@ export const buildKanbanTicketsPageArgs = (
       dynamicFieldScalarFilters: getDynamicFieldScalarFilters(
         options.filters,
         options.zeroOnlyDynamicFieldIds,
+        options.dynamicFieldTypes,
       ),
       filters: toQueryFilters(options.filters),
       formEntityValueFieldIds: options.formEntityValueFieldIds,

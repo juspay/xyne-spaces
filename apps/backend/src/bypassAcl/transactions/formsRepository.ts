@@ -1,7 +1,7 @@
 import { transaction } from '../base';
 import { FormsRepository, CreateFormWithFieldsInput } from '@/database/repositories/formsRepository';
 import { FormFieldInput, assertNoNameCollisions } from '@/utils/formFieldResolution';
-import { FormFieldType, serializeFieldOptions, FieldEnumOption, parseFieldOptions } from '@xyne/shared';
+import { FormFieldType, serializeFieldOptions, FieldEnumOption, parseFieldOptions, assertFieldTypeUnchanged } from '@xyne/shared';
 import { Prisma, FormFields } from '@prisma/client';
 import { EntitySequenceService } from '@/services/entitySequenceService';
 import { randomUUID } from 'crypto';
@@ -137,6 +137,7 @@ export async function syncFormFields(tx: Prisma.TransactionClient, formId: strin
 
         const existingLegacyRow = existingById.get(field.fieldId);
         if (existingLegacyRow && !existingLegacyRow.globalFieldId) {
+          assertFieldTypeUnchanged(existingLegacyRow.fieldType, field.fieldType, field.fieldName.trim());
           // Update the legacy row in place to keep its id + saved values stable.
           await tx.formFields.update({
             where: { id: existingLegacyRow.id },
@@ -340,6 +341,7 @@ export async function updateGlobalFieldDefinition(tx: Prisma.TransactionClient, 
     if (!existing) {
       throw new Error(`Field ${globalFieldId} does not belong to this form`);
     }
+    assertFieldTypeUnchanged(existing.fieldType, def.fieldType, def.fieldName.trim());
 
     // An option's id is a per-form parentOptionId's only anchor — if some other form has a
     // branch child pointing at an option this save is about to remove, that child would be
