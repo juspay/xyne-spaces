@@ -1,12 +1,12 @@
 import type { CallEncryptionCredentials } from '../zero/types.js';
-import { decryptField, isEncryptedField } from './field-decrypt.js';
-import type { TransitKeyring } from './keyring.js';
+import { decryptField, isEncryptedField } from '../crypto/field-decrypt.js';
+import type { TransitKeyring } from '../crypto/keyring.js';
 
 /**
  * The media key of a call to hand to LiveKit's key provider. A derived key comes as is; a key
- * from the encryption service is transit ciphertext of `{"callId","key"}` (or already
- * its plaintext, when the response interceptor decrypted it) and is rejected unless it was
- * issued for `roomName`, so a relayed key for another call can't be swapped in.
+ * from the encryption service is transit ciphertext of `{"callId","key"}` (or already its
+ * plaintext, when the response interceptor decrypted it) and is rejected unless it was issued
+ * for `roomName`, so a relayed key for another call can't be swapped in.
  */
 export async function openCallKey(
   credentials: CallEncryptionCredentials,

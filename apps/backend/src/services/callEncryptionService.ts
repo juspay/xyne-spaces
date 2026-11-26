@@ -48,17 +48,16 @@ const TRANSIT_CIPHERTEXT_PREFIX = 'ENC:v1|tk-';
 
 type KeyedCall = Pick<Call, 'id' | 'externalId' | 'metadata' | 'status' | 'workspaceId'>;
 
-/** Who a call's E2EE key is released to. */
-export type CallKeyRecipient =
-  /** A signed-in user: the session's transit key (`transitCaller(req)`). */
-  | ({ kind: 'user'; userId: string } & TransitCaller)
-  /** A lobby guest or a transcription agent job: a one-off transit key sent with the join. */
-  | { kind: 'guest' | 'agent'; clientKey: string };
+/**
+ * Who a call's E2EE key is released to: a signed-in user, named by their access token. The
+ * encryption service encrypts the key to the transit key registered for that session.
+ */
+export type CallKeyRecipient = { kind: 'user'; userId: string; authToken: string | undefined };
 
-const transitCallerOf = (recipient: CallKeyRecipient): TransitCaller => {
-  if (recipient.kind !== 'user') return { clientKey: recipient.clientKey };
-  const { kind: _kind, userId: _userId, ...caller } = recipient;
-  return caller;
+/** Only signed-in users get service-issued keys for now; guests and the agent are refused. */
+const transitCallerOf = (recipient: CallKeyRecipient | undefined): TransitCaller => {
+  if (!recipient?.authToken) throw new Error('A service-issued call key needs a signed-in recipient');
+  return { authToken: recipient.authToken };
 };
 
 export type { CallEncryptionCredentials };
@@ -151,7 +150,7 @@ class CallEncryptionService {
   async credentialsForJoin(
     call: KeyedCall,
     pinKeyVersion: (callId: string, keyVersion: number) => Promise<number | null>,
-    recipient: CallKeyRecipient,
+    recipient?: CallKeyRecipient,
   ): Promise<CallEncryptionCredentials | undefined> {
     const state = encryptionStateOf(call);
     if (state?.enabled !== true) return undefined;
@@ -209,7 +208,8 @@ class CallEncryptionService {
     return shared;
   }
 
-  sealKeyForAgent(roomName: string, key: string, agentPublicKeyB64: string): SealedCallKey {
+  sealKeyForAgent(roomName: string, key: string | undefined, agentPublicKeyB64: string): SealedCallKey {
+    if (!key) throw new Error('Only a derived call key can be sealed for the agent');
     const ephemeral = generateKeyPairSync('x25519');
     const shared = this.agreeWithAgent(agentPublicKeyB64, ephemeral.privateKey);
     const wrapKey = Buffer.from(hkdfSync('sha256', shared, Buffer.alloc(0), Buffer.from(AGENT_SEAL_INFO, 'utf8'), 32));
@@ -228,22 +228,23 @@ class CallEncryptionService {
   private async credentials(
     call: Pick<Call, 'externalId' | 'workspaceId'>,
     keyVersion: number,
-    recipient: CallKeyRecipient,
+    recipient: CallKeyRecipient | undefined,
   ): Promise<CallEncryptionCredentials> {
     const roomName = call.externalId;
     try {
       if (keyVersion !== SERVICE_KEY_VERSION) {
         return { key: this.deriveKey(roomName, keyVersion).toString('base64') };
       }
+      const caller = transitCallerOf(recipient);
       const provider = getEncryptionProvider();
       const { wrappedKey } = await provider.generateKey({ keyType: 'CALL', workspaceId: call.workspaceId, keyValue: roomName });
-      const { body } = await provider.transformResponse({ encryptedKey: wrappedKey }, transitCallerOf(recipient));
+      const { body } = await provider.transformResponse({ encryptedKey: wrappedKey }, caller);
       // transformResponse is a no-op with API client encryption off; DEK ciphertext would leave the client silent.
       if (!body.encryptedKey.startsWith(TRANSIT_CIPHERTEXT_PREFIX)) throw new Error('Call key was not re-encrypted to the recipient');
       return { encryptedKey: body.encryptedKey };
     } catch (error) {
       // An encrypted call with no usable key would leave every client in silence; fail loudly.
-      logger.error(`[${roomName}] e2ee_key_unavailable | key_version=${keyVersion}, recipient=${recipient.kind}`, error);
+      logger.error(`[${roomName}] e2ee_key_unavailable | key_version=${keyVersion}, recipient=${recipient?.kind ?? 'none'}`, error);
       throw error;
     }
   }

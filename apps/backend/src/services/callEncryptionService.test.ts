@@ -119,18 +119,24 @@ describe('callEncryptionService with keys from the encryption service', () => {
     expect(pin).toHaveBeenCalledWith('call-1', SERVICE_KEY_VERSION);
   });
 
-  it('generates the call key by room name and workspace, then re-encrypts it to the recipient', async () => {
-    const guest: CallKeyRecipient = { kind: 'guest', clientKey: 'BA==' };
-    await callEncryptionService.credentialsForJoin(row('ACTIVE', { enabled: true, keyVersion: SERVICE_KEY_VERSION }), noPin, guest);
-    expect(generateKey).toHaveBeenCalledWith({ keyType: 'CALL', workspaceId: 'ws-1', keyValue: 'room-1' });
-    expect(transformResponse).toHaveBeenCalledWith({ encryptedKey: 'ENC:v1|dek-1|wrapped' }, { clientKey: 'BA==' });
+  it("generates the call key by room name and workspace, then re-encrypts it to the user's session key", async () => {
     await callEncryptionService.credentialsForJoin(row('ACTIVE', { enabled: true, keyVersion: SERVICE_KEY_VERSION }), noPin, user);
-    expect(transformResponse).toHaveBeenLastCalledWith({ encryptedKey: 'ENC:v1|dek-1|wrapped' }, { authToken: 'jwt' });
+    expect(generateKey).toHaveBeenCalledWith({ keyType: 'CALL', workspaceId: 'ws-1', keyValue: 'room-1' });
+    // The access token only: the service uses the session's registered key, never one sent with the request.
+    expect(transformResponse).toHaveBeenCalledWith({ encryptedKey: 'ENC:v1|dek-1|wrapped' }, { authToken: 'jwt' });
   });
 
   it('fails the join when the key comes back still under the DEK (API client encryption off)', async () => {
     transformResponse.mockResolvedValue({ body: { encryptedKey: 'ENC:v1|dek-1|wrapped' } });
     await expect(callEncryptionService.credentialsForJoin(row('ACTIVE', { enabled: true, keyVersion: SERVICE_KEY_VERSION }), noPin, user)).rejects.toThrow(/re-encrypted/);
+  });
+
+  it('refuses a service key to anyone but a signed-in user (guests and the agent, for now)', async () => {
+    const serviceKeyed = row('ACTIVE', { enabled: true, keyVersion: SERVICE_KEY_VERSION });
+    await expect(callEncryptionService.credentialsForJoin(serviceKeyed, noPin)).rejects.toThrow(/signed-in recipient/);
+    await expect(callEncryptionService.credentialsForJoin(serviceKeyed, noPin, { ...user, authToken: undefined })).rejects.toThrow(/signed-in recipient/);
+    expect(generateKey).not.toHaveBeenCalled();
+    expect(() => callEncryptionService.sealKeyForAgent('room-1', undefined, Buffer.alloc(32, 9).toString('base64'))).toThrow(/derived call key/);
   });
 
   it('keeps calls pinned to a derived version on the derived key during the cutover', async () => {

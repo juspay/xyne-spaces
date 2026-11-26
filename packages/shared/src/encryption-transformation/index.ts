@@ -38,6 +38,7 @@ export { extractForwardedRefs } from './forwarded.js';
 export type { ForwardedRefs } from './forwarded.js';
 export { extractFlowJsonPresent } from './flow.js';
 export { extractFileExtension, extractIsHeic } from './files.js';
+export { openCallKey } from './call-key.js';
 
 /**
  * The parsers the facts come from, each run at most once per text however many of its facts

@@ -1,6 +1,5 @@
 import { CallType, InvitationResponse } from '@xyne/shared';
-import { TransitKeyring, generateTransitKeyPair, openCallKey } from '@xyne/shared';
-import type { CallChatMessage, CallEncryptionCredentials, TransitServerKeys } from '@xyne/shared';
+import type { CallChatMessage, CallEncryptionCredentials } from '@xyne/shared';
 import axios from 'axios';
 import { apiInstance, BASE_URL } from '../clients/apiClient';
 import { refreshSessionOnce } from '../clients/sessionRefresh';
@@ -65,8 +64,6 @@ export interface ExternalJoinResponse {
   participantId: string;
   /** Present on end-to-end encrypted calls; the media key for this guest. */
   encryption?: CallEncryptionCredentials;
-  /** The encryption service's public keys, sent with a service-issued key to open it. */
-  transitServerKeys?: TransitServerKeys;
 }
 
 export type InternalCallRouteResolution =
@@ -150,22 +147,8 @@ export const callLobbyService = {
    * Identity comes from session cookie.
    */
   async externalJoin(externalId: string): Promise<ExternalJoinResponse> {
-    // A one-off transit key pair: a call keyed by the encryption service is released encrypted
-    // to it, so the backend relays the guest's key without being able to read it.
-    const pair = await generateTransitKeyPair();
-    const response = await apiInstance.post<ExternalJoinResponse>(`${BASE}/${externalId}/join`, {
-      transitPublicKey: pair.publicKey,
-    });
-    const { encryption, transitServerKeys, ...rest } = response.data;
-    if (!encryption?.encryptedKey) return response.data;
-    if (!transitServerKeys) throw new Error('Call key sent without the transit server keys');
-    const keyring = new TransitKeyring(pair, transitServerKeys, () =>
-      Promise.resolve(transitServerKeys),
-    );
-    return {
-      ...rest,
-      encryption: { key: await openCallKey(encryption, response.data.externalId, keyring) },
-    };
+    const response = await apiInstance.post<ExternalJoinResponse>(`${BASE}/${externalId}/join`);
+    return response.data;
   },
 
   /**

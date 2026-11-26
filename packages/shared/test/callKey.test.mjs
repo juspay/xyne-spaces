@@ -2,12 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { TransitKeyring, generateTransitKeyPair } from '../dist/crypto/keyring.js';
-import { openCallKey } from '../dist/crypto/call-key.js';
+import { openCallKey } from '../dist/encryption-transformation/call-key.js';
 
 const ECDH = { name: 'ECDH', namedCurve: 'P-256' };
 const toBase64 = bytes => Buffer.from(bytes).toString('base64');
 
-/** What the encryption service does for /internal/transit/call-key, in WebCrypto. */
+/** What the encryption service's transform-response does to a call key, in WebCrypto. */
 async function seal(server, clientPublicKey, payload) {
   const clientPoint = Buffer.from(clientPublicKey, 'base64');
   const serverPoint = Buffer.from(server.publicKey, 'base64');
@@ -37,25 +37,25 @@ async function setup() {
 
 test('opens a service-issued key for the call being joined', async () => {
   const { server, client, keyring } = await setup();
-  const encryptedKey = await seal(server, client.publicKey, { callId: 'room-1', keyId: 'dek-1', key: 'K3y==' });
+  const encryptedKey = await seal(server, client.publicKey, { callId: 'room-1', key: 'K3y==' });
   assert.equal(await openCallKey({ encryptedKey }, 'room-1', keyring), 'K3y==');
 });
 
 test('rejects a key issued for another call', async () => {
   const { server, client, keyring } = await setup();
-  const encryptedKey = await seal(server, client.publicKey, { callId: 'room-2', keyId: 'dek-2', key: 'other' });
+  const encryptedKey = await seal(server, client.publicKey, { callId: 'room-2', key: 'other' });
   await assert.rejects(openCallKey({ encryptedKey }, 'room-1', keyring), /another call/);
 });
 
 test("can't be opened with another client's transit key", async () => {
   const { server, keyring } = await setup();
   const someoneElse = await generateTransitKeyPair();
-  const encryptedKey = await seal(server, someoneElse.publicKey, { callId: 'room-1', keyId: 'dek-1', key: 'K3y==' });
+  const encryptedKey = await seal(server, someoneElse.publicKey, { callId: 'room-1', key: 'K3y==' });
   await assert.rejects(openCallKey({ encryptedKey }, 'room-1', keyring));
 });
 
 test('accepts the plaintext the response interceptor already decrypted, still bound to the call', async () => {
-  const plain = JSON.stringify({ callId: 'room-1', keyId: 'dek-1', key: 'K3y==' });
+  const plain = JSON.stringify({ callId: 'room-1', key: 'K3y==' });
   assert.equal(await openCallKey({ encryptedKey: plain }, 'room-1', null), 'K3y==');
   await assert.rejects(openCallKey({ encryptedKey: plain }, 'room-9', null), /another call/);
 });

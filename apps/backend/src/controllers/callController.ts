@@ -76,7 +76,6 @@ import { buildCallInviteUrl } from '@/utils/urlUtils';
 import { resolveCallSttRouting } from '@/services/callSttRouting';
 import { readRecordingGoogleDocLinks } from '@/utils/recordingGoogleDocs';
 import { hideCallTx } from '@/bypassAcl/transactions/callController';
-import { transitCaller } from '@/middleware/decryptionMiddleware';
 
 const RecordingParticipantsCommandSchema = z.object({
   action: z.enum(['add', 'remove']),
@@ -754,7 +753,7 @@ export class CallController {
           const existingEncryption = await callEncryptionService.credentialsForJoin(existingCall, pinCallEncryptionKeyVersion, {
             kind: 'user',
             userId,
-            ...transitCaller(req),
+            authToken: req.authToken,
           });
           if (existingEncryption) res.set('Cache-Control', 'no-store');
           res.json({
@@ -969,7 +968,7 @@ export class CallController {
       const newCallEncryption = await callEncryptionService.credentialsForState(
         { externalId: callExternalId, workspaceId: callWorkspaceId },
         e2eeState,
-        { kind: 'user', userId, ...transitCaller(req) },
+        { kind: 'user', userId, authToken: req.authToken },
       );
       if (newCallEncryption) res.set('Cache-Control', 'no-store');
       res.json({
@@ -1247,7 +1246,7 @@ export class CallController {
       const encryption = await callEncryptionService.credentialsForJoin(call, pinCallEncryptionKeyVersion, {
         kind: 'user',
         userId: user.id,
-        ...transitCaller(req),
+        authToken: req.authToken,
       });
       if (encryption) res.set('Cache-Control', 'no-store');
       res.json({
