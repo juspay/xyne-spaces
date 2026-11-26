@@ -17,6 +17,7 @@ import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
 import { OrgLLMServiceAccountPurpose } from '@xyne/shared';
 import { Agent } from 'undici';
 import { approvedActionInstructions, type ClawApprovedAction } from '@/services/clawApprovedAction';
+import type { CmdkAnswerContext } from '@/services/cmdkAnswer/context';
 
 // A brief run streams nothing while the model composes; undici's default 300s
 // bodyTimeout would sever this pipe mid-run. The AbortSignal below stays the
@@ -96,6 +97,8 @@ export interface ClawRunRequest {
   instant?: boolean;
   /** cmd+K AI overview: the palette tab claw searches before answering (its `agentConfig.answerScope`). */
   answerScope?: string;
+  /** cmd+K AI overview: the searches claw answers from, run here as the user (its `agentConfig.answerContext`). */
+  answerContext?: CmdkAnswerContext;
   researchContext?: { type: string; id?: string; name: string } | null;
   createCanvasEnabled: boolean;
   sessionId?: string;
@@ -661,6 +664,7 @@ export async function runClawAgentStream(
       webSearchEnabled: String(request.webSearchEnabled),
       deepResearchEnabled: String(request.deepResearchEnabled),
       ...(request.answerScope && { answerScope: request.answerScope }),
+      ...(request.answerContext && { answerContext: request.answerContext }),
       ...(config.xyneAiExtended.url && { XYNE_AI_EXTENDED_URL: config.xyneAiExtended.url }),
       ...(request.conversationId && { SPACES_CONVERSATION_ID: request.conversationId }),
       ...(request.canvasId && { SPACES_CANVAS_ID: request.canvasId }),

@@ -1026,9 +1026,7 @@ const ChannelCommandMenuContent = ({
     defaultIncludeBotMessages: initialToggles?.includeBotMessages ?? false,
     // Classifying costs a request per settled query, so only surfaces that can show the
     // overview ask for it (the backend gates the feature itself on cmdk_ai_intent_config.enabled).
-    // Disabled (LLM)
-    // classifyIntent: aiOverview && !isInTicketView,
-    classifyIntent: false && aiOverview && !isInTicketView,
+    classifyIntent: aiOverview && !isInTicketView,
     // cmd+k hides archived tickets on its Desk and Tickets tabs (the hook gates this by
     // active tab). There is no toggle here to opt back in.
     defaultExcludeArchived: true,
@@ -5184,13 +5182,12 @@ const ChannelCommandMenuContent = ({
                 {/* AI answer above the current tab's results when the query needs AI
                     (Google "AI Overview" style). Not a cmdk item, so the results below
                     keep arrow keys and the Enter target. */}
-                {/* Disabled (LLM) */}
-                {/* {aiOverview && !isInTicketView && ( */}
-                {aiOverview && !isInTicketView && false && (
+                {aiOverview && !isInTicketView && (
                   <AiAnswerCard
                     query={searchText}
                     tab={activeTab}
                     active={isAiQuery && !mentionSearchType}
+                    onSourceOpen={() => onOpenChange(false)}
                   />
                 )}
 

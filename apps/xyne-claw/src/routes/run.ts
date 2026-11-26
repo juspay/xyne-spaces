@@ -223,7 +223,7 @@ import {
   startPrefetchExtraction,
   type ExecutableTool,
 } from "../prefetch.js";
-import { answerFromContextEnabled, answerScopeFrom, buildAnswerContext } from "../answer-context.js";
+import { answerFromContextEnabled, answerScopeFrom, buildAnswerContext, renderProvidedAnswerContext } from "../answer-context.js";
 
 const clog = createLogger("run");
 const XYNE_CLAW_PACKAGE_DIR = fileURLToPath(new URL("../../", import.meta.url));
@@ -4057,14 +4057,16 @@ export async function processTask(
     if (answerFromContext) {
       const retrieveStartedAt = Date.now();
       const scope = answerScopeFrom(agentConfig);
-      const { block, sections } = await buildAnswerContext({
-        query: task,
-        scope,
-        tools: allTools as unknown as ExecutableTool[],
-        askerName: userName,
-        progressUrl,
-        sessionId,
-      });
+      const { block, sections } =
+        renderProvidedAnswerContext({ agentConfig, scope, askerName: userName, progressUrl, sessionId }) ??
+        (await buildAnswerContext({
+          query: task,
+          scope,
+          tools: allTools as unknown as ExecutableTool[],
+          askerName: userName,
+          progressUrl,
+          sessionId,
+        }));
       fullContext = fullContext ? `${fullContext}\n\n${block}` : block;
       log(`[answer-context] scope=${scope} sources=${sections.length} chars=${block.length} in ${Date.now() - retrieveStartedAt}ms`);
     }
