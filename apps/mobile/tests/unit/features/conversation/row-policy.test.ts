@@ -4,6 +4,7 @@ import { describe, it } from 'node:test';
 import type { ChatPaintRow } from '@/src/features/chat/v2/paint/chatPaint.types';
 import {
   isRestyledRow,
+  isUnreadableMessage,
   usesClassicRow,
   type RowFacts,
 } from '@/src/features/conversation/model/row-policy';
@@ -80,5 +81,15 @@ describe('isRestyledRow', () => {
   it('takes the flow card and hydration facts from the caller', () => {
     assert.equal(isRestyledRow(paint(), { isFlowJson: true }), false);
     assert.equal(isRestyledRow(paint(), { hasConversation: false }), false);
+  });
+});
+
+describe('isUnreadableMessage', () => {
+  it('is true only while the message is still ciphertext', () => {
+    assert.equal(isUnreadableMessage('ENC:v1|key|abc'), true);
+    assert.equal(isUnreadableMessage(':::initialMessage\nmessageId: m1'), false);
+    assert.equal(isUnreadableMessage(''), false);
+    assert.equal(isUnreadableMessage(null), false);
+    assert.equal(isUnreadableMessage(undefined), false);
   });
 });
