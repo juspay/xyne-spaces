@@ -4023,7 +4023,7 @@ export const queries = defineQueries({
       .where('userId', ctx.userID)
       .where('isStarred', true)
       .whereExists('canvas', canvas =>
-        applyCanvasVisibilityQueryFilter(canvas.where('docType', DocType.Canvas), ctx.userID),
+        applyUserAndPublicChannelCanvasFilter(canvas.where('docType', DocType.Canvas), ctx.userID),
       )
       .related('canvas', canvas =>
         includeCurrentUserCanvasStatus(canvas.related('participants'), ctx.userID),
