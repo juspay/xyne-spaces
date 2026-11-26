@@ -20,6 +20,7 @@ import {
 import { useChatChannelController } from '@/src/features/chat/v2/screens/useChatChannelController';
 
 import { composerPlaceholder, isSelfDmName, roomKindOf, roomTitle } from '../model/room-title';
+import { useRoomKeepsTail } from '../hooks/use-room-keeps-tail';
 import { clearHoldSource } from '../model/hold-source-store';
 import { getRoomTypingBarMinimumHeight } from '../model/typing-bar';
 import { CONVERSATION_RENDERERS } from '../renderers';
@@ -106,6 +107,12 @@ export const ConversationChannelScreen = (): ReactElement => {
     [isDraggingPastNewest],
   );
 
+  const handleListScrolledUpChange = useRoomKeepsTail(
+    editingTarget !== null,
+    chatListRef,
+    handleScrolledUpChange,
+  );
+
   // The emoji and forward views close without the hold menu mounted, so the
   // held row is released here, once the sheet is finally gone.
   const handleActionsDismiss = useCallback((): void => {
@@ -186,7 +193,7 @@ export const ConversationChannelScreen = (): ReactElement => {
                     keyboardOffset={keyboardGeometry.listOffset}
                     onMessagePress={handleMessagePress}
                     onMessageLongPress={handleMessageLongPress}
-                    onScrolledUpChange={handleScrolledUpChange}
+                    onScrolledUpChange={handleListScrolledUpChange}
                     onDragPastNewestChange={handleDragPastNewestChange}
                     onFirstLayout={handleChatListFirstLayout}
                     onInitialLoadComplete={handleChatListInitialLoadComplete}

@@ -320,6 +320,12 @@ export const TYPING_BAR_TOOLS_SWAP_MS = 150;
 export const TYPING_BAR_EMOJI_KEYBOARD_WAIT_MS = 350;
 export const TYPING_BAR_TOOLS_SWAP_SCALE = 0.96;
 
+/**
+ * How long the edit strip takes to settle into the typing bar (the bar's
+ * height eases over 160ms), before the list scrolls its newest message above it.
+ */
+export const EDIT_STRIP_SETTLE_MS = 220;
+
 /*
  * Typing bar: edit / also send / attachments, in the room's own language:
  * 32 rows over the field, 16 in from the sides like the bar, and 56 tiles
