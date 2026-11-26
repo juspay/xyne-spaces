@@ -132,7 +132,7 @@ export const CustomiseViewPopover = (props: CustomiseViewPopoverProps): ReactEle
     () => [
       {
         id: 'table',
-        label: 'List',
+        label: 'Table',
         thumb: (
           <span className='flex flex-col gap-[3px]'>
             <span className='h-[5px] rounded-[3px] bg-muted-foreground/40' />
