@@ -21,6 +21,8 @@ async function fetchTicketActors(ticketId: string): Promise<string[]> {
 
 function formatTicketReferenceRelationLabel(relationType: TicketReferenceRelation): string {
   switch (relationType) {
+    case TicketReferenceRelation.BLOCKS:
+      return 'Blocks';
     case TicketReferenceRelation.DUPLICATE_CONFIRMED:
       return 'Duplicate';
     case TicketReferenceRelation.DUPLICATE_POSSIBLE:

@@ -273,6 +273,13 @@ model TicketSubTicketMapping {
   ticketId    String // Parent ticket ID
   subTicketId String // Sub ticket ID
 
+  strength       String? // SOFT | HARD; null means SOFT
+  gatedStageId   String? // dependent board stage; null means terminal stages
+  satisfiedAt    DateTime?
+  overriddenAt   DateTime?
+  overriddenBy   String?
+  overrideReason String?
+
   // Relations
   ticket    Ticket    @relation(fields: [ticketId], references: [id])
   subTicket SubTicket @relation(fields: [subTicketId], references: [id])
@@ -426,6 +433,16 @@ model TicketReferenceMapping {
   createdBy      String
   createdAt      DateTime                 @default(now())
   updatedAt      DateTime                 @updatedAt
+  strength       String? // SOFT | HARD; null means SOFT
+  gatedStageId   String? // dependent board stage; null means terminal stages
+  satisfiedAt    DateTime?
+  overriddenAt   DateTime?
+  overriddenBy   String?
+  overrideReason String?
+  satisfiedStageId String? // blocker board stage; null means COMPLETED
+  origin           String? // MANUAL | BOARD_RULE | PROCESS_RULE | AI
+  reviewNeededAt   DateTime?
+
   // Relations
   sourceTicket Ticket @relation("SourceTicket", fields: [sourceTicketId], references: [id])
   targetTicket Ticket @relation("TargetTicket", fields: [targetTicketId], references: [id])
@@ -435,6 +452,8 @@ model TicketReferenceMapping {
   @@unique([sourceTicketId, targetTicketId, relationType])
   @@index([channelConnectId])
   @@map("ticket_reference_mappings")
+  @@index([targetTicketId, relationType])
+  @@index([sourceTicketId, relationType])
   @@schema("public")
 }
 

@@ -3,6 +3,7 @@ import { AutomationStatus } from '../automations/types/status';
 import { toDisplayFilename } from '@/utils/filename';
 import { buildAutomationMetadata, parseAutomationMetadata } from '../automations/types/workflow-adapter';
 import {
+  assertGenericTicketReference,
   ChannelRole,
   AgentProactivityMode,
   ChannelType,
@@ -977,6 +978,8 @@ async function assignFullRoles(
 
 const formatTicketReferenceRelationLabel = (relationType: TicketReferenceRelation): string => {
   switch (relationType) {
+    case TicketReferenceRelation.BLOCKS:
+      return 'Blocks';
     case TicketReferenceRelation.DUPLICATE_CONFIRMED:
       return 'Duplicate';
     case TicketReferenceRelation.DUPLICATE_POSSIBLE:
@@ -9759,6 +9762,7 @@ export function createMutators(
           referenceId: z.string(),
         }),
         async ({ tx, ctx, args: { sourceTicketId, targetTicketId, relationType, timestamp, referenceId } }) => {
+          assertGenericTicketReference(relationType);
           const existingReference = await tx.run(zql.ticket_reference_mappings
             .where('sourceTicketId', sourceTicketId)
             .where('targetTicketId', targetTicketId)
@@ -9841,10 +9845,13 @@ export function createMutators(
           timestamp: z.number(),
         }),
         async ({ tx, args: { id, relationType, timestamp } }) => {
+          assertGenericTicketReference(relationType);
           const reference = await tx.run(zql.ticket_reference_mappings.where('id', id).one());
           if (!reference) {
             throw new Error('Ticket reference not found');
           }
+
+          assertGenericTicketReference(reference.relationType);
 
           await tx.mutate.ticket_reference_mappings.update({
             id,
@@ -9916,6 +9923,8 @@ export function createMutators(
           if (!reference) {
             throw new Error('Ticket reference not found');
           }
+
+          assertGenericTicketReference(reference.relationType);
 
           await tx.mutate.ticket_reference_mappings.delete({
             id,

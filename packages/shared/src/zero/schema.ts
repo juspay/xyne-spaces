@@ -11,6 +11,7 @@ import {
   createSchema,
   type Row,
 } from '@rocicorp/zero';
+import type { DependencyStrength, DependencyOrigin } from '../tickets/dependencies/types.js';
 
 export * from './types';
 
@@ -240,6 +241,12 @@ export const ticketSubTicketMappingTable = table('ticket_sub_ticket_mappings')
     id: string(),
     ticketId: string(),
     subTicketId: string(),
+    strength: enumeration<DependencyStrength>().optional(),
+    gatedStageId: string().optional(),
+    satisfiedAt: number().optional(),
+    overriddenAt: number().optional(),
+    overriddenBy: string().optional(),
+    overrideReason: string().optional(),
   })
   .primaryKey('id');
 
@@ -331,6 +338,15 @@ export const ticketReferenceMappingTable = table('ticket_reference_mappings')
     createdBy: string(),
     createdAt: number(),
     updatedAt: number(),
+    strength: enumeration<DependencyStrength>().optional(),
+    gatedStageId: string().optional(),
+    satisfiedAt: number().optional(),
+    overriddenAt: number().optional(),
+    overriddenBy: string().optional(),
+    overrideReason: string().optional(),
+    satisfiedStageId: string().optional(),
+    origin: enumeration<DependencyOrigin>().optional(),
+    reviewNeededAt: number().optional(),
   })
   .primaryKey('id');
 

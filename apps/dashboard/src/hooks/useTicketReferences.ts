@@ -40,6 +40,8 @@ interface UseTicketReferencesResult {
 
 export const formatReferenceLabel = (relationType: TicketReferenceRelation): string => {
   switch (relationType) {
+    case TicketReferenceRelation.BLOCKS:
+      return 'Blocks';
     case TicketReferenceRelation.DUPLICATE_CONFIRMED:
       return 'Duplicate';
     case TicketReferenceRelation.DUPLICATE_POSSIBLE:
@@ -54,6 +56,8 @@ export const formatReferenceLabel = (relationType: TicketReferenceRelation): str
 
 export const formatIncomingReferenceLabel = (relationType: TicketReferenceRelation): string => {
   switch (relationType) {
+    case TicketReferenceRelation.BLOCKS:
+      return 'Blocked by';
     case TicketReferenceRelation.DUPLICATE_CONFIRMED:
       return 'Duplicated By';
     case TicketReferenceRelation.DUPLICATE_POSSIBLE:
@@ -138,7 +142,9 @@ export const useTicketReferences = ({
 
     try {
       const existingReference = referencesOut?.find(
-        reference => reference.targetTicketId === targetTicketId,
+        reference =>
+          reference.targetTicketId === targetTicketId &&
+          reference.relationType !== TicketReferenceRelation.BLOCKS,
       );
 
       if (existingReference) {
