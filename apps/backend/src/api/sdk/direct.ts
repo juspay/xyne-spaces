@@ -18,21 +18,26 @@
 
 import { Router, type NextFunction, type Request, type RequestHandler, type Response } from 'express';
 import { z, type ZodTypeAny } from 'zod';
-import { AccessType, BoardType, MAX_RULES, NotificationStatus } from '@xyne/shared';
+import { AccessType, API, BoardType, MAX_RULES, NotificationStatus, type AnyRouteContract } from '@xyne/shared';
 import { searchQuerySchema, searchSchemaQuerySchema } from './schemas/search';
 import { db } from '@/database/client';
 import type { AuthData } from '@/zero/mutators';
 import { ChannelController } from '@/controllers/channelController';
 import { ConversationController } from '@/controllers/conversationController';
 import { TicketController } from '@/controllers/ticketController';
-import { SubTicketController } from '@/controllers/subTicketController';
 import { AttachmentController } from '@/controllers/attachmentController';
 import { DraftAttachmentController } from '@/controllers/draftAttachmentController';
 import { callController as callsController } from '@/controllers/callController';
 import { affinityController } from '@/controllers/affinityController';
 import { userManagementController } from '@/controllers/userManagementController';
-import { notificationController } from '@/controllers/notificationController';
 import * as dailyBriefController from '@/controllers/dailyBriefController';
+import { ContractError } from '@/framework/api';
+import * as channelHandlers from '@/handlers/channels';
+import * as dailyBriefHandlers from '@/handlers/dailyBrief';
+import * as notificationHandlers from '@/handlers/notifications';
+import * as settingsHandlers from '@/handlers/settings';
+import * as workspaceHandlers from '@/handlers/workspace';
+import type { AuthenticatedUser } from '@/types/express';
 import { customEmojiController } from '@/controllers/customEmojiController';
 import { CanvasController } from '@/controllers/canvasController';
 import { deskMetricsController } from '@/controllers/deskMetricsController';
@@ -78,7 +83,6 @@ import { handle } from './handler';
 const channelController = new ChannelController();
 const conversationController = new ConversationController();
 const ticketController = new TicketController();
-const subTicketController = new SubTicketController();
 const attachmentController = new AttachmentController();
 const draftAttachmentController = new DraftAttachmentController();
 // Constructed the way routes/canvas.ts constructs it.
@@ -180,8 +184,32 @@ interface BaseRoute {
  * writes an Express response, or a service function that returns a value.
  */
 type DirectRoute =
-  | (BaseRoute & { readonly controller: Controller; readonly service?: never })
-  | (BaseRoute & { readonly service: Service; readonly controller?: never });
+  | (BaseRoute & { readonly controller: Controller; readonly service?: never; readonly typed?: never })
+  | (BaseRoute & { readonly service: Service; readonly controller?: never; readonly typed?: never })
+  | (BaseRoute & { readonly typed: TypedHandler; readonly controller?: never; readonly service?: never });
+
+/** What a typed handler gets: the request, checked against its contract. No req, no res. */
+interface TypedContext {
+  readonly user: AuthenticatedUser;
+  readonly params: never;
+  readonly query: never;
+  readonly body: never;
+  readonly headers: Request['headers'];
+  readonly userAgent: string | undefined;
+}
+
+/**
+ * A route backed by the typed framework's handler (the same function the product's typed route
+ * calls), so the SDK and the product cannot drift. The contract's params, query and body are
+ * checked here as the typed route checks them; a `ContractError` becomes the SDK error envelope
+ * exactly as a controller's 4xx/5xx does.
+ */
+interface TypedHandler {
+  readonly contract: AnyRouteContract;
+  readonly handle: (ctx: TypedContext) => Promise<unknown>;
+  /** Status of the success answer (default 200); 204 sends no body. */
+  readonly successStatus?: number;
+}
 
 /** A query-string parameter the desk metrics controller decodes as a JSON array of strings. */
 const jsonStringArrayParam = z
@@ -301,7 +329,10 @@ const ROUTES: readonly DirectRoute[] = [
   {
     method: 'post',
     path: '/channels/check-duplicate',
-    controller: channelController.checkDuplicate,
+    typed: {
+      contract: API.channels.checkDuplicate,
+      handle: ({ body, user }) => channelHandlers.checkDuplicate({ body, user }),
+    },
   },
   /**
    * Channels desk tickets for the caller's own threads: status fields only, and only for threads the caller
@@ -581,7 +612,10 @@ const ROUTES: readonly DirectRoute[] = [
   {
     method: 'get',
     path: '/notifications/workspace-counts',
-    controller: notificationController.getWorkspaceNotificationCounts.bind(notificationController),
+    typed: {
+      contract: API.notifications.workspaceCounts,
+      handle: ({ user }) => notificationHandlers.workspaceCounts({ user }),
+    },
   },
   {
     method: 'patch',
@@ -594,7 +628,10 @@ const ROUTES: readonly DirectRoute[] = [
   {
     method: 'patch',
     path: '/notifications/:id/read',
-    controller: notificationController.markAsRead.bind(notificationController),
+    typed: {
+      contract: API.notifications.read,
+      handle: ({ params, body, user }) => notificationHandlers.markRead({ params, body, user }),
+    },
     body: z.object({
       channelId: z.string().min(1).optional(),
       conversationId: z.string().min(1).optional(),
@@ -604,20 +641,29 @@ const ROUTES: readonly DirectRoute[] = [
   {
     method: 'patch',
     path: '/notifications/:id/dismiss',
-    controller: notificationController.dismiss.bind(notificationController),
+    typed: {
+      contract: API.notifications.dismiss,
+      handle: ({ params, user }) => notificationHandlers.dismiss({ params, user }),
+    },
     unwrap: unwrapEnvelope,
   },
   {
     method: 'get',
     path: '/notifications/preferences',
-    controller: notificationController.getPreferences.bind(notificationController),
+    typed: {
+      contract: API.notifications.preferences,
+      handle: ({ user }) => notificationHandlers.getPreferences({ user }),
+    },
   },
   {
     method: 'put',
     path: '/notifications/preferences',
     // Validated by the controller against its own preferencesSchema, after it
     // drops retired notification types — so a stale client still saves.
-    controller: notificationController.updatePreferences.bind(notificationController),
+    typed: {
+      contract: API.notifications.preferencesSet,
+      handle: ({ body, user }) => notificationHandlers.updatePreferences({ body, user }),
+    },
     unwrap: unwrapEnvelope,
   },
 
@@ -651,12 +697,18 @@ const ROUTES: readonly DirectRoute[] = [
   {
     method: 'get',
     path: '/daily-brief/config',
-    controller: dailyBriefController.getConfig,
+    typed: {
+      contract: API.dailyBrief.config,
+      handle: ({ user, headers }) => dailyBriefHandlers.getConfig({ user, headers }),
+    },
   },
   {
     method: 'put',
     path: '/daily-brief/config',
-    controller: dailyBriefController.saveConfig,
+    typed: {
+      contract: API.dailyBrief.configSet,
+      handle: ({ body, user, headers }) => dailyBriefHandlers.saveConfig({ body, user, headers }),
+    },
     body: z.object({
       enabled: z.boolean().optional(),
       instructions: z.string().optional(),
@@ -666,12 +718,18 @@ const ROUTES: readonly DirectRoute[] = [
   {
     method: 'get',
     path: '/daily-brief/settings',
-    controller: dailyBriefController.getSettings,
+    typed: {
+      contract: API.dailyBrief.settings,
+      handle: ({ user, headers }) => dailyBriefHandlers.getSettings({ user, headers }),
+    },
   },
   {
     method: 'put',
     path: '/daily-brief/settings',
-    controller: dailyBriefController.saveSettings,
+    typed: {
+      contract: API.dailyBrief.settingsSet,
+      handle: ({ body, user, headers }) => dailyBriefHandlers.saveSettings({ body, user, headers }),
+    },
     body: z.object({ agentSlug: z.string().min(1).nullable() }),
   },
 
@@ -758,7 +816,10 @@ const ROUTES: readonly DirectRoute[] = [
   {
     method: 'get',
     path: '/channels/search',
-    controller: channelController.searchForMentions,
+    typed: {
+      contract: API.channels.search,
+      handle: ({ query, user }) => channelHandlers.searchForMentions({ query, user }),
+    },
     query: z.object({
       q: z.string().min(1),
       limit: z.string().regex(/^\d+$/).optional(),
@@ -768,14 +829,20 @@ const ROUTES: readonly DirectRoute[] = [
   {
     method: 'post',
     path: '/channels/member-counts',
-    controller: channelController.getChannelMemberCounts,
+    typed: {
+      contract: API.channels.memberCounts,
+      handle: ({ body, user }) => channelHandlers.memberCounts({ body, user }),
+    },
     body: z.object({ channelIds: z.array(z.string()).max(10000) }),
     unwrap: unwrapEnvelope,
   },
   {
     method: 'get',
     path: '/channels/:channelId/members',
-    controller: channelController.getChannelMembers,
+    typed: {
+      contract: API.channels.members,
+      handle: ({ params, user }) => channelHandlers.channelMembers({ params, user }),
+    },
     unwrap: unwrapEnvelope,
   },
 
@@ -809,13 +876,13 @@ const ROUTES: readonly DirectRoute[] = [
   {
     method: 'get',
     path: '/emojis',
-    controller: customEmojiController.getAllCustomEmojis,
+    typed: { contract: API.emojis.list, handle: () => settingsHandlers.listEmojis() },
     unwrap: (body) => field(body, 'emojis'),
   },
   {
     method: 'get',
     path: '/emojis/:emojiId',
-    controller: customEmojiController.getCustomEmojiById,
+    typed: { contract: API.emojis.get, handle: ({ params }) => settingsHandlers.getEmoji({ params }) },
     unwrap: (body) => field(body, 'emoji'),
   },
   {
@@ -828,7 +895,7 @@ const ROUTES: readonly DirectRoute[] = [
   {
     method: 'delete',
     path: '/emojis/:emojiId',
-    controller: customEmojiController.deleteCustomEmoji,
+    typed: { contract: API.emojis.delete, handle: ({ params, user }) => settingsHandlers.deleteEmoji({ params, user }) },
     unwrap: () => ({}),
   },
 
@@ -916,7 +983,11 @@ const ROUTES: readonly DirectRoute[] = [
   {
     method: 'post',
     path: '/sub-tickets/link',
-    controller: subTicketController.linkExisting,
+    typed: {
+      contract: API.subTickets.link,
+      successStatus: 201,
+      handle: ({ body, user }) => workspaceHandlers.linkSubTicket({ body, user }),
+    },
     body: z.object({
       ticketId: z.string().min(1),
       mappedTicketId: z.string().min(1),
@@ -926,7 +997,11 @@ const ROUTES: readonly DirectRoute[] = [
   {
     method: 'post',
     path: '/sub-tickets/unlink',
-    controller: subTicketController.unlink,
+    typed: {
+      contract: API.subTickets.unlink,
+      successStatus: 204,
+      handle: ({ body, user }) => workspaceHandlers.unlinkSubTicketHandler({ body, user }),
+    },
     body: z.object({ mappingId: z.string().min(1) }),
   },
 
@@ -1007,6 +1082,17 @@ export function createDirectRouter(): Router {
         req.sdkCall ??= { op: `${route.method.toUpperCase()} ${route.path}`, kind: 'direct' };
         for (const guard of route.guards ?? []) await guard(req);
 
+        if (route.typed) {
+          const result = await runTyped(route, req);
+          const status = route.typed.successStatus ?? 200;
+          if (status === 204 || result === undefined) {
+            res.status(status).end();
+            return;
+          }
+          res.status(status).json(result);
+          return;
+        }
+
         if (route.service) {
           const authData = await buildAuthData(req);
           if (route.query) route.query.parse(req.query);
@@ -1051,6 +1137,39 @@ export function createDirectRouter(): Router {
   }
 
   return router;
+}
+
+/**
+ * Run a route backed by a typed handler: validate with the route's own schemas first (then the
+ * contract's), call the handler with the checked request, and answer in the SDK shape.
+ */
+async function runTyped(route: DirectRoute & { typed: TypedHandler }, req: Request): Promise<unknown> {
+  const user = req.user;
+  if (!user) throw new SdkApiError('unauthenticated', 'Missing authenticated principal.');
+  const { contract } = route.typed;
+
+  const routeQuery = route.query ? (route.query.parse(req.query) as Record<string, unknown>) : req.query;
+  const routeBody: unknown = route.body ? route.body.parse(req.body ?? {}) : req.body;
+  const parse = (schema: unknown, value: unknown): unknown =>
+    schema ? (schema as ZodTypeAny).parse(value ?? {}) : value;
+
+  const ctx: TypedContext = {
+    user,
+    params: parse(contract.params, req.params) as never,
+    query: parse(contract.query, routeQuery) as never,
+    body: parse(contract.body, routeBody) as never,
+    headers: req.headers,
+    userAgent: req.get('user-agent'),
+  };
+
+  let result: unknown;
+  try {
+    result = await route.typed.handle(ctx);
+  } catch (error) {
+    if (error instanceof ContractError) throw controllerError(error.status, error.body);
+    throw error;
+  }
+  return route.unwrap ? route.unwrap(result) : result;
 }
 
 interface ControllerResult {

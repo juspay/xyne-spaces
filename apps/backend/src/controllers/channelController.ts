@@ -1,15 +1,13 @@
 import { Request, Response } from 'express';
 import { WORKSPACE_LEVEL } from '@/integrations/core/sourceScope';
 import {
-  buildSlackDeskSourceName,
-} from '../integrations/core/deskSources';
+  buildSlackDeskSourceName } from '../integrations/core/deskSources';
 import { ChannelRepository, CreateChannelInput } from '../database/repositories/channelRepository';
 import { ChannelParticipantRepository } from '../database/repositories/channelParticipantRepository';
 import { ConversationRepository, CreateConversationInput } from '../database/repositories/conversationRepository';
 import { MessageRepository, CreateMessageInput } from '../database/repositories/messageRepository';
 import { MessageAttachmentRepository } from '../database/repositories/messageAttachmentRepository';
 import { UserRepository } from '../database/repositories/users';
-import { UserGroupRepository } from '../database/repositories/userGroups';
 import { ProjectRepository } from '../database/repositories/projectRepository';
 import { type User } from '@prisma/client';
 import { v4 as uuidv4 } from 'uuid';
@@ -28,8 +26,7 @@ import {
   ActivityClassificationJobType, ChannelType, ChannelRole,
   normalizeHistoryScope,
   type AddGroupDmParticipantsRequest,
-  type AddGroupDmParticipantsResponse,
-} from '@xyne/shared';
+  type AddGroupDmParticipantsResponse } from '@xyne/shared';
 import '../types/express'; // Import to enable Express types augmentation
 import { unreadService } from '../services/unreadService';
 import { redisService } from '../services/redisService';
@@ -37,9 +34,7 @@ import { notificationService } from '../services/notificationService';
 import { ChannelParticipantsSideEffectHandler } from '../zero/side-effects/tables/channel-participants-handler';
 import { handleUnreadCount } from '@/zero/utils/unreadCountUtlis';
 import {
-  CreateChannelResponse,
-  CheckDuplicateChannelResponse,
-} from '../api/types/ChannelTypes';
+  CreateChannelResponse } from '../api/types/ChannelTypes';
 import { websocketService } from '../services/websocketService';
 import { createChannelCreatedActivity } from '../utils/channelActivityUtils';
 import { ChannelUserStatusRepository } from '@/database/repositories/channelUserStatusRepository';
@@ -72,7 +67,6 @@ export class ChannelController {
   private messageRepository: MessageRepository;
   private messageAttachmentRepository: MessageAttachmentRepository;
   private userRepository: UserRepository;
-  private userGroupRepository: UserGroupRepository;
   private channelUserStatusRepository: ChannelUserStatusRepository;
   private projectRepository: ProjectRepository;
   private emailChannelPreferenceRepository: EmailChannelPreferenceRepository;
@@ -85,7 +79,6 @@ export class ChannelController {
     this.messageRepository = new MessageRepository();
     this.messageAttachmentRepository = new MessageAttachmentRepository();
     this.userRepository = new UserRepository();
-    this.userGroupRepository = new UserGroupRepository();
     this.channelUserStatusRepository = new ChannelUserStatusRepository();
     this.projectRepository = new ProjectRepository();
     this.emailChannelPreferenceRepository = new EmailChannelPreferenceRepository();
@@ -174,8 +167,7 @@ export class ChannelController {
         operationType,
         participants: newParticipants,
         adminUserId: authData.id,
-        adminUserName: authData.name,
-      };
+        adminUserName: authData.name };
 
       // Create conversation for system message
       const conversationData: CreateConversationInput = {
@@ -193,15 +185,13 @@ export class ChannelController {
         content: systemContent,
         msgType: MessageType.SYSTEM,
         hasAttachment: false,
-        metadata: messageMetadata,
-      };
+        metadata: messageMetadata };
 
       const createdMessage = await this.messageRepository.create(messageData);
 
       // Update conversation with real initial message ID
       await this.conversationRepository.update(conversation.conversationId, {
-        initialMessageId: createdMessage.messageId,
-      });
+        initialMessageId: createdMessage.messageId });
       await messageMetadataService.syncInitialMessageMd(conversation.conversationId);
 
       // Reopen DM for all participants so they can see the system message
@@ -222,8 +212,7 @@ export class ChannelController {
         msgType: createdMessage.msgType,
         hasAttachment: createdMessage.hasAttachment,
         attachments: [],
-        createdAt: createdMessage.createdAt,
-      };
+        createdAt: createdMessage.createdAt };
 
       await websocketService.broadcastToSession(channelId, 'new_conversation', conversationMessage);
       await redisService.broadcastMessageToSession(channelId, conversationMessage);
@@ -287,16 +276,12 @@ export class ChannelController {
             targetUserId: changes[0].userId,
             targetUserName: changes[0].userName,
             oldRole: changes[0].oldRole,
-            newRole: changes[0].newRole,
-          }),
+            newRole: changes[0].newRole }),
           changes,
           updatedBy: actor.id,
-          updatedByName: actor.name,
-        },
-      });
+          updatedByName: actor.name } });
       await this.conversationRepository.update(conversation.conversationId, {
-        initialMessageId: createdMessage.messageId,
-      });
+        initialMessageId: createdMessage.messageId });
       await messageMetadataService.syncInitialMessageMd(conversation.conversationId);
       await this.channelUserStatusRepository.reopenForAllParticipants(channelId);
 
@@ -312,8 +297,7 @@ export class ChannelController {
         msgType: createdMessage.msgType,
         hasAttachment: createdMessage.hasAttachment,
         attachments: [],
-        createdAt: createdMessage.createdAt,
-      };
+        createdAt: createdMessage.createdAt };
       await websocketService.broadcastToSession(channelId, 'new_conversation', conversationMessage);
       await redisService.broadcastMessageToSession(channelId, conversationMessage);
     } catch (error) {
@@ -362,16 +346,14 @@ export class ChannelController {
 
       // Update conversation with real initial message ID
       await this.conversationRepository.update(conversation.conversationId, {
-        initialMessageId: createdMessage.messageId,
-      });
+        initialMessageId: createdMessage.messageId });
       const targetChannel = await this.channelRepository.findById(channelId);
       if (targetChannel) {
         await ensureDmConversationAuthorParticipant({
           channelId,
           conversationId: conversation.conversationId,
           senderId,
-          scopeType: targetChannel.scopeType as ChannelScopeType,
-        });
+          scopeType: targetChannel.scopeType as ChannelScopeType });
       }
       await messageMetadataService.syncInitialMessageMd(conversation.conversationId);
 
@@ -468,8 +450,7 @@ export class ChannelController {
                 channelId,
                 isThreadActivity: false,
                 classification: ActivityClassification.PENDING,
-                classificationJobType: ActivityClassificationJobType.SPECIAL_MENTION_AUDIENCE,
-              })),
+                classificationJobType: ActivityClassificationJobType.SPECIAL_MENTION_AUDIENCE })),
             );
           }
         } else {
@@ -507,8 +488,7 @@ export class ChannelController {
         msgType: createdMessage.msgType,
         hasAttachment: createdMessage.hasAttachment,
         attachments: [],
-        createdAt: createdMessage.createdAt,
-      };
+        createdAt: createdMessage.createdAt };
 
       await websocketService.broadcastToSession(channelId, 'new_conversation', conversationMessage);
       await redisService.broadcastMessageToSession(channelId, conversationMessage);
@@ -522,8 +502,7 @@ export class ChannelController {
           hasAttachment: createdMessage.hasAttachment,
           attachments: [],
           createdAt: createdMessage.createdAt,
-          sender: senderInfo,
-        }
+          sender: senderInfo }
       };
     } catch (error) {
       logger.error('Error sending initial message:', error);
@@ -637,8 +616,7 @@ export class ChannelController {
         originalChannelId: originalConversation?.channelId || null,
         originalConversationId: originalMessage.conversationId,
         optionalText: forwardedMessage.optionalMessage || null,
-        content: forwardedContent,
-      });
+        content: forwardedContent });
 
       // Use transaction for all write operations to maintain atomicity
       const channelWorkspaceId = await this.channelRepository.getWorkspaceId(channelId);
@@ -678,8 +656,7 @@ export class ChannelController {
             if (mentioned.length > 0) {
               const members = await db.user.findMany({
                 where: { id: { in: channelParticipants.map(p => p.userId) } },
-                select: { id: true, name: true, displayName: true },
-              });
+                select: { id: true, name: true, displayName: true } });
               const nameById = new Map(members.map(u => [u.id, u.displayName || u.name]));
               mentioned.forEach(u => mentionedIds.add(u.userId));
               await notifyMentioned([...mentionedIds], {
@@ -693,15 +670,13 @@ export class ChannelController {
                 senderPicture: senderInfo.picture ?? '',
                 cleanContent,
                 isReply: false,
-                isGroupDM: true,
-              });
+                isGroupDM: true });
               await activityService.createActivities(
                 mentionActivities(mentioned, {
                   messageId: result.createdMessage.messageId,
                   channelId,
                   senderId,
-                  isThreadActivity: false,
-                }),
+                  isThreadActivity: false }),
               );
             }
           } catch (error) {
@@ -741,8 +716,7 @@ export class ChannelController {
         msgType: result.createdMessage.msgType,
         hasAttachment: result.createdMessage.hasAttachment,
         attachments: result.copiedAttachments,
-        createdAt: result.createdMessage.createdAt,
-      };
+        createdAt: result.createdMessage.createdAt };
 
       await websocketService.broadcastToSession(channelId, 'new_conversation', conversationMessage);
       await redisService.broadcastMessageToSession(channelId, conversationMessage);
@@ -757,9 +731,7 @@ export class ChannelController {
           attachments: result.copiedAttachments,
           createdAt: result.createdMessage.createdAt,
           sender: senderInfo,
-          metadata: {},
-        },
-      };
+          metadata: {} } };
     } catch (error) {
       logger.error('Error sending forwarded message:', error);
       // Don't fail the entire operation if message creation fails
@@ -784,8 +756,7 @@ export class ChannelController {
         dlEmail,
         slackChannelId,
         installedAppId,
-        boardId,
-      }: {
+        boardId }: {
         scopeType: ChannelScopeType;
         scopeId?: string;
         name?: string;
@@ -818,8 +789,7 @@ export class ChannelController {
           error: projectIdRequired ? 'ScopeType and projectId are required' : 'ScopeType is required',
           details: {
             scopeType: !scopeType ? 'ScopeType is required' : undefined,
-            projectId: projectIdRequired && !projectId ? 'ProjectId is required' : undefined,
-          }
+            projectId: projectIdRequired && !projectId ? 'ProjectId is required' : undefined }
         });
         return;
       }
@@ -868,8 +838,7 @@ export class ChannelController {
           const workspaceId = req.user!.workspaceId!;
           const sharedSource = await db.externalSource.findFirst({
             where: { workspaceId, ...WORKSPACE_LEVEL, sourceType: { in: ['google', 'microsoft'] }, isActive: true },
-            select: { displayName: true, isActive: true },
-          });
+            select: { displayName: true, isActive: true } });
           if (!sharedSource) {
             res.status(409).json({ error: 'Workspace has no shared desk email configured' });
             return;
@@ -880,8 +849,7 @@ export class ChannelController {
           }
           const claimants = await db.emailChannelPreference.findMany({
             where: { workspaceId, OR: [{ dlEmail: { not: null } }, { NOT: { dlAliases: null } }] },
-            select: { dlEmail: true, dlAliases: true },
-          });
+            select: { dlEmail: true, dlAliases: true } });
           const target = dlEmail.trim().toLowerCase();
           if (claimants.some(pref => dlAddressesFor(pref).includes(target))) {
             res.status(409).json({ error: 'A desk already exists for this DL' });
@@ -904,8 +872,7 @@ export class ChannelController {
           return;
         }
         const slackWorkspaceSource = await db.externalSource.findFirst({
-          where: { workspaceId: req.user!.workspaceId!, ...WORKSPACE_LEVEL, sourceType: 'slack', isActive: true },
-        });
+          where: { workspaceId: req.user!.workspaceId!, ...WORKSPACE_LEVEL, sourceType: 'slack', isActive: true } });
         if (!slackWorkspaceSource) {
           res.status(503).json({ error: 'Slack is not connected for this workspace. Please connect Slack first.' });
           return;
@@ -918,8 +885,7 @@ export class ChannelController {
         // the create falls through to a truthful `name` unique violation.
         const existingSource = await db.externalSource.findFirst({
           where: { name: sourceName, workspaceId: req.user!.workspaceId! },
-          select: { id: true, isActive: true },
-        });
+          select: { id: true, isActive: true } });
         if (existingSource?.isActive) {
           res.status(409).json({ error: 'A desk already exists for this Slack channel' });
           return;
@@ -933,8 +899,7 @@ export class ChannelController {
         }
         const installedApp = await db.installedApps.findUnique({
           where: { id: installedAppId },
-          select: { id: true, userId: true, user: { select: { workspaceId: true } } },
-        });
+          select: { id: true, userId: true, user: { select: { workspaceId: true } } } });
         if (!installedApp || installedApp.user.workspaceId !== req.user!.workspaceId!) {
           res.status(404).json({ error: 'App is not installed in this workspace' });
           return;
@@ -943,10 +908,8 @@ export class ChannelController {
           where: {
             installedAppId,
             status: { in: [AppPermissionStatus.APPROVED, AppPermissionStatus.PENDINGDELETE] },
-            permission: { name: 'desk', type: AppPermissionType.WRITE },
-          },
-          select: { id: true },
-        });
+            permission: { name: 'desk', type: AppPermissionType.WRITE } },
+          select: { id: true } });
         if (!hasDeskWrite) {
           res.status(403).json({ error: 'App must have the desk:write permission to back a desk' });
           return;
@@ -1004,8 +967,7 @@ export class ChannelController {
             id: existingDM.id,
             name: existingDM.name,
             scopeType: existingDM.scopeType,
-            createdAt: existingDM.createdAt,
-          });
+            createdAt: existingDM.createdAt });
           return;
         }
       }
@@ -1041,8 +1003,7 @@ export class ChannelController {
         workspaceId: req.user!.workspaceId!,
         type: (channelType || 'DEFAULT') as ChannelType,
         // Desk channels: honour the requested board as the default mapping (else oldest).
-        ...(boardId && { defaultBoardId: boardId }),
-      };
+        ...(boardId && { defaultBoardId: boardId }) };
 
       const channel = await this.channelRepository.create(channelData);
 
@@ -1109,8 +1070,7 @@ export class ChannelController {
           const firstBoard = await db.board.findFirst({
             where: { projectId: projectId },
             orderBy: { createdAt: 'asc' },
-            select: { id: true },
-          });
+            select: { id: true } });
           resolvedBoardId = firstBoard?.id;
           if (!resolvedBoardId) {
             logger.error('Cannot create DL desk: project has no boards', { projectId: projectId });
@@ -1129,9 +1089,7 @@ export class ChannelController {
             ...(isDl && {
               dlEmail: dlEmail!,
               workspaceId: req.user!.workspaceId!,
-              sendAsEmail: dlEmail!,
-            }),
-          });
+              sendAsEmail: dlEmail! }) });
         } catch (error) {
           if (isDl) {
             logger.error('Failed to create DL EmailChannelPreference, rolling back channel', error);
@@ -1158,8 +1116,7 @@ export class ChannelController {
             const firstBoard = await db.board.findFirst({
               where: { projectId: projectId },
               orderBy: { createdAt: 'asc' },
-              select: { id: true },
-            });
+              select: { id: true } });
             if (!firstBoard) {
               await db.channel.delete({ where: { id: channel.id } }).catch(() => {});
               res.status(409).json({ error: 'Project has no boards configured — cannot create call desk' });
@@ -1174,8 +1131,7 @@ export class ChannelController {
             deskType: DeskType.CALL,
             boardId: callBoardId,
             emailMergeMode: EmailMergeMode.DISABLED,
-            ...(assigneeUserGroupId && { assigneeUserGroupId }),
-          });
+            ...(assigneeUserGroupId && { assigneeUserGroupId }) });
         } catch (error) {
           logger.error('Failed to create call desk resources, rolling back channel', error);
           await db.channel.delete({ where: { id: channel.id } }).catch(err => {
@@ -1202,15 +1158,13 @@ export class ChannelController {
             deskType: DeskType.CHANNELS,
             boardId: channelsDeskBoardId,
             emailMergeMode: EmailMergeMode.DISABLED,
-            ...(assigneeUserGroupId && { assigneeUserGroupId }),
-          });
+            ...(assigneeUserGroupId && { assigneeUserGroupId }) });
           await linkChannelsDesk({
             workspaceId: req.user!.workspaceId!,
             installedAppId: installedAppId!,
             appName: channelsDeskAppName,
             deskChannelId: channel.id,
-            linkedBy: userId,
-          });
+            linkedBy: userId });
         } catch (error) {
           logger.error('Failed to create channels desk, rolling back channel', error);
           await db.emailChannelPreference.deleteMany({ where: { channelId: channel.id } }).catch(() => {});
@@ -1230,8 +1184,7 @@ export class ChannelController {
             const firstBoard = await db.board.findFirst({
               where: { projectId: projectId },
               orderBy: { createdAt: 'asc' },
-              select: { id: true },
-            });
+              select: { id: true } });
             if (!firstBoard) {
               await db.channel.delete({ where: { id: channel.id } }).catch(() => {});
               res.status(409).json({ error: 'Project has no boards configured — cannot create Slack desk' });
@@ -1246,14 +1199,12 @@ export class ChannelController {
             deskType: DeskType.SLACK,
             boardId: slackBoardId,
             emailMergeMode: EmailMergeMode.DISABLED,
-            ...(assigneeUserGroupId && { assigneeUserGroupId }),
-          });
+            ...(assigneeUserGroupId && { assigneeUserGroupId }) });
 
           const sourceName = buildSlackDeskSourceName(slackChannelId);
           // Read bot token from workspace-level Slack source
           const slackWorkspaceSource = await db.externalSource.findFirst({
-            where: { workspaceId: req.user!.workspaceId!, ...WORKSPACE_LEVEL, sourceType: 'slack', isActive: true },
-          });
+            where: { workspaceId: req.user!.workspaceId!, ...WORKSPACE_LEVEL, sourceType: 'slack', isActive: true } });
           if (!slackWorkspaceSource) {
             await db.channel.delete({ where: { id: channel.id } }).catch(() => {});
             res.status(503).json({ error: 'Slack is not connected for this workspace' });
@@ -1262,21 +1213,18 @@ export class ChannelController {
           const slackCreds = JSON.parse(decrypt(slackWorkspaceSource.credentials));
           const credentials = encrypt(JSON.stringify({
             signingSecret: slackCreds.signingSecret,
-            botOauthToken: slackCreds.botOauthToken,
-          }));
+            botOauthToken: slackCreds.botOauthToken }));
 
           // Reactivate existing or create new ExternalSource. Workspace-scoped for
           // the same reason as the pre-check above.
           const existingSource = await db.externalSource.findFirst({
             where: { name: sourceName, workspaceId: req.user!.workspaceId! },
-            select: { id: true },
-          });
+            select: { id: true } });
 
           if (existingSource) {
             await db.externalSource.update({
               where: { id: existingSource.id },
-              data: { isActive: true, credentials, channelId: channel.id, displayName: name! },
-            });
+              data: { isActive: true, credentials, channelId: channel.id, displayName: name! } });
           } else {
             await db.externalSource.create({
               data: {
@@ -1286,9 +1234,7 @@ export class ChannelController {
                 channelId: channel.id,
                 credentials,
                 isActive: true,
-                workspaceId: req.user!.workspaceId!,
-              },
-            });
+                workspaceId: req.user!.workspaceId! } });
           }
         } catch (error) {
           logger.error('Failed to create Slack desk resources, rolling back channel', error);
@@ -1312,8 +1258,7 @@ export class ChannelController {
             const firstBoard = await db.board.findFirst({
               where: { projectId: projectId },
               orderBy: { createdAt: 'asc' },
-              select: { id: true },
-            });
+              select: { id: true } });
             if (!firstBoard) {
               await db.channel.delete({ where: { id: channel.id } }).catch(() => {});
               res.status(409).json({ error: 'Project has no boards configured — cannot create app desk' });
@@ -1324,8 +1269,7 @@ export class ChannelController {
 
           const installedApp = await db.installedApps.findUnique({
             where: { id: installedAppId },
-            select: { id: true, userId: true, user: { select: { workspaceId: true } } },
-          });
+            select: { id: true, userId: true, user: { select: { workspaceId: true } } } });
           if (!installedApp || installedApp.user.workspaceId !== req.user!.workspaceId!) {
             await db.channel.delete({ where: { id: channel.id } }).catch(() => {});
             res.status(404).json({ error: 'App is not installed in this workspace' });
@@ -1338,15 +1282,13 @@ export class ChannelController {
             deskType: DeskType.APP,
             boardId: appBoardId,
             emailMergeMode: EmailMergeMode.DISABLED,
-            ...(assigneeUserGroupId && { assigneeUserGroupId }),
-          });
+            ...(assigneeUserGroupId && { assigneeUserGroupId }) });
 
           await this.externalSourceRepository.connectAppToChannel({
             channelId: channel.id,
             installedAppId,
             workspaceId: req.user!.workspaceId!,
-            displayName: name!,
-          });
+            displayName: name! });
 
           await this.channelParticipantRepository.addParticipant(
             channel.id,
@@ -1378,8 +1320,7 @@ export class ChannelController {
       void userActivityTrackingService.trackChannelCreated(userId, {
         channelId: channel.id,
         name: channel.name,
-        scopeType: channel.scopeType,
-      });
+        scopeType: channel.scopeType });
 
       // Queue channel for Vespa ingestion AFTER participants are added
       //await this.channelRepository.queueChannelForVespa(channel.id, 'feed');
@@ -1393,8 +1334,7 @@ export class ChannelController {
         description: channel.description,
         visibility: channel.visibility as ChannelVisibility,
         projectId: projectId ?? '',
-        createdAt: channel.createdAt,
-      };
+        createdAt: channel.createdAt };
 
       // Include participant results if any were processed
       if (participantAddResults.length > 0) {
@@ -1425,8 +1365,7 @@ export class ChannelController {
         jobType: "feed",
         docId: channel.id,
         userId: userId,
-        workspaceId: req.user!.workspaceId!,
-      }).catch(async (error) => {
+        workspaceId: req.user!.workspaceId! }).catch(async (error) => {
         logger.error('Error queuing Vespa job for channel:', error);
         // Log failed insertion to Postgres for later retry
         try {
@@ -1443,9 +1382,7 @@ export class ChannelController {
                 errorDetails: JSON.stringify(error),
                 userId: userId,
                 createdAt: new Date(),
-                workspaceId: req.user!.workspaceId!,
-              },
-            });
+                workspaceId: req.user!.workspaceId! } });
           }
         } catch (dbError) {
           logger.error('Failed to log Vespa insertion error to database:', dbError);
@@ -1477,224 +1414,6 @@ export class ChannelController {
   };
 
   // POST /api/channels/check-duplicate - Check if channel name is duplicate
-  checkDuplicate = async (req: Request, res: Response): Promise<void> => {
-    try {
-      // projectId is accepted for backwards compatibility with older clients but
-      // is no longer required or used: duplicate-channel checks are workspace-scoped.
-      const { name, projectId }: { name: string; projectId?: string } = req.body;
-
-      // Validate required fields
-      if (!name) {
-        res.status(400).json({
-          error: 'Name is required',
-          details: {
-            name: 'Name is required',
-          }
-        });
-        return;
-      }
-
-      // Check if channel name exists within the workspace
-      const workspaceId = req.user?.workspaceId;
-      if (!workspaceId) {
-        res.status(400).json({ error: 'Missing workspaceId' });
-        return;
-      }
-      const isDuplicate = await this.channelRepository.checkDuplicateName(name.trim(), workspaceId);
-
-      const response: CheckDuplicateChannelResponse = {
-        isDuplicate,
-        name: name.trim(),
-        ...(projectId ? { projectId } : {}),
-      };
-
-      res.status(200).json(response);
-    } catch (error) {
-      logger.error('Error checking channel duplicate:', error);
-      res.status(500).json({ error: 'Internal server error' });
-    }
-  };
-
-  getChannelMemberCounts = async (req: Request, res: Response): Promise<void> => {
-    try {
-      const userId = req.user?.id;
-      if (!userId) {
-        res.status(401).json({ success: false, error: 'Unauthorized' });
-        return;
-      }
-
-      const { channelIds } = req.body as { channelIds?: unknown };
-      if (!Array.isArray(channelIds) || channelIds.some(id => typeof id !== 'string')) {
-        res.status(400).json({ success: false, error: 'channelIds must be an array of strings' });
-        return;
-      }
-
-      // Bound the input so a single request can't issue an unbounded IN query.
-      const MAX_CHANNEL_IDS = 10000;
-      if (channelIds.length > MAX_CHANNEL_IDS) {
-        res.status(400).json({
-          success: false,
-          error: `channelIds exceeds the maximum of ${MAX_CHANNEL_IDS}`,
-        });
-        return;
-      }
-
-      const counts: Record<string, number> = {};
-      if (channelIds.length === 0) {
-        res.status(200).json({ success: true, data: { counts } });
-        return;
-      }
-
-      const stats = await db.channelStats.findMany({
-        where: { channelId: { in: channelIds as string[] } },
-        select: { channelId: true, participantCount: true },
-      });
-
-      for (const stat of stats) counts[stat.channelId] = stat.participantCount;
-
-      res.status(200).json({ success: true, data: { counts } });
-    } catch (error) {
-      logger.error('Error in getChannelMemberCounts:', error);
-      res.status(500).json({ success: false, error: 'Internal server error' });
-    }
-  };
-
-  // GET /api/channels/:channelId/vespa-participants - Channel participants (user IDs) from Vespa chat_container.permissions
-  getChannelMembers = async (req: Request, res: Response): Promise<void> => {
-    try {
-      const userId = req.user!.id;
-      const { channelId } = req.params;
-      if (!channelId) {
-        res.status(400).json({ success: false, error: 'channelId is required' });
-        return;
-      }
-      // Only members of the channel may view its roster.
-      const isMember = await this.channelParticipantRepository.isParticipant(channelId, userId);
-      if (!isMember) {
-        res.status(403).json({ success: false, error: 'Forbidden' });
-        return;
-      }
-      const members = await this.channelParticipantRepository.getActiveChannelMembers(channelId);
-      res.status(200).json({ success: true, data: { members } });
-    } catch (error) {
-      logger.error('Error in getChannelMembers:', error);
-      res.status(500).json({ success: false, error: 'Internal server error' });
-    }
-  };
-  
-  searchForMentions = async (req: Request, res: Response): Promise<void> => {
-    try {
-      const userId = req.user!.id;
-      const { q, limit = '10', types = 'users,groups' } = req.query;
-
-      // Validate query parameter - allow 1+ characters for mentions
-      if (!q || typeof q !== 'string' || q.trim().length < 1) {
-        res.status(400).json({
-          error: 'Search query (q) is required and must be at least 1 character',
-          details: 'Provide a search term of minimum 1 character'
-        });
-        return;
-      }
-
-      // Parse and validate limit
-      const searchLimit = Math.min(parseInt(limit as string) || 10, 15); // Max 15 results
-
-      // Parse types parameter
-      const searchTypes = (types as string).split(',').map(type => type.trim());
-      const includeUsers = searchTypes.includes('users');
-      const includeGroups = searchTypes.includes('groups');
-
-      const results: any[] = [];
-
-      try {
-        // Parallel search promises
-        const searchPromises: Promise<any>[] = [];
-
-        // User search
-        if (includeUsers) {
-          const userSearchPromise = this.userRepository.findBySearch(q.trim(), {
-            page: 1,
-            pageSize: searchLimit
-          }).then(searchResults => {
-            const users = Array.isArray(searchResults) ? searchResults : searchResults.data;
-            return users
-              .filter(user => user.status === 'ACTIVE' && user.id !== userId)
-              .slice(0, searchLimit)
-              .map(user => ({
-                id: user.id,
-                name: user.displayName || user.name,
-                email: user.email,
-                picture: user.picture,
-                type: 'user'
-              }));
-          });
-          searchPromises.push(userSearchPromise);
-        }
-
-        // Group search
-        if (includeGroups) {
-          const groupSearchPromise = this.userGroupRepository.findBySearch(q.trim(), {
-            page: 1,
-            pageSize: searchLimit
-          }).then(async searchResults => {
-            const groups = Array.isArray(searchResults) ? searchResults : searchResults.data;
-            return await Promise.all(
-              groups.slice(0, searchLimit).map(async group => {
-                try {
-                  const memberCount = await this.userGroupRepository.getUserCount(group.id);
-                  return {
-                    id: group.id,
-                    name: group.name,
-                    alias: group.alias,
-                    description: group.description,
-                    memberCount,
-                    type: 'group'
-                  };
-                } catch (error) {
-                  logger.warn(`Failed to get member count for group ${group.id}:`, error);
-                  return {
-                    id: group.id,
-                    name: group.name,
-                    alias: group.alias,
-                    description: group.description,
-                    memberCount: 0,
-                    type: 'group'
-                  };
-                }
-              })
-            );
-          });
-          searchPromises.push(groupSearchPromise);
-        }
-
-        // Execute searches in parallel and combine results
-        const searchResults = await Promise.all(searchPromises);
-        searchResults.forEach(searchResult => {
-          results.push(...searchResult);
-        });
-
-        // Limit total results
-        const limitedResults = results.slice(0, searchLimit);
-
-        res.status(200).json({
-          results: limitedResults,
-          total: limitedResults.length,
-          query: q,
-          limit: searchLimit,
-          types: searchTypes
-        });
-      } catch (searchError) {
-        logger.error('Error during unified search:', searchError);
-        res.status(500).json({ error: 'Search failed' });
-      }
-    } catch (error) {
-      logger.error('Error in unified search for mentions:', error);
-      res.status(500).json({ error: 'Internal server error' });
-    }
-  };
-
-  // GET /api/channels/publish-targets - Get channels where user can publish docs
-  // Returns DEFAULT scope channels (not DMs or GROUP_DMs)
   getUserDMs = async (req: Request, res: Response): Promise<void> => {
     try {
       const userId = req.user!.id;
@@ -1709,8 +1428,7 @@ export class ChannelController {
       if (dmChannelIds.length === 0) {
         res.status(200).json({
           channels: [],
-          total: 0,
-        });
+          total: 0 });
         return;
       }
 
@@ -1724,8 +1442,7 @@ export class ChannelController {
       if (dmChannels.length === 0) {
         res.status(200).json({
           channels: [],
-          total: 0,
-        });
+          total: 0 });
         return;
       }
 
@@ -1840,8 +1557,7 @@ export class ChannelController {
 
       res.status(200).json({
         channels: dmChannelsWithCounts,
-        total: dmChannelsWithCounts.length,
-      });
+        total: dmChannelsWithCounts.length });
     } catch (error) {
       logger.error('Error getting user DMs:', error);
       res.status(500).json({ error: 'Internal server error' });
@@ -1857,8 +1573,7 @@ export class ChannelController {
         participantIds: string[],
         message?: string,
         forwardedMessage?: { originalMessageId: string; optionalMessage?: string }
-        silent?: boolean,
-      } = req.body;
+        silent?: boolean } = req.body;
 
       // When a DM is auto-created without an initial message, keep it hidden from
       // the creator's list until the first message is actually sent.
@@ -1987,8 +1702,7 @@ export class ChannelController {
           visibility: ChannelVisibility.PRIVATE,
           createdBy: currentUserId,
           projectId: dmProjectId,
-          workspaceId,
-        };
+          workspaceId };
 
         const channel = await this.channelRepository.create(channelData);
 
@@ -2036,8 +1750,7 @@ export class ChannelController {
           jobType: "feed",
           docId: channel.id,
           userId: currentUserId,
-          workspaceId: workspaceId,
-        }).catch(error => {
+          workspaceId: workspaceId }).catch(error => {
           logger.error('Error queuing Vespa job for self-DM:', error);
         });
         return;
@@ -2103,8 +1816,7 @@ export class ChannelController {
           visibility: ChannelVisibility.PRIVATE,
           createdBy: currentUserId,
           projectId: dmProjectId,
-          workspaceId,
-        };
+          workspaceId };
 
         const channel = await this.channelRepository.create(channelData);
 
@@ -2157,8 +1869,7 @@ export class ChannelController {
           jobType: "feed",
           docId: channel.id,
           userId: currentUserId,
-          workspaceId: workspaceId,
-        }).catch(error => {
+          workspaceId: workspaceId }).catch(error => {
           logger.error('Error queuing Vespa job for DM:', error);
         });
       } else {
@@ -2178,8 +1889,7 @@ export class ChannelController {
               userId: p.userId,
               role: p.role,
               joinedAt: p.joinedAt,
-              user: await this.getUserInfo(p.userId),
-            }))
+              user: await this.getUserInfo(p.userId) }))
           );
 
           // Send message or forwarded message if provided, even for existing Group DM
@@ -2221,8 +1931,7 @@ export class ChannelController {
           visibility: ChannelVisibility.PRIVATE,
           createdBy: currentUserId,
           projectId: dmProjectId,
-          workspaceId,
-        };
+          workspaceId };
 
         const channel = await this.channelRepository.create(channelData);
 
@@ -2289,8 +1998,7 @@ export class ChannelController {
           jobType: "feed",
           docId: channel.id,
           userId: currentUserId,
-          workspaceId: workspaceId,
-        }).catch(error => {
+          workspaceId: workspaceId }).catch(error => {
           logger.error('Error queuing Vespa job for Group DM:', error);
         });
       }
@@ -2323,8 +2031,7 @@ export class ChannelController {
         channelId,
         currentUserId,
         since,
-        limit,
-      });
+        limit });
 
       res.status(200).json({ conversations, total });
     } catch (error) {
@@ -2349,8 +2056,7 @@ export class ChannelController {
         currentUserId,
         workspaceId,
         userIds: body.userIds,
-        historyScope: normalizeHistoryScope(body),
-      });
+        historyScope: normalizeHistoryScope(body) });
 
       const movedHistory = result.conversationsMoved > 0;
 
@@ -2382,8 +2088,7 @@ export class ChannelController {
               'conversation_moved_source',
               {
                 movedEverything: result.movedEverything,
-                destinationChannelId: result.channelId,
-              }
+                destinationChannelId: result.channelId }
             );
           }
         } catch (error) {
@@ -2397,8 +2102,7 @@ export class ChannelController {
           workspaceId: req.user!.workspaceId,
           role: req.user!.role,
           orgRole: req.user!.orgRole,
-          memberId: req.user!.memberId,
-        });
+          memberId: req.user!.memberId });
         // Awaited so "added" lands before the mention the client's prompt delete delivers next.
         await Promise.all(result.addedParticipants.map(participant =>
           handler.onInsert({
@@ -2414,8 +2118,7 @@ export class ChannelController {
         isExisting: result.isExisting,
         participantsAdded: result.participantsAdded,
         conversationsMoved: result.conversationsMoved,
-        message: result.message,
-      };
+        message: result.message };
 
       res.status(result.isExisting ? 200 : 201).json(response);
     } catch (error) {

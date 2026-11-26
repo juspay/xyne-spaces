@@ -68,7 +68,7 @@ export async function getSettings(input: Input) {
 }
 
 /** PUT /daily-brief/settings: set the org's brief agent. claw-auth's status is passed through (403 not admin, 400 bad agent). */
-export async function saveSettings(input: Input & { body: { agentSlug?: string } }) {
+export async function saveSettings(input: Input & { body: { agentSlug?: string | null } }) {
   const userId = userIdOf(input.user);
   try {
     const { status, json } = await saveDailyBriefSettings(input, userId, { agentSlug: input.body.agentSlug });

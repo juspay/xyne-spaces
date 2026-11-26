@@ -171,52 +171,6 @@ export class CustomEmojiController {
   };
 
   /**
-   * Get all custom emojis
-   * GET /api/emojis
-   */
-  getAllCustomEmojis = async (_req: Request, res: Response): Promise<void> => {
-    try {
-      const emojis = await this.customEmojiRepository.findAll();
-
-      // Transform emojis to frontend-friendly format
-      const transformedEmojis = emojis.map(transformEmoji);
-
-      res.status(200).json({
-        success: true,
-        emojis: transformedEmojis,
-      });
-    } catch (error) {
-      logger.error('Error fetching custom emojis:', error);
-      res.status(500).json({ error: 'Internal server error' });
-    }
-  };
-
-  /**
-   * Get a single custom emoji by ID
-   * GET /api/emojis/:emojiId
-   */
-  getCustomEmojiById = async (req: Request, res: Response): Promise<void> => {
-    try {
-      const { emojiId } = req.params;
-
-      const emoji = await this.customEmojiRepository.findById(emojiId);
-
-      if (!emoji) {
-        res.status(404).json({ error: 'Emoji not found' });
-        return;
-      }
-
-      res.status(200).json({
-        success: true,
-        emoji: transformEmoji(emoji),
-      });
-    } catch (error) {
-      logger.error('Error fetching custom emoji:', error);
-      res.status(500).json({ error: 'Internal server error' });
-    }
-  };
-
-  /**
    * Stream emoji image
    * GET /api/emojis/:emojiId/stream
    */
@@ -268,51 +222,6 @@ export class CustomEmojiController {
     }
   };
 
-  /**
-   * Delete a custom emoji
-   * DELETE /api/emojis/:emojiId
-   */
-  deleteCustomEmoji = async (req: Request, res: Response): Promise<void> => {
-    try {
-      const { emojiId } = req.params;
-      const userId = req.user!.id;
-
-      // Find the emoji
-      const emoji = await this.customEmojiRepository.findById(emojiId);
-
-      if (!emoji) {
-        res.status(404).json({ error: 'Emoji not found' });
-        return;
-      }
-
-      // Check if user is the creator (or add admin check if needed)
-      if (emoji.createdBy !== userId) {
-        res.status(403).json({ error: 'You do not have permission to delete this emoji' });
-        return;
-      }
-
-      // Delete the file from GCS
-      try {
-        await storageService.deleteFile(emoji.url);
-      } catch (error) {
-        logger.warn(`Failed to delete emoji file from GCS: ${emoji.url}`, error);
-        // Continue with emoji deletion even if file deletion fails
-      }
-
-      // Delete the emoji record
-      await this.customEmojiRepository.delete(emojiId);
-
-      res.status(200).json({
-        success: true,
-        message: 'Custom emoji deleted successfully',
-      });
-
-      logger.info(`Custom emoji deleted: ${emoji.name} by user ${userId}`);
-    } catch (error) {
-      logger.error('Error deleting custom emoji:', error);
-      res.status(500).json({ error: 'Internal server error' });
-    }
-  };
 }
 
 export const customEmojiController = new CustomEmojiController(new CustomEmojiRepository());

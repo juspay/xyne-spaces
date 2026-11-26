@@ -1,17 +1,12 @@
 import { Request, Response } from 'express';
 import { logger } from '../utils/logger';
 import {
-  getDailyBriefConfig,
-  saveDailyBriefConfig,
-  getDailyBriefSettings,
-  saveDailyBriefSettings,
   getLatestDailyBrief,
   getDailyBriefHistory,
   getDailyBriefDates,
   getDailyBriefByDate,
   postDailyBriefSwitched,
-  regenerateDailyBriefStream,
-} from '../services/clawAgentService';
+  regenerateDailyBriefStream } from '../services/clawAgentService';
 
 /** Unwrap claw-auth's { success, data } envelope for the dashboard. */
 function unwrap(result: unknown): unknown {
@@ -19,68 +14,6 @@ function unwrap(result: unknown): unknown {
     return (result as { data: unknown }).data;
   }
   return result;
-}
-
-/** GET /api/daily-brief/config — enable flag + custom instructions. */
-export async function getConfig(req: Request, res: Response) {
-  const userId = req.user?.id;
-  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
-  try {
-    const result = await getDailyBriefConfig(req, userId);
-    return res.json(unwrap(result));
-  } catch (error) {
-    logger.error('[DailyBrief] Error fetching config:', error);
-    return res.status(500).json({ error: 'Failed to load daily brief config' });
-  }
-}
-
-/** PUT /api/daily-brief/config — { enabled?, instructions?, instructionsEnabled? }. */
-export async function saveConfig(req: Request, res: Response) {
-  const userId = req.user?.id;
-  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
-  try {
-    const { enabled, instructions, instructionsEnabled } = req.body ?? {};
-    const result = await saveDailyBriefConfig(req, userId, {
-      enabled,
-      instructions,
-      instructionsEnabled,
-    });
-    return res.json(unwrap(result));
-  } catch (error) {
-    logger.error('[DailyBrief] Error saving config:', error);
-    return res.status(500).json({ error: 'Failed to save daily brief config' });
-  }
-}
-
-/** GET /api/daily-brief/settings — which agent runs the brief + pickable agents. */
-export async function getSettings(req: Request, res: Response) {
-  const userId = req.user?.id;
-  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
-  try {
-    const result = await getDailyBriefSettings(req, userId);
-    return res.json(unwrap(result));
-  } catch (error) {
-    logger.error('[DailyBrief] Error fetching settings:', error);
-    return res.status(500).json({ error: 'Failed to load daily brief settings' });
-  }
-}
-
-/** PUT /api/daily-brief/settings — set the org's brief agent ({ agentSlug }). Admin-only. */
-export async function saveSettings(req: Request, res: Response) {
-  const userId = req.user?.id;
-  if (!userId) return res.status(401).json({ error: 'Unauthorized' });
-  try {
-    const { agentSlug } = req.body ?? {};
-    const { status, json } = await saveDailyBriefSettings(req, userId, { agentSlug });
-    // Pass through the claw-auth status (403 not-admin / 400 bad agent / 200 ok).
-    const payload = json && typeof json === 'object' && 'data' in (json as Record<string, unknown>)
-      ? (json as { data: unknown }).data
-      : json;
-    return res.status(status).json(payload);
-  } catch (error) {
-    logger.error('[DailyBrief] Error saving settings:', error);
-    return res.status(500).json({ error: 'Failed to save daily brief settings' });
-  }
 }
 
 /** GET /api/daily-brief/latest — today's stored brief (or the most recent one). */

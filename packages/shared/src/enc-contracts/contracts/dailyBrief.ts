@@ -34,6 +34,6 @@ export const dailyBriefSettings = defineRoute({
 export const dailyBriefSettingsSet = defineRoute({
   method: 'PUT',
   path: '/daily-brief/settings',
-  body: z.object({ agentSlug: z.string().optional() }),
+  body: z.object({ agentSlug: z.string().nullable().optional() }),
   response: z.unknown(),
 });
