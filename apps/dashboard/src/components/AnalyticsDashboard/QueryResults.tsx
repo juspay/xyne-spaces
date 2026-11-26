@@ -5,7 +5,7 @@ import 'react-resizable/css/styles.css';
 import { apiInstance } from '../../services/clients/apiClient';
 import { Trash2, RefreshCw, Edit, GripVertical, Maximize2, X } from 'lucide-react';
 import { Button } from '../../components/ui/Button';
-import type { Query as QueryType, Dashboard } from '@xyne/shared';
+import type { Query as QueryType, Dashboard, DashboardShare } from '@xyne/shared';
 import { QueryVisualization } from '../QueryVisualizations/QueryVisualization';
 import { QueryVisualizationType } from '../QueryVisualizations/types';
 import { cn } from '../../utils/classNames';
@@ -38,10 +38,13 @@ interface MappingEntry {
 
 export interface DashboardWithQueries extends Dashboard {
   queryMappings?: ReadonlyArray<MappingEntry>;
+  shares?: ReadonlyArray<DashboardShare>;
 }
 
 interface QueryResultsProps {
   dashboardData: DashboardWithQueries | null | undefined;
+  /** Owners and editors can move, resize, edit and delete widgets; viewers only look. */
+  canEdit: boolean;
   onDeleteQuery: (queryId: string) => void;
   onEditQuery?: (query: {
     id: string;
@@ -134,6 +137,7 @@ function ResizeCornerHandle(_axis: ResizeHandleAxis, ref: React.Ref<HTMLElement>
 
 const QueryResults: React.FC<QueryResultsProps> = ({
   dashboardData,
+  canEdit,
   onDeleteQuery,
   onEditQuery,
 }) => {
@@ -279,7 +283,7 @@ const QueryResults: React.FC<QueryResultsProps> = ({
 
   const persistLayout = useCallback(
     (next: Layout) => {
-      if (!zero) return;
+      if (!zero || !canEdit) return;
       const updates: Array<{ id: string; position: string }> = [];
       for (const item of next) {
         const w = Math.max(item.w, item.minW ?? MIN_TILE_W);
@@ -318,11 +322,12 @@ const QueryResults: React.FC<QueryResultsProps> = ({
           });
         });
     },
-    [queriesData, zero],
+    [canEdit, queriesData, zero],
   );
 
   useEffect(() => {
-    if (backfillUpdates.length === 0 || !zero) return;
+    // Viewers can't write positions; their layout is computed locally.
+    if (backfillUpdates.length === 0 || !zero || !canEdit) return;
     const key = backfillUpdates.map(u => `${u.id}:${u.position}`).join('|');
     if (backfillPersistedRef.current === key) return;
     backfillPersistedRef.current = key;
@@ -340,7 +345,7 @@ const QueryResults: React.FC<QueryResultsProps> = ({
     void result.server.catch(() => {
       backfillPersistedRef.current = '';
     });
-  }, [backfillUpdates, zero]);
+  }, [backfillUpdates, canEdit, zero]);
 
   const handleRefreshQuery = useCallback(
     (queryId: string, mappingId: string, queryJson: unknown): void => {
@@ -410,8 +415,12 @@ const QueryResults: React.FC<QueryResultsProps> = ({
             width={gridWidth}
             compactor={DASHBOARD_GRID_COMPACTOR}
             gridConfig={{ cols: GRID_COLS, rowHeight: ROW_HEIGHT_PX, margin: TILE_MARGIN_PX }}
-            dragConfig={{ enabled: true, handle: '.dashboard-grid-drag-handle' }}
-            resizeConfig={{ enabled: true, handles: ['se'], handleComponent: ResizeCornerHandle }}
+            dragConfig={{ enabled: canEdit, handle: '.dashboard-grid-drag-handle' }}
+            resizeConfig={{
+              enabled: canEdit,
+              handles: ['se'],
+              handleComponent: ResizeCornerHandle,
+            }}
             onDragStop={persistLayout}
             onResizeStop={persistLayout}
           >
@@ -442,7 +451,13 @@ const QueryResults: React.FC<QueryResultsProps> = ({
                     )}
                   >
                     <div className='flex items-center justify-between px-4 py-3 border-b border-border/40 bg-gradient-to-r from-muted/30 via-muted/20 to-transparent shrink-0'>
-                      <div className='flex items-center gap-2 min-w-0 dashboard-grid-drag-handle cursor-grab active:cursor-grabbing touch-none'>
+                      <div
+                        className={cn(
+                          'flex items-center gap-2 min-w-0',
+                          canEdit &&
+                            'dashboard-grid-drag-handle cursor-grab active:cursor-grabbing touch-none',
+                        )}
+                      >
                         <div className='shrink-0 text-muted-foreground/40 hover:text-muted-foreground/80 transition-colors p-0.5 rounded'>
                           <GripVertical className='w-4 h-4' />
                         </div>
@@ -488,7 +503,7 @@ const QueryResults: React.FC<QueryResultsProps> = ({
                         >
                           <RefreshCw className='h-3.5 w-3.5' />
                         </Button>
-                        {onEditQuery && (
+                        {canEdit && onEditQuery && (
                           <Button
                             variant='ghost'
                             size='iconSm'
@@ -512,19 +527,21 @@ const QueryResults: React.FC<QueryResultsProps> = ({
                             <Edit className='h-3.5 w-3.5' />
                           </Button>
                         )}
-                        <Button
-                          variant='ghost'
-                          size='iconSm'
-                          onClick={() => void handleDelete(r.queryId)}
-                          title='Delete query'
-                          aria-label='Delete query'
-                          className='hover:bg-red-100 hover:text-red-600 dark:hover:bg-red-900/30 dark:hover:text-red-400 transition-colors'
-                          data-track-category='ANALYTICS'
-                          data-track-name='Delete_Query'
-                          data-track-metadata={JSON.stringify({ queryId: r.queryId })}
-                        >
-                          <Trash2 className='h-3.5 w-3.5' />
-                        </Button>
+                        {canEdit && (
+                          <Button
+                            variant='ghost'
+                            size='iconSm'
+                            onClick={() => void handleDelete(r.queryId)}
+                            title='Delete query'
+                            aria-label='Delete query'
+                            className='hover:bg-red-100 hover:text-red-600 dark:hover:bg-red-900/30 dark:hover:text-red-400 transition-colors'
+                            data-track-category='ANALYTICS'
+                            data-track-name='Delete_Query'
+                            data-track-metadata={JSON.stringify({ queryId: r.queryId })}
+                          >
+                            <Trash2 className='h-3.5 w-3.5' />
+                          </Button>
+                        )}
                       </div>
                     </div>
 

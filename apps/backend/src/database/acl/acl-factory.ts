@@ -242,6 +242,10 @@ export class ACLFactory {
       return new CustomEmojisACL(ctx, prisma)
     case 'dashboard':
       return new DashboardsACL(ctx, prisma)
+    // Workspace scope: access checks must read share rows for any viewer. Who is shown the share
+    // list is enforced by the Zero read ACL and the dashboards API.
+    case 'dashboardShare':
+      return new BaseQueryACL(ctx, prisma)
     case 'dashboardQueryMapping':
       return new DashboardQueriesMappingACL(ctx, prisma)
     case 'draftMessage':

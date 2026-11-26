@@ -3352,6 +3352,7 @@ export const queries = defineQueries({
       .related('reaction')
       .related('canvas', c => c.related('sdlcArtifact'))
       .related('savedView')
+      .related('dashboard')
       .related('call')
       .related('ticket');
   }),
@@ -3457,6 +3458,7 @@ export const queries = defineQueries({
         .related('reaction')
         .related('canvas', c => c.related('sdlcArtifact'))
         .related('savedView')
+        .related('dashboard')
         .related('call')
         .related('ticket');
     },
@@ -5353,6 +5355,9 @@ export const queries = defineQueries({
       return zql.dashboards
         .where('id', dashboardId)
         .related('queryMappings', mapping => mapping.related('query'))
+        // Owners and editors get every share; anyone else only the row naming them (see the
+        // dashboard_shares read ACL), which is all the app needs to work out their role.
+        .related('shares')
         .one();
     },
   ),

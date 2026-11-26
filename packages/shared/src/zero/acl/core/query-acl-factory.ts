@@ -107,6 +107,7 @@ import {
   CustomEmojisACL,
   DashboardQueriesMappingACL,
   DashboardsACL,
+  DashboardSharesACL,
   DraftMessagesACL,
   EmailReadsACL,
   ImpactsACL,
@@ -335,6 +336,8 @@ export class QueryACLFactory {
         return new DashboardQueriesMappingACL(ctx) as BaseQueryACL<TTable>;
       case 'dashboards':
         return new DashboardsACL(ctx) as BaseQueryACL<TTable>;
+      case 'dashboard_shares':
+        return new DashboardSharesACL(ctx) as BaseQueryACL<TTable>;
       case 'draft_messages':
         return new DraftMessagesACL(ctx) as BaseQueryACL<TTable>;
       case 'email_reads':

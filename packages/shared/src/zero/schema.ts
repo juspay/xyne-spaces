@@ -55,6 +55,8 @@ import {
   EntityType,
   FormContextType,
   FormEntityType,
+  DashboardSharePrincipal,
+  DashboardShareRole,
   FormFieldType,
   IngestionStatus,
   InvitationResponse,
@@ -1107,6 +1109,7 @@ export const activityTable = table('activities')
     channelId: string().optional(),
     canvasId: string().optional(),
     savedViewId: string().optional(),
+    dashboardId: string().optional(),
     trackId: string().optional(),
     blockId: string().optional(),
     conversationSeenCutoffAt: number().optional(),
@@ -2002,6 +2005,20 @@ export const dashboardTable = table('dashboards')
     id: string(),
     name: string(),
     description: string().optional(),
+    createdBy: string(),
+    createdAt: number(),
+    updatedAt: number(),
+  })
+  .primaryKey('id');
+
+export const dashboardShareTable = table('dashboard_shares')
+  .columns({
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
+    id: string(),
+    dashboardId: string(),
+    principalType: enumeration<DashboardSharePrincipal>(),
+    principalId: string(),
+    role: enumeration<DashboardShareRole>(),
     createdBy: string(),
     createdAt: number(),
     updatedAt: number(),
@@ -3893,6 +3910,11 @@ export const activityTableRelationships = relationships(activityTable, ({ one })
     destField: ['id'],
     destSchema: savedUserConfigurationTable,
   }),
+  dashboard: one({
+    sourceField: ['dashboardId'],
+    destField: ['id'],
+    destSchema: dashboardTable,
+  }),
   actor: one({
     sourceField: ['actorId'],
     destField: ['id'],
@@ -4848,6 +4870,25 @@ export const dashboardTableRelationships = relationships(dashboardTable, ({ many
     destField: ['dashboardId'],
     destSchema: dashboardQueryMappingTable,
   }),
+  shares: many({
+    sourceField: ['id'],
+    destField: ['dashboardId'],
+    destSchema: dashboardShareTable,
+  }),
+}));
+
+export const dashboardShareTableRelationships = relationships(dashboardShareTable, ({ one }) => ({
+  dashboard: one({
+    sourceField: ['dashboardId'],
+    destField: ['id'],
+    destSchema: dashboardTable,
+  }),
+  // Only meaningful on CHANNEL shares, where principalId is a channel id.
+  channel: one({
+    sourceField: ['principalId'],
+    destField: ['id'],
+    destSchema: channelTable,
+  }),
 }));
 
 export const queryTableRelationships = relationships(queryTable, ({ many }) => ({
@@ -5199,6 +5240,7 @@ export const schema = createSchema({
     ticketStageRequestTable,
     stageTransitionTable,
     dashboardTable,
+    dashboardShareTable,
     queryTable,
     dashboardQueryMappingTable,
     merchantTable,
@@ -5338,6 +5380,7 @@ export const schema = createSchema({
     stageTransitionTableRelationships,
     stageApproversTableRelationships,
     dashboardTableRelationships,
+    dashboardShareTableRelationships,
     queryTableRelationships,
     dashboardQueryMappingTableRelationships,
     merchantTableRelationships,
@@ -5476,6 +5519,7 @@ export type FormEntityValueItems = Row<typeof schema.tables.form_entity_value_it
 export type StageApprovers = Row<typeof schema.tables.stage_approvers>;
 export type TicketStageRequest = Row<typeof schema.tables.ticket_stage_requests>;
 export type Dashboard = Row<typeof schema.tables.dashboards>;
+export type DashboardShare = Row<typeof schema.tables.dashboard_shares>;
 export type Query = Row<typeof schema.tables.queries>;
 export type DashboardQueryMapping = Row<typeof schema.tables.dashboard_queries_mapping>;
 export type Merchant = Row<typeof schema.tables.merchants>;

@@ -7,6 +7,13 @@ import {
   useParams,
 } from 'react-router-dom';
 import SplashScreen from './SplashScreen/SplashScreen';
+
+/** /analytics-dashboard[/:id] moved to /xyne-dashboards[/:id]. */
+const LegacyAnalyticsDashboardRedirect = (): ReactElement => {
+  const { workspaceId, dashboardId } = useParams<{ workspaceId?: string; dashboardId?: string }>();
+  const base = workspaceId ? `/${workspaceId}` : '';
+  return <Navigate to={`${base}/xyne-dashboards${dashboardId ? `/${dashboardId}` : ''}`} replace />;
+};
 import ProtectedRoute from '../components/Auth/ProtectedRoute';
 import { useActivityTracker } from '../hooks/useActivityTracker';
 import HomeScreen from './HomeScreen';
@@ -1712,20 +1719,28 @@ export const router = createBrowserRouter([
                 element: <LegacyOrganisationsRedirect section='user-groups' />,
               },
               {
-                path: 'analytics-dashboard',
+                // Xyne Dashboards: any ANALYTICS tier opens them; what each person sees is
+                // limited by who the dashboard is shared with.
+                path: 'xyne-dashboards',
                 element: (
-                  <ResourceProtectedRoute resourceName='ANALYTICS'>
+                  <ResourceProtectedRoute resourceName='ANALYTICS' minAccess='READ'>
                     <DashboardCreation />
                   </ResourceProtectedRoute>
                 ),
               },
               {
-                path: 'analytics-dashboard/:dashboardId',
+                path: 'xyne-dashboards/:dashboardId',
                 element: (
-                  <ResourceProtectedRoute resourceName='ANALYTICS'>
+                  <ResourceProtectedRoute resourceName='ANALYTICS' minAccess='READ'>
                     <QueryDashboardScreen />
                   </ResourceProtectedRoute>
                 ),
+              },
+              // Old links from the Support rail and bookmarks.
+              { path: 'analytics-dashboard', element: <LegacyAnalyticsDashboardRedirect /> },
+              {
+                path: 'analytics-dashboard/:dashboardId',
+                element: <LegacyAnalyticsDashboardRedirect />,
               },
               {
                 path: 'dashboards',

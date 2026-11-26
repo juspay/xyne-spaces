@@ -192,7 +192,6 @@ const SUPPORT_REUSED_ROUTES = [
   '/chat/activity',
   '/calls',
   '/automations',
-  '/analytics-dashboard',
   '/knowledge-base',
 ];
 

@@ -722,6 +722,7 @@ export enum NotificationType {
   RECORDING_SUMMARY_READY = "RECORDING_SUMMARY_READY",
   TRANSCRIPT_TRANSLATION_READY = "TRANSCRIPT_TRANSLATION_READY",
   SUMMARY_TEMPLATE_SHARED = "SUMMARY_TEMPLATE_SHARED",
+  DASHBOARD_SHARED = "DASHBOARD_SHARED",
   COLLECTION_INGESTION_COMPLETED = "COLLECTION_INGESTION_COMPLETED",
   MAX_WORKLOAD_REACHED = "MAX_WORKLOAD_REACHED",
   ASSIGNMENT_PAUSED = "ASSIGNMENT_PAUSED",
@@ -773,6 +774,20 @@ export enum CanvasRole {
 export enum CanvasCommentThreadStatus {
   OPEN = 'OPEN',
   RESOLVED = 'RESOLVED',
+}
+
+// Legacy analytics dashboards (the `dashboards` table): who a dashboard is shared with.
+// @ts-ignore TS1294
+export enum DashboardSharePrincipal {
+  USER = 'USER',
+  CHANNEL = 'CHANNEL',
+  WORKSPACE = 'WORKSPACE',
+}
+
+// @ts-ignore TS1294
+export enum DashboardShareRole {
+  EDITOR = 'EDITOR',
+  VIEWER = 'VIEWER',
 }
 
 // @ts-ignore TS1294

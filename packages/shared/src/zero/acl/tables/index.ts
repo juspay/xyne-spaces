@@ -104,6 +104,7 @@ export { CoesACL } from './coes-acl';
 export { CustomEmojisACL } from './custom-emojis-acl';
 export { DashboardQueriesMappingACL } from './dashboard-queries-mapping-acl';
 export { DashboardsACL } from './dashboards-acl';
+export { DashboardSharesACL } from './dashboard-shares-acl';
 export { DraftMessagesACL } from './draft-messages-acl';
 export { EmailReadsACL } from './email-reads-acl';
 export { ImpactsACL } from './impacts-acl';

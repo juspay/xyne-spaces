@@ -1,6 +1,8 @@
 import type { Query } from '@rocicorp/zero';
 import type { Schema, Context } from '../../schema';
 import { BaseQueryACL } from '../core/base-acl';
+import { denyGuestSelect } from '../core/guest-acl-utils';
+import { canUseDashboards, readableDashboardWhere } from '../core/dashboard-access';
 
 export class DashboardQueriesMappingACL extends BaseQueryACL<'dashboard_queries_mapping'> {
   constructor(ctx: Context) {
@@ -8,6 +10,10 @@ export class DashboardQueriesMappingACL extends BaseQueryACL<'dashboard_queries_
   }
 
   canSelect<TReturn>(query: Query<'dashboard_queries_mapping', Schema, TReturn>): Query<'dashboard_queries_mapping', Schema, TReturn> {
-    return query.where('workspaceId', '=', this.ctx.workspaceId);
+    // A mapping is visible with its dashboard.
+    if (!canUseDashboards(this.ctx)) return denyGuestSelect(query, 'id');
+    return query
+      .where('workspaceId', '=', this.ctx.workspaceId)
+      .whereExists('dashboard', d => d.where(readableDashboardWhere(this.ctx)));
   }
 }

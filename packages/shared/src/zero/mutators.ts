@@ -9733,6 +9733,10 @@ export const mutators = defineMutators({
           await tx.mutate.dashboard_queries_mapping.delete({ id: mapping.id });
           await tx.mutate.queries.delete({ id: mapping.queryId });
         }
+        const shares = await tx.run(zql.dashboard_shares.where('dashboardId', id));
+        for (const share of shares) {
+          await tx.mutate.dashboard_shares.delete({ id: share.id });
+        }
         await tx.mutate.dashboards.delete({ id });
       },
     ),

@@ -19,6 +19,7 @@ import { EmailFetchActivity } from './EmailFetchActivity';
 import { DeskAccountDisconnectedActivity } from './DeskAccountDisconnectedActivity';
 import { CanvasSharedActivity } from './CanvasSharedActivity';
 import { ViewSharedActivity } from './ViewSharedActivity';
+import { DashboardSharedActivity } from './DashboardSharedActivity';
 import { RecordingSharedActivity } from './RecordingSharedActivity';
 import { RecordingSummaryActivity } from './RecordingSummaryActivity';
 // Disabled (LLM)
@@ -143,6 +144,11 @@ export const ActivityItem = memo(function ActivityItem({
     case 'view_shared':
     case 'view_access_revoked':
       return <ViewSharedActivity activity={activity} isExpanded={isExpanded} />;
+
+    case 'dashboard_shared':
+    case 'dashboard_access_changed':
+    case 'dashboard_access_revoked':
+      return <DashboardSharedActivity activity={activity} isExpanded={isExpanded} />;
 
     case 'recording_shared':
     case 'recording_access_changed':

@@ -222,6 +222,7 @@ import { callTranscriptionQueue } from '@/queues/callTranscriptionQueue';
 import { initStorage } from '@/services/storage';
 
 import queryRoutes from '@/routes/query';
+import analyticsDashboardRoutes from '@/routes/analyticsDashboard';
 import { GenericFieldRegistry } from '@/services/queryService/genericFieldRegistry';
 import emojiRoutes from '@/routes/emojis';
 import { appRoutes } from '@/apps';
@@ -863,6 +864,7 @@ export class App {
 
     // Generic query route (auth required)
     this.app.use('/api/analytics-query', authMiddleware.authenticate, queryRoutes);
+    this.app.use('/api/analytics-dashboards', authMiddleware.authenticate, analyticsDashboardRoutes);
 
     // Canvas file upload routes (auth required)
     this.app.use('/api/canvas', authMiddleware.authenticate, canvasRoutes);
