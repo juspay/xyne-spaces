@@ -85,7 +85,7 @@ jest.mock('@/middleware/encryptedRoute', () => ({
   ],
 }));
 
-import { api, ContractError, mountApi, mountTypedRoutes, type AccessCheck } from '../api';
+import { router, route, ContractError, mountApi, mountTypedRoutes, type AccessCheck } from '../api';
 import { createApp } from '../createApp';
 import { contractGate, findContract } from '../contractGate';
 
@@ -110,7 +110,7 @@ const echo = defineRoute({
   body: z.object({ name: z.string().trim().min(1), note: z.string().optional() }),
   response: z.object({ id: z.string(), name: z.string(), keys: z.array(z.string()), user: z.string().nullable() }),
 });
-api.route(echo, {
+route(echo, {
   controller: async ({ params, body, user }) => ({ id: params.id, name: body.name, keys: Object.keys(body), user: user?.id ?? null }),
 });
 
@@ -136,7 +136,7 @@ const appGroup = {
     response: z.object({}),
   }),
 } as const;
-mountApi(api.router(appGroup, {}, (serve) => ({
+mountApi(router(appGroup, {}, (serve) => ({
   post: serve('post', {
     auth: 'app',
     access: { channel: channelCheck },
@@ -163,12 +163,12 @@ const sessionEncrypted = defineRoute({
   facts: { note: {} },
   response: z.object({ ok: z.boolean() }),
 });
-api.route(sessionEncrypted, {
+route(sessionEncrypted, {
   encryption: { resolveWorkspaceId: async () => 'ws-1' },
   controller: async () => ({ ok: true }),
 });
 
-api.route(defineRoute({ method: 'GET', path: '/test/boom', response: z.object({}) }), {
+route(defineRoute({ method: 'GET', path: '/test/boom', response: z.object({}) }), {
   auth: 'public',
   controller: async () => {
     throw new Error('boom');
@@ -181,7 +181,7 @@ const slackStyle = defineRoute({
   body: z.object({ ts: z.string().min(1) }),
   response: z.object({ ok: z.literal(true), ts: z.string() }),
 });
-api.route(slackStyle, {
+route(slackStyle, {
   auth: 'slack-app',
   invalidRequest: () => new ContractError(200, { ok: false, error: 'invalid_arguments' }),
   access: {
@@ -397,17 +397,17 @@ describe('typed routes depend on nothing app.ts adds', () => {
 // Type-level checks (tsc --noEmit): a group must serve every entry, each under its own name.
 function typeChecks() {
   // @ts-expect-error `fail` is missing
-  mountApi(api.router(appGroup, {}, (serve) => ({
+  mountApi(router(appGroup, {}, (serve) => ({
     post: serve('post', { auth: 'app', encryption: { resolveWorkspaceId: async () => 'ws' }, controller: async () => ({ channel: '', app: null, facts: [] }) }),
   })));
-  mountApi(api.router(appGroup, {}, (serve) => ({
+  mountApi(router(appGroup, {}, (serve) => ({
     post: serve('post', { auth: 'app', encryption: { resolveWorkspaceId: async () => 'ws' }, controller: async () => ({ channel: '', app: null, facts: [] }) }),
     // @ts-expect-error built for `post`, mounted as `fail`
     fail: serve('post', { auth: 'app', encryption: { resolveWorkspaceId: async () => 'ws' }, controller: async () => ({ channel: '', app: null, facts: [] }) }),
   })));
   // @ts-expect-error a route with an encryption contract must say where its fields are stored
-  api.route(sessionEncrypted, { controller: async () => ({ ok: true }) });
-  api.route(echo, {
+  route(sessionEncrypted, { controller: async () => ({ ok: true }) });
+  route(echo, {
     // @ts-expect-error the handler gets no req
     controller: async ({ req }) => ({ id: req, name: '', keys: [], user: null }),
   });

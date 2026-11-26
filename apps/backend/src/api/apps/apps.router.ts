@@ -1,5 +1,5 @@
-import { API, AccessType } from '@xyne/shared';
-import { api } from '@/framework/api';
+import { api, AccessType } from '@xyne/shared';
+import { router } from '@/framework/api';
 import { appSigningSecret, botChannels, configureAppWebhook, createApp, installAppHandler, orgNames, projectBoards, promoteApp, regenerateAppJwt } from './apps.controller';
 import { createAppCommand, deleteAppCommand, listAppCommands, updateAppCommand } from './commands.controller';
 import { xyneApps } from '@/api/apps/xyne-apps.access';
@@ -17,7 +17,7 @@ import { ticketRouter } from './ticket/ticket.router';
 import { slackRouter } from './slack/slack.router';
 
 /** `/apps`: Xyne Apps. The bot API (bot token, set by each child router) and the dashboard side (dashboard login + XYNE-APPS access). The order is the table's (packages/shared/src/api/apps/apps.router.ts). */
-export const appsRouter = api.router(API.apps, {}, (serve) => ({
+export const appsRouter = router(api.apps, {}, (serve) => ({
   create: serve('create', { ...xyneApps(AccessType.WRITE), successStatus: 201, controller: ({ body, user }) => createApp({ body, user }) }),
   install: serve('install', { ...xyneApps(AccessType.ADMIN), successStatus: 201, controller: ({ params, user }) => installAppHandler({ params, user }) }),
   promote: serve('promote', { ...xyneApps(AccessType.ADMIN), controller: ({ params, user }) => promoteApp({ params, user }) }),

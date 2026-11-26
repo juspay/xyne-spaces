@@ -18,7 +18,7 @@
 
 import { Router, type NextFunction, type Request, type RequestHandler, type Response } from 'express';
 import { z, type ZodTypeAny } from 'zod';
-import { AccessType, API, BoardType, MAX_RULES, NotificationStatus, type AnyRouteContract } from '@xyne/shared';
+import { AccessType, api, BoardType, MAX_RULES, NotificationStatus, type AnyRouteContract } from '@xyne/shared';
 import { searchQuerySchema, searchSchemaQuerySchema } from './schemas/search';
 import { db } from '@/database/client';
 import type { AuthData } from '@/zero/mutators';
@@ -330,7 +330,7 @@ const ROUTES: readonly DirectRoute[] = [
     method: 'post',
     path: '/channels/check-duplicate',
     typed: {
-      contract: API.channels.checkDuplicate,
+      contract: api.channels.checkDuplicate,
       controller: ({ body, user }) => channelsApi.checkDuplicate({ body, user }),
     },
   },
@@ -613,7 +613,7 @@ const ROUTES: readonly DirectRoute[] = [
     method: 'get',
     path: '/notifications/workspace-counts',
     typed: {
-      contract: API.notifications.workspaceCounts,
+      contract: api.notifications.workspaceCounts,
       controller: ({ user }) => notificationsApi.workspaceCounts({ user }),
     },
   },
@@ -629,7 +629,7 @@ const ROUTES: readonly DirectRoute[] = [
     method: 'patch',
     path: '/notifications/:id/read',
     typed: {
-      contract: API.notifications.read,
+      contract: api.notifications.read,
       controller: ({ params, body, user }) => notificationsApi.markRead({ params, body, user }),
     },
     body: z.object({
@@ -642,7 +642,7 @@ const ROUTES: readonly DirectRoute[] = [
     method: 'patch',
     path: '/notifications/:id/dismiss',
     typed: {
-      contract: API.notifications.dismiss,
+      contract: api.notifications.dismiss,
       controller: ({ params, user }) => notificationsApi.dismiss({ params, user }),
     },
     unwrap: unwrapEnvelope,
@@ -651,7 +651,7 @@ const ROUTES: readonly DirectRoute[] = [
     method: 'get',
     path: '/notifications/preferences',
     typed: {
-      contract: API.notifications.preferences,
+      contract: api.notifications.preferences,
       controller: ({ user }) => notificationsApi.getPreferences({ user }),
     },
   },
@@ -661,7 +661,7 @@ const ROUTES: readonly DirectRoute[] = [
     // Validated by the controller against its own preferencesSchema, after it
     // drops retired notification types — so a stale client still saves.
     typed: {
-      contract: API.notifications.preferencesSet,
+      contract: api.notifications.preferencesSet,
       controller: ({ body, user }) => notificationsApi.updatePreferences({ body, user }),
     },
     unwrap: unwrapEnvelope,
@@ -698,7 +698,7 @@ const ROUTES: readonly DirectRoute[] = [
     method: 'get',
     path: '/daily-brief/config',
     typed: {
-      contract: API.dailyBrief.config,
+      contract: api.dailyBrief.config,
       controller: ({ user, headers }) => dailyBriefApi.getConfig({ user, headers }),
     },
   },
@@ -706,7 +706,7 @@ const ROUTES: readonly DirectRoute[] = [
     method: 'put',
     path: '/daily-brief/config',
     typed: {
-      contract: API.dailyBrief.configSet,
+      contract: api.dailyBrief.configSet,
       controller: ({ body, user, headers }) => dailyBriefApi.saveConfig({ body, user, headers }),
     },
     body: z.object({
@@ -719,7 +719,7 @@ const ROUTES: readonly DirectRoute[] = [
     method: 'get',
     path: '/daily-brief/settings',
     typed: {
-      contract: API.dailyBrief.settings,
+      contract: api.dailyBrief.settings,
       controller: ({ user, headers }) => dailyBriefApi.getSettings({ user, headers }),
     },
   },
@@ -727,7 +727,7 @@ const ROUTES: readonly DirectRoute[] = [
     method: 'put',
     path: '/daily-brief/settings',
     typed: {
-      contract: API.dailyBrief.settingsSet,
+      contract: api.dailyBrief.settingsSet,
       controller: ({ body, user, headers }) => dailyBriefApi.saveSettings({ body, user, headers }),
     },
     body: z.object({ agentSlug: z.string().min(1).nullable() }),
@@ -817,7 +817,7 @@ const ROUTES: readonly DirectRoute[] = [
     method: 'get',
     path: '/channels/search',
     typed: {
-      contract: API.channels.search,
+      contract: api.channels.search,
       controller: ({ query, user }) => channelsApi.searchForMentions({ query, user }),
     },
     query: z.object({
@@ -830,7 +830,7 @@ const ROUTES: readonly DirectRoute[] = [
     method: 'post',
     path: '/channels/member-counts',
     typed: {
-      contract: API.channels.memberCounts,
+      contract: api.channels.memberCounts,
       controller: ({ body, user }) => channelsApi.memberCounts({ body, user }),
     },
     body: z.object({ channelIds: z.array(z.string()).max(10000) }),
@@ -840,7 +840,7 @@ const ROUTES: readonly DirectRoute[] = [
     method: 'get',
     path: '/channels/:channelId/members',
     typed: {
-      contract: API.channels.members,
+      contract: api.channels.members,
       controller: ({ params, user }) => channelsApi.channelMembers({ params, user }),
     },
     unwrap: unwrapEnvelope,
@@ -876,13 +876,13 @@ const ROUTES: readonly DirectRoute[] = [
   {
     method: 'get',
     path: '/emojis',
-    typed: { contract: API.emojis.list, controller: () => emojisApi.listEmojis() },
+    typed: { contract: api.emojis.list, controller: () => emojisApi.listEmojis() },
     unwrap: (body) => field(body, 'emojis'),
   },
   {
     method: 'get',
     path: '/emojis/:emojiId',
-    typed: { contract: API.emojis.get, controller: ({ params }) => emojisApi.getEmoji({ params }) },
+    typed: { contract: api.emojis.get, controller: ({ params }) => emojisApi.getEmoji({ params }) },
     unwrap: (body) => field(body, 'emoji'),
   },
   {
@@ -895,7 +895,7 @@ const ROUTES: readonly DirectRoute[] = [
   {
     method: 'delete',
     path: '/emojis/:emojiId',
-    typed: { contract: API.emojis.delete, controller: ({ params, user }) => emojisApi.deleteEmoji({ params, user }) },
+    typed: { contract: api.emojis.delete, controller: ({ params, user }) => emojisApi.deleteEmoji({ params, user }) },
     unwrap: () => ({}),
   },
 
@@ -984,7 +984,7 @@ const ROUTES: readonly DirectRoute[] = [
     method: 'post',
     path: '/sub-tickets/link',
     typed: {
-      contract: API.subTickets.link,
+      contract: api.subTickets.link,
       successStatus: 201,
       controller: ({ body, user }) => subTicketsApi.linkSubTicket({ body, user }),
     },
@@ -998,7 +998,7 @@ const ROUTES: readonly DirectRoute[] = [
     method: 'post',
     path: '/sub-tickets/unlink',
     typed: {
-      contract: API.subTickets.unlink,
+      contract: api.subTickets.unlink,
       successStatus: 204,
       controller: ({ body, user }) => subTicketsApi.unlinkSubTicketHandler({ body, user }),
     },

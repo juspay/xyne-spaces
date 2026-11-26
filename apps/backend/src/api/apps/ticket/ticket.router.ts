@@ -1,10 +1,10 @@
-import { API } from '@xyne/shared';
-import { api } from '@/framework/api';
+import { api } from '@xyne/shared';
+import { router } from '@/framework/api';
 import { listBoardStages, listBoards, listBySender } from './ticket.controller';
 import { appPermission } from '@/apps/access';
 
 /** `/apps/ticket` (bot token). */
-export const ticketRouter = api.router(API.apps.ticket, { auth: 'app' }, (serve) => ({
+export const ticketRouter = router(api.apps.ticket, { auth: 'app' }, (serve) => ({
   boards: serve('boards', {
     access: { permission: appPermission('tickets:read') },
     controller: ({ query, user }) => listBoards({ query, user }),

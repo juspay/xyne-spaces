@@ -15,11 +15,11 @@ import { dailyBriefRouter } from './daily-brief/daily-brief.router.js';
 
 /**
  * The API table: every typed REST route, as a tree of routers that mirrors the URL (and the
- * folders of this directory). Mounted under `/api`: `API.apps.channel.info` is
+ * folders of this directory). Mounted under `/api`: `api.apps.channel.info` is
  * `GET /api/apps/channel/info`. The backend's router tree (apps/backend/src/api) gives one
  * route per entry, checked by TypeScript, so none can be left out.
  */
-export const API = defineRouter('', {
+export const api = defineRouter('', {
   apps: appsRouter,
   activityAliases: activityAliasesRouter,
   clientEvents: clientEventsRouter,

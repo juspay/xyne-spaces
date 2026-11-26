@@ -1,10 +1,10 @@
-import { API } from '@xyne/shared';
-import { api } from '@/framework/api';
+import { api } from '@xyne/shared';
+import { router } from '@/framework/api';
 import { appGuestToken, createAppGuest, listAppGuests, updateAppGuest } from './guests.controller';
 import { appPermission } from '@/apps/access';
 
 /** `/apps/guests` (bot token). */
-export const guestsRouter = api.router(API.apps.guests, { auth: 'app' }, (serve) => ({
+export const guestsRouter = router(api.apps.guests, { auth: 'app' }, (serve) => ({
   create: serve('create', {
     access: { permission: appPermission('guests:write') },
     successStatus: 201,

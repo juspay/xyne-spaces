@@ -1,10 +1,10 @@
-import { API, AccessType } from '@xyne/shared';
-import { api } from '@/framework/api';
+import { api, AccessType } from '@xyne/shared';
+import { router } from '@/framework/api';
 import { activateInstalledPermissions, deleteFetchConfig, getFetchConfig, getInstalledPermissions, listAttachedResources, listInstalledCommands, setAttachedResources, setInstalledPermissions, updateInstalledApp } from './installed.controller';
 import { xyneApps } from '@/api/apps/xyne-apps.access';
 
 /** `/apps/installed`: an installed app, edited from the Installed screen (dashboard login + XYNE-APPS access), scoped to the caller's workspace. */
-export const installedRouter = api.router(API.apps.installed, {}, (serve) => ({
+export const installedRouter = router(api.apps.installed, {}, (serve) => ({
 
   // Per-install edits (Installed screen, workspace admin), scoped to the caller's workspace.
   update: serve('update', {

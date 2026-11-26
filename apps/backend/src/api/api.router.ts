@@ -1,5 +1,5 @@
-import { API } from '@xyne/shared';
-import { api } from '@/framework/api';
+import { api } from '@xyne/shared';
+import { router } from '@/framework/api';
 import { appsRouter } from './apps/apps.router';
 import { activityAliasesRouter } from './activity-aliases/activity-aliases.router';
 import { clientEventsRouter } from './client-events/client-events.router';
@@ -20,7 +20,7 @@ import { dailyBriefRouter } from './daily-brief/daily-brief.router';
  * (TypeScript checks none is missing), and passes its defaults (auth, access checks) down to
  * every route under it. Mounted once at startup (app.ts: mountApi(apiRouter)).
  */
-export const apiRouter = api.router(API, {}, () => ({
+export const apiRouter = router(api, {}, () => ({
   apps: appsRouter,
   activityAliases: activityAliasesRouter,
   clientEvents: clientEventsRouter,

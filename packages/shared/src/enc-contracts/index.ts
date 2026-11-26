@@ -28,7 +28,7 @@ export { recapSetCustomRecapPromptClient, userPresenceUpsertClient } from './con
 export { ticketUpdateClient } from './contracts/tickets.js';
 export { ROUTE_METHODS, defineRoute, defineRouter, requestContractOf, routeContracts, routeSpecProblems } from './api-route.js';
 export type { AnyRouteContract, FactsFor, Prefixed, RouteBody, RouteBodyInput, RouteContract, RouteDerived, RouteGroup, RouteMethod, RouteParams, RouteQuery, RouteResponse, RouteTable, UnreadableKeys } from './api-route.js';
-export { API } from '../api/index.js';
+export { api } from '../api/index.js';
 
 // The route contracts, by folder (packages/shared/src/api mirrors the URL).
 export * from '../api/activity-aliases/activity-aliases.contracts.js';

@@ -142,7 +142,7 @@ export type RouteImpl<C extends AnyRouteContract, A extends AccessChecks = Recor
 } & (HasEncryptedFields<C> extends true ? { encryption: EncryptionImpl } : { encryption?: never });
 
 declare const mountedBrand: unique symbol;
-/** A route built for contract `C`, ready to mount. Only `api.routes` makes one. */
+/** A route built for contract `C`, ready to mount. Only `router` makes one. */
 export type MountedRoute<C extends AnyRouteContract> = {
   readonly contract: C;
   readonly handlers: RequestHandler[];
@@ -469,14 +469,14 @@ export type Serve<T> = <K extends ContractNames<T>, A extends AccessChecks = Rec
 ) => PendingRoute<Extract<T[K], AnyRouteContract>>;
 
 /**
- * A router over one table of the API table (`API.apps.channel`): what its routes inherit, and
+ * A router over one table of the API table (`api.apps.channel`): what its routes inherit, and
  * one entry per name of the table (a route via `serve`, or a child router). A missing entry,
  * an extra one, or a route served for another contract is a type error.
  *
- *   export const channelRouter = api.router(API.apps.channel, { access: { permission: appPermission('channels:read') } }, (serve) => ({
+ *   export const channelRouter = router(api.apps.channel, { access: { permission: appPermission('channels:read') } }, (serve) => ({
  *     info: serve('info', { controller: ({ query }) => channelInfo(query) }),
  *   }));
- *   export const appsRouter = api.router(API.apps, { auth: 'app' }, () => ({ channel: channelRouter, ... }));
+ *   export const appsRouter = router(api.apps, { auth: 'app' }, () => ({ channel: channelRouter, ... }));
  */
 export function router<T extends RouteTable>(table: T, defaults: RouterDefaults, build: (serve: Serve<T>) => RouterEntries<T>): RouterNode<T> {
   const serve = ((name: string, impl: RouteImpl<AnyRouteContract, AccessChecks>) => ({
@@ -526,7 +526,7 @@ export function mountApi(root: RouterNode<RouteTable>): void {
   mountTree(root, {});
 }
 
-/** Mount one typed route outside the tree (tests). The API table goes through `api.router` / `mountApi`. */
+/** Mount one typed route outside the tree (tests). The API table goes through `router` / `mountApi`. */
 export function route<C extends AnyRouteContract, A extends AccessChecks = Record<never, never>>(contract: C, impl: RouteImpl<C, A>): void {
   mount(build(contract, impl));
 }
@@ -536,5 +536,3 @@ export function mountTypedRoutes(app: Application): void {
   app.use(API_PREFIX, typedRouter);
 }
 
-/** What feature code uses: `api.router` builds the router tree; `mountApi` mounts it once at startup. */
-export const api = { route, router };

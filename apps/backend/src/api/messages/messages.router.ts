@@ -1,9 +1,9 @@
-import { API } from '@xyne/shared';
-import { api } from '@/framework/api';
+import { api } from '@xyne/shared';
+import { router } from '@/framework/api';
 import { addReaction, getMessageReactions, getMessagesReactions, removeReaction, toggleReaction } from './reactions.controller';
 
 /** The reactions of messages (`/reactions/bulk` before `/:messageId/...`). */
-const reactionsRouter = api.router(API.messages.reactions, {}, (serve) => ({
+const reactionsRouter = router(api.messages.reactions, {}, (serve) => ({
   bulk: serve('bulk', { controller: ({ body, user }) => getMessagesReactions({ body, user }) }),
   add: serve('add', { controller: ({ params, body, user }) => addReaction({ params, body, user }) }),
   remove: serve('remove', { controller: ({ params, user }) => removeReaction({ params, user }) }),
@@ -12,6 +12,6 @@ const reactionsRouter = api.router(API.messages.reactions, {}, (serve) => ({
 }));
 
 /** `/messages`: message reactions (login). */
-export const messagesRouter = api.router(API.messages, {}, () => ({
+export const messagesRouter = router(api.messages, {}, () => ({
   reactions: reactionsRouter,
 }));

@@ -1,10 +1,10 @@
-import { API, AccessType } from '@xyne/shared';
-import { api } from '@/framework/api';
+import { api, AccessType } from '@xyne/shared';
+import { router } from '@/framework/api';
 import { createIncomingWebhook, listIncomingWebhooks, revokeIncomingWebhook, updateIncomingWebhook } from './incoming-webhooks.controller';
 import { xyneApps } from '@/api/apps/xyne-apps.access';
 
 /** `/apps/incoming-webhooks`: managing an install's incoming webhooks (dashboard login + XYNE-APPS access). */
-export const incomingWebhooksRouter = api.router(API.apps.incomingWebhooks, {}, (serve) => ({
+export const incomingWebhooksRouter = router(api.apps.incomingWebhooks, {}, (serve) => ({
 
   create: serve('create', {
     ...xyneApps(AccessType.WRITE),

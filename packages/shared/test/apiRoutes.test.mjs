@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { z } from 'zod';
 
 // Imports the BUILT output on purpose, like the other tests here.
-import { API, UnreadableString, defineRoute, defineRouter, derive, derivedNames, hasText, requestContractOf, reveal, routeContracts, routeSpecProblems, runComposeTemplate, sourceFieldNames, unreadableString } from '../dist/enc-contracts/index.js';
+import { api, UnreadableString, defineRoute, defineRouter, derive, derivedNames, hasText, requestContractOf, reveal, routeContracts, routeSpecProblems, runComposeTemplate, sourceFieldNames, unreadableString } from '../dist/enc-contracts/index.js';
 import { applySlackMentions, findSlackMentionIds, mergeSlackMentionIds } from '../dist/slack/mentions.js';
 
 const SLACK_TEXT_FACTS = ['slackMentionUserIds', 'slackMentionGroupIds', 'slackMentionChannels'];
@@ -11,7 +11,7 @@ const SLACK_TEXT_FACTS = ['slackMentionUserIds', 'slackMentionGroupIds', 'slackM
 // defineRoute does not throw (a bad spec must not stop the backend from starting): this is
 // where a bad contract is caught.
 test('every route contract in the API table is well formed', () => {
-  const contracts = routeContracts(API);
+  const contracts = routeContracts(api);
   assert.ok(contracts.length > 0);
   for (const contract of contracts) {
     assert.deepEqual(routeSpecProblems(contract), [], contract.key);
@@ -20,7 +20,7 @@ test('every route contract in the API table is well formed', () => {
 });
 
 test('no two contracts in the API table share a method and path', () => {
-  const keys = routeContracts(API).map((c) => c.key);
+  const keys = routeContracts(api).map((c) => c.key);
   assert.deepEqual(keys, [...new Set(keys)]);
 });
 
@@ -36,7 +36,7 @@ test('routeSpecProblems catches bad specs', () => {
 });
 
 test('apps chat routes: the encrypted fields are fields of the body, as the manifest rules list them', () => {
-  const { postMessage, updateMessage } = API.apps.chat;
+  const { postMessage, updateMessage } = api.apps.chat;
   assert.equal(postMessage.key, 'POST /apps/chat/postMessage');
   assert.equal(updateMessage.key, 'POST /apps/chat/updateMessage');
   assert.deepEqual(sourceFieldNames(requestContractOf(postMessage)), ['markdownText', 'text']);
@@ -57,7 +57,7 @@ test('apps chat routes: the encrypted fields are fields of the body, as the mani
 });
 
 test('apps postEphemeral: markdownText encrypted, nothing derived, fields as its manifest rule lists them', () => {
-  const route = API.apps.chat.postEphemeral;
+  const route = api.apps.chat.postEphemeral;
   assert.equal(route.key, 'POST /apps/chat/postEphemeral');
   assert.deepEqual(sourceFieldNames(requestContractOf(route)), ['markdownText', 'text']);
   assert.deepEqual(derivedNames(requestContractOf(route)), { markdownText: [], text: SLACK_TEXT_FACTS });
@@ -68,7 +68,7 @@ test('apps postEphemeral: markdownText encrypted, nothing derived, fields as its
 });
 
 test('apps postEphemeral body keeps the controller checks', () => {
-  const body = API.apps.chat.postEphemeral.body;
+  const body = api.apps.chat.postEphemeral.body;
   assert.equal(body.safeParse({ channelId: 'c1', text: 'hi' }).success, false, 'no user');
   assert.equal(body.safeParse({ channelId: 'c1', user: 'u1', text: 'hi', messageDelivery: 'OPENSCREEN' }).success, false, 'popup without flow');
   const ok = body.safeParse({ channelId: 'c1', user: ' u1 ', markdownText: 'hi' });
@@ -80,7 +80,7 @@ test('apps postEphemeral body keeps the controller checks', () => {
 });
 
 test('apps deleteMessage and agentProgress: typed, no encryption contract', () => {
-  const { deleteMessage, agentProgress } = API.apps.chat;
+  const { deleteMessage, agentProgress } = api.apps.chat;
   assert.equal(deleteMessage.key, 'POST /apps/chat/deleteMessage');
   assert.equal(agentProgress.key, 'POST /apps/chat/agentProgress');
   assert.equal(requestContractOf(deleteMessage), undefined);
@@ -88,19 +88,19 @@ test('apps deleteMessage and agentProgress: typed, no encryption contract', () =
 });
 
 test('apps deleteMessage and agentProgress bodies keep the controller checks', () => {
-  const del = API.apps.chat.deleteMessage.body;
+  const del = api.apps.chat.deleteMessage.body;
   assert.equal(del.safeParse({ messageId: 'm1' }).success, false, 'no channel');
   assert.equal(del.safeParse({ channelId: 'c1' }).success, false, 'no messageId');
   assert.deepEqual(del.safeParse({ messageId: ' m1 ', channelName: 'general' }).data, { messageId: 'm1', channelName: 'general' });
 
-  const progress = API.apps.chat.agentProgress.body;
+  const progress = api.apps.chat.agentProgress.body;
   assert.equal(progress.safeParse({ channelId: 'c1' }).success, false, 'no conversationId');
   assert.equal(progress.safeParse({ conversationId: 'cv1', status: 'paused' }).success, false, 'unknown status');
   assert.deepEqual(progress.safeParse({ conversationId: 'cv1' }).data, { conversationId: 'cv1', status: 'working' });
 });
 
 test('Slack-compatible chat.delete: typed, no encryption, Slack arguments', () => {
-  const route = API.apps.slack.chatDelete;
+  const route = api.apps.slack.chatDelete;
   assert.equal(route.key, 'POST /apps/slack/chat.delete');
   assert.equal(requestContractOf(route), undefined);
   assert.equal(route.body.safeParse({ channel: 'C1' }).success, false, 'no ts');
@@ -110,7 +110,7 @@ test('Slack-compatible chat.delete: typed, no encryption, Slack arguments', () =
 });
 
 test('apps postMessage body keeps the controller checks', () => {
-  const body = API.apps.chat.postMessage.body;
+  const body = api.apps.chat.postMessage.body;
   assert.equal(body.safeParse({ channelId: 'c1' }).success, false, 'no content');
   assert.equal(body.safeParse({ text: 'hi' }).success, false, 'no channel');
   const ok = body.safeParse({ channelId: ' c1 ', text: 'hi', unknown: 1 });
@@ -180,7 +180,7 @@ test('compose slackMessageContent: mentions applied, then Block Kit to HTML', ()
 });
 
 test('Slack chat.postMessage / postEphemeral / update: text encrypted, fields as the manifest rules list them', () => {
-  const { chatPostMessage, chatPostEphemeral, chatUpdate } = API.apps.slack;
+  const { chatPostMessage, chatPostEphemeral, chatUpdate } = api.apps.slack;
   const keys = (c) => Object.keys(requestContractOf(c).schema.shape).sort();
   assert.deepEqual(keys(chatPostMessage), ['attachments', 'blocks', 'channel', 'metadata', 'mrkdwn', 'text', 'thread_ts', 'username']);
   assert.deepEqual(keys(chatPostEphemeral), ['attachments', 'blocks', 'channel', 'metadata', 'mrkdwn', 'text', 'thread_ts', 'user', 'username']);
@@ -192,7 +192,7 @@ test('Slack chat.postMessage / postEphemeral / update: text encrypted, fields as
 });
 
 test('Slack chat.postMessage body: form-encoded values parsed, content required, mrkdwn defaults to true', () => {
-  const body = API.apps.slack.chatPostMessage.body;
+  const body = api.apps.slack.chatPostMessage.body;
   assert.equal(body.safeParse({ channel: 'C1' }).success, false, 'no content');
   const form = body.safeParse({ channel: 'C1', blocks: '[{"type":"divider"}]', mrkdwn: 'false', metadata: '{"a":1}' });
   assert.equal(form.success, true);
@@ -240,7 +240,7 @@ test('compose slackChatContent: plain text (mrkdwn false), HTML, flow card, hand
 // A route with a :param must not be registered before a literal route it could capture
 // (`/apps/calls/:callId` before `/apps/calls/summary-templates`): routes match in the table's order.
 test('API table: no duplicate routes, and a generic route never comes before a literal one it captures', () => {
-  const all = routeContracts(API);
+  const all = routeContracts(api);
   const keys = all.map((c) => c.key);
   assert.deepEqual(keys.filter((k, i) => keys.indexOf(k) !== i), [], 'duplicate method + path');
   const seg = (p) => p.split('/').filter(Boolean);
@@ -263,7 +263,7 @@ test('API table: no duplicate routes, and a generic route never comes before a l
 
 test('Xyne Apps dashboard contracts: bodies keep the controllers\' rules', () => {
   // The dashboard side now sits in the /apps tree: top-level leaves, and the incoming-webhooks router.
-  const d = { ...API.apps, incomingWebhooksList: API.apps.incomingWebhooks.list, incomingWebhooksCreate: API.apps.incomingWebhooks.create };
+  const d = { ...api.apps, incomingWebhooksList: api.apps.incomingWebhooks.list, incomingWebhooksCreate: api.apps.incomingWebhooks.create };
   assert.equal(d.create.body.safeParse({ name: '' }).success, false, 'empty name');
   assert.equal(d.configureWebhook.body.safeParse({ webhookUrl: 'not a url' }).success, false);
   assert.equal(d.commandsCreate.body.safeParse({ commandName: 'Bad Name', description: 'd', commandType: 'COMMAND', commandAccessibility: 'CHAT' }).success, false);
@@ -275,17 +275,17 @@ test('Xyne Apps dashboard contracts: bodies keep the controllers\' rules', () =>
 });
 
 test('settings contracts: alias, client-event and tags-config rules', () => {
-  assert.equal(API.activityAliases.create.body.safeParse({ eventName: 'e', eventCategory: 'c' }).success, false, 'alias names needed when not blacklisted');
-  assert.equal(API.activityAliases.create.body.safeParse({ eventName: 'e', eventCategory: 'c', isBlacklisted: true }).success, true);
-  assert.equal(API.clientEvents.post.body.safeParse({ userIds: [], event: 'reload' }).success, false, 'userIds must not be empty');
-  assert.equal(API.clientEvents.post.body.safeParse({ userIds: ['u'], event: 'explode' }).success, false, 'unknown event');
-  assert.equal(API.channels.tagsConfig.update.body.safeParse({ categories: { 'Bad Name': { method: 'manual' } } }).success, false, 'category name format');
-  assert.equal(API.channels.tagsConfig.update.body.safeParse({ categories: { sev: { method: 'manual', tags: ['a', 'a'] } } }).success, false, 'duplicate tags');
-  assert.equal(API.channels.tagsConfig.update.body.safeParse({ categories: { sev: { method: 'llm', tags: ['p1', 'p2'] } } }).success, true);
+  assert.equal(api.activityAliases.create.body.safeParse({ eventName: 'e', eventCategory: 'c' }).success, false, 'alias names needed when not blacklisted');
+  assert.equal(api.activityAliases.create.body.safeParse({ eventName: 'e', eventCategory: 'c', isBlacklisted: true }).success, true);
+  assert.equal(api.clientEvents.post.body.safeParse({ userIds: [], event: 'reload' }).success, false, 'userIds must not be empty');
+  assert.equal(api.clientEvents.post.body.safeParse({ userIds: ['u'], event: 'explode' }).success, false, 'unknown event');
+  assert.equal(api.channels.tagsConfig.update.body.safeParse({ categories: { 'Bad Name': { method: 'manual' } } }).success, false, 'category name format');
+  assert.equal(api.channels.tagsConfig.update.body.safeParse({ categories: { sev: { method: 'manual', tags: ['a', 'a'] } } }).success, false, 'duplicate tags');
+  assert.equal(api.channels.tagsConfig.update.body.safeParse({ categories: { sev: { method: 'llm', tags: ['p1', 'p2'] } } }).success, true);
 });
 
 test('notification preferences: unknown types are dropped first, the rest are checked', () => {
-  const body = API.notifications.preferencesSet.body;
+  const body = api.notifications.preferencesSet.body;
   const on = { browserEnabled: true, emailEnabled: false, slackEnabled: false };
   // As before (zod 4 record with enum keys), every notification type must be present.
   const all = Object.fromEntries(
@@ -300,14 +300,14 @@ test('notification preferences: unknown types are dropped first, the rest are ch
 });
 
 test('organizations, reactions, channels and labels contracts keep the controllers\' limits', () => {
-  assert.equal(API.organizations.addMember.body.safeParse({ userId: 'u', role: 'VIEWER' }).success, false, 'VIEWER is not assignable here');
-  assert.equal(API.organizations.addMember.body.safeParse({ userId: 'u', role: 'ADMIN' }).success, true);
-  assert.equal(API.messages.reactions.bulk.body.safeParse({ messageIds: [] }).success, false, 'at least one id');
-  assert.equal(API.messages.reactions.bulk.body.safeParse({ messageIds: Array.from({ length: 101 }, (_, i) => String(i)) }).success, false, 'at most 100');
-  assert.equal(API.channels.search.query.safeParse({ q: '  ' }).success, false, 'q needs a character');
-  assert.equal(API.channels.memberCounts.body.safeParse({ channelIds: Array.from({ length: 10001 }, (_, i) => String(i)) }).success, false);
-  assert.equal(API.conversationLabels.unreadCounts.query.safeParse({}).success, false, 'channelId is required');
-  assert.equal(API.analytics.activeUsers.query.safeParse({ groupBy: 'anything' }).success, true, 'groupBy is passed through, as before');
+  assert.equal(api.organizations.addMember.body.safeParse({ userId: 'u', role: 'VIEWER' }).success, false, 'VIEWER is not assignable here');
+  assert.equal(api.organizations.addMember.body.safeParse({ userId: 'u', role: 'ADMIN' }).success, true);
+  assert.equal(api.messages.reactions.bulk.body.safeParse({ messageIds: [] }).success, false, 'at least one id');
+  assert.equal(api.messages.reactions.bulk.body.safeParse({ messageIds: Array.from({ length: 101 }, (_, i) => String(i)) }).success, false, 'at most 100');
+  assert.equal(api.channels.search.query.safeParse({ q: '  ' }).success, false, 'q needs a character');
+  assert.equal(api.channels.memberCounts.body.safeParse({ channelIds: Array.from({ length: 10001 }, (_, i) => String(i)) }).success, false);
+  assert.equal(api.conversationLabels.unreadCounts.query.safeParse({}).success, false, 'channelId is required');
+  assert.equal(api.analytics.activeUsers.query.safeParse({ groupBy: 'anything' }).success, true, 'groupBy is passed through, as before');
 });
 
 // Every response says what comes back. The few open ones are answers that belong to someone else
@@ -315,12 +315,12 @@ test('organizations, reactions, channels and labels contracts keep the controlle
 // as its whole response fails this test.
 test('API table: no route has an open (z.unknown()) response unless it is a listed passthrough', () => {
   const PASSTHROUGH = new Set(['GET /daily-brief/config', 'PUT /daily-brief/config', 'GET /daily-brief/settings', 'PUT /daily-brief/settings']);
-  const open = routeContracts(API)
+  const open = routeContracts(api)
     .filter((c) => (c.response._zod?.def?.type ?? c.response.def?.type) === 'unknown')
     .map((c) => c.key)
     .filter((key) => !PASSTHROUGH.has(key));
   assert.deepEqual(open, []);
-  assert.equal(API.subTickets.link.body.safeParse({ ticketId: ' ', mappedTicketId: 'x' }).success, false, 'blank ticketId');
+  assert.equal(api.subTickets.link.body.safeParse({ ticketId: ' ', mappedTicketId: 'x' }).success, false, 'blank ticketId');
 });
 
 test('one body schema: unreadableString() fields are the encrypted ones, facts must name exactly them', () => {
@@ -363,10 +363,10 @@ test('defineRouter: prefixes compose into the full path and key, at any depth, i
 });
 
 test('the API table is a tree of routers: paths compose from the folders', () => {
-  assert.equal(API.apps.channel.info.key, 'POST /apps/channel/info');
-  assert.equal(API.apps.installed.update.key, 'PATCH /apps/installed/:installedAppId');
-  assert.equal(API.channels.tagsConfig.get.key, 'GET /channels/:channelId/tags-config');
-  assert.equal(API.messages.reactions.bulk.key, 'POST /messages/reactions/bulk');
-  assert.equal(API.organizations.list.key, 'GET /organizations');
-  assert.equal(routeContracts(API).length, 141);
+  assert.equal(api.apps.channel.info.key, 'POST /apps/channel/info');
+  assert.equal(api.apps.installed.update.key, 'PATCH /apps/installed/:installedAppId');
+  assert.equal(api.channels.tagsConfig.get.key, 'GET /channels/:channelId/tags-config');
+  assert.equal(api.messages.reactions.bulk.key, 'POST /messages/reactions/bulk');
+  assert.equal(api.organizations.list.key, 'GET /organizations');
+  assert.equal(routeContracts(api).length, 141);
 });

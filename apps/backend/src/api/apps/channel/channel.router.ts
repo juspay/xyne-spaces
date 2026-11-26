@@ -1,11 +1,11 @@
-import { API } from '@xyne/shared';
-import { api } from '@/framework/api';
+import { api } from '@xyne/shared';
+import { router } from '@/framework/api';
 import { channelInfo, deskChannelConfig, listChannels, openDm, updateChannel } from './channel.controller';
 import { listChannelCommands } from './commands.controller';
 import { appPermission, botChannel } from '@/apps/access';
 
 /** `/apps/channel`: channels for bots (bot token), and a channel's commands for the dashboard (session). */
-export const channelRouter = api.router(API.apps.channel, { auth: 'app' }, (serve) => ({
+export const channelRouter = router(api.apps.channel, { auth: 'app' }, (serve) => ({
   // The workspace comes from the verified token, never the body: an app installed in workspace
   // A cannot open a DM in workspace B.
   openDm: serve('openDm', {

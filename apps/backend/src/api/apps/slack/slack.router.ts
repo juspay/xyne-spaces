@@ -1,5 +1,5 @@
-import { API } from '@xyne/shared';
-import { api } from '@/framework/api';
+import { api } from '@xyne/shared';
+import { router } from '@/framework/api';
 import { slackChatPostEphemeral, slackChatPostMessage, slackChatUpdate } from './chat.controller';
 import { slackAuthTest, slackConversationsInfo, slackConversationsList, slackConversationsOpen, slackUsergroupsList, slackUsersConversations, slackUsersInfo, slackUsersLookupByEmail } from './reads.controller';
 import { appPermission } from '@/apps/access';
@@ -14,7 +14,7 @@ const encryptUnderBotWorkspace = {
 };
 
 /** `/apps/slack`: the Slack-compatible API (bot token, Slack's answers: HTTP 200, `{ ok: false, error }`). */
-export const slackRouter = api.router(API.apps.slack, { auth: 'slack-app', invalidRequest: () => slackError('invalid_arguments') }, (serve) => ({
+export const slackRouter = router(api.apps.slack, { auth: 'slack-app', invalidRequest: () => slackError('invalid_arguments') }, (serve) => ({
 	// Same check as the native chat/deleteMessage (core/botMessageDelete), Slack's answers.
 	chatDelete: serve("chatDelete", {
 		access: { permission: appPermission("chat:delete"), channel: slackChannel() },

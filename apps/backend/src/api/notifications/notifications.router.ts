@@ -1,9 +1,9 @@
-import { API } from '@xyne/shared';
-import { api } from '@/framework/api';
+import { api } from '@xyne/shared';
+import { router } from '@/framework/api';
 import { dismiss, getPreferences, markAllRead, markRead, queueStats, registerMobilePushToken, sendTest, subscribe, unreadCount, unregisterMobilePushToken, unsubscribe, updatePreferences, workspaceCounts } from './notifications.controller';
 
 /** `/notifications` (login). The list itself is untyped (routes/notifications.ts). */
-export const notificationsRouter = api.router(API.notifications, {}, (serve) => ({
+export const notificationsRouter = router(api.notifications, {}, (serve) => ({
   subscribe: serve('subscribe', { controller: ({ body, user, userAgent }) => subscribe({ body, user, userAgent }) }),
   unsubscribe: serve('unsubscribe', { controller: ({ body, user }) => unsubscribe({ body, user }) }),
   mobileRegister: serve('mobileRegister', { controller: ({ body, user, headers }) => registerMobilePushToken({ body, user, headers }) }),

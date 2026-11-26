@@ -1,5 +1,5 @@
-import { API } from '@xyne/shared';
-import { api } from '@/framework/api';
+import { api } from '@xyne/shared';
+import { router } from '@/framework/api';
 import { appPermission, botChannel } from '@/apps/access';
 import { ChatController } from '@/apps/controllers/chatController';
 
@@ -11,7 +11,7 @@ const encryptUnderBotWorkspace = {
 };
 
 /** `/apps/chat`: the native chat API for bots (bot token). Controllers: the chat controller (apps/controllers/chatController.ts). */
-export const chatRouter = api.router(API.apps.chat, { auth: 'app' }, (serve) => ({
+export const chatRouter = router(api.apps.chat, { auth: 'app' }, (serve) => ({
   // Also accepts a user id as `channelId`: it then posts into the bot's DM with that user,
   // matching the Slack adapter's chat.postMessage.
   postMessage: serve('postMessage', {

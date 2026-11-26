@@ -29,7 +29,7 @@ type Compiled = { contract: AnyRouteContract; regexp: RegExp };
 const byMethod = new Map<string, Compiled[]>();
 const contracts = new Map<string, AnyRouteContract>();
 
-/** Called by `api.route(s)` for each route it mounts. A second contract for the same key is refused (logged). */
+/** Called by `route(s)` for each route it mounts. A second contract for the same key is refused (logged). */
 export function registerContract(contract: AnyRouteContract): boolean {
   if (contracts.has(contract.key)) {
     logger.error('[contractGate] route already registered; the second one is not mounted', { route: contract.key });
@@ -71,7 +71,7 @@ export type ContractGateOptions = {
 /**
  * The first middleware of the app (createApp). It finds the contract for the request's method
  * and address and puts it on `req.apiContract`; a typed route serves a request only when the
- * gate matched it to that route's contract (`api.route(s)`), so a typed route cannot be reached
+ * gate matched it to that route's contract (`route(s)`), so a typed route cannot be reached
  * past the gate. OPTIONS (CORS preflight) passes straight through to the cors middleware.
  */
 export function contractGate(options: ContractGateOptions): RequestHandler {

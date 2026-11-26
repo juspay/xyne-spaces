@@ -30,7 +30,7 @@ const setCrossOriginHeaders = (req: Request, res: Response, next: NextFunction):
   next();
 };
 
-// Typed routes (API.emojis: list, get, delete) are served by the API router behind the contract gate.
+// Typed routes (api.emojis: list, get, delete) are served by the API router behind the contract gate.
 // The image stream and the upload (a file streamed to storage) stay here.
 // Stream emoji image - must come before /:emojiId to avoid route conflicts
 router.get(

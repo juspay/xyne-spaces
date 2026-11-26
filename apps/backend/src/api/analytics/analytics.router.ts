@@ -1,10 +1,10 @@
-import { API, AccessType } from '@xyne/shared';
-import { api } from '@/framework/api';
+import { api, AccessType } from '@xyne/shared';
+import { router } from '@/framework/api';
 import { activeChannels, activeUsers, currentActiveUsers, filesShared, messagesExchanged, messagesToday, numberOfCalls, numberOfCanvases, numberOfTickets, topUsersByMessages, totalCallsDuration, usersOnboarded } from './analytics.controller';
 import { analyticsWorkspace, resourceAccess, routeAcl } from '@/framework/dashboardAccess';
 
 /** `/analytics`: every route runs these checks, in this order: a workspace is present, the route ACL, then ANALYTICS admin (individual access only). */
-export const analyticsRouter = api.router(API.analytics, { access: { workspace: analyticsWorkspace(), acl: routeAcl(), analytics: resourceAccess('ANALYTICS', AccessType.ADMIN) } }, (serve) => ({
+export const analyticsRouter = router(api.analytics, { access: { workspace: analyticsWorkspace(), acl: routeAcl(), analytics: resourceAccess('ANALYTICS', AccessType.ADMIN) } }, (serve) => ({
   messagesExchanged: serve('messagesExchanged', { controller: ({ query, user }) => messagesExchanged({ query, user }) }),
   activeUsers: serve('activeUsers', { controller: ({ query, user }) => activeUsers({ query, user }) }),
   currentActiveUsers: serve('currentActiveUsers', { controller: ({ query, user }) => currentActiveUsers({ query, user }) }),
