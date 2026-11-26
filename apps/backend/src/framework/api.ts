@@ -15,11 +15,10 @@ import {
   type SourceToDerived,
   type RouteBody,
   type RouteDerived,
-  type RouteGroup,
   type RouteParams,
+  type RouteTable,
   type RouteQuery,
-  type RouteResponse,
-} from '@xyne/shared';
+  type RouteResponse } from '@xyne/shared';
 import { config } from '@/config/env';
 import { authMiddleware } from '@/middleware/auth';
 import { encryptedRoute } from '@/middleware/encryptedRoute';
@@ -63,8 +62,7 @@ const AUTH_STEPS: Record<RouteAuth, RequestHandler[]> = {
   session: [authMiddleware.authenticate as RequestHandler],
   app: [authenticateApp as RequestHandler],
   'slack-app': [slackAuthenticateApp as RequestHandler],
-  public: [],
-};
+  public: [] };
 
 /** The Xyne App behind an `app` route's bot token (authenticateApp). */
 export type AppCaller = {
@@ -139,7 +137,8 @@ export type RouteImpl<C extends AnyRouteContract, A extends AccessChecks = Recor
    * refused either way.
    */
   invalidRequest?: () => ContractError;
-  handle: (input: HandlerInput<C, A>) => Promise<RouteResponse<C>>;
+  /** The route's controller: the checked input in, the answer out (or a thrown ContractError). */
+  controller: (input: HandlerInput<C, A>) => Promise<RouteResponse<C>>;
 } & (HasEncryptedFields<C> extends true ? { encryption: EncryptionImpl } : { encryption?: never });
 
 declare const mountedBrand: unique symbol;
@@ -155,7 +154,7 @@ export type MountedRoute<C extends AnyRouteContract> = {
  * only createApp mounts it (mountTypedRoutes), right after the contract gate and the steps
  * every request gets, before any route app.ts adds.
  */
-const apiRouter = express.Router(ROUTER_OPTIONS);
+const typedRouter = express.Router(ROUTER_OPTIONS);
 
 /** Body parsing as app.ts does it for its routes (same limits), on typed routes only. */
 const parseBody: RequestHandler[] = [express.json({ limit: '10mb' }), express.urlencoded({ extended: true, limit: '10mb' })];
@@ -170,8 +169,7 @@ function appCaller(req: Request): AppCaller | undefined {
     appId: auth.appId,
     installedAppId: auth.installedAppId ?? '',
     permissions: Array.isArray(auth.permissions) ? auth.permissions : [],
-    permissionsStale: auth.permissionsStale === true,
-  };
+    permissionsStale: auth.permissionsStale === true };
 }
 
 function validationError(res: Response, issues: z.core.$ZodIssue[]): void {
@@ -185,8 +183,7 @@ function throughGate(contract: AnyRouteContract): RequestHandler {
     if (req.apiContract !== contract) {
       logger.error('[api] typed route reached without the contract gate matching it', {
         route: contract.key,
-        matched: req.apiContract?.key ?? null,
-      });
+        matched: req.apiContract?.key ?? null });
       res.status(404).json({ error: 'Not found' });
       return;
     }
@@ -233,8 +230,7 @@ function checkInput(req: Request): CheckInput<AnyRouteContract> {
     user: req.user,
     app: appCaller(req),
     route: { method: req.method, path: req.originalUrl.split('?')[0] },
-    headers: req.headers,
-  };
+    headers: req.headers };
 }
 
 function runAccess(checks: AccessChecks): RequestHandler {
@@ -324,8 +320,7 @@ function encryptionSteps(
   const steps = encryptedRoute(requestContract, {
     resolveWorkspaceId: encryption.resolveWorkspaceId,
     transitProxyIngress: auth === 'app' || auth === 'slack-app',
-    afterTransform: fieldsAndFacts,
-  });
+    afterTransform: fieldsAndFacts });
   return steps.length > 0 ? steps : [fieldsAndFacts];
 }
 
@@ -354,15 +349,14 @@ function respond<C extends AnyRouteContract, A extends AccessChecks>(contract: C
       const requestContract = requestContractOf(contract);
       const body = requestContract ? makeUnreadable(requestContract, req.body ?? {}) : req.body;
       const files = req.files;
-      const result = await impl.handle({
+      const result = await impl.controller({
         ...(checkInput(req) as CheckInput<C>),
         body: body as RouteBody<C>,
         derived: req.derived as RouteDerived<C>,
         access: (checked.get(req)?.access ?? {}) as AccessResults<A>,
         files: Array.isArray(files) ? files : files ? Object.values(files).flat() : undefined,
         ip: req.ip,
-        userAgent: req.get('user-agent'),
-      });
+        userAgent: req.get('user-agent') });
       const readable = makeReadable(result);
       checkResponse(contract, readable);
       res.status(impl.successStatus ?? 200).json(readable);
@@ -425,40 +419,122 @@ function build<C extends AnyRouteContract, A extends AccessChecks>(contract: C, 
 function mount(route: MountedRoute<AnyRouteContract>): void {
   if (!registerContract(route.contract)) return;
   const method = route.contract.method.toLowerCase() as 'get' | 'post' | 'put' | 'patch' | 'delete';
-  apiRouter[method](route.contract.path, ...route.handlers);
+  typedRouter[method](route.contract.path, ...route.handlers);
 }
 
-/** Builds the route for one entry of a group: `serve('postMessage', { ... })`. */
-export type Serve<G extends RouteGroup> = <K extends keyof G & string, A extends AccessChecks = Record<never, never>>(
-  name: K,
-  impl: RouteImpl<G[K], A>,
-) => MountedRoute<G[K]>;
+// ─── Routers: a tree of routes, as Express's routers nest ───────────────────────
 
 /**
- * Mount a group of the API table. `build` must return a route for every entry of the group,
- * each built for that entry (`serve('<name>', ...)` under the key `<name>`): a missing route,
- * an extra one, or one built for another entry is a type error.
- *
- *   api.routes(API.apps.chat, (serve) => ({
- *     postMessage: serve('postMessage', { auth: 'app', ..., handle: async ({ body }) => ... }),
- *     updateMessage: serve('updateMessage', { ... }),
- *   }));
+ * What a router sets for every route under it, at any depth. A child router or a route may
+ * set its own `auth`, `responseHeaders` and `invalidRequest`; `access` checks only add up:
+ * the ancestors' checks run first, then the child's, and a child cannot remove one.
  */
-export function routes<G extends RouteGroup>(group: G, buildGroup: (serve: Serve<G>) => { [K in keyof G]: MountedRoute<G[K]> }): void {
-  const serve: Serve<G> = (name, impl) => build(group[name], impl);
-  const built = buildGroup(serve);
-  for (const name of Object.keys(group)) mount(built[name]);
+export type RouterDefaults = {
+  auth?: RouteAuth;
+  access?: AccessChecks;
+  responseHeaders?: Record<string, string>;
+  invalidRequest?: () => ContractError;
+};
+
+declare const pendingBrand: unique symbol;
+/** A route written for contract `C` and not built yet: `api.mount` builds it with its routers' defaults. */
+export type PendingRoute<C extends AnyRouteContract> = {
+  readonly kind: 'PENDING_ROUTE';
+  readonly contract: C;
+  readonly impl: RouteImpl<C, AccessChecks>;
+  readonly [pendingBrand]: true;
+};
+
+/** The entries a router must give: one per name of its table, a route for a contract, a router for a sub-table. */
+export type RouterEntries<T> = {
+  [K in keyof T]: T[K] extends AnyRouteContract ? PendingRoute<T[K]> : T[K] extends RouteTable ? RouterNode<T[K]> : never;
+};
+
+declare const routerBrand: unique symbol;
+/** One router of the tree: its table (from the API table), its defaults, and its entries. */
+export type RouterNode<T> = {
+  readonly kind: 'ROUTER';
+  readonly table: T;
+  readonly defaults: RouterDefaults;
+  readonly entries: RouterEntries<T>;
+  readonly [routerBrand]: true;
+};
+
+type ContractNames<T> = { [K in keyof T]: T[K] extends AnyRouteContract ? K : never }[keyof T] & string;
+
+/** Writes the route for one contract of a router's table: `serve('info', { controller: ... })`. */
+export type Serve<T> = <K extends ContractNames<T>, A extends AccessChecks = Record<never, never>>(
+  name: K,
+  impl: RouteImpl<Extract<T[K], AnyRouteContract>, A>,
+) => PendingRoute<Extract<T[K], AnyRouteContract>>;
+
+/**
+ * A router over one table of the API table (`API.apps.channel`): what its routes inherit, and
+ * one entry per name of the table (a route via `serve`, or a child router). A missing entry,
+ * an extra one, or a route served for another contract is a type error.
+ *
+ *   export const channelRouter = api.router(API.apps.channel, { access: { permission: appPermission('channels:read') } }, (serve) => ({
+ *     info: serve('info', { controller: ({ query }) => channelInfo(query) }),
+ *   }));
+ *   export const appsRouter = api.router(API.apps, { auth: 'app' }, () => ({ channel: channelRouter, ... }));
+ */
+export function router<T extends RouteTable>(table: T, defaults: RouterDefaults, build: (serve: Serve<T>) => RouterEntries<T>): RouterNode<T> {
+  const serve = ((name: string, impl: RouteImpl<AnyRouteContract, AccessChecks>) => ({
+    kind: 'PENDING_ROUTE',
+    contract: (table as Record<string, AnyRouteContract>)[name],
+    impl })) as unknown as Serve<T>;
+  return { kind: 'ROUTER', table, defaults, entries: build(serve) } as RouterNode<T>;
 }
 
-/** Mount one typed route. Groups of the API table go through `api.routes`, which checks none is left out. */
+function mergeDefaults(parent: RouterDefaults, child: RouterDefaults, where: string): RouterDefaults {
+  const access: AccessChecks = { ...(parent.access ?? {}) };
+  for (const [name, check] of Object.entries(child.access ?? {})) {
+    if (name in access) {
+      // A child must not replace an ancestor's check: the ancestor's stays, the child's is dropped.
+      logger.error('[api] access check name already set by an outer router; the outer one is kept', { where, check: name });
+      continue;
+    }
+    access[name] = check;
+  }
+  return {
+    auth: child.auth ?? parent.auth,
+    access,
+    responseHeaders: { ...(parent.responseHeaders ?? {}), ...(child.responseHeaders ?? {}) },
+    invalidRequest: child.invalidRequest ?? parent.invalidRequest };
+}
+
+/** Builds and mounts every route under `node`, in table order, with the defaults of every router above it. */
+function mountTree(node: RouterNode<RouteTable>, inherited: RouterDefaults): void {
+  const defaults = mergeDefaults(inherited, node.defaults, 'router');
+  for (const name of Object.keys(node.table)) {
+    const entry = (node.entries as Record<string, PendingRoute<AnyRouteContract> | RouterNode<RouteTable>>)[name];
+    if (!entry) {
+      logger.error('[api] router has no entry for a table name; not mounted', { name });
+      continue;
+    }
+    if (entry.kind === 'ROUTER') {
+      mountTree(entry, defaults);
+      continue;
+    }
+    const merged = mergeDefaults(defaults, { auth: entry.impl.auth, access: entry.impl.access as AccessChecks | undefined, responseHeaders: entry.impl.responseHeaders, invalidRequest: entry.impl.invalidRequest }, entry.contract.key);
+    mount(build(entry.contract, { ...entry.impl, ...merged } as RouteImpl<AnyRouteContract, AccessChecks>));
+  }
+}
+
+/** Mounts the whole router tree (the root router over the API table). Called once, at startup. */
+export function mountApi(root: RouterNode<RouteTable>): void {
+  mountTree(root, {});
+}
+
+/** Mount one typed route outside the tree (tests). The API table goes through `api.router` / `mountApi`. */
 export function route<C extends AnyRouteContract, A extends AccessChecks = Record<never, never>>(contract: C, impl: RouteImpl<C, A>): void {
   mount(build(contract, impl));
 }
 
 /** createApp only: mounts the typed router at /api. */
 export function mountTypedRoutes(app: Application): void {
-  app.use(API_PREFIX, apiRouter);
+  app.use(API_PREFIX, typedRouter);
 }
 
-/** What feature code uses: add typed routes. Mounting the router is createApp's alone. */
-export const api = { route, routes };
+/** What feature code uses: `api.router` builds the router tree; `mountApi` mounts it once at startup. */
+export const api = { route, router };

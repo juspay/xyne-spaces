@@ -85,7 +85,7 @@ jest.mock('@/middleware/encryptedRoute', () => ({
   ],
 }));
 
-import { api, ContractError, mountTypedRoutes, type AccessCheck } from '../api';
+import { api, ContractError, mountApi, mountTypedRoutes, type AccessCheck } from '../api';
 import { createApp } from '../createApp';
 import { contractGate, findContract } from '../contractGate';
 
@@ -111,7 +111,7 @@ const echo = defineRoute({
   response: z.object({ id: z.string(), name: z.string(), keys: z.array(z.string()), user: z.string().nullable() }),
 });
 api.route(echo, {
-  handle: async ({ params, body, user }) => ({ id: params.id, name: body.name, keys: Object.keys(body), user: user?.id ?? null }),
+  controller: async ({ params, body, user }) => ({ id: params.id, name: body.name, keys: Object.keys(body), user: user?.id ?? null }),
 });
 
 const seen: unknown[] = [];
@@ -136,13 +136,13 @@ const appGroup = {
     response: z.object({}),
   }),
 } as const;
-api.routes(appGroup, (serve) => ({
+mountApi(api.router(appGroup, {}, (serve) => ({
   post: serve('post', {
     auth: 'app',
     access: { channel: channelCheck },
     encryption: { resolveWorkspaceId: async () => 'ws-1' },
     successStatus: 201,
-    handle: async ({ access, app, derived }) => ({
+    controller: async ({ access, app, derived }) => ({
       channel: access.channel.channelId,
       app: app?.appId ?? null,
       facts: (derived?.fields as Record<string, { userIds?: string[] }> | undefined)?.note?.userIds ?? [],
@@ -150,11 +150,11 @@ api.routes(appGroup, (serve) => ({
   }),
   fail: serve('fail', {
     auth: 'public',
-    handle: async () => {
+    controller: async () => {
       throw new ContractError(409, { error: 'Conflict', code: 'TEST_CONFLICT' });
     },
   }),
-}));
+})));
 
 const sessionEncrypted = defineRoute({
   method: 'PUT',
@@ -165,12 +165,12 @@ const sessionEncrypted = defineRoute({
 });
 api.route(sessionEncrypted, {
   encryption: { resolveWorkspaceId: async () => 'ws-1' },
-  handle: async () => ({ ok: true }),
+  controller: async () => ({ ok: true }),
 });
 
 api.route(defineRoute({ method: 'GET', path: '/test/boom', response: z.object({}) }), {
   auth: 'public',
-  handle: async () => {
+  controller: async () => {
     throw new Error('boom');
   },
 });
@@ -189,7 +189,7 @@ api.route(slackStyle, {
       if ((body as { ts: string }).ts === 'gone') throw new ContractError(404, { error: 'message_not_found' });
     },
   },
-  handle: async ({ body }) => ({ ok: true as const, ts: body.ts }),
+  controller: async ({ body }) => ({ ok: true as const, ts: body.ts }),
 });
 
 beforeEach(() => {
@@ -330,7 +330,7 @@ describe('with the ingress transit proxy deployed', () => {
     freshApi.route(contract, {
       auth: 'app',
       encryption: { resolveWorkspaceId: async () => 'ws-1' },
-      handle: async ({ derived }) => ({
+      controller: async ({ derived }) => ({
         facts: (derived?.fields as Record<string, { userIds?: string[] }> | undefined)?.note?.userIds ?? [],
       }),
     });
@@ -397,19 +397,19 @@ describe('typed routes depend on nothing app.ts adds', () => {
 // Type-level checks (tsc --noEmit): a group must serve every entry, each under its own name.
 function typeChecks() {
   // @ts-expect-error `fail` is missing
-  api.routes(appGroup, (serve) => ({
-    post: serve('post', { auth: 'app', encryption: { resolveWorkspaceId: async () => 'ws' }, handle: async () => ({ channel: '', app: null, facts: [] }) }),
-  }));
-  api.routes(appGroup, (serve) => ({
-    post: serve('post', { auth: 'app', encryption: { resolveWorkspaceId: async () => 'ws' }, handle: async () => ({ channel: '', app: null, facts: [] }) }),
+  mountApi(api.router(appGroup, {}, (serve) => ({
+    post: serve('post', { auth: 'app', encryption: { resolveWorkspaceId: async () => 'ws' }, controller: async () => ({ channel: '', app: null, facts: [] }) }),
+  })));
+  mountApi(api.router(appGroup, {}, (serve) => ({
+    post: serve('post', { auth: 'app', encryption: { resolveWorkspaceId: async () => 'ws' }, controller: async () => ({ channel: '', app: null, facts: [] }) }),
     // @ts-expect-error built for `post`, mounted as `fail`
-    fail: serve('post', { auth: 'app', encryption: { resolveWorkspaceId: async () => 'ws' }, handle: async () => ({ channel: '', app: null, facts: [] }) }),
-  }));
+    fail: serve('post', { auth: 'app', encryption: { resolveWorkspaceId: async () => 'ws' }, controller: async () => ({ channel: '', app: null, facts: [] }) }),
+  })));
   // @ts-expect-error a route with an encryption contract must say where its fields are stored
-  api.route(sessionEncrypted, { handle: async () => ({ ok: true }) });
+  api.route(sessionEncrypted, { controller: async () => ({ ok: true }) });
   api.route(echo, {
     // @ts-expect-error the handler gets no req
-    handle: async ({ req }) => ({ id: req, name: '', keys: [], user: null }),
+    controller: async ({ req }) => ({ id: req, name: '', keys: [], user: null }),
   });
 }
 void typeChecks;

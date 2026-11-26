@@ -1,33 +1,12 @@
 import { Router } from 'express';
-import { API } from '@xyne/shared';
-import { api } from '@/framework/api';
-import { appPermission } from '../access';
-import { listBoardStages, listBoards, listBySender } from '../handlers/callsTickets';
 import { TicketController } from '../controllers/ticketController';
 import { validateChannelAccessForPost } from '../middelware/channelValidation';
 import { requirePermission } from '@/middleware/requirePermission';
 import { uploadMultiple } from '@/middleware/upload';
 
 const router = Router();
+// Typed routes: src/api (the router tree), contracts in @xyne/shared (packages/shared/src/api).
 
-// Typed routes (API.apps.ticket), served by the API router behind the contract gate.
-api.routes(API.apps.ticket, (serve) => ({
-  boards: serve('boards', {
-    auth: 'app',
-    access: { permission: appPermission('tickets:read') },
-    handle: ({ query, user }) => listBoards({ query, user }),
-  }),
-  boardStages: serve('boardStages', {
-    auth: 'app',
-    access: { permission: appPermission('tickets:read') },
-    handle: ({ params, user }) => listBoardStages({ params, user }),
-  }),
-  listBySender: serve('listBySender', {
-    auth: 'app',
-    access: { permission: appPermission('tickets:read') },
-    handle: ({ query, user }) => listBySender({ query, user }),
-  }),
-}));
 const ticketController = new TicketController();
 
 router.post('/createTicket', requirePermission('tickets:write'), validateChannelAccessForPost, ticketController.createTicket);

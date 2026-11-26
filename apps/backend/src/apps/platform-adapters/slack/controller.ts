@@ -20,7 +20,7 @@ import {
 import { redisService } from "@/services/redisService";
 import { classifyUpload, screenUploadBuffer, MAX_FILE_SIZE_BYTES } from "@/middleware/upload";
 import { wrapSlackHandler } from "./error-transformer";
-import { resolveSlackThreadConversationId } from "./chatWrite";
+import { resolveSlackThreadConversationId } from "@/api/apps/slack/chat.controller";
 import {
 	getResolvedChannelId,
 	getSlackAuthContext,

@@ -2,15 +2,8 @@ import express, { Request, Response, NextFunction } from 'express';
 import { customEmojiController } from '../controllers/customEmojiController';
 import { uploadSingle } from '../middleware/upload';
 import { config } from '../config/env';
-import { API } from '@xyne/shared';
-import { api } from '@/framework/api';
-import { deleteEmoji, getEmoji, listEmojis } from '@/handlers/settings';
+// Typed routes: src/api (the router tree), contracts in @xyne/shared (packages/shared/src/api).
 
-api.routes(API.emojis, (serve) => ({
-  list: serve('list', { handle: () => listEmojis() }),
-  get: serve('get', { handle: ({ params }) => getEmoji({ params }) }),
-  delete: serve('delete', { handle: ({ params, user }) => deleteEmoji({ params, user }) }),
-}));
 
 const router = express.Router();
 

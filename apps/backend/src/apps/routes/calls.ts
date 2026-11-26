@@ -1,30 +1,8 @@
 import { Router } from 'express';
-import { API } from '@xyne/shared';
-import { api } from '@/framework/api';
 import { AppCallController } from '../controllers/callController';
 import { requirePermission } from '@/middleware/requirePermission';
-import { appPermission } from '../access';
-import { getCall, getSummaryTemplate, listSummaryTemplates } from '../handlers/callsTickets';
+// Typed routes: src/api (the router tree), contracts in @xyne/shared (packages/shared/src/api).
 
-// Typed routes (API.apps.calls), served by the API router behind the contract gate. The
-// summary-template routes come first so /:callId does not capture 'summary-templates'.
-api.routes(API.apps.calls, (serve) => ({
-  summaryTemplates: serve('summaryTemplates', {
-    auth: 'app',
-    access: { permission: appPermission('summaries:read') },
-    handle: ({ user }) => listSummaryTemplates({ user }),
-  }),
-  summaryTemplate: serve('summaryTemplate', {
-    auth: 'app',
-    access: { permission: appPermission('summaries:read') },
-    handle: ({ params, user }) => getSummaryTemplate({ params, user }),
-  }),
-  get: serve('get', {
-    auth: 'app',
-    access: { permission: appPermission('calls:read') },
-    handle: ({ params, user }) => getCall({ params, user }),
-  }),
-}));
 
 // Untyped: schedule / update / cancel hand the request to the dashboard's scheduleCallController;
 // transcript and summary return content (response encryption not designed yet).

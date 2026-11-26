@@ -262,7 +262,8 @@ test('API table: no duplicate routes, and a generic route never comes before a l
 });
 
 test('Xyne Apps dashboard contracts: bodies keep the controllers\' rules', () => {
-  const d = API.apps.dashboard;
+  // The dashboard side now sits in the /apps tree: top-level leaves, and the incoming-webhooks router.
+  const d = { ...API.apps, incomingWebhooksList: API.apps.incomingWebhooks.list, incomingWebhooksCreate: API.apps.incomingWebhooks.create };
   assert.equal(d.create.body.safeParse({ name: '' }).success, false, 'empty name');
   assert.equal(d.configureWebhook.body.safeParse({ webhookUrl: 'not a url' }).success, false);
   assert.equal(d.commandsCreate.body.safeParse({ commandName: 'Bad Name', description: 'd', commandType: 'COMMAND', commandAccessibility: 'CHAT' }).success, false);
@@ -278,9 +279,9 @@ test('settings contracts: alias, client-event and tags-config rules', () => {
   assert.equal(API.activityAliases.create.body.safeParse({ eventName: 'e', eventCategory: 'c', isBlacklisted: true }).success, true);
   assert.equal(API.clientEvents.post.body.safeParse({ userIds: [], event: 'reload' }).success, false, 'userIds must not be empty');
   assert.equal(API.clientEvents.post.body.safeParse({ userIds: ['u'], event: 'explode' }).success, false, 'unknown event');
-  assert.equal(API.channelTagsConfig.update.body.safeParse({ categories: { 'Bad Name': { method: 'manual' } } }).success, false, 'category name format');
-  assert.equal(API.channelTagsConfig.update.body.safeParse({ categories: { sev: { method: 'manual', tags: ['a', 'a'] } } }).success, false, 'duplicate tags');
-  assert.equal(API.channelTagsConfig.update.body.safeParse({ categories: { sev: { method: 'llm', tags: ['p1', 'p2'] } } }).success, true);
+  assert.equal(API.channels.tagsConfig.update.body.safeParse({ categories: { 'Bad Name': { method: 'manual' } } }).success, false, 'category name format');
+  assert.equal(API.channels.tagsConfig.update.body.safeParse({ categories: { sev: { method: 'manual', tags: ['a', 'a'] } } }).success, false, 'duplicate tags');
+  assert.equal(API.channels.tagsConfig.update.body.safeParse({ categories: { sev: { method: 'llm', tags: ['p1', 'p2'] } } }).success, true);
 });
 
 test('notification preferences: unknown types are dropped first, the rest are checked', () => {
@@ -301,8 +302,8 @@ test('notification preferences: unknown types are dropped first, the rest are ch
 test('organizations, reactions, channels and labels contracts keep the controllers\' limits', () => {
   assert.equal(API.organizations.addMember.body.safeParse({ userId: 'u', role: 'VIEWER' }).success, false, 'VIEWER is not assignable here');
   assert.equal(API.organizations.addMember.body.safeParse({ userId: 'u', role: 'ADMIN' }).success, true);
-  assert.equal(API.reactions.bulk.body.safeParse({ messageIds: [] }).success, false, 'at least one id');
-  assert.equal(API.reactions.bulk.body.safeParse({ messageIds: Array.from({ length: 101 }, (_, i) => String(i)) }).success, false, 'at most 100');
+  assert.equal(API.messages.reactions.bulk.body.safeParse({ messageIds: [] }).success, false, 'at least one id');
+  assert.equal(API.messages.reactions.bulk.body.safeParse({ messageIds: Array.from({ length: 101 }, (_, i) => String(i)) }).success, false, 'at most 100');
   assert.equal(API.channels.search.query.safeParse({ q: '  ' }).success, false, 'q needs a character');
   assert.equal(API.channels.memberCounts.body.safeParse({ channelIds: Array.from({ length: 10001 }, (_, i) => String(i)) }).success, false);
   assert.equal(API.conversationLabels.unreadCounts.query.safeParse({}).success, false, 'channelId is required');
@@ -359,4 +360,13 @@ test('defineRouter: prefixes compose into the full path and key, at any depth, i
   assert.equal(apps.channel.byId.members.key, 'GET /apps/channel/:channelId/members');
   assert.deepEqual(routeContracts(apps).map((c) => c.key), ['GET /apps/channel', 'GET /apps/channel/info', 'GET /apps/channel/:channelId/members']);
   assert.equal(info.path, '/info', 'the leaf itself is not changed');
+});
+
+test('the API table is a tree of routers: paths compose from the folders', () => {
+  assert.equal(API.apps.channel.info.key, 'POST /apps/channel/info');
+  assert.equal(API.apps.installed.update.key, 'PATCH /apps/installed/:installedAppId');
+  assert.equal(API.channels.tagsConfig.get.key, 'GET /channels/:channelId/tags-config');
+  assert.equal(API.messages.reactions.bulk.key, 'POST /messages/reactions/bulk');
+  assert.equal(API.organizations.list.key, 'GET /organizations');
+  assert.equal(routeContracts(API).length, 141);
 });

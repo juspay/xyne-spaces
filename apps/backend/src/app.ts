@@ -32,13 +32,10 @@ import microsoftDeskAuthRoutes from '@/integrations/routes/microsoft-desk-auth';
 import conversationRoutes from '@/routes/conversations';
 // Disabled (LLM)
 // import threadTypeVocabularyRoutes from '@/routes/threadTypeVocabulary';
-import conversationLabelRoutes from '@/routes/conversationLabels';
 // Disabled (LLM)
 // import radarExecutionRoutes from '@/routes/radarExecution';
-import organizationRoutes from '@/routes/organizations';
 import invitationRoutes from '@/routes/invitations';
 import joinRequestRoutes, { legacyJoinRequestRouter } from '@/routes/joinRequests';
-import reactionRoutes from '@/routes/reactionRoutes';
 import userAssignmentStateRoutes from '@/routes/userAssignmentState';
 import { UserManagementController } from '@/controllers/userManagementController';
 import { workflowsPublicRouter, workflowsRouter } from '@/workflowsV2/router';
@@ -79,7 +76,6 @@ import { attachVoiceInputStreamHandler } from '@/routes/voiceInputStream';
 import transcriptionAgentRoutes from '@/routes/transcriptionAgent';
 import livekitWebhookRoutes from '@/routes/livekitWebhook';
 import zeroRoutes from '@/routes/zero';
-import userHeaderOverridesRoutes from '@/routes/userHeaderOverrides';
 import encryptionRoutes from '@/routes/encryption';
 import encryptionManifestRoutes from '@/routes/encryptionManifest';
 import transitRoutes from '@/routes/transit';
@@ -93,7 +89,6 @@ import linkPreviewRoutes from '@/routes/linkPreview';
 import projectRoutes from '@/routes/projects';
 import ticketReportRoutes from '@/routes/ticketReports';
 import boardRoutes from '@/routes/boards';
-import subTicketRoutes from '@/routes/subTickets';
 import boardConfigCopyRoutes from '@/routes/boardConfigCopy';
 import auditLogRoutes from '@/routes/auditLogs';
 import recordingPointerBackfillRoutes from '@/routes/recordingPointerBackfill';
@@ -114,7 +109,6 @@ import { dashboardClawRouter } from '@/routes/dashboardClaw';
 // Disabled (LLM)
 // import summarizeRoutes from '@/routes/summarize';
 import xyneAIRoutes from '@/routes/xyneAI';
-import cacConfigRoutes from '@/routes/cacConfig';
 import lotusCacConfigRoutes from '@/routes/lotusCacConfig';
 import ticketMigrationRoutes from '@/routes/ticketMigration';
 import gmailWatchRenewalRoutes from '@/routes/gmailWatchRenewal';
@@ -133,7 +127,6 @@ import emailRoutes from '@/routes/email';
 import emailDemergeRoutes from '@/routes/emailDemerge';
 // Disabled (LLM)
 // import emailClassificationRoutes from '@/routes/emailClassification';
-import deskTagsConfigRoutes from '@/routes/deskTagsConfig';
 // Disabled (LLM)
 // import priorityClassificationRoutes from '@/routes/priorityClassificationRoutes';
 import deskMetricsRoutes from '@/routes/deskMetricsRoutes';
@@ -165,7 +158,6 @@ import { handleDeskThreadCanvasCallback } from '@/controllers/deskThreadCanvasCa
 import automationWebhookRoutes from '@/automations/routes/webhook-trigger.handler';
 import activityLogRoutes from '@/routes/activityLog';
 import userActivityRoutes from '@/routes/userActivity';
-import activityAliasesRoutes from '@/routes/activityAliases';
 import commitAnalysisRoutes from '@/routes/commitAnalysis';
 import meetCallbackRoutes from '@/routes/meetCallback';
 import samRoutes from '@/routes/sam';
@@ -217,6 +209,8 @@ import emojiRoutes from '@/routes/emojis';
 import { appRoutes } from '@/apps';
 import { requireTransitProxyIngress } from '@/apps/middelware/requireTransitProxy';
 import { createApp } from '@/framework/createApp';
+import { mountApi } from '@/framework/api';
+import { apiRouter } from '@/api/api.router';
 import transitProxyInternalRoutes from '@/routes/transitProxyInternal';
 import { ChatController } from '@/apps/controllers/chatController';
 import { ReactionController } from '@/controllers/reactionController';
@@ -257,6 +251,8 @@ export class App {
     // createApp installs the contract gate, what every request gets (security headers, CORS,
     // logging, tenant scope...) and the typed routes; this file only adds the untyped routes.
     this.app = createApp();
+    // Every typed route, once: the router tree of src/api over the API table (@xyne/shared).
+    mountApi(apiRouter);
     this.httpServer = createServer(this.app);
     this.initializeRoutes();
     this.initializeErrorHandling();
@@ -344,7 +340,6 @@ export class App {
     this.app.use('/api/email', emailDemergeRoutes);
     // Disabled (LLM)
     // this.app.use('/api/channels/:channelId/classification', authMiddleware.authenticate, emailClassificationRoutes);
-    this.app.use('/api/channels/:channelId/tags-config', authMiddleware.authenticate, deskTagsConfigRoutes);
     // Disabled (LLM)
     // this.app.use('/api/channels/:channelId/priority-classification', authMiddleware.authenticate, priorityClassificationRoutes);
     this.app.use('/api/channels/:channelId/metrics', authMiddleware.authenticate, deskMetricsRoutes);
@@ -467,21 +462,16 @@ export class App {
     // Claw MCP route (user + app auth) — must be before /api/conversations
     this.app.use('/api/conversations/claw', authenticateUserOrApp, conversationRoutes);
     this.app.use('/api/conversations', authMiddleware.authenticate, conversationRoutes);
-    this.app.use('/api/conversation-labels', authMiddleware.authenticate, conversationLabelRoutes);
     // Disabled (LLM)
     // this.app.use('/api/radar', authMiddleware.authenticate, radarExecutionRoutes);
-    this.app.use('/api/organizations', authMiddleware.authenticate, organizationRoutes);
     this.app.use('/api/invitations', invitationRoutes);
     this.app.use('/api/users', authMiddleware.authenticate, userRoutes);
     this.app.use('/api/user-groups', authMiddleware.authenticate, userGroupRoutes); // User groups (teams)
     this.app.use('/api/forms', authMiddleware.authenticate, formsRoutes); // Forms routes
     this.app.use('/api/zero', zeroRoutes);
-    this.app.use('/api/client-events', userHeaderOverridesRoutes); // Common client-command events + header overrides (auth in route file)
     this.app.use('/api/encryption', authMiddleware.authenticate, encryptionRoutes);
     this.app.use('/api/encryption-manifest', authMiddleware.authenticate, encryptionManifestRoutes);
     this.app.use('/api/transit', authMiddleware.authenticate, transitRoutes);
-
-    this.app.use('/api/messages', authMiddleware.authenticate, reactionRoutes);
 
     // Calls admin panel — must be before /api/calls, whose /:callId routes would shadow it
     this.app.use('/api/calls/admin', authMiddleware.authenticate, callAdminRoutes);
@@ -774,7 +764,6 @@ export class App {
 
     // Board routes (auth and ACL required)
     this.app.use('/api/boards', authMiddleware.authenticate, boardRoutes);
-    this.app.use('/api/sub-tickets', authMiddleware.authenticate, subTicketRoutes);
 
     // Knowledge routes (auth required)
     this.app.use('/api/knowledge', authMiddleware.authenticate, knowledgeRoutes);
@@ -808,7 +797,6 @@ export class App {
     this.app.use('/api/xyne-ai', authMiddleware.authenticate, xyneAIRoutes);
 
     // Generic CAC config routes
-    this.app.use('/api/cac-config', authMiddleware.authenticate, cacConfigRoutes);
 
     this.app.use('/api/lotus-config', authMiddleware.authenticate, lotusCacConfigRoutes);
 
@@ -845,8 +833,6 @@ export class App {
     // User activity routes (auth required)
     this.app.use('/api/user-activity', authMiddleware.authenticate, userActivityRoutes);
 
-    this.app.use('/api/activity-aliases', authMiddleware.authenticate, activityAliasesRoutes);
-
     // Chat routes (auth only, no ACL for now)
 
     // New chat schema routes
@@ -854,11 +840,9 @@ export class App {
     this.app.use('/api/conversations', authMiddleware.authenticate, conversationRoutes);
     // Disabled (LLM)
     // this.app.use('/api/thread-type-vocabulary', authMiddleware.authenticate, threadTypeVocabularyRoutes);
-    this.app.use('/api/organizations', authMiddleware.authenticate, organizationRoutes);
     this.app.use('/api/users', authMiddleware.authenticate, userRoutes);
     this.app.use('/api/user-groups', authMiddleware.authenticate, userGroupRoutes); // User groups (teams)
     this.app.use('/api/user-assignment-state', userAssignmentStateRoutes); // User assignment state routes (auth handled in route file)
-    // this.app.use('/api/messages', authMiddleware.authenticate, reactionRoutes); // Reactions routes
     this.app.use('/api/notifications', notificationRoutes); // Notification routes
 
     //Draft routes

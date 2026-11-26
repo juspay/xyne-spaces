@@ -32,11 +32,11 @@ import { affinityController } from '@/controllers/affinityController';
 import { userManagementController } from '@/controllers/userManagementController';
 import * as dailyBriefController from '@/controllers/dailyBriefController';
 import { ContractError } from '@/framework/api';
-import * as channelHandlers from '@/handlers/channels';
-import * as dailyBriefHandlers from '@/handlers/dailyBrief';
-import * as notificationHandlers from '@/handlers/notifications';
-import * as settingsHandlers from '@/handlers/settings';
-import * as workspaceHandlers from '@/handlers/workspace';
+import * as channelsApi from '@/api/channels/channels.controller';
+import * as dailyBriefApi from '@/api/daily-brief/daily-brief.controller';
+import * as notificationsApi from '@/api/notifications/notifications.controller';
+import * as emojisApi from '@/api/emojis/emojis.controller';
+import * as subTicketsApi from '@/api/sub-tickets/sub-tickets.controller';
 import type { AuthenticatedUser } from '@/types/express';
 import { customEmojiController } from '@/controllers/customEmojiController';
 import { CanvasController } from '@/controllers/canvasController';
@@ -206,7 +206,7 @@ interface TypedContext {
  */
 interface TypedHandler {
   readonly contract: AnyRouteContract;
-  readonly handle: (ctx: TypedContext) => Promise<unknown>;
+  readonly controller: (ctx: TypedContext) => Promise<unknown>;
   /** Status of the success answer (default 200); 204 sends no body. */
   readonly successStatus?: number;
 }
@@ -331,7 +331,7 @@ const ROUTES: readonly DirectRoute[] = [
     path: '/channels/check-duplicate',
     typed: {
       contract: API.channels.checkDuplicate,
-      handle: ({ body, user }) => channelHandlers.checkDuplicate({ body, user }),
+      controller: ({ body, user }) => channelsApi.checkDuplicate({ body, user }),
     },
   },
   /**
@@ -614,7 +614,7 @@ const ROUTES: readonly DirectRoute[] = [
     path: '/notifications/workspace-counts',
     typed: {
       contract: API.notifications.workspaceCounts,
-      handle: ({ user }) => notificationHandlers.workspaceCounts({ user }),
+      controller: ({ user }) => notificationsApi.workspaceCounts({ user }),
     },
   },
   {
@@ -630,7 +630,7 @@ const ROUTES: readonly DirectRoute[] = [
     path: '/notifications/:id/read',
     typed: {
       contract: API.notifications.read,
-      handle: ({ params, body, user }) => notificationHandlers.markRead({ params, body, user }),
+      controller: ({ params, body, user }) => notificationsApi.markRead({ params, body, user }),
     },
     body: z.object({
       channelId: z.string().min(1).optional(),
@@ -643,7 +643,7 @@ const ROUTES: readonly DirectRoute[] = [
     path: '/notifications/:id/dismiss',
     typed: {
       contract: API.notifications.dismiss,
-      handle: ({ params, user }) => notificationHandlers.dismiss({ params, user }),
+      controller: ({ params, user }) => notificationsApi.dismiss({ params, user }),
     },
     unwrap: unwrapEnvelope,
   },
@@ -652,7 +652,7 @@ const ROUTES: readonly DirectRoute[] = [
     path: '/notifications/preferences',
     typed: {
       contract: API.notifications.preferences,
-      handle: ({ user }) => notificationHandlers.getPreferences({ user }),
+      controller: ({ user }) => notificationsApi.getPreferences({ user }),
     },
   },
   {
@@ -662,7 +662,7 @@ const ROUTES: readonly DirectRoute[] = [
     // drops retired notification types — so a stale client still saves.
     typed: {
       contract: API.notifications.preferencesSet,
-      handle: ({ body, user }) => notificationHandlers.updatePreferences({ body, user }),
+      controller: ({ body, user }) => notificationsApi.updatePreferences({ body, user }),
     },
     unwrap: unwrapEnvelope,
   },
@@ -699,7 +699,7 @@ const ROUTES: readonly DirectRoute[] = [
     path: '/daily-brief/config',
     typed: {
       contract: API.dailyBrief.config,
-      handle: ({ user, headers }) => dailyBriefHandlers.getConfig({ user, headers }),
+      controller: ({ user, headers }) => dailyBriefApi.getConfig({ user, headers }),
     },
   },
   {
@@ -707,7 +707,7 @@ const ROUTES: readonly DirectRoute[] = [
     path: '/daily-brief/config',
     typed: {
       contract: API.dailyBrief.configSet,
-      handle: ({ body, user, headers }) => dailyBriefHandlers.saveConfig({ body, user, headers }),
+      controller: ({ body, user, headers }) => dailyBriefApi.saveConfig({ body, user, headers }),
     },
     body: z.object({
       enabled: z.boolean().optional(),
@@ -720,7 +720,7 @@ const ROUTES: readonly DirectRoute[] = [
     path: '/daily-brief/settings',
     typed: {
       contract: API.dailyBrief.settings,
-      handle: ({ user, headers }) => dailyBriefHandlers.getSettings({ user, headers }),
+      controller: ({ user, headers }) => dailyBriefApi.getSettings({ user, headers }),
     },
   },
   {
@@ -728,7 +728,7 @@ const ROUTES: readonly DirectRoute[] = [
     path: '/daily-brief/settings',
     typed: {
       contract: API.dailyBrief.settingsSet,
-      handle: ({ body, user, headers }) => dailyBriefHandlers.saveSettings({ body, user, headers }),
+      controller: ({ body, user, headers }) => dailyBriefApi.saveSettings({ body, user, headers }),
     },
     body: z.object({ agentSlug: z.string().min(1).nullable() }),
   },
@@ -818,7 +818,7 @@ const ROUTES: readonly DirectRoute[] = [
     path: '/channels/search',
     typed: {
       contract: API.channels.search,
-      handle: ({ query, user }) => channelHandlers.searchForMentions({ query, user }),
+      controller: ({ query, user }) => channelsApi.searchForMentions({ query, user }),
     },
     query: z.object({
       q: z.string().min(1),
@@ -831,7 +831,7 @@ const ROUTES: readonly DirectRoute[] = [
     path: '/channels/member-counts',
     typed: {
       contract: API.channels.memberCounts,
-      handle: ({ body, user }) => channelHandlers.memberCounts({ body, user }),
+      controller: ({ body, user }) => channelsApi.memberCounts({ body, user }),
     },
     body: z.object({ channelIds: z.array(z.string()).max(10000) }),
     unwrap: unwrapEnvelope,
@@ -841,7 +841,7 @@ const ROUTES: readonly DirectRoute[] = [
     path: '/channels/:channelId/members',
     typed: {
       contract: API.channels.members,
-      handle: ({ params, user }) => channelHandlers.channelMembers({ params, user }),
+      controller: ({ params, user }) => channelsApi.channelMembers({ params, user }),
     },
     unwrap: unwrapEnvelope,
   },
@@ -876,13 +876,13 @@ const ROUTES: readonly DirectRoute[] = [
   {
     method: 'get',
     path: '/emojis',
-    typed: { contract: API.emojis.list, handle: () => settingsHandlers.listEmojis() },
+    typed: { contract: API.emojis.list, controller: () => emojisApi.listEmojis() },
     unwrap: (body) => field(body, 'emojis'),
   },
   {
     method: 'get',
     path: '/emojis/:emojiId',
-    typed: { contract: API.emojis.get, handle: ({ params }) => settingsHandlers.getEmoji({ params }) },
+    typed: { contract: API.emojis.get, controller: ({ params }) => emojisApi.getEmoji({ params }) },
     unwrap: (body) => field(body, 'emoji'),
   },
   {
@@ -895,7 +895,7 @@ const ROUTES: readonly DirectRoute[] = [
   {
     method: 'delete',
     path: '/emojis/:emojiId',
-    typed: { contract: API.emojis.delete, handle: ({ params, user }) => settingsHandlers.deleteEmoji({ params, user }) },
+    typed: { contract: API.emojis.delete, controller: ({ params, user }) => emojisApi.deleteEmoji({ params, user }) },
     unwrap: () => ({}),
   },
 
@@ -986,7 +986,7 @@ const ROUTES: readonly DirectRoute[] = [
     typed: {
       contract: API.subTickets.link,
       successStatus: 201,
-      handle: ({ body, user }) => workspaceHandlers.linkSubTicket({ body, user }),
+      controller: ({ body, user }) => subTicketsApi.linkSubTicket({ body, user }),
     },
     body: z.object({
       ticketId: z.string().min(1),
@@ -1000,7 +1000,7 @@ const ROUTES: readonly DirectRoute[] = [
     typed: {
       contract: API.subTickets.unlink,
       successStatus: 204,
-      handle: ({ body, user }) => workspaceHandlers.unlinkSubTicketHandler({ body, user }),
+      controller: ({ body, user }) => subTicketsApi.unlinkSubTicketHandler({ body, user }),
     },
     body: z.object({ mappingId: z.string().min(1) }),
   },
@@ -1164,7 +1164,7 @@ async function runTyped(route: DirectRoute & { typed: TypedHandler }, req: Reque
 
   let result: unknown;
   try {
-    result = await route.typed.handle(ctx);
+    result = await route.typed.controller(ctx);
   } catch (error) {
     if (error instanceof ContractError) throw controllerError(error.status, error.body);
     throw error;
