@@ -9,7 +9,7 @@ import { useInitialMessageFacts } from '@/src/features/chat/v2/components/chat/c
 import { useIsContinuation, useRowFlow } from '../hooks/use-agent-plan';
 import { useFlatHoldCopy } from '../hooks/use-flat-hold-copy';
 import { THREAD_LIST_INSET } from '../constants';
-import { isRestyledRow } from '../model/row-policy';
+import { isRestyledRow, isUnreadableMessage } from '../model/row-policy';
 import { FlatMessage, type FlatMessageContentProps } from './flat-message';
 
 /**
@@ -70,6 +70,7 @@ export const ConversationThreadMessageRow = memo(function ConversationThreadMess
     handlers.current.onLongPress?.();
   }, [handlers, messageId, registerHold]);
 
+  if (isUnreadableMessage(conversation.initial_message_md)) return <View />;
   if (!isRestyledRow(paintRow, { isFlowJson: isClassicFlow })) return classicContent;
 
   return (

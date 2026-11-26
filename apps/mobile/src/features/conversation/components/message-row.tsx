@@ -1,5 +1,5 @@
 import { memo, useCallback, useMemo, type ReactElement } from 'react';
-import type { AccessibilityActionEvent, AccessibilityActionInfo } from 'react-native';
+import { View, type AccessibilityActionEvent, type AccessibilityActionInfo } from 'react-native';
 import { useSharedValue } from 'react-native-reanimated';
 import { getStatus, usePendingByMessageId } from '@xyne/shared/messages';
 
@@ -18,7 +18,7 @@ import {
 import { useIsContinuation, useRowFlow } from '../hooks/use-agent-plan';
 import { useFlatHoldCopy } from '../hooks/use-flat-hold-copy';
 import type { AgentPlan } from '../model/agent-plan';
-import { isRestyledRow } from '../model/row-policy';
+import { isRestyledRow, isUnreadableMessage } from '../model/row-policy';
 import { swipeDirections, type SwipeActionId } from '../model/swipe-actions';
 import { useConversationCanReact } from './conversation-palette';
 import { FlatMessage, type FlatMessageContentProps } from './flat-message';
@@ -42,6 +42,7 @@ export const ConversationMessageRow = memo(function ConversationMessageRow({
   const { initialMessageSummary } = facts;
   const { plan, isClassicFlow } = useRowFlow(facts);
 
+  if (conversation && isUnreadableMessage(conversation.initial_message_md)) return <View />;
   if (!conversation || !isRestyledRow(item.paint, { isFlowJson: isClassicFlow })) {
     return <ChatMessageListRow {...props} />;
   }

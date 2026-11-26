@@ -1,3 +1,5 @@
+import { isEncryptedField } from '@xyne/shared';
+
 import type { ChatPaintRow } from '@/src/features/chat/v2/paint/chatPaint.types';
 
 /** The paint builder's stand-in sender for a message that names none. */
@@ -56,4 +58,13 @@ export function isRestyledRow(
     hasRecordingPreview: !!row.recordingPreview,
     isFlowJson,
   });
+}
+
+/**
+ * A message whose content is still ciphertext: the key has not come, or this
+ * device cannot read it. Its paint has no sender and no words, so the row
+ * draws nothing and takes no room, rather than leaving an empty gap.
+ */
+export function isUnreadableMessage(initialMessageMd: string | null | undefined): boolean {
+  return isEncryptedField(initialMessageMd);
 }
