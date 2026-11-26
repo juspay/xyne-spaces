@@ -1,5 +1,7 @@
 export const WORKFLOWS_TYPE = 'Workflow';
 export const WORKFLOWS_SCOPE = { workflowType: WORKFLOWS_TYPE } as const;
+/** Discriminator of a version snapshot row; keeps it out of every `WORKFLOWS_SCOPE` query. */
+export const WORKFLOW_VERSION_TYPE = 'WorkflowVersion';
 export const DEFAULT_FOLDER_ID = 'default';
 export const DEFAULT_CRON_TIMEZONE = 'Asia/Kolkata';
 export const TERMINAL_EXECUTION_STATUSES = ['COMPLETED', 'FAILED', 'CANCELLED'] as const;

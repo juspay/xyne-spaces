@@ -7,10 +7,11 @@ import type {
   FolderRecord,
   StepRecord,
   WorkflowRecord,
+  WorkflowVersionSummary,
 } from '@xyne/workflow-sdk';
 import { GateCategory } from '@xyne/workflow-sdk';
 import type { Workflow, WorkflowFolder } from '@prisma/client';
-import { DEFAULT_FOLDER_ID } from './constants';
+import { DEFAULT_FOLDER_ID, WORKFLOW_VERSION_TYPE } from './constants';
 import type { XyneResourceAttrs } from './types';
 
 // ─── Cursor codec ────────────────────────────────────────────────────────────
@@ -126,6 +127,40 @@ export const toWorkflowRecord = (row: Workflow): WorkflowRecord => ({
   attributes: { workspaceId: row.workspaceId } satisfies XyneResourceAttrs,
 });
 
+/** A snapshot's primary key; the number is unique per workflow because the id is. */
+export const versionRowId = (workflowId: string, version: number): string => `${workflowId}:v${version}`;
+
+/** Where-clause for every snapshot row of one workflow. */
+export const versionRowsOf = (workflowId: string) =>
+  ({ workflowType: WORKFLOW_VERSION_TYPE, id: { startsWith: `${workflowId}:v` } }) as const;
+
+/** Columns a version summary needs — everything but the config body. */
+export const VERSION_SUMMARY_SELECT = {
+  id: true,
+  version: true,
+  metadata: true,
+  summary: true,
+  configuration: true,
+  createdAt: true,
+} as const;
+
+/** `configuration` holds the SDK eventType; the row's own `eventType` is NO_OP to keep it out of the router. */
+export const toVersionSummary = (row: {
+  id: string;
+  version: number | null;
+  metadata: string | null;
+  summary: string | null;
+  configuration: string | null;
+  createdAt: Date;
+}): WorkflowVersionSummary => ({
+  workflowId: row.id.slice(0, row.id.lastIndexOf(':v')),
+  version: row.version ?? 0,
+  metadata: row.metadata,
+  summary: row.summary,
+  eventType: row.configuration ?? '',
+  createdAt: row.createdAt.getTime(),
+});
+
 export const toFolderRecord = (row: WorkflowFolder): FolderRecord => ({
   id: row.id,
   name: row.name,
@@ -143,6 +178,7 @@ export const toExecutionRecord = (
     updatedAt: Date;
     parentWorkflowExecutionId: string | null;
     tag: string;
+    workflowVersion?: number | null;
   },
   workflowMetadata: string | null,
   /** The scheduling columns from the run's state row, for a run that waited. */
@@ -157,6 +193,7 @@ export const toExecutionRecord = (
     ? { sourceExecutionId: row.parentWorkflowExecutionId }
     : {}),
   ...schedulingFacts(scheduling),
+  workflowVersion: row.workflowVersion ?? null,
   workflowName: readNameFromMetadata(workflowMetadata) ?? row.workflowId,
 });
 
