@@ -153,10 +153,12 @@ class NoteTakerTranscriptService {
 
       // AI outputs run on the Claw agent; without it there is no LLM engine, so
       // the transcript is only attached and indexed.
-      if (isClawCallAiEnabled()) {
+      const engine = isClawCallAiEnabled() ? 'claw' : isGatewayLlmEnabled() ? 'gateway' : 'none';
+      logger.info(`[${callId}] call_ai_engine_selected`, { engine, path: 'note_taker' });
+      if (engine === 'claw') {
         await this.generateAiOutputs(call, formattedTranscript, entries.length);
-      } else if (isGatewayLlmEnabled()) {
-        await this.generateSealedAiOutputs(call, formattedTranscript);
+      } else if (engine === 'gateway') {
+        await this.generateSealedAiOutputs(call, formattedTranscript, entries.length);
       }
       await this.queueVespaIndexing(call);
 
@@ -232,21 +234,45 @@ class NoteTakerTranscriptService {
   }
 
   /**
-   * Without Claw: summary and title on the egress gateway. They come back as workspace-DEK
-   * ciphertext and are stored as-is (DEK passthrough: not re-encrypted, not decrypted).
-   * Outputs that read the reply (detailed summary, labels, title syncs) need Claw.
+   * Without Claw, on the egress gateway: the summary and title come back as workspace-DEK
+   * ciphertext and are stored as-is (DEK passthrough: not re-encrypted, not decrypted). The
+   * detailed-summary canvas runs as with Claw; its reply is decrypted here (executeStreamingLlmRequest).
+   * Labels and title syncs need Claw.
    */
-  private async generateSealedAiOutputs(call: Call, formattedTranscript: string): Promise<void> {
+  private async generateSealedAiOutputs(call: Call, formattedTranscript: string, entryCount: number): Promise<void> {
     const callId = call.externalId;
     const sealed = { workspaceId: call.workspaceId };
     const modelType = await this.getSummaryModelPreference(call);
     const { numbered } = numberTranscriptSegments(formattedTranscript);
-    const [aiSummary, title] = await Promise.all([
+    const [aiSummary, title, detailedSummary] = await Promise.all([
       transcriptService.generateCallSummary(numbered, callId, modelType, undefined, { sealed }).catch(() => null),
       call.title
         ? null
         : transcriptService.generateRecordingTitle(formattedTranscript, callId, modelType, { sealed }).catch(() => null),
+      this.generateDetailedSummaryCanvas(call, formattedTranscript, undefined, modelType),
     ]);
+    await this.finalizeCallUpdates(call, {
+      metadata: {
+        transcriptEntryCount: entryCount,
+        detailedSummaryCanvasId: detailedSummary?.canvasId,
+        detailedSummaryReady: detailedSummary ? true : undefined,
+        detailedSummaryStatus: detailedSummary ? 'ready' : 'failed',
+        summaryModelUsed: modelType,
+      },
+      summaryTemplateId: detailedSummary?.summaryTemplateId,
+      ...(detailedSummary ? { markedItems: detailedSummary.markedItems } : {}),
+    });
+    logger.info(`[${callId}] call_ai_gateway_outputs`, {
+      path: 'note_taker',
+      summary: aiSummary ? 'ok' : 'failed',
+      title: call.title ? 'kept' : title ? 'ok' : 'failed',
+      detailedSummary: detailedSummary ? 'ok' : 'failed',
+      detailedSummaryCanvasId: detailedSummary?.canvasId,
+      markedItems: detailedSummary?.markedItems.length ?? 0,
+    });
+    if (detailedSummary) {
+      await this.notifySummaryReady(call, detailedSummary.rawSummary);
+    }
     const data = { ...(aiSummary ? { aiSummary } : {}), ...(title ? { title } : {}) };
     if (Object.keys(data).length === 0) {
       logger.error(`[${callId}] ai_summary_skipped`, { reason: 'generation_failed', path: 'note_taker' });
@@ -254,7 +280,15 @@ class NoteTakerTranscriptService {
     }
     try {
       await runWithDekPassthrough(() => repositories.calls.update(call.id, data));
-      logger.info(`[${callId}] call_record_updated`, { fields_updated: Object.keys(data).join(','), path: 'note_taker' });
+      logger.info(`[${callId}] call_record_updated`, {
+        fields_updated: Object.keys(data).join(','),
+        path: 'note_taker',
+        engine: 'gateway',
+        // Stored as-is: each must be workspace-DEK ciphertext (ENC:v1|<dekId>|…), never plaintext.
+        stored: Object.fromEntries(
+          Object.entries(data).map(([field, value]) => [field, /^ENC:v\d+\|[^|]+\|/.exec(value)?.[0] ?? 'NOT_CIPHERTEXT']),
+        ),
+      });
     } catch (error) {
       logger.error(`[${callId}] call_record_update_failed`, { stage: 'sealed_summary_save', path: 'note_taker', error });
     }

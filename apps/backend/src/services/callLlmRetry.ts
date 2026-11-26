@@ -6,7 +6,7 @@ import { logger } from '@/utils/logger';
 // import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
 // import { OrgLLMServiceAccountPurpose } from '@xyne/shared';
 import { runCallAiTask } from '@/services/callAi/callAiGateway';
-import { isGatewayLlmEnabled, runLlmOnGateway } from '@/services/callAi/gatewayLlm';
+import { isGatewayLlmEnabled, runLlmOnGateway, runLlmOnGatewayForPlaintext } from '@/services/callAi/gatewayLlm';
 
 const DEFAULT_MODEL = 'glm-latest';
 
@@ -89,7 +89,6 @@ function llmUnavailable(operation: string, callId: string | undefined): Extracte
  */
 export interface SealedOutput {
   workspaceId: string;
-  format?: 'text' | 'title';
   modelType?: SummaryModelType;
 }
 
@@ -133,15 +132,16 @@ async function runSealedOnGateway(
   try {
     const content = await runLlmOnGateway({
       operation,
+      callId: callId || 'unknown',
       userPrompt,
       systemPrompt,
       model: resolveSummaryModel(sealed.modelType),
       workspaceId: sealed.workspaceId,
-      format: sealed.format,
     });
     return { ok: true, content };
   } catch (error) {
     logger.warn(`[${callId || 'unknown'}] ${operation}_gateway_failed`, {
+      engine: 'gateway',
       error: error instanceof Error ? error.message : String(error),
     });
     return failedResult('gateway_failed');
@@ -193,10 +193,51 @@ export async function executeStreamingLlmRequest(
       }),
     },
     async () => {
+      if (PLAINTEXT_GATEWAY_OPERATIONS.has(options.operation) && options.callId && isGatewayLlmEnabled()) {
+        return runPlaintextOnGateway(options);
+      }
       logger.warn(`[${options.callId || 'unknown'}] ${options.operation}_skipped`, { reason: 'llm_unavailable' });
       return { ok: false, reason: 'litellm_credentials_missing' };
     },
   );
+}
+
+/**
+ * Without Claw, the detailed-summary canvas (and the template choice it uses) runs on the
+ * egress gateway like the summary, but its reply is decrypted here: the canvas, marked items
+ * and notifications are built from the text.
+ */
+const PLAINTEXT_GATEWAY_OPERATIONS = new Set([
+  'detailed_summary_generation',
+  'summary_template_selection',
+  'recording_summary_template_selection',
+]);
+
+async function runPlaintextOnGateway(options: ExecuteStreamingLlmOptions): Promise<StreamingLlmResult> {
+  const callId = options.callId || 'unknown';
+  try {
+    const call = await repositories.calls.findByExternalId(callId);
+    if (!call?.workspaceId) {
+      logger.warn(`[${callId}] ${options.operation}_skipped`, { reason: 'no_workspace' });
+      return { ok: false, reason: 'litellm_credentials_missing' };
+    }
+    const content = await runLlmOnGatewayForPlaintext({
+      operation: options.operation,
+      callId,
+      userPrompt: options.userPrompt,
+      ...(options.systemPrompt ? { systemPrompt: options.systemPrompt } : {}),
+      model: resolveSummaryModel(options.modelType),
+      workspaceId: call.workspaceId,
+      ...(options.abortSignal ? { abortSignal: options.abortSignal } : {}),
+    });
+    await emitFinalDelta(options, content);
+    return { ok: true, content };
+  } catch (error) {
+    if (options.abortSignal?.aborted) return { ok: false, reason: 'cancelled' };
+    const message = error instanceof Error ? error.message : String(error);
+    logger.warn(`[${callId}] ${options.operation}_gateway_failed`, { engine: 'gateway', error: message });
+    return { ok: false, reason: 'exception', error: `gateway: ${message}` };
+  }
 }
 
 async function emitFinalDelta(options: ExecuteStreamingLlmOptions, content: string): Promise<void> {
@@ -214,7 +255,7 @@ async function emitFinalDelta(options: ExecuteStreamingLlmOptions, content: stri
 // import { config } from '@/config/env';
 // import { extractAgentContent } from '@/utils/agentUtils';
 // import { logger } from '@/utils/logger';
-// import { repositories } from '@/database/repositories';
+import { repositories } from '@/database/repositories';
 // import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
 // import { OrgLLMServiceAccountPurpose } from '@xyne/shared';
 // import { runCallAiTask } from '@/services/callAi/callAiGateway';

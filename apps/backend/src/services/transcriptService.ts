@@ -1130,7 +1130,7 @@ export class TranscriptService {
       'call_summary',
       callId || 'unknown',
       undefined,
-      options.sealed ? { workspaceId: options.sealed.workspaceId, format: 'text', modelType } : undefined,
+      options.sealed ? { workspaceId: options.sealed.workspaceId, modelType } : undefined,
     );
 
     if (!extracted.ok) {
@@ -1157,8 +1157,8 @@ export class TranscriptService {
    * Generate a short AI title from transcript with explicit retry loop.
    */
   /**
-   * `options.sealed`: as for generateCallSummary. The gateway then shapes the title itself
-   * (first line, unquoted, at most 100 characters), since the backend gets only ciphertext.
+   * `options.sealed`: as for generateCallSummary. The title is then stored as the model wrote it,
+   * since the backend gets only ciphertext.
    */
   async generateCallTitle(
     transcript: string,
@@ -1175,7 +1175,7 @@ export class TranscriptService {
       'call_title',
       callId || 'unknown',
       undefined,
-      options.sealed ? { workspaceId: options.sealed.workspaceId, format: 'title', modelType } : undefined,
+      options.sealed ? { workspaceId: options.sealed.workspaceId, modelType } : undefined,
     );
 
     if (!extracted.ok) {

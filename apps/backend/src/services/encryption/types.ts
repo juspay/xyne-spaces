@@ -88,6 +88,12 @@ export type TransitCaller = {
    * refuses `clientKey` / `authToken` alongside it.
    */
   proxyClient?: { role: 'ingress' | 'egress'; version: number };
+  /**
+   * transformResponse for the egress proxy only: the result also carries `llmTarget`,
+   * `{ url: <LiteLLM base URL> + path, apiKey }` built by the encryption service and sealed
+   * for the proxy's `POST /llm`.
+   */
+  llmTarget?: { name: 'calllitellm'; path: string };
   clientKey?: string;
   authToken?: string;
   /**
@@ -194,6 +200,8 @@ export type ComposeItemResult = { unchanged: true } | { unchanged: false; value:
 
 export type TransitEncryptResult<T> = {
   body: T;
+  /** With `llmTarget` asked for: the sealed LiteLLM target, to relay to the egress proxy as is. */
+  llmTarget?: string;
 };
 
 export interface EncryptionProvider {
