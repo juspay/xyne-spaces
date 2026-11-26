@@ -10,7 +10,13 @@ jest.mock('@/bypassAcl/meetTranscriptServices', () => ({
   findMeetTranscriptUserIds: jest.fn(),
   findGoogleCalendarSourceId: jest.fn(),
   findMeetTranscriptCall: jest.fn(),
-  asMeetTranscriptOwner: jest.fn((_call: unknown, fn: () => Promise<unknown>) => fn()),
+  // As the real ones: run the operation (here the mocked services) as the call's owner.
+  storeMeetTranscriptAsOwner: jest.fn((call: { externalId: string }, entries: unknown) =>
+    jest.requireMock('@/services/transcriptService').transcriptService.storeRawTranscript(call.externalId, entries),
+  ),
+  processMeetTranscriptAsOwner: jest.fn((call: unknown) =>
+    jest.requireMock('@/services/noteTakerTranscriptService').noteTakerTranscriptService.processTranscript(call, true),
+  ),
 }));
 jest.mock('@/services/calendarTokenRefresh', () => ({ getCalendarCredentialsBySourceId: jest.fn() }));
 jest.mock('@/services/googleMeetApi', () => ({

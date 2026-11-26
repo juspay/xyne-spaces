@@ -11,7 +11,8 @@ export const SYNC_CALENDAR_FIRST = 'Please sync your calendar first';
 
 /** The server's message for a refused save, else a generic one. */
 function saveErrorMessage(error: unknown): string {
-  const data = (error as { response?: { data?: { error?: string; message?: string } } })?.response?.data;
+  const data = (error as { response?: { data?: { error?: string; message?: string } } })?.response
+    ?.data;
   if (data?.error === 'calendar_not_connected') return SYNC_CALENDAR_FIRST;
   return data?.message || 'Failed to save the setting. Please try again.';
 }

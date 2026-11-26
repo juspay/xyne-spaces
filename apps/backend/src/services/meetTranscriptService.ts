@@ -1,7 +1,8 @@
 import { AuthProvider } from '@xyne/shared';
 import {
   type MeetTranscriptCall,
-  asMeetTranscriptOwner,
+  processMeetTranscriptAsOwner,
+  storeMeetTranscriptAsOwner,
   findCalendarMeetCallsEnded,
   findCalendarMeetCallsLive,
   findCalendarMeetCallsStarting,
@@ -26,7 +27,7 @@ import {
 } from '@/services/googleMeetApi';
 import { noteTakerTranscriptService } from '@/services/noteTakerTranscriptService';
 import { redisService } from '@/services/redisService';
-import { type TranscriptEntry, transcriptService } from '@/services/transcriptService';
+import type { TranscriptEntry } from '@/services/transcriptService';
 import { logger } from '@/utils/logger';
 
 /**
@@ -251,7 +252,7 @@ class MeetTranscriptService {
     log: Record<string, unknown>,
   ): Promise<void> {
     try {
-      await asMeetTranscriptOwner(call, () => noteTakerTranscriptService.processTranscript(call, true));
+      await processMeetTranscriptAsOwner(call);
     } catch (error) {
       logger.error(`${TAG} process_failed`, { ...log, error: error instanceof Error ? error.message : String(error) });
     }
@@ -318,7 +319,7 @@ class MeetTranscriptService {
       }
       const full = await findMeetTranscriptCall(call.id);
       if (!full || full.transcript) return false;
-      await asMeetTranscriptOwner(full, () => transcriptService.storeRawTranscript(full.externalId, result.entries));
+      await storeMeetTranscriptAsOwner(full, result.entries);
       // Not awaited: the pipeline's AI outputs run on Claw and can take many
       // minutes, which would hold up the next passes. It attaches the transcript
       // first, so a later pass sees `full.transcript` and skips this meeting.

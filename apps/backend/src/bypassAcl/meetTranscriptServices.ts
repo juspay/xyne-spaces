@@ -2,6 +2,8 @@ import type { Call } from '@prisma/client';
 import { CallOrigin, CallStatus } from '@xyne/shared';
 import { db } from '@/database/client';
 import { getCalendarSourceType } from '@/database/repositories/externalSourceRepository';
+import { noteTakerTranscriptService } from '@/services/noteTakerTranscriptService';
+import { type TranscriptEntry, transcriptService } from '@/services/transcriptService';
 import { asService, asSystem } from './base';
 
 /**
@@ -96,18 +98,32 @@ export function findMeetTranscriptCall(id: string): Promise<Call | null> {
   );
 }
 
-/** Runs the transcript pipeline for a call on behalf of the user who owns it. */
-export function asMeetTranscriptOwner<T>(
-  call: Pick<Call, 'id' | 'createdByUserId' | 'workspaceId'>,
-  fn: () => Promise<T>,
-): Promise<T> {
+type OwnedCall = Pick<Call, 'id' | 'createdByUserId' | 'workspaceId'>;
+
+/** `fn` as the organiser of `call`, in its workspace. Not exported: callers use the named operations below. */
+function asMeetTranscriptOwner<T>(call: OwnedCall, reason: string, fn: () => Promise<T>): Promise<T> {
   if (!call.workspaceId) throw new Error(`Call ${call.id} has no workspace`);
-  return asService(
-    ['Call'],
+  return asService(['Call'], reason, call.createdByUserId, call.workspaceId, fn);
+}
+
+/** Saves a fetched Meet transcript on the organiser's call, as the organiser. */
+export function storeMeetTranscriptAsOwner(
+  call: OwnedCall & Pick<Call, 'externalId'>,
+  entries: TranscriptEntry[],
+): Promise<void> {
+  return asMeetTranscriptOwner(
+    call,
     "meet transcript worker has no HTTP tenant context; saves the organiser's own meeting transcript on their call",
-    call.createdByUserId,
-    call.workspaceId,
-    fn,
+    () => transcriptService.storeRawTranscript(call.externalId, entries),
+  );
+}
+
+/** Runs the transcript pipeline (attach, AI outputs, indexing) for a saved Meet transcript, as the organiser. */
+export function processMeetTranscriptAsOwner(call: Call): Promise<void> {
+  return asMeetTranscriptOwner(
+    call,
+    "meet transcript worker has no HTTP tenant context; runs the transcript pipeline on the organiser's own call",
+    () => noteTakerTranscriptService.processTranscript(call, true),
   );
 }
 
