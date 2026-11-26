@@ -478,7 +478,7 @@ export class App {
     // (runs as the system actor), and the '-backfill' suffix puts it behind backfillMountGuard.
     this.app.use('/api/admin/form-entity-value-backfill', formEntityValueBackfillRoutes);
     this.app.use('/api/admin/sdlc-repo-credential-backfill', sdlcRepoCredentialBackfillRoutes);
-    // Moves call routing saved on connections before per-desk settings onto the desks; every workspace.
+    // Moves call routing saved on connections before per-desk settings onto the desks; caller's workspace only.
     this.app.use('/api/admin/call-routing-backfill', callRoutingBackfillRoutes);
     // Same shape: the one-off SDLC multi-repo data migration spans every workspace,
     // so it opens its own runAsSystem scope rather than taking workspaceScopedRoute.
