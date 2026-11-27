@@ -1,0 +1,3286 @@
+{
+  "WARNING": "TEST VECTORS. The key pairs under `keys` were generated only for these vectors, are published in this repository, and are not secrets. Never configure them in any service. Written by make-vectors.mjs; edit that file, not this one.",
+  "format": {
+    "typ": "xyne-git-scope+jwt",
+    "alg": "ES256",
+    "version": 1,
+    "maxTokenLength": 16384,
+    "clockSkewSeconds": 60
+  },
+  "howToRead": {
+    "keys": "Named key pairs. A vector's `keys` maps kid to a name here: `name` is that pair's public key PEM, `name/private` its private key PEM.",
+    "verification": "verifyGitScope(token, { keys, now, expected }) must give `result`: the payload, or exactly that reason.",
+    "addresses": "`repo` is the list entry for a profile whose only address is `address`; null means the address is refused (the profile cannot get a list).",
+    "profiles": "`repos` is the profile's list (sorted, no repeats); null means building it fails.",
+    "requests": "parseGitGatewayRequest(method, target, hostMap) must give `result`.",
+    "decisions": "decideGitRequest on a verified list with these `repos` must give `result`."
+  },
+  "keys": {
+    "p256-a": {
+      "use": "TEST ONLY. Not a secret. Never configure this key anywhere.",
+      "kind": "p256-a",
+      "publicKeyPem": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEL8TvsXqpXtCxM04XnhW+u1vjhTTl\nnpxxnAcFdeuv/hKdrFcgYuKs26UfmyvKfgt3LfbLqvRaQDxMZnbm7q20Mw==\n-----END PUBLIC KEY-----\n",
+      "privateKeyPem": "-----BEGIN PRIVATE KEY-----\nMIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQglW8w8h7isJiztSnm\nFyC+2bGwHtoLtZGO2v95vlqFcY6hRANCAAQvxO+xeqle0LEzTheeFb67W+OFNOWe\nnHGcBwV166/+Ep2sVyBi4qzbpR+bK8p+C3ct9suq9FpAPExmduburbQz\n-----END PRIVATE KEY-----\n"
+    },
+    "p256-b": {
+      "use": "TEST ONLY. Not a secret. Never configure this key anywhere.",
+      "kind": "p256-b",
+      "publicKeyPem": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEmm9LIWW420mFWrG2b4GPSs+9ZJSM\nNy+yTLpjiJ2UikNU2maSAgsrm+DIM75h1MBLae3jl0YWIp/JupBJsE8lGw==\n-----END PUBLIC KEY-----\n",
+      "privateKeyPem": "-----BEGIN PRIVATE KEY-----\nMIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQg5e7Q4F1JniBMwaHv\nEG7YtqEpWuKoeVB3ucTngQRGUi2hRANCAASab0shZbjbSYVasbZvgY9Kz71klIw3\nL7JMumOInZSKQ1TaZpICCyub4MgzvmHUwEtp7eOXRhYin8m6kEmwTyUb\n-----END PRIVATE KEY-----\n"
+    },
+    "p384": {
+      "use": "TEST ONLY. Not a secret. Never configure this key anywhere.",
+      "kind": "p384",
+      "publicKeyPem": "-----BEGIN PUBLIC KEY-----\nMHYwEAYHKoZIzj0CAQYFK4EEACIDYgAEm1X//2bkKXuEV7ApkqVPQwsIvhKt8wNh\npVFC9GrBi3ikVy97rnTM8Gwt2/oPIw90atskmYqLGRrhmrJf0HnByBM4enLZcWo3\no4wfn+4WixYd17CbqQ9ExKz26fqyAmoC\n-----END PUBLIC KEY-----\n",
+      "privateKeyPem": "-----BEGIN PRIVATE KEY-----\nMIG2AgEAMBAGByqGSM49AgEGBSuBBAAiBIGeMIGbAgEBBDDae8ee1nN11KdJMiCa\n9xg4wkLzMi7CYKr6NlF3mZ4k/u5NTpMQSMu0lCC001vJEBGhZANiAASbVf//ZuQp\ne4RXsCmSpU9DCwi+Eq3zA2GlUUL0asGLeKRXL3uudMzwbC3b+g8jD3Rq2ySZiosZ\nGuGasl/QecHIEzh6ctlxajejjB+f7haLFh3XsJupD0TErPbp+rICagI=\n-----END PRIVATE KEY-----\n"
+    },
+    "rsa-2048": {
+      "use": "TEST ONLY. Not a secret. Never configure this key anywhere.",
+      "kind": "rsa-2048",
+      "publicKeyPem": "-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAobA0GvYULmLycZuhG/pd\nqrjF2u7aNioIpRHI7vwws0NELrFBLZ7zt/vTn2JXfcgOGXi0NucMUyoYjA7eNPZS\nu4f4damzu8iFL5DtLfHGMziFW9vJ7QATrNSquTmO0kjVX3Ejl7hRwTIQByzC0BRk\n+DRIjFMcmW8EmWVFgVUHs+lPRlWYs7uTpF8nAQkJfiuChn7cwxxdSSSuVSM82Qas\nMFJ92ovPP4/zBOhj5mhyo7pfeDbbYjJKlTgQ4cXyg28mt6NsoLWtaTTsiAWXWrID\nn+p1ybb2Ol/l27TkPi5DRNajMx0sHB60wGwKwc1Wo2rrmKq6yWVmrOHjIuyC+zOS\nWwIDAQAB\n-----END PUBLIC KEY-----\n",
+      "privateKeyPem": "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQChsDQa9hQuYvJx\nm6Eb+l2quMXa7to2KgilEcju/DCzQ0QusUEtnvO3+9OfYld9yA4ZeLQ25wxTKhiM\nDt409lK7h/h1qbO7yIUvkO0t8cYzOIVb28ntABOs1Kq5OY7SSNVfcSOXuFHBMhAH\nLMLQFGT4NEiMUxyZbwSZZUWBVQez6U9GVZizu5OkXycBCQl+K4KGftzDHF1JJK5V\nIzzZBqwwUn3ai88/j/ME6GPmaHKjul94NttiMkqVOBDhxfKDbya3o2ygta1pNOyI\nBZdasgOf6nXJtvY6X+XbtOQ+LkNE1qMzHSwcHrTAbArBzVajauuYqrrJZWas4eMi\n7IL7M5JbAgMBAAECggEAAWspWd802B9YHzUNWdB9h+TtH3mfAoCl6MTaLXaa+sep\nTnuRpdPSMZgNCEX1nI3nycNsWVr3mbcx1fC/dFmA6lJMFMQzZn9g48Tyv8dyRLrH\nOMIZ6HFqusZ25P8jSKcI8Dhu5oLgfMBysY1r/CVhqWfUBx8njhUSRkJENNlJIwPy\nb+9p96Voh/+FRl/KSjwdib3IPaY1Gts8ebBDoEKBMcNPHTVeiYyXbg5C9y5aBtKV\ncaC8xuCwncuJUWN6caPkFddh7UYv5jt+KwqB8MxI/l6eBckXQZak0qlRtU/1SCKm\n21NHmD8n/FQ+iprmcqo7qnrdHqWmAy638zpUXc+2wQKBgQDdT5jXYF9HYWwR3wXp\nrXHXYlT52UFTeA4SMMXZ/M5PMzBkxOHc7ZpppymMu+9ksixK7edg9xA6ZtNHqYUB\nPx1cWdW8usERXqP1+/ZBBTrU8lZyQqxjY2+7riFgy8dMxKaceoMqS2gjXijdlO+0\nJ+Aec+kyvgMzEFOmvan3qZKn+wKBgQC7CCrEalg2Q9Ef3Wt0ZT9VuSs639x7w5R1\ncQ7jS3dhxF3P1qxJLIDmIONWvwjEZ7YH+t6ocn5yzban3KEvGW32He3YkN5Fe3oU\nI5QFKxHD+sYmEzv5YeP186J8fMptVQf10CMrbm5W2CSDnU8kPASkwa6QuK0mVIzX\nWuU6q/jRIQKBgFpa9hbw9NWK0/mT6bEXLER4lCMR7VbrzCrnGNBAI+c4CgkKTQDL\nTWDXa+JWlI2zJNxOt0nidRCzDI3Ui0YQA6fB0b7lLJAv6Jc0kLzJKtToQB0UVZea\ncHLazCvd5vfTzgZTCpxI/zJ5bgvRk/Ak257zSgF6jInbn5uTEgLYi9TjAoGAZ561\nuw5EAwR9lw7gWqNBfKfTOJIQII2R8aMKoYkNAiB97Qk9eGjsnRL5gPTj0ZS3+CHY\nPDD6t3YbTVLiBisrjeC1Bnf0fUBUuVWgy2A6Pn7wSuX7I0ZFut0ZV6j3qa0jdN+0\nrHpJLVogmL6Nu0B5PiKEKW/3ljXfteyI9YGTn6ECgYEAnFy543qct8uatwcNUAPT\n7JG07IHrgQ43fjNofjdbNWSipmTRpnFL2a/02uL263XXGXI8E1Q9AF9m8c2fUDGY\nuCUVNIFm/vCmhOQHhcR9b3XTcLijknjpFnA/O55kbKbkasmyFdwq3pJfQ1+MLnD4\nF8KnYVzGnGxVkDvWkcM2ocY=\n-----END PRIVATE KEY-----\n"
+    }
+  },
+  "verification": [
+    {
+      "name": "valid-rw",
+      "about": "Two repositories, fetch and push.",
+      "token": "eyJhbGciOiJFUzI1NiIsInR5cCI6Inh5bmUtZ2l0LXNjb3BlK2p3dCIsImtpZCI6InNpZ25lci0xIn0.eyJ2IjoxLCJjbGFpbSI6InNieC03ZjNhOWMiLCJucyI6InNhbmRib3hlcyIsInRwbCI6ImFnZW50LXdvcmtzcGFjZS10ZW1wbGF0ZSIsInByb2ZpbGUiOiJleGFtcGxlLXByb2ZpbGUiLCJpYXQiOjE3ODk5OTk5OTAsImV4cCI6MTc5MDAwMzYwMCwicmVwb3MiOlt7InJlcG8iOiJiaXRidWNrZXQuZXhhbXBsZS5uZXQvcHJvai9zZXJ2aWNlIiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXRodWIuY29tL2V4YW1wbGUtb3JnL2FwcCIsImFjY2VzcyI6InJ3In1dfQ.NAPX63F9EWz25chKkaVBYLS133mn9q3sqrUWqWLKmMLQNgldMpQvBFNdDpZ8uUILDVOxATB2Xyi9L489s1nl4A",
+      "keys": {
+        "signer-1": "p256-a"
+      },
+      "now": 1790000000,
+      "expected": {
+        "claim": "sbx-7f3a9c",
+        "namespace": "sandboxes",
+        "template": "agent-workspace-template"
+      },
+      "result": {
+        "ok": true,
+        "payload": {
+          "v": 1,
+          "claim": "sbx-7f3a9c",
+          "ns": "sandboxes",
+          "tpl": "agent-workspace-template",
+          "profile": "example-profile",
+          "iat": 1789999990,
+          "exp": 1790003600,
+          "repos": [
+            {
+              "repo": "bitbucket.example.net/proj/service",
+              "access": "rw"
+            },
+            {
+              "repo": "github.com/example-org/app",
+              "access": "rw"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "valid-fetch-only-entry",
+      "about": "One entry is fetch only.",
+      "token": "eyJhbGciOiJFUzI1NiIsInR5cCI6Inh5bmUtZ2l0LXNjb3BlK2p3dCIsImtpZCI6InNpZ25lci0xIn0.eyJ2IjoxLCJjbGFpbSI6InNieC03ZjNhOWMiLCJucyI6InNhbmRib3hlcyIsInRwbCI6ImFnZW50LXdvcmtzcGFjZS10ZW1wbGF0ZSIsInByb2ZpbGUiOiJleGFtcGxlLXByb2ZpbGUiLCJpYXQiOjE3ODk5OTk5OTAsImV4cCI6MTc5MDAwMzYwMCwicmVwb3MiOlt7InJlcG8iOiJiaXRidWNrZXQuZXhhbXBsZS5uZXQvfmpkb2UvdG9vbHMiLCJhY2Nlc3MiOiJyIn0seyJyZXBvIjoiZ2l0aHViLmNvbS9leGFtcGxlLW9yZy9hcHAiLCJhY2Nlc3MiOiJydyJ9XX0.qzBaY8oJkkYqGltn3eAp71rHeewwb_Ut4Na1XsXJI3UGpuXNhlThgxySvy4uHX8gNagyf2mLHEtIE0bpnE7rlQ",
+      "keys": {
+        "signer-1": "p256-a"
+      },
+      "now": 1790000000,
+      "expected": {
+        "claim": "sbx-7f3a9c",
+        "namespace": "sandboxes",
+        "template": "agent-workspace-template"
+      },
+      "result": {
+        "ok": true,
+        "payload": {
+          "v": 1,
+          "claim": "sbx-7f3a9c",
+          "ns": "sandboxes",
+          "tpl": "agent-workspace-template",
+          "profile": "example-profile",
+          "iat": 1789999990,
+          "exp": 1790003600,
+          "repos": [
+            {
+              "repo": "bitbucket.example.net/~jdoe/tools",
+              "access": "r"
+            },
+            {
+              "repo": "github.com/example-org/app",
+              "access": "rw"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "valid-no-repos",
+      "about": "A profile without repositories: a valid list that allows nothing.",
+      "token": "eyJhbGciOiJFUzI1NiIsInR5cCI6Inh5bmUtZ2l0LXNjb3BlK2p3dCIsImtpZCI6InNpZ25lci0xIn0.eyJ2IjoxLCJjbGFpbSI6InNieC03ZjNhOWMiLCJucyI6InNhbmRib3hlcyIsInRwbCI6ImFnZW50LXdvcmtzcGFjZS10ZW1wbGF0ZSIsInByb2ZpbGUiOiJicm93c2VyIiwiaWF0IjoxNzg5OTk5OTkwLCJleHAiOjE3OTAwMDM2MDAsInJlcG9zIjpbXX0.T71WC0nC-1JPf8bRjvdPi7T7YTMnAWFmDF60j3WKTjNmXCjWf69m5Wo_nKul6VvD-45GWgeplo5d1wTOx2UMpQ",
+      "keys": {
+        "signer-1": "p256-a"
+      },
+      "now": 1790000000,
+      "expected": {
+        "claim": "sbx-7f3a9c",
+        "namespace": "sandboxes",
+        "template": "agent-workspace-template"
+      },
+      "result": {
+        "ok": true,
+        "payload": {
+          "v": 1,
+          "claim": "sbx-7f3a9c",
+          "ns": "sandboxes",
+          "tpl": "agent-workspace-template",
+          "profile": "browser",
+          "iat": 1789999990,
+          "exp": 1790003600,
+          "repos": []
+        }
+      }
+    },
+    {
+      "name": "valid-template-not-checked",
+      "about": "The verifier gives no template, so tpl is not compared.",
+      "token": "eyJhbGciOiJFUzI1NiIsInR5cCI6Inh5bmUtZ2l0LXNjb3BlK2p3dCIsImtpZCI6InNpZ25lci0xIn0.eyJ2IjoxLCJjbGFpbSI6InNieC03ZjNhOWMiLCJucyI6InNhbmRib3hlcyIsInRwbCI6ImFnZW50LXdvcmtzcGFjZS10ZW1wbGF0ZSIsInByb2ZpbGUiOiJleGFtcGxlLXByb2ZpbGUiLCJpYXQiOjE3ODk5OTk5OTAsImV4cCI6MTc5MDAwMzYwMCwicmVwb3MiOlt7InJlcG8iOiJiaXRidWNrZXQuZXhhbXBsZS5uZXQvcHJvai9zZXJ2aWNlIiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXRodWIuY29tL2V4YW1wbGUtb3JnL2FwcCIsImFjY2VzcyI6InJ3In1dfQ.NAPX63F9EWz25chKkaVBYLS133mn9q3sqrUWqWLKmMLQNgldMpQvBFNdDpZ8uUILDVOxATB2Xyi9L489s1nl4A",
+      "keys": {
+        "signer-1": "p256-a"
+      },
+      "now": 1790000000,
+      "expected": {
+        "claim": "sbx-7f3a9c",
+        "namespace": "sandboxes"
+      },
+      "result": {
+        "ok": true,
+        "payload": {
+          "v": 1,
+          "claim": "sbx-7f3a9c",
+          "ns": "sandboxes",
+          "tpl": "agent-workspace-template",
+          "profile": "example-profile",
+          "iat": 1789999990,
+          "exp": 1790003600,
+          "repos": [
+            {
+              "repo": "bitbucket.example.net/proj/service",
+              "access": "rw"
+            },
+            {
+              "repo": "github.com/example-org/app",
+              "access": "rw"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "valid-member-order-and-whitespace",
+      "about": "Member order and JSON whitespace are free, in the header and in the payload.",
+      "token": "eyAia2lkIjogInNpZ25lci0xIiwKICAidHlwIjogInh5bmUtZ2l0LXNjb3BlK2p3dCIsICJhbGciOiAiRVMyNTYiIH0.ewogICJyZXBvcyI6IFsKICAgIHsKICAgICAgInJlcG8iOiAiYml0YnVja2V0LmV4YW1wbGUubmV0L3Byb2ovc2VydmljZSIsCiAgICAgICJhY2Nlc3MiOiAicnciCiAgICB9LAogICAgewogICAgICAicmVwbyI6ICJnaXRodWIuY29tL2V4YW1wbGUtb3JnL2FwcCIsCiAgICAgICJhY2Nlc3MiOiAicnciCiAgICB9CiAgXSwKICAiZXhwIjogMTc5MDAwMzYwMCwKICAiaWF0IjogMTc4OTk5OTk5MCwKICAicHJvZmlsZSI6ICJleGFtcGxlLXByb2ZpbGUiLAogICJ0cGwiOiAiYWdlbnQtd29ya3NwYWNlLXRlbXBsYXRlIiwKICAibnMiOiAic2FuZGJveGVzIiwKICAiY2xhaW0iOiAic2J4LTdmM2E5YyIsCiAgInYiOiAxCn0.apoExqgQcW85ejCgjN_Pqq3tLwgkGLyAavhdABqkexQVKPIASemZDV7tenNaK1SNopkeRxYItqrOCDEBv6H5wA",
+      "keys": {
+        "signer-1": "p256-a"
+      },
+      "now": 1790000000,
+      "expected": {
+        "claim": "sbx-7f3a9c",
+        "namespace": "sandboxes",
+        "template": "agent-workspace-template"
+      },
+      "result": {
+        "ok": true,
+        "payload": {
+          "v": 1,
+          "claim": "sbx-7f3a9c",
+          "ns": "sandboxes",
+          "tpl": "agent-workspace-template",
+          "profile": "example-profile",
+          "iat": 1789999990,
+          "exp": 1790003600,
+          "repos": [
+            {
+              "repo": "bitbucket.example.net/proj/service",
+              "access": "rw"
+            },
+            {
+              "repo": "github.com/example-org/app",
+              "access": "rw"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "valid-last-second",
+      "about": "now = exp - 1.",
+      "token": "eyJhbGciOiJFUzI1NiIsInR5cCI6Inh5bmUtZ2l0LXNjb3BlK2p3dCIsImtpZCI6InNpZ25lci0xIn0.eyJ2IjoxLCJjbGFpbSI6InNieC03ZjNhOWMiLCJucyI6InNhbmRib3hlcyIsInRwbCI6ImFnZW50LXdvcmtzcGFjZS10ZW1wbGF0ZSIsInByb2ZpbGUiOiJleGFtcGxlLXByb2ZpbGUiLCJpYXQiOjE3ODk5OTk5OTAsImV4cCI6MTc5MDAwMzYwMCwicmVwb3MiOlt7InJlcG8iOiJiaXRidWNrZXQuZXhhbXBsZS5uZXQvcHJvai9zZXJ2aWNlIiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXRodWIuY29tL2V4YW1wbGUtb3JnL2FwcCIsImFjY2VzcyI6InJ3In1dfQ.NAPX63F9EWz25chKkaVBYLS133mn9q3sqrUWqWLKmMLQNgldMpQvBFNdDpZ8uUILDVOxATB2Xyi9L489s1nl4A",
+      "keys": {
+        "signer-1": "p256-a"
+      },
+      "now": 1790003599,
+      "expected": {
+        "claim": "sbx-7f3a9c",
+        "namespace": "sandboxes",
+        "template": "agent-workspace-template"
+      },
+      "result": {
+        "ok": true,
+        "payload": {
+          "v": 1,
+          "claim": "sbx-7f3a9c",
+          "ns": "sandboxes",
+          "tpl": "agent-workspace-template",
+          "profile": "example-profile",
+          "iat": 1789999990,
+          "exp": 1790003600,
+          "repos": [
+            {
+              "repo": "bitbucket.example.net/proj/service",
+              "access": "rw"
+            },
+            {
+              "repo": "github.com/example-org/app",
+              "access": "rw"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "valid-iat-at-skew-limit",
+      "about": "iat is exactly 60 seconds ahead of the verifier's clock.",
+      "token": "eyJhbGciOiJFUzI1NiIsInR5cCI6Inh5bmUtZ2l0LXNjb3BlK2p3dCIsImtpZCI6InNpZ25lci0xIn0.eyJ2IjoxLCJjbGFpbSI6InNieC03ZjNhOWMiLCJucyI6InNhbmRib3hlcyIsInRwbCI6ImFnZW50LXdvcmtzcGFjZS10ZW1wbGF0ZSIsInByb2ZpbGUiOiJleGFtcGxlLXByb2ZpbGUiLCJpYXQiOjE3OTAwMDAwNjAsImV4cCI6MTc5MDAwMzYwMCwicmVwb3MiOlt7InJlcG8iOiJiaXRidWNrZXQuZXhhbXBsZS5uZXQvcHJvai9zZXJ2aWNlIiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXRodWIuY29tL2V4YW1wbGUtb3JnL2FwcCIsImFjY2VzcyI6InJ3In1dfQ.A7q9o6x84KEm8PTwXVO-Le1wDM4gVXHXA14IRvm5fey8sebG_Xh58huvHfBwQfnWnIHzzsCvNHgs2BcFSHskHw",
+      "keys": {
+        "signer-1": "p256-a"
+      },
+      "now": 1790000000,
+      "expected": {
+        "claim": "sbx-7f3a9c",
+        "namespace": "sandboxes",
+        "template": "agent-workspace-template"
+      },
+      "result": {
+        "ok": true,
+        "payload": {
+          "v": 1,
+          "claim": "sbx-7f3a9c",
+          "ns": "sandboxes",
+          "tpl": "agent-workspace-template",
+          "profile": "example-profile",
+          "iat": 1790000060,
+          "exp": 1790003600,
+          "repos": [
+            {
+              "repo": "bitbucket.example.net/proj/service",
+              "access": "rw"
+            },
+            {
+              "repo": "github.com/example-org/app",
+              "access": "rw"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "valid-second-key",
+      "about": "Signed with a second key under its own kid; the verifier holds both (key rotation).",
+      "token": "eyJhbGciOiJFUzI1NiIsInR5cCI6Inh5bmUtZ2l0LXNjb3BlK2p3dCIsImtpZCI6InNpZ25lci0yIn0.eyJ2IjoxLCJjbGFpbSI6InNieC03ZjNhOWMiLCJucyI6InNhbmRib3hlcyIsInRwbCI6ImFnZW50LXdvcmtzcGFjZS10ZW1wbGF0ZSIsInByb2ZpbGUiOiJleGFtcGxlLXByb2ZpbGUiLCJpYXQiOjE3ODk5OTk5OTAsImV4cCI6MTc5MDAwMzYwMCwicmVwb3MiOlt7InJlcG8iOiJiaXRidWNrZXQuZXhhbXBsZS5uZXQvcHJvai9zZXJ2aWNlIiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXRodWIuY29tL2V4YW1wbGUtb3JnL2FwcCIsImFjY2VzcyI6InJ3In1dfQ.OrV-NFY6oXg6BSDFwLLgqCZsgaPoBcuD7uFbC8v-PR89qhLK9L56wQ6WZss-ws3lclifD9pQK1TSTqcRVUy5Jw",
+      "keys": {
+        "signer-1": "p256-a",
+        "signer-2": "p256-b"
+      },
+      "now": 1790000000,
+      "expected": {
+        "claim": "sbx-7f3a9c",
+        "namespace": "sandboxes",
+        "template": "agent-workspace-template"
+      },
+      "result": {
+        "ok": true,
+        "payload": {
+          "v": 1,
+          "claim": "sbx-7f3a9c",
+          "ns": "sandboxes",
+          "tpl": "agent-workspace-template",
+          "profile": "example-profile",
+          "iat": 1789999990,
+          "exp": 1790003600,
+          "repos": [
+            {
+              "repo": "bitbucket.example.net/proj/service",
+              "access": "rw"
+            },
+            {
+              "repo": "github.com/example-org/app",
+              "access": "rw"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "malformed-empty",
+      "about": "The empty string.",
+      "token": "",
+      "keys": {
+        "signer-1": "p256-a"
+      },
+      "now": 1790000000,
+      "expected": {
+        "claim": "sbx-7f3a9c",
+        "namespace": "sandboxes",
+        "template": "agent-workspace-template"
+      },
+      "result": {
+        "ok": false,
+        "reason": "malformed"
+      }
+    },
+    {
+      "name": "malformed-two-parts",
+      "about": "No signature part.",
+      "token": "eyJhbGciOiJFUzI1NiIsInR5cCI6Inh5bmUtZ2l0LXNjb3BlK2p3dCIsImtpZCI6InNpZ25lci0xIn0.eyJ2IjoxLCJjbGFpbSI6InNieC03ZjNhOWMiLCJucyI6InNhbmRib3hlcyIsInRwbCI6ImFnZW50LXdvcmtzcGFjZS10ZW1wbGF0ZSIsInByb2ZpbGUiOiJleGFtcGxlLXByb2ZpbGUiLCJpYXQiOjE3ODk5OTk5OTAsImV4cCI6MTc5MDAwMzYwMCwicmVwb3MiOlt7InJlcG8iOiJiaXRidWNrZXQuZXhhbXBsZS5uZXQvcHJvai9zZXJ2aWNlIiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXRodWIuY29tL2V4YW1wbGUtb3JnL2FwcCIsImFjY2VzcyI6InJ3In1dfQ",
+      "keys": {
+        "signer-1": "p256-a"
+      },
+      "now": 1790000000,
+      "expected": {
+        "claim": "sbx-7f3a9c",
+        "namespace": "sandboxes",
+        "template": "agent-workspace-template"
+      },
+      "result": {
+        "ok": false,
+        "reason": "malformed"
+      }
+    },
+    {
+      "name": "malformed-four-parts",
+      "about": "A fourth part.",
+      "token": "eyJhbGciOiJFUzI1NiIsInR5cCI6Inh5bmUtZ2l0LXNjb3BlK2p3dCIsImtpZCI6InNpZ25lci0xIn0.eyJ2IjoxLCJjbGFpbSI6InNieC03ZjNhOWMiLCJucyI6InNhbmRib3hlcyIsInRwbCI6ImFnZW50LXdvcmtzcGFjZS10ZW1wbGF0ZSIsInByb2ZpbGUiOiJleGFtcGxlLXByb2ZpbGUiLCJpYXQiOjE3ODk5OTk5OTAsImV4cCI6MTc5MDAwMzYwMCwicmVwb3MiOlt7InJlcG8iOiJiaXRidWNrZXQuZXhhbXBsZS5uZXQvcHJvai9zZXJ2aWNlIiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXRodWIuY29tL2V4YW1wbGUtb3JnL2FwcCIsImFjY2VzcyI6InJ3In1dfQ.NAPX63F9EWz25chKkaVBYLS133mn9q3sqrUWqWLKmMLQNgldMpQvBFNdDpZ8uUILDVOxATB2Xyi9L489s1nl4A.AAAA",
+      "keys": {
+        "signer-1": "p256-a"
+      },
+      "now": 1790000000,
+      "expected": {
+        "claim": "sbx-7f3a9c",
+        "namespace": "sandboxes",
+        "template": "agent-workspace-template"
+      },
+      "result": {
+        "ok": false,
+        "reason": "malformed"
+      }
+    },
+    {
+      "name": "malformed-empty-signature",
+      "about": "ES256 header with an empty signature part.",
+      "token": "eyJhbGciOiJFUzI1NiIsInR5cCI6Inh5bmUtZ2l0LXNjb3BlK2p3dCIsImtpZCI6InNpZ25lci0xIn0.eyJ2IjoxLCJjbGFpbSI6InNieC03ZjNhOWMiLCJucyI6InNhbmRib3hlcyIsInRwbCI6ImFnZW50LXdvcmtzcGFjZS10ZW1wbGF0ZSIsInByb2ZpbGUiOiJleGFtcGxlLXByb2ZpbGUiLCJpYXQiOjE3ODk5OTk5OTAsImV4cCI6MTc5MDAwMzYwMCwicmVwb3MiOlt7InJlcG8iOiJiaXRidWNrZXQuZXhhbXBsZS5uZXQvcHJvai9zZXJ2aWNlIiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXRodWIuY29tL2V4YW1wbGUtb3JnL2FwcCIsImFjY2VzcyI6InJ3In1dfQ.",
+      "keys": {
+        "signer-1": "p256-a"
+      },
+      "now": 1790000000,
+      "expected": {
+        "claim": "sbx-7f3a9c",
+        "namespace": "sandboxes",
+        "template": "agent-workspace-template"
+      },
+      "result": {
+        "ok": false,
+        "reason": "malformed"
+      }
+    },
+    {
+      "name": "malformed-trailing-newline",
+      "about": "A valid token followed by a line feed.",
+      "token": "eyJhbGciOiJFUzI1NiIsInR5cCI6Inh5bmUtZ2l0LXNjb3BlK2p3dCIsImtpZCI6InNpZ25lci0xIn0.eyJ2IjoxLCJjbGFpbSI6InNieC03ZjNhOWMiLCJucyI6InNhbmRib3hlcyIsInRwbCI6ImFnZW50LXdvcmtzcGFjZS10ZW1wbGF0ZSIsInByb2ZpbGUiOiJleGFtcGxlLXByb2ZpbGUiLCJpYXQiOjE3ODk5OTk5OTAsImV4cCI6MTc5MDAwMzYwMCwicmVwb3MiOlt7InJlcG8iOiJiaXRidWNrZXQuZXhhbXBsZS5uZXQvcHJvai9zZXJ2aWNlIiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXRodWIuY29tL2V4YW1wbGUtb3JnL2FwcCIsImFjY2VzcyI6InJ3In1dfQ.NAPX63F9EWz25chKkaVBYLS133mn9q3sqrUWqWLKmMLQNgldMpQvBFNdDpZ8uUILDVOxATB2Xyi9L489s1nl4A\n",
+      "keys": {
+        "signer-1": "p256-a"
+      },
+      "now": 1790000000,
+      "expected": {
+        "claim": "sbx-7f3a9c",
+        "namespace": "sandboxes",
+        "template": "agent-workspace-template"
+      },
+      "result": {
+        "ok": false,
+        "reason": "malformed"
+      }
+    },
+    {
+      "name": "malformed-padding",
+      "about": "A valid token whose signature has '=' padding.",
+      "token": "eyJhbGciOiJFUzI1NiIsInR5cCI6Inh5bmUtZ2l0LXNjb3BlK2p3dCIsImtpZCI6InNpZ25lci0xIn0.eyJ2IjoxLCJjbGFpbSI6InNieC03ZjNhOWMiLCJucyI6InNhbmRib3hlcyIsInRwbCI6ImFnZW50LXdvcmtzcGFjZS10ZW1wbGF0ZSIsInByb2ZpbGUiOiJleGFtcGxlLXByb2ZpbGUiLCJpYXQiOjE3ODk5OTk5OTAsImV4cCI6MTc5MDAwMzYwMCwicmVwb3MiOlt7InJlcG8iOiJiaXRidWNrZXQuZXhhbXBsZS5uZXQvcHJvai9zZXJ2aWNlIiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXRodWIuY29tL2V4YW1wbGUtb3JnL2FwcCIsImFjY2VzcyI6InJ3In1dfQ.NAPX63F9EWz25chKkaVBYLS133mn9q3sqrUWqWLKmMLQNgldMpQvBFNdDpZ8uUILDVOxATB2Xyi9L489s1nl4A==",
+      "keys": {
+        "signer-1": "p256-a"
+      },
+      "now": 1790000000,
+      "expected": {
+        "claim": "sbx-7f3a9c",
+        "namespace": "sandboxes",
+        "template": "agent-workspace-template"
+      },
+      "result": {
+        "ok": false,
+        "reason": "malformed"
+      }
+    },
+    {
+      "name": "malformed-non-canonical-base64",
+      "about": "The signature's last character changed to one that decodes to the same 64 bytes (non-zero unused bits).",
+      "token": "eyJhbGciOiJFUzI1NiIsInR5cCI6Inh5bmUtZ2l0LXNjb3BlK2p3dCIsImtpZCI6InNpZ25lci0xIn0.eyJ2IjoxLCJjbGFpbSI6InNieC03ZjNhOWMiLCJucyI6InNhbmRib3hlcyIsInRwbCI6ImFnZW50LXdvcmtzcGFjZS10ZW1wbGF0ZSIsInByb2ZpbGUiOiJleGFtcGxlLXByb2ZpbGUiLCJpYXQiOjE3ODk5OTk5OTAsImV4cCI6MTc5MDAwMzYwMCwicmVwb3MiOlt7InJlcG8iOiJiaXRidWNrZXQuZXhhbXBsZS5uZXQvcHJvai9zZXJ2aWNlIiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXRodWIuY29tL2V4YW1wbGUtb3JnL2FwcCIsImFjY2VzcyI6InJ3In1dfQ.NAPX63F9EWz25chKkaVBYLS133mn9q3sqrUWqWLKmMLQNgldMpQvBFNdDpZ8uUILDVOxATB2Xyi9L489s1nl4B",
+      "keys": {
+        "signer-1": "p256-a"
+      },
+      "now": 1790000000,
+      "expected": {
+        "claim": "sbx-7f3a9c",
+        "namespace": "sandboxes",
+        "template": "agent-workspace-template"
+      },
+      "result": {
+        "ok": false,
+        "reason": "malformed"
+      }
+    },
+    {
+      "name": "malformed-header-not-json",
+      "about": "The header is not JSON.",
+      "token": "bm90IGpzb24.eyJ2IjoxLCJjbGFpbSI6InNieC03ZjNhOWMiLCJucyI6InNhbmRib3hlcyIsInRwbCI6ImFnZW50LXdvcmtzcGFjZS10ZW1wbGF0ZSIsInByb2ZpbGUiOiJleGFtcGxlLXByb2ZpbGUiLCJpYXQiOjE3ODk5OTk5OTAsImV4cCI6MTc5MDAwMzYwMCwicmVwb3MiOlt7InJlcG8iOiJiaXRidWNrZXQuZXhhbXBsZS5uZXQvcHJvai9zZXJ2aWNlIiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXRodWIuY29tL2V4YW1wbGUtb3JnL2FwcCIsImFjY2VzcyI6InJ3In1dfQ.8DeAMUtf-KNOAE_Ty-CY6S5z4lV6OdvEJ3IUur1y_cYHlaqZBriCh5n-ECRzP-Ym7QlW4dveAM4rnX7u_bezNA",
+      "keys": {
+        "signer-1": "p256-a"
+      },
+      "now": 1790000000,
+      "expected": {
+        "claim": "sbx-7f3a9c",
+        "namespace": "sandboxes",
+        "template": "agent-workspace-template"
+      },
+      "result": {
+        "ok": false,
+        "reason": "malformed"
+      }
+    },
+    {
+      "name": "malformed-header-not-an-object",
+      "about": "The header is a JSON array.",
+      "token": "WyJFUzI1NiJd.eyJ2IjoxLCJjbGFpbSI6InNieC03ZjNhOWMiLCJucyI6InNhbmRib3hlcyIsInRwbCI6ImFnZW50LXdvcmtzcGFjZS10ZW1wbGF0ZSIsInByb2ZpbGUiOiJleGFtcGxlLXByb2ZpbGUiLCJpYXQiOjE3ODk5OTk5OTAsImV4cCI6MTc5MDAwMzYwMCwicmVwb3MiOlt7InJlcG8iOiJiaXRidWNrZXQuZXhhbXBsZS5uZXQvcHJvai9zZXJ2aWNlIiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXRodWIuY29tL2V4YW1wbGUtb3JnL2FwcCIsImFjY2VzcyI6InJ3In1dfQ.5BhnQ3Asw1km0ote_XhyZsg0y-FOjtlgiGzJwD9pwM0u-H_S_NluOD2sK8iFMFCqNWNk_md-GEgqOlrsfBXGqA",
+      "keys": {
+        "signer-1": "p256-a"
+      },
+      "now": 1790000000,
+      "expected": {
+        "claim": "sbx-7f3a9c",
+        "namespace": "sandboxes",
+        "template": "agent-workspace-template"
+      },
+      "result": {
+        "ok": false,
+        "reason": "malformed"
+      }
+    },
+    {
+      "name": "malformed-no-kid",
+      "about": "The header has no kid.",
+      "token": "eyJhbGciOiJFUzI1NiIsInR5cCI6Inh5bmUtZ2l0LXNjb3BlK2p3dCJ9.eyJ2IjoxLCJjbGFpbSI6InNieC03ZjNhOWMiLCJucyI6InNhbmRib3hlcyIsInRwbCI6ImFnZW50LXdvcmtzcGFjZS10ZW1wbGF0ZSIsInByb2ZpbGUiOiJleGFtcGxlLXByb2ZpbGUiLCJpYXQiOjE3ODk5OTk5OTAsImV4cCI6MTc5MDAwMzYwMCwicmVwb3MiOlt7InJlcG8iOiJiaXRidWNrZXQuZXhhbXBsZS5uZXQvcHJvai9zZXJ2aWNlIiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXRodWIuY29tL2V4YW1wbGUtb3JnL2FwcCIsImFjY2VzcyI6InJ3In1dfQ.rVdOIma2Egigv2E0VWTVeIwtqwfGVmkXuqA7xFbMJ_zij6W2O-TRQ70TeGodYwAPxxEaQJn-GOrgPJAb1fSj_w",
+      "keys": {
+        "signer-1": "p256-a"
+      },
+      "now": 1790000000,
+      "expected": {
+        "claim": "sbx-7f3a9c",
+        "namespace": "sandboxes",
+        "template": "agent-workspace-template"
+      },
+      "result": {
+        "ok": false,
+        "reason": "malformed"
+      }
+    },
+    {
+      "name": "malformed-embedded-jwk",
+      "about": "The header carries its own public key (jwk) and the token is signed with it. No header member other than alg, typ, kid is allowed.",
+      "token": "eyJhbGciOiJFUzI1NiIsInR5cCI6Inh5bmUtZ2l0LXNjb3BlK2p3dCIsImtpZCI6InNpZ25lci0xIiwiandrIjp7Imt0eSI6IkVDIiwieCI6Im1tOUxJV1c0MjBtRldyRzJiNEdQU3MtOVpKU01OeS15VExwamlKMlVpa00iLCJ5IjoiVk5wbWtnSUxLNXZneURPLVlkVEFTMm50NDVkR0ZpS2Z5YnFRU2JCUEpScyIsImNydiI6IlAtMjU2In19.eyJ2IjoxLCJjbGFpbSI6InNieC03ZjNhOWMiLCJucyI6InNhbmRib3hlcyIsInRwbCI6ImFnZW50LXdvcmtzcGFjZS10ZW1wbGF0ZSIsInByb2ZpbGUiOiJleGFtcGxlLXByb2ZpbGUiLCJpYXQiOjE3ODk5OTk5OTAsImV4cCI6MTc5MDAwMzYwMCwicmVwb3MiOlt7InJlcG8iOiJiaXRidWNrZXQuZXhhbXBsZS5uZXQvcHJvai9zZXJ2aWNlIiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXRodWIuY29tL2V4YW1wbGUtb3JnL2FwcCIsImFjY2VzcyI6InJ3In1dfQ.TTy43fFmINmzPv4ezf65zTiFhb8NkYiXGdxHvNnXtRPhB0ijlkGxYidp3EeSdqs8UYg0hZT3ZHijPzZ8-G2fEA",
+      "keys": {
+        "signer-1": "p256-a"
+      },
+      "now": 1790000000,
+      "expected": {
+        "claim": "sbx-7f3a9c",
+        "namespace": "sandboxes",
+        "template": "agent-workspace-template"
+      },
+      "result": {
+        "ok": false,
+        "reason": "malformed"
+      }
+    },
+    {
+      "name": "malformed-crit",
+      "about": "The header has a crit member.",
+      "token": "eyJhbGciOiJFUzI1NiIsInR5cCI6Inh5bmUtZ2l0LXNjb3BlK2p3dCIsImtpZCI6InNpZ25lci0xIiwiY3JpdCI6WyJleHAiXX0.eyJ2IjoxLCJjbGFpbSI6InNieC03ZjNhOWMiLCJucyI6InNhbmRib3hlcyIsInRwbCI6ImFnZW50LXdvcmtzcGFjZS10ZW1wbGF0ZSIsInByb2ZpbGUiOiJleGFtcGxlLXByb2ZpbGUiLCJpYXQiOjE3ODk5OTk5OTAsImV4cCI6MTc5MDAwMzYwMCwicmVwb3MiOlt7InJlcG8iOiJiaXRidWNrZXQuZXhhbXBsZS5uZXQvcHJvai9zZXJ2aWNlIiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXRodWIuY29tL2V4YW1wbGUtb3JnL2FwcCIsImFjY2VzcyI6InJ3In1dfQ.5uC1N896n1cwQBSwHU8jqa9tWWE9QWY1-D859K-aRVm5IC3D-kzUoHCtXHiM5gfMBBnomHI2dxz1enw79c1b9Q",
+      "keys": {
+        "signer-1": "p256-a"
+      },
+      "now": 1790000000,
+      "expected": {
+        "claim": "sbx-7f3a9c",
+        "namespace": "sandboxes",
+        "template": "agent-workspace-template"
+      },
+      "result": {
+        "ok": false,
+        "reason": "malformed"
+      }
+    },
+    {
+      "name": "too-large-by-one",
+      "about": "A correctly signed token of 16385 characters, one more than the limit.",
+      "token": "eyJhbGciOiJFUzI1NiIsInR5cCI6Inh5bmUtZ2l0LXNjb3BlK2p3dCIsImtpZCI6InNpZ25lci0xeHgifQ.eyJ2IjoxLCJjbGFpbSI6InNieC03ZjNhOWMiLCJucyI6InNhbmRib3hlcyIsInRwbCI6ImFnZW50LXdvcmtzcGFjZS10ZW1wbGF0ZSIsInByb2ZpbGUiOiJwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHAiLCJpYXQiOjE3ODk5OTk5OTAsImV4cCI6MTc5MDAwMzYwMCwicmVwb3MiOlt7InJlcG8iOiJnaXQuZXhhbXBsZS5jb20vdGVhbS0wMDAvc2VydmljZS0wMDAiLCJhY2Nlc3MiOiJydyJ9LHsicmVwbyI6ImdpdC5leGFtcGxlLmNvbS90ZWFtLTAwMS9zZXJ2aWNlLTAwMSIsImFjY2VzcyI6InJ3In0seyJyZXBvIjoiZ2l0LmV4YW1wbGUuY29tL3RlYW0tMDAyL3NlcnZpY2UtMDAyIiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXQuZXhhbXBsZS5jb20vdGVhbS0wMDMvc2VydmljZS0wMDMiLCJhY2Nlc3MiOiJydyJ9LHsicmVwbyI6ImdpdC5leGFtcGxlLmNvbS90ZWFtLTAwNC9zZXJ2aWNlLTAwNCIsImFjY2VzcyI6InJ3In0seyJyZXBvIjoiZ2l0LmV4YW1wbGUuY29tL3RlYW0tMDA1L3NlcnZpY2UtMDA1IiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXQuZXhhbXBsZS5jb20vdGVhbS0wMDYvc2VydmljZS0wMDYiLCJhY2Nlc3MiOiJydyJ9LHsicmVwbyI6ImdpdC5leGFtcGxlLmNvbS90ZWFtLTAwNy9zZXJ2aWNlLTAwNyIsImFjY2VzcyI6InJ3In0seyJyZXBvIjoiZ2l0LmV4YW1wbGUuY29tL3RlYW0tMDA4L3NlcnZpY2UtMDA4IiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXQuZXhhbXBsZS5jb20vdGVhbS0wMDkvc2VydmljZS0wMDkiLCJhY2Nlc3MiOiJydyJ9LHsicmVwbyI6ImdpdC5leGFtcGxlLmNvbS90ZWFtLTAxMC9zZXJ2aWNlLTAxMCIsImFjY2VzcyI6InJ3In0seyJyZXBvIjoiZ2l0LmV4YW1wbGUuY29tL3RlYW0tMDExL3NlcnZpY2UtMDExIiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXQuZXhhbXBsZS5jb20vdGVhbS0wMTIvc2VydmljZS0wMTIiLCJhY2Nlc3MiOiJydyJ9LHsicmVwbyI6ImdpdC5leGFtcGxlLmNvbS90ZWFtLTAxMy9zZXJ2aWNlLTAxMyIsImFjY2VzcyI6InJ3In0seyJyZXBvIjoiZ2l0LmV4YW1wbGUuY29tL3RlYW0tMDE0L3NlcnZpY2UtMDE0IiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXQuZXhhbXBsZS5jb20vdGVhbS0wMTUvc2VydmljZS0wMTUiLCJhY2Nlc3MiOiJydyJ9LHsicmVwbyI6ImdpdC5leGFtcGxlLmNvbS90ZWFtLTAxNi9zZXJ2aWNlLTAxNiIsImFjY2VzcyI6InJ3In0seyJyZXBvIjoiZ2l0LmV4YW1wbGUuY29tL3RlYW0tMDE3L3NlcnZpY2UtMDE3IiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXQuZXhhbXBsZS5jb20vdGVhbS0wMTgvc2VydmljZS0wMTgiLCJhY2Nlc3MiOiJydyJ9LHsicmVwbyI6ImdpdC5leGFtcGxlLmNvbS90ZWFtLTAxOS9zZXJ2aWNlLTAxOSIsImFjY2VzcyI6InJ3In0seyJyZXBvIjoiZ2l0LmV4YW1wbGUuY29tL3RlYW0tMDIwL3NlcnZpY2UtMDIwIiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXQuZXhhbXBsZS5jb20vdGVhbS0wMjEvc2VydmljZS0wMjEiLCJhY2Nlc3MiOiJydyJ9LHsicmVwbyI6ImdpdC5leGFtcGxlLmNvbS90ZWFtLTAyMi9zZXJ2aWNlLTAyMiIsImFjY2VzcyI6InJ3In0seyJyZXBvIjoiZ2l0LmV4YW1wbGUuY29tL3RlYW0tMDIzL3NlcnZpY2UtMDIzIiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXQuZXhhbXBsZS5jb20vdGVhbS0wMjQvc2VydmljZS0wMjQiLCJhY2Nlc3MiOiJydyJ9LHsicmVwbyI6ImdpdC5leGFtcGxlLmNvbS90ZWFtLTAyNS9zZXJ2aWNlLTAyNSIsImFjY2VzcyI6InJ3In0seyJyZXBvIjoiZ2l0LmV4YW1wbGUuY29tL3RlYW0tMDI2L3NlcnZpY2UtMDI2IiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXQuZXhhbXBsZS5jb20vdGVhbS0wMjcvc2VydmljZS0wMjciLCJhY2Nlc3MiOiJydyJ9LHsicmVwbyI6ImdpdC5leGFtcGxlLmNvbS90ZWFtLTAyOC9zZXJ2aWNlLTAyOCIsImFjY2VzcyI6InJ3In0seyJyZXBvIjoiZ2l0LmV4YW1wbGUuY29tL3RlYW0tMDI5L3NlcnZpY2UtMDI5IiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXQuZXhhbXBsZS5jb20vdGVhbS0wMzAvc2VydmljZS0wMzAiLCJhY2Nlc3MiOiJydyJ9LHsicmVwbyI6ImdpdC5leGFtcGxlLmNvbS90ZWFtLTAzMS9zZXJ2aWNlLTAzMSIsImFjY2VzcyI6InJ3In0seyJyZXBvIjoiZ2l0LmV4YW1wbGUuY29tL3RlYW0tMDMyL3NlcnZpY2UtMDMyIiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXQuZXhhbXBsZS5jb20vdGVhbS0wMzMvc2VydmljZS0wMzMiLCJhY2Nlc3MiOiJydyJ9LHsicmVwbyI6ImdpdC5leGFtcGxlLmNvbS90ZWFtLTAzNC9zZXJ2aWNlLTAzNCIsImFjY2VzcyI6InJ3In0seyJyZXBvIjoiZ2l0LmV4YW1wbGUuY29tL3RlYW0tMDM1L3NlcnZpY2UtMDM1IiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXQuZXhhbXBsZS5jb20vdGVhbS0wMzYvc2VydmljZS0wMzYiLCJhY2Nlc3MiOiJydyJ9LHsicmVwbyI6ImdpdC5leGFtcGxlLmNvbS90ZWFtLTAzNy9zZXJ2aWNlLTAzNyIsImFjY2VzcyI6InJ3In0seyJyZXBvIjoiZ2l0LmV4YW1wbGUuY29tL3RlYW0tMDM4L3NlcnZpY2UtMDM4IiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXQuZXhhbXBsZS5jb20vdGVhbS0wMzkvc2VydmljZS0wMzkiLCJhY2Nlc3MiOiJydyJ9LHsicmVwbyI6ImdpdC5leGFtcGxlLmNvbS90ZWFtLTA0MC9zZXJ2aWNlLTA0MCIsImFjY2VzcyI6InJ3In0seyJyZXBvIjoiZ2l0LmV4YW1wbGUuY29tL3RlYW0tMDQxL3NlcnZpY2UtMDQxIiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXQuZXhhbXBsZS5jb20vdGVhbS0wNDIvc2VydmljZS0wNDIiLCJhY2Nlc3MiOiJydyJ9LHsicmVwbyI6ImdpdC5leGFtcGxlLmNvbS90ZWFtLTA0My9zZXJ2aWNlLTA0MyIsImFjY2VzcyI6InJ3In0seyJyZXBvIjoiZ2l0LmV4YW1wbGUuY29tL3RlYW0tMDQ0L3NlcnZpY2UtMDQ0IiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXQuZXhhbXBsZS5jb20vdGVhbS0wNDUvc2VydmljZS0wNDUiLCJhY2Nlc3MiOiJydyJ9LHsicmVwbyI6ImdpdC5leGFtcGxlLmNvbS90ZWFtLTA0Ni9zZXJ2aWNlLTA0NiIsImFjY2VzcyI6InJ3In0seyJyZXBvIjoiZ2l0LmV4YW1wbGUuY29tL3RlYW0tMDQ3L3NlcnZpY2UtMDQ3IiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXQuZXhhbXBsZS5jb20vdGVhbS0wNDgvc2VydmljZS0wNDgiLCJhY2Nlc3MiOiJydyJ9LHsicmVwbyI6ImdpdC5leGFtcGxlLmNvbS90ZWFtLTA0OS9zZXJ2aWNlLTA0OSIsImFjY2VzcyI6InJ3In0seyJyZXBvIjoiZ2l0LmV4YW1wbGUuY29tL3RlYW0tMDUwL3NlcnZpY2UtMDUwIiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXQuZXhhbXBsZS5jb20vdGVhbS0wNTEvc2VydmljZS0wNTEiLCJhY2Nlc3MiOiJydyJ9LHsicmVwbyI6ImdpdC5leGFtcGxlLmNvbS90ZWFtLTA1Mi9zZXJ2aWNlLTA1MiIsImFjY2VzcyI6InJ3In0seyJyZXBvIjoiZ2l0LmV4YW1wbGUuY29tL3RlYW0tMDUzL3NlcnZpY2UtMDUzIiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXQuZXhhbXBsZS5jb20vdGVhbS0wNTQvc2VydmljZS0wNTQiLCJhY2Nlc3MiOiJydyJ9LHsicmVwbyI6ImdpdC5leGFtcGxlLmNvbS90ZWFtLTA1NS9zZXJ2aWNlLTA1NSIsImFjY2VzcyI6InJ3In0seyJyZXBvIjoiZ2l0LmV4YW1wbGUuY29tL3RlYW0tMDU2L3NlcnZpY2UtMDU2IiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXQuZXhhbXBsZS5jb20vdGVhbS0wNTcvc2VydmljZS0wNTciLCJhY2Nlc3MiOiJydyJ9LHsicmVwbyI6ImdpdC5leGFtcGxlLmNvbS90ZWFtLTA1OC9zZXJ2aWNlLTA1OCIsImFjY2VzcyI6InJ3In0seyJyZXBvIjoiZ2l0LmV4YW1wbGUuY29tL3RlYW0tMDU5L3NlcnZpY2UtMDU5IiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXQuZXhhbXBsZS5jb20vdGVhbS0wNjAvc2VydmljZS0wNjAiLCJhY2Nlc3MiOiJydyJ9LHsicmVwbyI6ImdpdC5leGFtcGxlLmNvbS90ZWFtLTA2MS9zZXJ2aWNlLTA2MSIsImFjY2VzcyI6InJ3In0seyJyZXBvIjoiZ2l0LmV4YW1wbGUuY29tL3RlYW0tMDYyL3NlcnZpY2UtMDYyIiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXQuZXhhbXBsZS5jb20vdGVhbS0wNjMvc2VydmljZS0wNjMiLCJhY2Nlc3MiOiJydyJ9LHsicmVwbyI6ImdpdC5leGFtcGxlLmNvbS90ZWFtLTA2NC9zZXJ2aWNlLTA2NCIsImFjY2VzcyI6InJ3In0seyJyZXBvIjoiZ2l0LmV4YW1wbGUuY29tL3RlYW0tMDY1L3NlcnZpY2UtMDY1IiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXQuZXhhbXBsZS5jb20vdGVhbS0wNjYvc2VydmljZS0wNjYiLCJhY2Nlc3MiOiJydyJ9LHsicmVwbyI6ImdpdC5leGFtcGxlLmNvbS90ZWFtLTA2Ny9zZXJ2aWNlLTA2NyIsImFjY2VzcyI6InJ3In0seyJyZXBvIjoiZ2l0LmV4YW1wbGUuY29tL3RlYW0tMDY4L3NlcnZpY2UtMDY4IiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXQuZXhhbXBsZS5jb20vdGVhbS0wNjkvc2VydmljZS0wNjkiLCJhY2Nlc3MiOiJydyJ9LHsicmVwbyI6ImdpdC5leGFtcGxlLmNvbS90ZWFtLTA3MC9zZXJ2aWNlLTA3MCIsImFjY2VzcyI6InJ3In0seyJyZXBvIjoiZ2l0LmV4YW1wbGUuY29tL3RlYW0tMDcxL3NlcnZpY2UtMDcxIiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXQuZXhhbXBsZS5jb20vdGVhbS0wNzIvc2VydmljZS0wNzIiLCJhY2Nlc3MiOiJydyJ9LHsicmVwbyI6ImdpdC5leGFtcGxlLmNvbS90ZWFtLTA3My9zZXJ2aWNlLTA3MyIsImFjY2VzcyI6InJ3In0seyJyZXBvIjoiZ2l0LmV4YW1wbGUuY29tL3RlYW0tMDc0L3NlcnZpY2UtMDc0IiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXQuZXhhbXBsZS5jb20vdGVhbS0wNzUvc2VydmljZS0wNzUiLCJhY2Nlc3MiOiJydyJ9LHsicmVwbyI6ImdpdC5leGFtcGxlLmNvbS90ZWFtLTA3Ni9zZXJ2aWNlLTA3NiIsImFjY2VzcyI6InJ3In0seyJyZXBvIjoiZ2l0LmV4YW1wbGUuY29tL3RlYW0tMDc3L3NlcnZpY2UtMDc3IiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXQuZXhhbXBsZS5jb20vdGVhbS0wNzgvc2VydmljZS0wNzgiLCJhY2Nlc3MiOiJydyJ9LHsicmVwbyI6ImdpdC5leGFtcGxlLmNvbS90ZWFtLTA3OS9zZXJ2aWNlLTA3OSIsImFjY2VzcyI6InJ3In0seyJyZXBvIjoiZ2l0LmV4YW1wbGUuY29tL3RlYW0tMDgwL3NlcnZpY2UtMDgwIiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXQuZXhhbXBsZS5jb20vdGVhbS0wODEvc2VydmljZS0wODEiLCJhY2Nlc3MiOiJydyJ9LHsicmVwbyI6ImdpdC5leGFtcGxlLmNvbS90ZWFtLTA4Mi9zZXJ2aWNlLTA4MiIsImFjY2VzcyI6InJ3In0seyJyZXBvIjoiZ2l0LmV4YW1wbGUuY29tL3RlYW0tMDgzL3NlcnZpY2UtMDgzIiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXQuZXhhbXBsZS5jb20vdGVhbS0wODQvc2VydmljZS0wODQiLCJhY2Nlc3MiOiJydyJ9LHsicmVwbyI6ImdpdC5leGFtcGxlLmNvbS90ZWFtLTA4NS9zZXJ2aWNlLTA4NSIsImFjY2VzcyI6InJ3In0seyJyZXBvIjoiZ2l0LmV4YW1wbGUuY29tL3RlYW0tMDg2L3NlcnZpY2UtMDg2IiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXQuZXhhbXBsZS5jb20vdGVhbS0wODcvc2VydmljZS0wODciLCJhY2Nlc3MiOiJydyJ9LHsicmVwbyI6ImdpdC5leGFtcGxlLmNvbS90ZWFtLTA4OC9zZXJ2aWNlLTA4OCIsImFjY2VzcyI6InJ3In0seyJyZXBvIjoiZ2l0LmV4YW1wbGUuY29tL3RlYW0tMDg5L3NlcnZpY2UtMDg5IiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXQuZXhhbXBsZS5jb20vdGVhbS0wOTAvc2VydmljZS0wOTAiLCJhY2Nlc3MiOiJydyJ9LHsicmVwbyI6ImdpdC5leGFtcGxlLmNvbS90ZWFtLTA5MS9zZXJ2aWNlLTA5MSIsImFjY2VzcyI6InJ3In0seyJyZXBvIjoiZ2l0LmV4YW1wbGUuY29tL3RlYW0tMDkyL3NlcnZpY2UtMDkyIiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXQuZXhhbXBsZS5jb20vdGVhbS0wOTMvc2VydmljZS0wOTMiLCJhY2Nlc3MiOiJydyJ9LHsicmVwbyI6ImdpdC5leGFtcGxlLmNvbS90ZWFtLTA5NC9zZXJ2aWNlLTA5NCIsImFjY2VzcyI6InJ3In0seyJyZXBvIjoiZ2l0LmV4YW1wbGUuY29tL3RlYW0tMDk1L3NlcnZpY2UtMDk1IiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXQuZXhhbXBsZS5jb20vdGVhbS0wOTYvc2VydmljZS0wOTYiLCJhY2Nlc3MiOiJydyJ9LHsicmVwbyI6ImdpdC5leGFtcGxlLmNvbS90ZWFtLTA5Ny9zZXJ2aWNlLTA5NyIsImFjY2VzcyI6InJ3In0seyJyZXBvIjoiZ2l0LmV4YW1wbGUuY29tL3RlYW0tMDk4L3NlcnZpY2UtMDk4IiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXQuZXhhbXBsZS5jb20vdGVhbS0wOTkvc2VydmljZS0wOTkiLCJhY2Nlc3MiOiJydyJ9LHsicmVwbyI6ImdpdC5leGFtcGxlLmNvbS90ZWFtLTEwMC9zZXJ2aWNlLTEwMCIsImFjY2VzcyI6InJ3In0seyJyZXBvIjoiZ2l0LmV4YW1wbGUuY29tL3RlYW0tMTAxL3NlcnZpY2UtMTAxIiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXQuZXhhbXBsZS5jb20vdGVhbS0xMDIvc2VydmljZS0xMDIiLCJhY2Nlc3MiOiJydyJ9LHsicmVwbyI6ImdpdC5leGFtcGxlLmNvbS90ZWFtLTEwMy9zZXJ2aWNlLTEwMyIsImFjY2VzcyI6InJ3In0seyJyZXBvIjoiZ2l0LmV4YW1wbGUuY29tL3RlYW0tMTA0L3NlcnZpY2UtMTA0IiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXQuZXhhbXBsZS5jb20vdGVhbS0xMDUvc2VydmljZS0xMDUiLCJhY2Nlc3MiOiJydyJ9LHsicmVwbyI6ImdpdC5leGFtcGxlLmNvbS90ZWFtLTEwNi9zZXJ2aWNlLTEwNiIsImFjY2VzcyI6InJ3In0seyJyZXBvIjoiZ2l0LmV4YW1wbGUuY29tL3RlYW0tMTA3L3NlcnZpY2UtMTA3IiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXQuZXhhbXBsZS5jb20vdGVhbS0xMDgvc2VydmljZS0xMDgiLCJhY2Nlc3MiOiJydyJ9LHsicmVwbyI6ImdpdC5leGFtcGxlLmNvbS90ZWFtLTEwOS9zZXJ2aWNlLTEwOSIsImFjY2VzcyI6InJ3In0seyJyZXBvIjoiZ2l0LmV4YW1wbGUuY29tL3RlYW0tMTEwL3NlcnZpY2UtMTEwIiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXQuZXhhbXBsZS5jb20vdGVhbS0xMTEvc2VydmljZS0xMTEiLCJhY2Nlc3MiOiJydyJ9LHsicmVwbyI6ImdpdC5leGFtcGxlLmNvbS90ZWFtLTExMi9zZXJ2aWNlLTExMiIsImFjY2VzcyI6InJ3In0seyJyZXBvIjoiZ2l0LmV4YW1wbGUuY29tL3RlYW0tMTEzL3NlcnZpY2UtMTEzIiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXQuZXhhbXBsZS5jb20vdGVhbS0xMTQvc2VydmljZS0xMTQiLCJhY2Nlc3MiOiJydyJ9LHsicmVwbyI6ImdpdC5leGFtcGxlLmNvbS90ZWFtLTExNS9zZXJ2aWNlLTExNSIsImFjY2VzcyI6InJ3In0seyJyZXBvIjoiZ2l0LmV4YW1wbGUuY29tL3RlYW0tMTE2L3NlcnZpY2UtMTE2IiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXQuZXhhbXBsZS5jb20vdGVhbS0xMTcvc2VydmljZS0xMTciLCJhY2Nlc3MiOiJydyJ9LHsicmVwbyI6ImdpdC5leGFtcGxlLmNvbS90ZWFtLTExOC9zZXJ2aWNlLTExOCIsImFjY2VzcyI6InJ3In0seyJyZXBvIjoiZ2l0LmV4YW1wbGUuY29tL3RlYW0tMTE5L3NlcnZpY2UtMTE5IiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXQuZXhhbXBsZS5jb20vdGVhbS0xMjAvc2VydmljZS0xMjAiLCJhY2Nlc3MiOiJydyJ9LHsicmVwbyI6ImdpdC5leGFtcGxlLmNvbS90ZWFtLTEyMS9zZXJ2aWNlLTEyMSIsImFjY2VzcyI6InJ3In0seyJyZXBvIjoiZ2l0LmV4YW1wbGUuY29tL3RlYW0tMTIyL3NlcnZpY2UtMTIyIiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXQuZXhhbXBsZS5jb20vdGVhbS0xMjMvc2VydmljZS0xMjMiLCJhY2Nlc3MiOiJydyJ9LHsicmVwbyI6ImdpdC5leGFtcGxlLmNvbS90ZWFtLTEyNC9zZXJ2aWNlLTEyNCIsImFjY2VzcyI6InJ3In0seyJyZXBvIjoiZ2l0LmV4YW1wbGUuY29tL3RlYW0tMTI1L3NlcnZpY2UtMTI1IiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXQuZXhhbXBsZS5jb20vdGVhbS0xMjYvc2VydmljZS0xMjYiLCJhY2Nlc3MiOiJydyJ9LHsicmVwbyI6ImdpdC5leGFtcGxlLmNvbS90ZWFtLTEyNy9zZXJ2aWNlLTEyNyIsImFjY2VzcyI6InJ3In0seyJyZXBvIjoiZ2l0LmV4YW1wbGUuY29tL3RlYW0tMTI4L3NlcnZpY2UtMTI4IiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXQuZXhhbXBsZS5jb20vdGVhbS0xMjkvc2VydmljZS0xMjkiLCJhY2Nlc3MiOiJydyJ9LHsicmVwbyI6ImdpdC5leGFtcGxlLmNvbS90ZWFtLTEzMC9zZXJ2aWNlLTEzMCIsImFjY2VzcyI6InJ3In0seyJyZXBvIjoiZ2l0LmV4YW1wbGUuY29tL3RlYW0tMTMxL3NlcnZpY2UtMTMxIiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXQuZXhhbXBsZS5jb20vdGVhbS0xMzIvc2VydmljZS0xMzIiLCJhY2Nlc3MiOiJydyJ9LHsicmVwbyI6ImdpdC5leGFtcGxlLmNvbS90ZWFtLTEzMy9zZXJ2aWNlLTEzMyIsImFjY2VzcyI6InJ3In0seyJyZXBvIjoiZ2l0LmV4YW1wbGUuY29tL3RlYW0tMTM0L3NlcnZpY2UtMTM0IiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXQuZXhhbXBsZS5jb20vdGVhbS0xMzUvc2VydmljZS0xMzUiLCJhY2Nlc3MiOiJydyJ9LHsicmVwbyI6ImdpdC5leGFtcGxlLmNvbS90ZWFtLTEzNi9zZXJ2aWNlLTEzNiIsImFjY2VzcyI6InJ3In0seyJyZXBvIjoiZ2l0LmV4YW1wbGUuY29tL3RlYW0tMTM3L3NlcnZpY2UtMTM3IiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXQuZXhhbXBsZS5jb20vdGVhbS0xMzgvc2VydmljZS0xMzgiLCJhY2Nlc3MiOiJydyJ9LHsicmVwbyI6ImdpdC5leGFtcGxlLmNvbS90ZWFtLTEzOS9zZXJ2aWNlLTEzOSIsImFjY2VzcyI6InJ3In0seyJyZXBvIjoiZ2l0LmV4YW1wbGUuY29tL3RlYW0tMTQwL3NlcnZpY2UtMTQwIiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXQuZXhhbXBsZS5jb20vdGVhbS0xNDEvc2VydmljZS0xNDEiLCJhY2Nlc3MiOiJydyJ9LHsicmVwbyI6ImdpdC5leGFtcGxlLmNvbS90ZWFtLTE0Mi9zZXJ2aWNlLTE0MiIsImFjY2VzcyI6InJ3In0seyJyZXBvIjoiZ2l0LmV4YW1wbGUuY29tL3RlYW0tMTQzL3NlcnZpY2UtMTQzIiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXQuZXhhbXBsZS5jb20vdGVhbS0xNDQvc2VydmljZS0xNDQiLCJhY2Nlc3MiOiJydyJ9LHsicmVwbyI6ImdpdC5leGFtcGxlLmNvbS90ZWFtLTE0NS9zZXJ2aWNlLTE0NSIsImFjY2VzcyI6InJ3In0seyJyZXBvIjoiZ2l0LmV4YW1wbGUuY29tL3RlYW0tMTQ2L3NlcnZpY2UtMTQ2IiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXQuZXhhbXBsZS5jb20vdGVhbS0xNDcvc2VydmljZS0xNDciLCJhY2Nlc3MiOiJydyJ9LHsicmVwbyI6ImdpdC5leGFtcGxlLmNvbS90ZWFtLTE0OC9zZXJ2aWNlLTE0OCIsImFjY2VzcyI6InJ3In0seyJyZXBvIjoiZ2l0LmV4YW1wbGUuY29tL3RlYW0tMTQ5L3NlcnZpY2UtMTQ5IiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXQuZXhhbXBsZS5jb20vdGVhbS0xNTAvc2VydmljZS0xNTAiLCJhY2Nlc3MiOiJydyJ9LHsicmVwbyI6ImdpdC5leGFtcGxlLmNvbS90ZWFtLTE1MS9zZXJ2aWNlLTE1MSIsImFjY2VzcyI6InJ3In0seyJyZXBvIjoiZ2l0LmV4YW1wbGUuY29tL3RlYW0tMTUyL3NlcnZpY2UtMTUyIiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXQuZXhhbXBsZS5jb20vdGVhbS0xNTMvc2VydmljZS0xNTMiLCJhY2Nlc3MiOiJydyJ9LHsicmVwbyI6ImdpdC5leGFtcGxlLmNvbS90ZWFtLTE1NC9zZXJ2aWNlLTE1NCIsImFjY2VzcyI6InJ3In0seyJyZXBvIjoiZ2l0LmV4YW1wbGUuY29tL3RlYW0tMTU1L3NlcnZpY2UtMTU1IiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXQuZXhhbXBsZS5jb20vdGVhbS0xNTYvc2VydmljZS0xNTYiLCJhY2Nlc3MiOiJydyJ9LHsicmVwbyI6ImdpdC5leGFtcGxlLmNvbS90ZWFtLTE1Ny9zZXJ2aWNlLTE1NyIsImFjY2VzcyI6InJ3In0seyJyZXBvIjoiZ2l0LmV4YW1wbGUuY29tL3RlYW0tMTU4L3NlcnZpY2UtMTU4IiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXQuZXhhbXBsZS5jb20vdGVhbS0xNTkvc2VydmljZS0xNTkiLCJhY2Nlc3MiOiJydyJ9LHsicmVwbyI6ImdpdC5leGFtcGxlLmNvbS90ZWFtLTE2MC9zZXJ2aWNlLTE2MCIsImFjY2VzcyI6InJ3In0seyJyZXBvIjoiZ2l0LmV4YW1wbGUuY29tL3RlYW0tMTYxL3NlcnZpY2UtMTYxIiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXQuZXhhbXBsZS5jb20vdGVhbS0xNjIvc2VydmljZS0xNjIiLCJhY2Nlc3MiOiJydyJ9LHsicmVwbyI6ImdpdC5leGFtcGxlLmNvbS90ZWFtLTE2My9zZXJ2aWNlLTE2MyIsImFjY2VzcyI6InJ3In0seyJyZXBvIjoiZ2l0LmV4YW1wbGUuY29tL3RlYW0tMTY0L3NlcnZpY2UtMTY0IiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXQuZXhhbXBsZS5jb20vdGVhbS0xNjUvc2VydmljZS0xNjUiLCJhY2Nlc3MiOiJydyJ9LHsicmVwbyI6ImdpdC5leGFtcGxlLmNvbS90ZWFtLTE2Ni9zZXJ2aWNlLTE2NiIsImFjY2VzcyI6InJ3In0seyJyZXBvIjoiZ2l0LmV4YW1wbGUuY29tL3RlYW0tMTY3L3NlcnZpY2UtMTY3IiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXQuZXhhbXBsZS5jb20vdGVhbS0xNjgvc2VydmljZS0xNjgiLCJhY2Nlc3MiOiJydyJ9LHsicmVwbyI6ImdpdC5leGFtcGxlLmNvbS90ZWFtLTE2OS9zZXJ2aWNlLTE2OSIsImFjY2VzcyI6InJ3In0seyJyZXBvIjoiZ2l0LmV4YW1wbGUuY29tL3RlYW0tMTcwL3NlcnZpY2UtMTcwIiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXQuZXhhbXBsZS5jb20vdGVhbS0xNzEvc2VydmljZS0xNzEiLCJhY2Nlc3MiOiJydyJ9LHsicmVwbyI6ImdpdC5leGFtcGxlLmNvbS90ZWFtLTE3Mi9zZXJ2aWNlLTE3MiIsImFjY2VzcyI6InJ3In0seyJyZXBvIjoiZ2l0LmV4YW1wbGUuY29tL3RlYW0tMTczL3NlcnZpY2UtMTczIiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXQuZXhhbXBsZS5jb20vdGVhbS0xNzQvc2VydmljZS0xNzQiLCJhY2Nlc3MiOiJydyJ9LHsicmVwbyI6ImdpdC5leGFtcGxlLmNvbS90ZWFtLTE3NS9zZXJ2aWNlLTE3NSIsImFjY2VzcyI6InJ3In0seyJyZXBvIjoiZ2l0LmV4YW1wbGUuY29tL3RlYW0tMTc2L3NlcnZpY2UtMTc2IiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXQuZXhhbXBsZS5jb20vdGVhbS0xNzcvc2VydmljZS0xNzciLCJhY2Nlc3MiOiJydyJ9LHsicmVwbyI6ImdpdC5leGFtcGxlLmNvbS90ZWFtLTE3OC9zZXJ2aWNlLTE3OCIsImFjY2VzcyI6InJ3In0seyJyZXBvIjoiZ2l0LmV4YW1wbGUuY29tL3RlYW0tMTc5L3NlcnZpY2UtMTc5IiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXQuZXhhbXBsZS5jb20vdGVhbS0xODAvc2VydmljZS0xODAiLCJhY2Nlc3MiOiJydyJ9LHsicmVwbyI6ImdpdC5leGFtcGxlLmNvbS90ZWFtLTE4MS9zZXJ2aWNlLTE4MSIsImFjY2VzcyI6InJ3In0seyJyZXBvIjoiZ2l0LmV4YW1wbGUuY29tL3RlYW0tMTgyL3NlcnZpY2UtMTgyIiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXQuZXhhbXBsZS5jb20vdGVhbS0xODMvc2VydmljZS0xODMiLCJhY2Nlc3MiOiJydyJ9LHsicmVwbyI6ImdpdC5leGFtcGxlLmNvbS90ZWFtLTE4NC9zZXJ2aWNlLTE4NCIsImFjY2VzcyI6InJ3In0seyJyZXBvIjoiZ2l0LmV4YW1wbGUuY29tL3RlYW0tMTg1L3NlcnZpY2UtMTg1IiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXQuZXhhbXBsZS5jb20vdGVhbS0xODYvc2VydmljZS0xODYiLCJhY2Nlc3MiOiJydyJ9LHsicmVwbyI6ImdpdC5leGFtcGxlLmNvbS90ZWFtLTE4Ny9zZXJ2aWNlLTE4NyIsImFjY2VzcyI6InJ3In0seyJyZXBvIjoiZ2l0LmV4YW1wbGUuY29tL3RlYW0tMTg4L3NlcnZpY2UtMTg4IiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXQuZXhhbXBsZS5jb20vdGVhbS0xODkvc2VydmljZS0xODkiLCJhY2Nlc3MiOiJydyJ9LHsicmVwbyI6ImdpdC5leGFtcGxlLmNvbS90ZWFtLTE5MC9zZXJ2aWNlLTE5MCIsImFjY2VzcyI6InJ3In0seyJyZXBvIjoiZ2l0LmV4YW1wbGUuY29tL3RlYW0tMTkxL3NlcnZpY2UtMTkxIiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXQuZXhhbXBsZS5jb20vdGVhbS0xOTIvc2VydmljZS0xOTIiLCJhY2Nlc3MiOiJydyJ9XX0.vP-hjHLkOggRKrWhDA-F4kWZKO-_3a_krd1HCaNaGCOg0i7Nlesgf_R2jAT-6pANh1V1nftTqodo54O5hzMWfQ",
+      "keys": {
+        "signer-1xx": "p256-a"
+      },
+      "now": 1790000000,
+      "expected": {
+        "claim": "sbx-7f3a9c",
+        "namespace": "sandboxes",
+        "template": "agent-workspace-template"
+      },
+      "result": {
+        "ok": false,
+        "reason": "too-large"
+      }
+    },
+    {
+      "name": "wrong-alg-none",
+      "about": "alg \"none\" with an empty signature.",
+      "token": "eyJhbGciOiJub25lIiwidHlwIjoieHluZS1naXQtc2NvcGUrand0Iiwia2lkIjoic2lnbmVyLTEifQ.eyJ2IjoxLCJjbGFpbSI6InNieC03ZjNhOWMiLCJucyI6InNhbmRib3hlcyIsInRwbCI6ImFnZW50LXdvcmtzcGFjZS10ZW1wbGF0ZSIsInByb2ZpbGUiOiJleGFtcGxlLXByb2ZpbGUiLCJpYXQiOjE3ODk5OTk5OTAsImV4cCI6MTc5MDAwMzYwMCwicmVwb3MiOlt7InJlcG8iOiJiaXRidWNrZXQuZXhhbXBsZS5uZXQvcHJvai9zZXJ2aWNlIiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXRodWIuY29tL2V4YW1wbGUtb3JnL2FwcCIsImFjY2VzcyI6InJ3In1dfQ.",
+      "keys": {
+        "signer-1": "p256-a"
+      },
+      "now": 1790000000,
+      "expected": {
+        "claim": "sbx-7f3a9c",
+        "namespace": "sandboxes",
+        "template": "agent-workspace-template"
+      },
+      "result": {
+        "ok": false,
+        "reason": "wrong-alg"
+      }
+    },
+    {
+      "name": "wrong-alg-hs256-public-key-as-secret",
+      "about": "alg HS256, with the HMAC keyed by the verifier's public key PEM.",
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6Inh5bmUtZ2l0LXNjb3BlK2p3dCIsImtpZCI6InNpZ25lci0xIn0.eyJ2IjoxLCJjbGFpbSI6InNieC03ZjNhOWMiLCJucyI6InNhbmRib3hlcyIsInRwbCI6ImFnZW50LXdvcmtzcGFjZS10ZW1wbGF0ZSIsInByb2ZpbGUiOiJleGFtcGxlLXByb2ZpbGUiLCJpYXQiOjE3ODk5OTk5OTAsImV4cCI6MTc5MDAwMzYwMCwicmVwb3MiOlt7InJlcG8iOiJiaXRidWNrZXQuZXhhbXBsZS5uZXQvcHJvai9zZXJ2aWNlIiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXRodWIuY29tL2V4YW1wbGUtb3JnL2FwcCIsImFjY2VzcyI6InJ3In1dfQ.Lp4s1DKKrddMPNQDUvcu7sTzL6A7w8AatUVEc0FDuM8",
+      "keys": {
+        "signer-1": "p256-a"
+      },
+      "now": 1790000000,
+      "expected": {
+        "claim": "sbx-7f3a9c",
+        "namespace": "sandboxes",
+        "template": "agent-workspace-template"
+      },
+      "result": {
+        "ok": false,
+        "reason": "wrong-alg"
+      }
+    },
+    {
+      "name": "wrong-alg-rs256",
+      "about": "alg RS256, signed with an RSA key whose public key the verifier holds under the kid.",
+      "token": "eyJhbGciOiJSUzI1NiIsInR5cCI6Inh5bmUtZ2l0LXNjb3BlK2p3dCIsImtpZCI6InNpZ25lci0xIn0.eyJ2IjoxLCJjbGFpbSI6InNieC03ZjNhOWMiLCJucyI6InNhbmRib3hlcyIsInRwbCI6ImFnZW50LXdvcmtzcGFjZS10ZW1wbGF0ZSIsInByb2ZpbGUiOiJleGFtcGxlLXByb2ZpbGUiLCJpYXQiOjE3ODk5OTk5OTAsImV4cCI6MTc5MDAwMzYwMCwicmVwb3MiOlt7InJlcG8iOiJiaXRidWNrZXQuZXhhbXBsZS5uZXQvcHJvai9zZXJ2aWNlIiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXRodWIuY29tL2V4YW1wbGUtb3JnL2FwcCIsImFjY2VzcyI6InJ3In1dfQ.PIb1KBiLuhX0if3w6zJi2YFwJ4ps5CZcX7pJQIiuzfnmY2yXP2d4ZXLYpoy207YLtZ2Cij-CL1a3iiiVVlm2NZ8sdiXIMH3lAp1VnOupxZu3Ae8n0eudFAIkwAu9paoepthIZaAWr7oNAm3Tf9iGetUIuymIbpKrCaWOzZN_ZVskQQS01pnvbMX-IF9xZ7G_ccMsf8dTPA8cnDMFAqNPW-SvsIQwb1tB4Hs1KIk7jQng0yIHu984h0AeGMcYtWuJT-KDasl4pNMjBzIIrzbDC1Zxg_PR0HXFNtaSEXM7H82u6MRHFD2Ix6sNcIfrkZ_Nt1JSHNbWxdYOA-O5KDlmdw",
+      "keys": {
+        "signer-1": "rsa-2048"
+      },
+      "now": 1790000000,
+      "expected": {
+        "claim": "sbx-7f3a9c",
+        "namespace": "sandboxes",
+        "template": "agent-workspace-template"
+      },
+      "result": {
+        "ok": false,
+        "reason": "wrong-alg"
+      }
+    },
+    {
+      "name": "wrong-alg-es384",
+      "about": "alg ES384, signed with a P-384 key whose public key the verifier holds under the kid.",
+      "token": "eyJhbGciOiJFUzM4NCIsInR5cCI6Inh5bmUtZ2l0LXNjb3BlK2p3dCIsImtpZCI6InNpZ25lci0xIn0.eyJ2IjoxLCJjbGFpbSI6InNieC03ZjNhOWMiLCJucyI6InNhbmRib3hlcyIsInRwbCI6ImFnZW50LXdvcmtzcGFjZS10ZW1wbGF0ZSIsInByb2ZpbGUiOiJleGFtcGxlLXByb2ZpbGUiLCJpYXQiOjE3ODk5OTk5OTAsImV4cCI6MTc5MDAwMzYwMCwicmVwb3MiOlt7InJlcG8iOiJiaXRidWNrZXQuZXhhbXBsZS5uZXQvcHJvai9zZXJ2aWNlIiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXRodWIuY29tL2V4YW1wbGUtb3JnL2FwcCIsImFjY2VzcyI6InJ3In1dfQ.XwTzjvpMFy65lahActR56JcZkXczlDOOagDX1sQRoXE_PRsm2Tulve2cvIZFKrHaI5iRxJCOa6PDieJ-kZp5Tgqyg1DQm-oYcnJuFBizZdiZWScEYIz-ZtM2k5D_rEO2",
+      "keys": {
+        "signer-1": "p384"
+      },
+      "now": 1790000000,
+      "expected": {
+        "claim": "sbx-7f3a9c",
+        "namespace": "sandboxes",
+        "template": "agent-workspace-template"
+      },
+      "result": {
+        "ok": false,
+        "reason": "wrong-alg"
+      }
+    },
+    {
+      "name": "wrong-alg-lower-case",
+      "about": "alg \"es256\": the name is case-sensitive.",
+      "token": "eyJhbGciOiJlczI1NiIsInR5cCI6Inh5bmUtZ2l0LXNjb3BlK2p3dCIsImtpZCI6InNpZ25lci0xIn0.eyJ2IjoxLCJjbGFpbSI6InNieC03ZjNhOWMiLCJucyI6InNhbmRib3hlcyIsInRwbCI6ImFnZW50LXdvcmtzcGFjZS10ZW1wbGF0ZSIsInByb2ZpbGUiOiJleGFtcGxlLXByb2ZpbGUiLCJpYXQiOjE3ODk5OTk5OTAsImV4cCI6MTc5MDAwMzYwMCwicmVwb3MiOlt7InJlcG8iOiJiaXRidWNrZXQuZXhhbXBsZS5uZXQvcHJvai9zZXJ2aWNlIiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXRodWIuY29tL2V4YW1wbGUtb3JnL2FwcCIsImFjY2VzcyI6InJ3In1dfQ.U_qd-wIV2RoAgS1XME89Dv6cam59yNigInxvohwhM1-p2AneljD77xXD7Ejk9WfjA9uT7x9Cg1i2fxYAElx5bQ",
+      "keys": {
+        "signer-1": "p256-a"
+      },
+      "now": 1790000000,
+      "expected": {
+        "claim": "sbx-7f3a9c",
+        "namespace": "sandboxes",
+        "template": "agent-workspace-template"
+      },
+      "result": {
+        "ok": false,
+        "reason": "wrong-alg"
+      }
+    },
+    {
+      "name": "wrong-type-jwt",
+      "about": "typ \"JWT\".",
+      "token": "eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCIsImtpZCI6InNpZ25lci0xIn0.eyJ2IjoxLCJjbGFpbSI6InNieC03ZjNhOWMiLCJucyI6InNhbmRib3hlcyIsInRwbCI6ImFnZW50LXdvcmtzcGFjZS10ZW1wbGF0ZSIsInByb2ZpbGUiOiJleGFtcGxlLXByb2ZpbGUiLCJpYXQiOjE3ODk5OTk5OTAsImV4cCI6MTc5MDAwMzYwMCwicmVwb3MiOlt7InJlcG8iOiJiaXRidWNrZXQuZXhhbXBsZS5uZXQvcHJvai9zZXJ2aWNlIiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXRodWIuY29tL2V4YW1wbGUtb3JnL2FwcCIsImFjY2VzcyI6InJ3In1dfQ.uxydt_M6kulwnTZo3-6sRz_AwDxK3hSC3MPqUhZX0pjAoKTUkK-lZQmf8K4fsrvC5M24itZtvWpQlysa8OweLA",
+      "keys": {
+        "signer-1": "p256-a"
+      },
+      "now": 1790000000,
+      "expected": {
+        "claim": "sbx-7f3a9c",
+        "namespace": "sandboxes",
+        "template": "agent-workspace-template"
+      },
+      "result": {
+        "ok": false,
+        "reason": "wrong-type"
+      }
+    },
+    {
+      "name": "wrong-type-other-token",
+      "about": "A correctly signed token of another type from the same signer.",
+      "token": "eyJhbGciOiJFUzI1NiIsInR5cCI6Inh5bmUtc2VydmljZStqd3QiLCJraWQiOiJzaWduZXItMSJ9.eyJ2IjoxLCJjbGFpbSI6InNieC03ZjNhOWMiLCJucyI6InNhbmRib3hlcyIsInRwbCI6ImFnZW50LXdvcmtzcGFjZS10ZW1wbGF0ZSIsInByb2ZpbGUiOiJleGFtcGxlLXByb2ZpbGUiLCJpYXQiOjE3ODk5OTk5OTAsImV4cCI6MTc5MDAwMzYwMCwicmVwb3MiOlt7InJlcG8iOiJiaXRidWNrZXQuZXhhbXBsZS5uZXQvcHJvai9zZXJ2aWNlIiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXRodWIuY29tL2V4YW1wbGUtb3JnL2FwcCIsImFjY2VzcyI6InJ3In1dfQ.I6sGyd19CmaC0VN9I2HbbvSpjiUFnbKSgTJhuS49TtSTapCTr1MDCYFmoV2ThGkXtXepjqsSL_Y3mrn_r9tsXw",
+      "keys": {
+        "signer-1": "p256-a"
+      },
+      "now": 1790000000,
+      "expected": {
+        "claim": "sbx-7f3a9c",
+        "namespace": "sandboxes",
+        "template": "agent-workspace-template"
+      },
+      "result": {
+        "ok": false,
+        "reason": "wrong-type"
+      }
+    },
+    {
+      "name": "wrong-type-missing",
+      "about": "The header has no typ.",
+      "token": "eyJhbGciOiJFUzI1NiIsImtpZCI6InNpZ25lci0xIn0.eyJ2IjoxLCJjbGFpbSI6InNieC03ZjNhOWMiLCJucyI6InNhbmRib3hlcyIsInRwbCI6ImFnZW50LXdvcmtzcGFjZS10ZW1wbGF0ZSIsInByb2ZpbGUiOiJleGFtcGxlLXByb2ZpbGUiLCJpYXQiOjE3ODk5OTk5OTAsImV4cCI6MTc5MDAwMzYwMCwicmVwb3MiOlt7InJlcG8iOiJiaXRidWNrZXQuZXhhbXBsZS5uZXQvcHJvai9zZXJ2aWNlIiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXRodWIuY29tL2V4YW1wbGUtb3JnL2FwcCIsImFjY2VzcyI6InJ3In1dfQ.gshlP8b2NwfkYzwbmUg6E7AsJuCiIrsm1n3mlFDxa2ToUAThkfNncnifVfgM0gOQSn_x6UanMCwVotl2c3OfeQ",
+      "keys": {
+        "signer-1": "p256-a"
+      },
+      "now": 1790000000,
+      "expected": {
+        "claim": "sbx-7f3a9c",
+        "namespace": "sandboxes",
+        "template": "agent-workspace-template"
+      },
+      "result": {
+        "ok": false,
+        "reason": "wrong-type"
+      }
+    },
+    {
+      "name": "wrong-type-case",
+      "about": "typ in another letter case.",
+      "token": "eyJhbGciOiJFUzI1NiIsInR5cCI6Ilh5bmUtR2l0LVNjb3BlK0pXVCIsImtpZCI6InNpZ25lci0xIn0.eyJ2IjoxLCJjbGFpbSI6InNieC03ZjNhOWMiLCJucyI6InNhbmRib3hlcyIsInRwbCI6ImFnZW50LXdvcmtzcGFjZS10ZW1wbGF0ZSIsInByb2ZpbGUiOiJleGFtcGxlLXByb2ZpbGUiLCJpYXQiOjE3ODk5OTk5OTAsImV4cCI6MTc5MDAwMzYwMCwicmVwb3MiOlt7InJlcG8iOiJiaXRidWNrZXQuZXhhbXBsZS5uZXQvcHJvai9zZXJ2aWNlIiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXRodWIuY29tL2V4YW1wbGUtb3JnL2FwcCIsImFjY2VzcyI6InJ3In1dfQ.93vg334o5wXHlvmVuZhb0gnWgtpp1MV1tQ-l9PZOgD1v37IRkIfZPVZpZup_IRtIrPsyHgnkCbeH4oR2ZaFU2g",
+      "keys": {
+        "signer-1": "p256-a"
+      },
+      "now": 1790000000,
+      "expected": {
+        "claim": "sbx-7f3a9c",
+        "namespace": "sandboxes",
+        "template": "agent-workspace-template"
+      },
+      "result": {
+        "ok": false,
+        "reason": "wrong-type"
+      }
+    },
+    {
+      "name": "unknown-key-kid-not-held",
+      "about": "The verifier holds the right key, under another kid.",
+      "token": "eyJhbGciOiJFUzI1NiIsInR5cCI6Inh5bmUtZ2l0LXNjb3BlK2p3dCIsImtpZCI6InNpZ25lci0xIn0.eyJ2IjoxLCJjbGFpbSI6InNieC03ZjNhOWMiLCJucyI6InNhbmRib3hlcyIsInRwbCI6ImFnZW50LXdvcmtzcGFjZS10ZW1wbGF0ZSIsInByb2ZpbGUiOiJleGFtcGxlLXByb2ZpbGUiLCJpYXQiOjE3ODk5OTk5OTAsImV4cCI6MTc5MDAwMzYwMCwicmVwb3MiOlt7InJlcG8iOiJiaXRidWNrZXQuZXhhbXBsZS5uZXQvcHJvai9zZXJ2aWNlIiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXRodWIuY29tL2V4YW1wbGUtb3JnL2FwcCIsImFjY2VzcyI6InJ3In1dfQ.NAPX63F9EWz25chKkaVBYLS133mn9q3sqrUWqWLKmMLQNgldMpQvBFNdDpZ8uUILDVOxATB2Xyi9L489s1nl4A",
+      "keys": {
+        "signer-9": "p256-a"
+      },
+      "now": 1790000000,
+      "expected": {
+        "claim": "sbx-7f3a9c",
+        "namespace": "sandboxes",
+        "template": "agent-workspace-template"
+      },
+      "result": {
+        "ok": false,
+        "reason": "unknown-key"
+      }
+    },
+    {
+      "name": "unknown-key-no-keys",
+      "about": "The verifier holds no keys.",
+      "token": "eyJhbGciOiJFUzI1NiIsInR5cCI6Inh5bmUtZ2l0LXNjb3BlK2p3dCIsImtpZCI6InNpZ25lci0xIn0.eyJ2IjoxLCJjbGFpbSI6InNieC03ZjNhOWMiLCJucyI6InNhbmRib3hlcyIsInRwbCI6ImFnZW50LXdvcmtzcGFjZS10ZW1wbGF0ZSIsInByb2ZpbGUiOiJleGFtcGxlLXByb2ZpbGUiLCJpYXQiOjE3ODk5OTk5OTAsImV4cCI6MTc5MDAwMzYwMCwicmVwb3MiOlt7InJlcG8iOiJiaXRidWNrZXQuZXhhbXBsZS5uZXQvcHJvai9zZXJ2aWNlIiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXRodWIuY29tL2V4YW1wbGUtb3JnL2FwcCIsImFjY2VzcyI6InJ3In1dfQ.NAPX63F9EWz25chKkaVBYLS133mn9q3sqrUWqWLKmMLQNgldMpQvBFNdDpZ8uUILDVOxATB2Xyi9L489s1nl4A",
+      "keys": {},
+      "now": 1790000000,
+      "expected": {
+        "claim": "sbx-7f3a9c",
+        "namespace": "sandboxes",
+        "template": "agent-workspace-template"
+      },
+      "result": {
+        "ok": false,
+        "reason": "unknown-key"
+      }
+    },
+    {
+      "name": "unknown-key-rsa-key-held",
+      "about": "ES256 header, RSA signature, and the verifier holds that RSA public key under the kid.",
+      "token": "eyJhbGciOiJFUzI1NiIsInR5cCI6Inh5bmUtZ2l0LXNjb3BlK2p3dCIsImtpZCI6InNpZ25lci0xIn0.eyJ2IjoxLCJjbGFpbSI6InNieC03ZjNhOWMiLCJucyI6InNhbmRib3hlcyIsInRwbCI6ImFnZW50LXdvcmtzcGFjZS10ZW1wbGF0ZSIsInByb2ZpbGUiOiJleGFtcGxlLXByb2ZpbGUiLCJpYXQiOjE3ODk5OTk5OTAsImV4cCI6MTc5MDAwMzYwMCwicmVwb3MiOlt7InJlcG8iOiJiaXRidWNrZXQuZXhhbXBsZS5uZXQvcHJvai9zZXJ2aWNlIiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXRodWIuY29tL2V4YW1wbGUtb3JnL2FwcCIsImFjY2VzcyI6InJ3In1dfQ.NFIzL0E3SYQPEEA_HTuLDdSqxD4X5EFX-x8scDmrFLzqUWaUZnv2CSTYetEdHRtnXA8TVoCW01pqRJHKVwRZMDR5owfSv0PvP6HpJZSBLrrX3EWmQLROCmUhnUjFXVJePPewbBtee8gQBC70dSRtQPtoYNd6961Uo8uQUYUiXYZ2MLuUQyHmm7B7rnak9xzPMTtfbZnAAiEfo3wnPgFejl3BpFi8udgZtvdq3rnnF9EkeRO_PsEzh63fXhaTE8zrmjieTXGnI3KOffDRDmDYp813itNvAAkN_YsqJZlxdnco6b8Ux54AKsmHf4kk88MKnK7rXimOUhR8AzXATjRp9Q",
+      "keys": {
+        "signer-1": "rsa-2048"
+      },
+      "now": 1790000000,
+      "expected": {
+        "claim": "sbx-7f3a9c",
+        "namespace": "sandboxes",
+        "template": "agent-workspace-template"
+      },
+      "result": {
+        "ok": false,
+        "reason": "unknown-key"
+      }
+    },
+    {
+      "name": "unknown-key-p384-key-held",
+      "about": "ES256 header, signed with a P-384 key that the verifier holds under the kid.",
+      "token": "eyJhbGciOiJFUzI1NiIsInR5cCI6Inh5bmUtZ2l0LXNjb3BlK2p3dCIsImtpZCI6InNpZ25lci0xIn0.eyJ2IjoxLCJjbGFpbSI6InNieC03ZjNhOWMiLCJucyI6InNhbmRib3hlcyIsInRwbCI6ImFnZW50LXdvcmtzcGFjZS10ZW1wbGF0ZSIsInByb2ZpbGUiOiJleGFtcGxlLXByb2ZpbGUiLCJpYXQiOjE3ODk5OTk5OTAsImV4cCI6MTc5MDAwMzYwMCwicmVwb3MiOlt7InJlcG8iOiJiaXRidWNrZXQuZXhhbXBsZS5uZXQvcHJvai9zZXJ2aWNlIiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXRodWIuY29tL2V4YW1wbGUtb3JnL2FwcCIsImFjY2VzcyI6InJ3In1dfQ.1z7oV1VaWmcfv_cFo97kIGNMyQIzQ_pSsPXBisqjgkq168raNldMNvC7nYPuwAiLpKZBgVowyklTrIwbhbeJ7j1schLOZ58cojBwVhiwMxajwdGdnM0YlAfbBSJtIk5u",
+      "keys": {
+        "signer-1": "p384"
+      },
+      "now": 1790000000,
+      "expected": {
+        "claim": "sbx-7f3a9c",
+        "namespace": "sandboxes",
+        "template": "agent-workspace-template"
+      },
+      "result": {
+        "ok": false,
+        "reason": "unknown-key"
+      }
+    },
+    {
+      "name": "unknown-key-private-key-held",
+      "about": "The verifier was given the signer's PRIVATE key PEM. A verifier accepts public key PEMs only.",
+      "token": "eyJhbGciOiJFUzI1NiIsInR5cCI6Inh5bmUtZ2l0LXNjb3BlK2p3dCIsImtpZCI6InNpZ25lci0xIn0.eyJ2IjoxLCJjbGFpbSI6InNieC03ZjNhOWMiLCJucyI6InNhbmRib3hlcyIsInRwbCI6ImFnZW50LXdvcmtzcGFjZS10ZW1wbGF0ZSIsInByb2ZpbGUiOiJleGFtcGxlLXByb2ZpbGUiLCJpYXQiOjE3ODk5OTk5OTAsImV4cCI6MTc5MDAwMzYwMCwicmVwb3MiOlt7InJlcG8iOiJiaXRidWNrZXQuZXhhbXBsZS5uZXQvcHJvai9zZXJ2aWNlIiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXRodWIuY29tL2V4YW1wbGUtb3JnL2FwcCIsImFjY2VzcyI6InJ3In1dfQ.NAPX63F9EWz25chKkaVBYLS133mn9q3sqrUWqWLKmMLQNgldMpQvBFNdDpZ8uUILDVOxATB2Xyi9L489s1nl4A",
+      "keys": {
+        "signer-1": "p256-a/private"
+      },
+      "now": 1790000000,
+      "expected": {
+        "claim": "sbx-7f3a9c",
+        "namespace": "sandboxes",
+        "template": "agent-workspace-template"
+      },
+      "result": {
+        "ok": false,
+        "reason": "unknown-key"
+      }
+    },
+    {
+      "name": "unknown-key-kid-not-a-string",
+      "about": "kid is a number.",
+      "token": "eyJhbGciOiJFUzI1NiIsInR5cCI6Inh5bmUtZ2l0LXNjb3BlK2p3dCIsImtpZCI6MX0.eyJ2IjoxLCJjbGFpbSI6InNieC03ZjNhOWMiLCJucyI6InNhbmRib3hlcyIsInRwbCI6ImFnZW50LXdvcmtzcGFjZS10ZW1wbGF0ZSIsInByb2ZpbGUiOiJleGFtcGxlLXByb2ZpbGUiLCJpYXQiOjE3ODk5OTk5OTAsImV4cCI6MTc5MDAwMzYwMCwicmVwb3MiOlt7InJlcG8iOiJiaXRidWNrZXQuZXhhbXBsZS5uZXQvcHJvai9zZXJ2aWNlIiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXRodWIuY29tL2V4YW1wbGUtb3JnL2FwcCIsImFjY2VzcyI6InJ3In1dfQ.vtkGLNTtYHwUN232V22L6C9yhOwe9teKEpPprs6UdtNDrTjMlMxaRjxKqQdquOU2kiLzr7IYGIM66uSX_1HOrg",
+      "keys": {
+        "signer-1": "p256-a"
+      },
+      "now": 1790000000,
+      "expected": {
+        "claim": "sbx-7f3a9c",
+        "namespace": "sandboxes",
+        "template": "agent-workspace-template"
+      },
+      "result": {
+        "ok": false,
+        "reason": "unknown-key"
+      }
+    },
+    {
+      "name": "bad-signature-other-key",
+      "about": "Signed with a different P-256 key under the signer's kid.",
+      "token": "eyJhbGciOiJFUzI1NiIsInR5cCI6Inh5bmUtZ2l0LXNjb3BlK2p3dCIsImtpZCI6InNpZ25lci0xIn0.eyJ2IjoxLCJjbGFpbSI6InNieC03ZjNhOWMiLCJucyI6InNhbmRib3hlcyIsInRwbCI6ImFnZW50LXdvcmtzcGFjZS10ZW1wbGF0ZSIsInByb2ZpbGUiOiJleGFtcGxlLXByb2ZpbGUiLCJpYXQiOjE3ODk5OTk5OTAsImV4cCI6MTc5MDAwMzYwMCwicmVwb3MiOlt7InJlcG8iOiJiaXRidWNrZXQuZXhhbXBsZS5uZXQvcHJvai9zZXJ2aWNlIiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXRodWIuY29tL2V4YW1wbGUtb3JnL2FwcCIsImFjY2VzcyI6InJ3In1dfQ.Mdlp4_QFC0p6f4wKurkWQQGlxw_7o2-Zvkulqlmf-KLQULr2o1W-iK2LP5lrfvetVpltaWWnshOF91a4QgsqAg",
+      "keys": {
+        "signer-1": "p256-a"
+      },
+      "now": 1790000000,
+      "expected": {
+        "claim": "sbx-7f3a9c",
+        "namespace": "sandboxes",
+        "template": "agent-workspace-template"
+      },
+      "result": {
+        "ok": false,
+        "reason": "bad-signature"
+      }
+    },
+    {
+      "name": "bad-signature-payload-replaced",
+      "about": "A token signed with access \"r\" whose payload was replaced by the same list with \"rw\".",
+      "token": "eyJhbGciOiJFUzI1NiIsInR5cCI6Inh5bmUtZ2l0LXNjb3BlK2p3dCIsImtpZCI6InNpZ25lci0xIn0.eyJ2IjoxLCJjbGFpbSI6InNieC03ZjNhOWMiLCJucyI6InNhbmRib3hlcyIsInRwbCI6ImFnZW50LXdvcmtzcGFjZS10ZW1wbGF0ZSIsInByb2ZpbGUiOiJleGFtcGxlLXByb2ZpbGUiLCJpYXQiOjE3ODk5OTk5OTAsImV4cCI6MTc5MDAwMzYwMCwicmVwb3MiOlt7InJlcG8iOiJnaXRodWIuY29tL2V4YW1wbGUtb3JnL2FwcCIsImFjY2VzcyI6InJ3In1dfQ.f4sfDPKq_nK6adnsTkiVXkKqGyxW5TzZnaPEo2fO_xMV6A2ceaij_S_cLR8caudAqn_4qHYFGJXIP2IuRPyqNg",
+      "keys": {
+        "signer-1": "p256-a"
+      },
+      "now": 1790000000,
+      "expected": {
+        "claim": "sbx-7f3a9c",
+        "namespace": "sandboxes",
+        "template": "agent-workspace-template"
+      },
+      "result": {
+        "ok": false,
+        "reason": "bad-signature"
+      }
+    },
+    {
+      "name": "bad-signature-der-encoded",
+      "about": "A correct signature in ASN.1/DER form instead of the 64 bytes r || s. The usual mistake when a library's default output is used.",
+      "token": "eyJhbGciOiJFUzI1NiIsInR5cCI6Inh5bmUtZ2l0LXNjb3BlK2p3dCIsImtpZCI6InNpZ25lci0xIn0.eyJ2IjoxLCJjbGFpbSI6InNieC03ZjNhOWMiLCJucyI6InNhbmRib3hlcyIsInRwbCI6ImFnZW50LXdvcmtzcGFjZS10ZW1wbGF0ZSIsInByb2ZpbGUiOiJleGFtcGxlLXByb2ZpbGUiLCJpYXQiOjE3ODk5OTk5OTAsImV4cCI6MTc5MDAwMzYwMCwicmVwb3MiOlt7InJlcG8iOiJiaXRidWNrZXQuZXhhbXBsZS5uZXQvcHJvai9zZXJ2aWNlIiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXRodWIuY29tL2V4YW1wbGUtb3JnL2FwcCIsImFjY2VzcyI6InJ3In1dfQ.MEQCIGxJueopv6LgIoXPmW91lluapkhYoX2B3w4Zk_q4jOgqAiAWO_2hu9m3dKFQ6wKgS6_-lNq3c3tiXVeXxt6YIH49Yw",
+      "keys": {
+        "signer-1": "p256-a"
+      },
+      "now": 1790000000,
+      "expected": {
+        "claim": "sbx-7f3a9c",
+        "namespace": "sandboxes",
+        "template": "agent-workspace-template"
+      },
+      "result": {
+        "ok": false,
+        "reason": "bad-signature"
+      }
+    },
+    {
+      "name": "bad-signature-all-zero",
+      "about": "r = 0 and s = 0.",
+      "token": "eyJhbGciOiJFUzI1NiIsInR5cCI6Inh5bmUtZ2l0LXNjb3BlK2p3dCIsImtpZCI6InNpZ25lci0xIn0.eyJ2IjoxLCJjbGFpbSI6InNieC03ZjNhOWMiLCJucyI6InNhbmRib3hlcyIsInRwbCI6ImFnZW50LXdvcmtzcGFjZS10ZW1wbGF0ZSIsInByb2ZpbGUiOiJleGFtcGxlLXByb2ZpbGUiLCJpYXQiOjE3ODk5OTk5OTAsImV4cCI6MTc5MDAwMzYwMCwicmVwb3MiOlt7InJlcG8iOiJiaXRidWNrZXQuZXhhbXBsZS5uZXQvcHJvai9zZXJ2aWNlIiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXRodWIuY29tL2V4YW1wbGUtb3JnL2FwcCIsImFjY2VzcyI6InJ3In1dfQ.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      "keys": {
+        "signer-1": "p256-a"
+      },
+      "now": 1790000000,
+      "expected": {
+        "claim": "sbx-7f3a9c",
+        "namespace": "sandboxes",
+        "template": "agent-workspace-template"
+      },
+      "result": {
+        "ok": false,
+        "reason": "bad-signature"
+      }
+    },
+    {
+      "name": "bad-signature-hmac-under-es256",
+      "about": "ES256 header, but the signature is an HMAC-SHA256 keyed by the public key PEM.",
+      "token": "eyJhbGciOiJFUzI1NiIsInR5cCI6Inh5bmUtZ2l0LXNjb3BlK2p3dCIsImtpZCI6InNpZ25lci0xIn0.eyJ2IjoxLCJjbGFpbSI6InNieC03ZjNhOWMiLCJucyI6InNhbmRib3hlcyIsInRwbCI6ImFnZW50LXdvcmtzcGFjZS10ZW1wbGF0ZSIsInByb2ZpbGUiOiJleGFtcGxlLXByb2ZpbGUiLCJpYXQiOjE3ODk5OTk5OTAsImV4cCI6MTc5MDAwMzYwMCwicmVwb3MiOlt7InJlcG8iOiJiaXRidWNrZXQuZXhhbXBsZS5uZXQvcHJvai9zZXJ2aWNlIiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXRodWIuY29tL2V4YW1wbGUtb3JnL2FwcCIsImFjY2VzcyI6InJ3In1dfQ.VzUuHQDYT1t1SGJy-o0RM_9Q9mvTv69iSQCwrqLGLq0",
+      "keys": {
+        "signer-1": "p256-a"
+      },
+      "now": 1790000000,
+      "expected": {
+        "claim": "sbx-7f3a9c",
+        "namespace": "sandboxes",
+        "template": "agent-workspace-template"
+      },
+      "result": {
+        "ok": false,
+        "reason": "bad-signature"
+      }
+    },
+    {
+      "name": "bad-signature-rsa-under-es256",
+      "about": "ES256 header, RSA signature; the verifier holds the P-256 key.",
+      "token": "eyJhbGciOiJFUzI1NiIsInR5cCI6Inh5bmUtZ2l0LXNjb3BlK2p3dCIsImtpZCI6InNpZ25lci0xIn0.eyJ2IjoxLCJjbGFpbSI6InNieC03ZjNhOWMiLCJucyI6InNhbmRib3hlcyIsInRwbCI6ImFnZW50LXdvcmtzcGFjZS10ZW1wbGF0ZSIsInByb2ZpbGUiOiJleGFtcGxlLXByb2ZpbGUiLCJpYXQiOjE3ODk5OTk5OTAsImV4cCI6MTc5MDAwMzYwMCwicmVwb3MiOlt7InJlcG8iOiJiaXRidWNrZXQuZXhhbXBsZS5uZXQvcHJvai9zZXJ2aWNlIiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXRodWIuY29tL2V4YW1wbGUtb3JnL2FwcCIsImFjY2VzcyI6InJ3In1dfQ.NFIzL0E3SYQPEEA_HTuLDdSqxD4X5EFX-x8scDmrFLzqUWaUZnv2CSTYetEdHRtnXA8TVoCW01pqRJHKVwRZMDR5owfSv0PvP6HpJZSBLrrX3EWmQLROCmUhnUjFXVJePPewbBtee8gQBC70dSRtQPtoYNd6961Uo8uQUYUiXYZ2MLuUQyHmm7B7rnak9xzPMTtfbZnAAiEfo3wnPgFejl3BpFi8udgZtvdq3rnnF9EkeRO_PsEzh63fXhaTE8zrmjieTXGnI3KOffDRDmDYp813itNvAAkN_YsqJZlxdnco6b8Ux54AKsmHf4kk88MKnK7rXimOUhR8AzXATjRp9Q",
+      "keys": {
+        "signer-1": "p256-a"
+      },
+      "now": 1790000000,
+      "expected": {
+        "claim": "sbx-7f3a9c",
+        "namespace": "sandboxes",
+        "template": "agent-workspace-template"
+      },
+      "result": {
+        "ok": false,
+        "reason": "bad-signature"
+      }
+    },
+    {
+      "name": "unsupported-version-2",
+      "about": "v is 2.",
+      "token": "eyJhbGciOiJFUzI1NiIsInR5cCI6Inh5bmUtZ2l0LXNjb3BlK2p3dCIsImtpZCI6InNpZ25lci0xIn0.eyJ2IjoyLCJjbGFpbSI6InNieC03ZjNhOWMiLCJucyI6InNhbmRib3hlcyIsInRwbCI6ImFnZW50LXdvcmtzcGFjZS10ZW1wbGF0ZSIsInByb2ZpbGUiOiJleGFtcGxlLXByb2ZpbGUiLCJpYXQiOjE3ODk5OTk5OTAsImV4cCI6MTc5MDAwMzYwMCwicmVwb3MiOlt7InJlcG8iOiJiaXRidWNrZXQuZXhhbXBsZS5uZXQvcHJvai9zZXJ2aWNlIiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXRodWIuY29tL2V4YW1wbGUtb3JnL2FwcCIsImFjY2VzcyI6InJ3In1dfQ.1olnYDq7Ldr-i_HEcMfoRbdPSCwXmO_Guoiu0EQKnH1Vpp3Au62rzRiM6ILQsqrF_VnoQaCtP7wh56MDmx4uqQ",
+      "keys": {
+        "signer-1": "p256-a"
+      },
+      "now": 1790000000,
+      "expected": {
+        "claim": "sbx-7f3a9c",
+        "namespace": "sandboxes",
+        "template": "agent-workspace-template"
+      },
+      "result": {
+        "ok": false,
+        "reason": "unsupported-version"
+      }
+    },
+    {
+      "name": "unsupported-version-missing",
+      "about": "No v.",
+      "token": "eyJhbGciOiJFUzI1NiIsInR5cCI6Inh5bmUtZ2l0LXNjb3BlK2p3dCIsImtpZCI6InNpZ25lci0xIn0.eyJjbGFpbSI6InNieC03ZjNhOWMiLCJucyI6InNhbmRib3hlcyIsInRwbCI6ImFnZW50LXdvcmtzcGFjZS10ZW1wbGF0ZSIsInByb2ZpbGUiOiJleGFtcGxlLXByb2ZpbGUiLCJpYXQiOjE3ODk5OTk5OTAsImV4cCI6MTc5MDAwMzYwMCwicmVwb3MiOlt7InJlcG8iOiJiaXRidWNrZXQuZXhhbXBsZS5uZXQvcHJvai9zZXJ2aWNlIiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXRodWIuY29tL2V4YW1wbGUtb3JnL2FwcCIsImFjY2VzcyI6InJ3In1dfQ.NlvQT6XEjBg3JoWKT5s-XQ8wDwq_2Kn9RVqFTln05QrGEJ0fCXmHVWKWvsktSUS7SuCb5t0DsJmk6XST5ZUKLA",
+      "keys": {
+        "signer-1": "p256-a"
+      },
+      "now": 1790000000,
+      "expected": {
+        "claim": "sbx-7f3a9c",
+        "namespace": "sandboxes",
+        "template": "agent-workspace-template"
+      },
+      "result": {
+        "ok": false,
+        "reason": "unsupported-version"
+      }
+    },
+    {
+      "name": "unsupported-version-string",
+      "about": "v is the string \"1\".",
+      "token": "eyJhbGciOiJFUzI1NiIsInR5cCI6Inh5bmUtZ2l0LXNjb3BlK2p3dCIsImtpZCI6InNpZ25lci0xIn0.eyJ2IjoiMSIsImNsYWltIjoic2J4LTdmM2E5YyIsIm5zIjoic2FuZGJveGVzIiwidHBsIjoiYWdlbnQtd29ya3NwYWNlLXRlbXBsYXRlIiwicHJvZmlsZSI6ImV4YW1wbGUtcHJvZmlsZSIsImlhdCI6MTc4OTk5OTk5MCwiZXhwIjoxNzkwMDAzNjAwLCJyZXBvcyI6W3sicmVwbyI6ImJpdGJ1Y2tldC5leGFtcGxlLm5ldC9wcm9qL3NlcnZpY2UiLCJhY2Nlc3MiOiJydyJ9LHsicmVwbyI6ImdpdGh1Yi5jb20vZXhhbXBsZS1vcmcvYXBwIiwiYWNjZXNzIjoicncifV19.qkZh61BP7mrXAx2YlZxacrWNQbXNEf_AxdiV5sxd6YJcqfrMqaJ_IJznowi0Vu5GjR6Z9Gm19ZgiPCGADaS4Ng",
+      "keys": {
+        "signer-1": "p256-a"
+      },
+      "now": 1790000000,
+      "expected": {
+        "claim": "sbx-7f3a9c",
+        "namespace": "sandboxes",
+        "template": "agent-workspace-template"
+      },
+      "result": {
+        "ok": false,
+        "reason": "unsupported-version"
+      }
+    },
+    {
+      "name": "invalid-payload-not-an-object",
+      "about": "The payload is a JSON array.",
+      "token": "eyJhbGciOiJFUzI1NiIsInR5cCI6Inh5bmUtZ2l0LXNjb3BlK2p3dCIsImtpZCI6InNpZ25lci0xIn0.W10.Suzdgx2b__f104xJasfAPf8VG7Vqgri2afZ2lQPqXeKOPuA72mTeFHKPacKyIdav3Am-YqUXTWF5H6bJc1tO1w",
+      "keys": {
+        "signer-1": "p256-a"
+      },
+      "now": 1790000000,
+      "expected": {
+        "claim": "sbx-7f3a9c",
+        "namespace": "sandboxes",
+        "template": "agent-workspace-template"
+      },
+      "result": {
+        "ok": false,
+        "reason": "invalid-payload"
+      }
+    },
+    {
+      "name": "invalid-payload-not-json",
+      "about": "The payload is not JSON.",
+      "token": "eyJhbGciOiJFUzI1NiIsInR5cCI6Inh5bmUtZ2l0LXNjb3BlK2p3dCIsImtpZCI6InNpZ25lci0xIn0.dj0x.Eklc35t3GxjR2oi1MEaBrAmnNQ2-Sk1rH2x_O1sZBDoX2LpBJ5LFPxhICWp156niAsOtsrwn6p5F6pV1AEXpGQ",
+      "keys": {
+        "signer-1": "p256-a"
+      },
+      "now": 1790000000,
+      "expected": {
+        "claim": "sbx-7f3a9c",
+        "namespace": "sandboxes",
+        "template": "agent-workspace-template"
+      },
+      "result": {
+        "ok": false,
+        "reason": "invalid-payload"
+      }
+    },
+    {
+      "name": "invalid-payload-missing-member",
+      "about": "No tpl.",
+      "token": "eyJhbGciOiJFUzI1NiIsInR5cCI6Inh5bmUtZ2l0LXNjb3BlK2p3dCIsImtpZCI6InNpZ25lci0xIn0.eyJ2IjoxLCJjbGFpbSI6InNieC03ZjNhOWMiLCJucyI6InNhbmRib3hlcyIsInByb2ZpbGUiOiJleGFtcGxlLXByb2ZpbGUiLCJpYXQiOjE3ODk5OTk5OTAsImV4cCI6MTc5MDAwMzYwMCwicmVwb3MiOlt7InJlcG8iOiJiaXRidWNrZXQuZXhhbXBsZS5uZXQvcHJvai9zZXJ2aWNlIiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXRodWIuY29tL2V4YW1wbGUtb3JnL2FwcCIsImFjY2VzcyI6InJ3In1dfQ.-g1Es8-5BNzBRHh2MArqBC82Emo7r_nZd6cSFCN--eDyhvDiPymlpzHMNIG4gMmQ4slqz7YkJejXm0JuxkLCXg",
+      "keys": {
+        "signer-1": "p256-a"
+      },
+      "now": 1790000000,
+      "expected": {
+        "claim": "sbx-7f3a9c",
+        "namespace": "sandboxes",
+        "template": "agent-workspace-template"
+      },
+      "result": {
+        "ok": false,
+        "reason": "invalid-payload"
+      }
+    },
+    {
+      "name": "invalid-payload-extra-member",
+      "about": "A member this version does not define.",
+      "token": "eyJhbGciOiJFUzI1NiIsInR5cCI6Inh5bmUtZ2l0LXNjb3BlK2p3dCIsImtpZCI6InNpZ25lci0xIn0.eyJ2IjoxLCJjbGFpbSI6InNieC03ZjNhOWMiLCJucyI6InNhbmRib3hlcyIsInRwbCI6ImFnZW50LXdvcmtzcGFjZS10ZW1wbGF0ZSIsInByb2ZpbGUiOiJleGFtcGxlLXByb2ZpbGUiLCJpYXQiOjE3ODk5OTk5OTAsImV4cCI6MTc5MDAwMzYwMCwicmVwb3MiOlt7InJlcG8iOiJiaXRidWNrZXQuZXhhbXBsZS5uZXQvcHJvai9zZXJ2aWNlIiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXRodWIuY29tL2V4YW1wbGUtb3JnL2FwcCIsImFjY2VzcyI6InJ3In1dLCJicmFuY2hlcyI6WyJtYWluIl19.fygINmTUcLk-7BNdaLVRz9WdwbQQypa0RHuNDEMNM41Z0MwZwmVDQxUHWb_BX67qgPbUoECoqpVaz9HATXwyow",
+      "keys": {
+        "signer-1": "p256-a"
+      },
+      "now": 1790000000,
+      "expected": {
+        "claim": "sbx-7f3a9c",
+        "namespace": "sandboxes",
+        "template": "agent-workspace-template"
+      },
+      "result": {
+        "ok": false,
+        "reason": "invalid-payload"
+      }
+    },
+    {
+      "name": "invalid-payload-empty-claim",
+      "about": "claim is empty.",
+      "token": "eyJhbGciOiJFUzI1NiIsInR5cCI6Inh5bmUtZ2l0LXNjb3BlK2p3dCIsImtpZCI6InNpZ25lci0xIn0.eyJ2IjoxLCJjbGFpbSI6IiIsIm5zIjoic2FuZGJveGVzIiwidHBsIjoiYWdlbnQtd29ya3NwYWNlLXRlbXBsYXRlIiwicHJvZmlsZSI6ImV4YW1wbGUtcHJvZmlsZSIsImlhdCI6MTc4OTk5OTk5MCwiZXhwIjoxNzkwMDAzNjAwLCJyZXBvcyI6W3sicmVwbyI6ImJpdGJ1Y2tldC5leGFtcGxlLm5ldC9wcm9qL3NlcnZpY2UiLCJhY2Nlc3MiOiJydyJ9LHsicmVwbyI6ImdpdGh1Yi5jb20vZXhhbXBsZS1vcmcvYXBwIiwiYWNjZXNzIjoicncifV19.13-XebVk5ICLhFBiGTNpgUaypQKM8wsa6qz96r1pn4mt7W4sQ6cCeT4YFn3_tUQTUCK5T0txuQP94dxW1IbpZA",
+      "keys": {
+        "signer-1": "p256-a"
+      },
+      "now": 1790000000,
+      "expected": {
+        "claim": "sbx-7f3a9c",
+        "namespace": "sandboxes",
+        "template": "agent-workspace-template"
+      },
+      "result": {
+        "ok": false,
+        "reason": "invalid-payload"
+      }
+    },
+    {
+      "name": "invalid-payload-claim-not-a-string",
+      "about": "claim is a number.",
+      "token": "eyJhbGciOiJFUzI1NiIsInR5cCI6Inh5bmUtZ2l0LXNjb3BlK2p3dCIsImtpZCI6InNpZ25lci0xIn0.eyJ2IjoxLCJjbGFpbSI6NywibnMiOiJzYW5kYm94ZXMiLCJ0cGwiOiJhZ2VudC13b3Jrc3BhY2UtdGVtcGxhdGUiLCJwcm9maWxlIjoiZXhhbXBsZS1wcm9maWxlIiwiaWF0IjoxNzg5OTk5OTkwLCJleHAiOjE3OTAwMDM2MDAsInJlcG9zIjpbeyJyZXBvIjoiYml0YnVja2V0LmV4YW1wbGUubmV0L3Byb2ovc2VydmljZSIsImFjY2VzcyI6InJ3In0seyJyZXBvIjoiZ2l0aHViLmNvbS9leGFtcGxlLW9yZy9hcHAiLCJhY2Nlc3MiOiJydyJ9XX0.CDS8i1oB-G2JYZfGN3rczOcJ9NCOUTCusE6Da6POfbkoytP22RFhKEM6ZJKEjuP-Sx8lCbfgNJV3fifiDr341A",
+      "keys": {
+        "signer-1": "p256-a"
+      },
+      "now": 1790000000,
+      "expected": {
+        "claim": "sbx-7f3a9c",
+        "namespace": "sandboxes",
+        "template": "agent-workspace-template"
+      },
+      "result": {
+        "ok": false,
+        "reason": "invalid-payload"
+      }
+    },
+    {
+      "name": "invalid-payload-exp-string",
+      "about": "exp is a string.",
+      "token": "eyJhbGciOiJFUzI1NiIsInR5cCI6Inh5bmUtZ2l0LXNjb3BlK2p3dCIsImtpZCI6InNpZ25lci0xIn0.eyJ2IjoxLCJjbGFpbSI6InNieC03ZjNhOWMiLCJucyI6InNhbmRib3hlcyIsInRwbCI6ImFnZW50LXdvcmtzcGFjZS10ZW1wbGF0ZSIsInByb2ZpbGUiOiJleGFtcGxlLXByb2ZpbGUiLCJpYXQiOjE3ODk5OTk5OTAsImV4cCI6IjE3OTAwMDM2MDAiLCJyZXBvcyI6W3sicmVwbyI6ImJpdGJ1Y2tldC5leGFtcGxlLm5ldC9wcm9qL3NlcnZpY2UiLCJhY2Nlc3MiOiJydyJ9LHsicmVwbyI6ImdpdGh1Yi5jb20vZXhhbXBsZS1vcmcvYXBwIiwiYWNjZXNzIjoicncifV19.gR5QIX1pa91x-kaaeMjZ2-a0suD4TUK6E2a49d-wrMjyAFG51lSaa-BTfuHD-dUeY6tCo-JtDgl3vN_ZY6J3QA",
+      "keys": {
+        "signer-1": "p256-a"
+      },
+      "now": 1790000000,
+      "expected": {
+        "claim": "sbx-7f3a9c",
+        "namespace": "sandboxes",
+        "template": "agent-workspace-template"
+      },
+      "result": {
+        "ok": false,
+        "reason": "invalid-payload"
+      }
+    },
+    {
+      "name": "invalid-payload-exp-not-after-iat",
+      "about": "exp equals iat.",
+      "token": "eyJhbGciOiJFUzI1NiIsInR5cCI6Inh5bmUtZ2l0LXNjb3BlK2p3dCIsImtpZCI6InNpZ25lci0xIn0.eyJ2IjoxLCJjbGFpbSI6InNieC03ZjNhOWMiLCJucyI6InNhbmRib3hlcyIsInRwbCI6ImFnZW50LXdvcmtzcGFjZS10ZW1wbGF0ZSIsInByb2ZpbGUiOiJleGFtcGxlLXByb2ZpbGUiLCJpYXQiOjE3ODk5OTk5OTAsImV4cCI6MTc4OTk5OTk5MCwicmVwb3MiOlt7InJlcG8iOiJiaXRidWNrZXQuZXhhbXBsZS5uZXQvcHJvai9zZXJ2aWNlIiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXRodWIuY29tL2V4YW1wbGUtb3JnL2FwcCIsImFjY2VzcyI6InJ3In1dfQ.WfGR6qYWrNRu98aCoCnbFiJfX8e10BiHG4H76-KGEuqNinDY0YiIa-Emq0KkqoSSLdVlJHuD6oVAzz-S9FUH5Q",
+      "keys": {
+        "signer-1": "p256-a"
+      },
+      "now": 1790000000,
+      "expected": {
+        "claim": "sbx-7f3a9c",
+        "namespace": "sandboxes",
+        "template": "agent-workspace-template"
+      },
+      "result": {
+        "ok": false,
+        "reason": "invalid-payload"
+      }
+    },
+    {
+      "name": "invalid-payload-fractional-iat",
+      "about": "iat is not a whole number.",
+      "token": "eyJhbGciOiJFUzI1NiIsInR5cCI6Inh5bmUtZ2l0LXNjb3BlK2p3dCIsImtpZCI6InNpZ25lci0xIn0.eyJ2IjoxLCJjbGFpbSI6InNieC03ZjNhOWMiLCJucyI6InNhbmRib3hlcyIsInRwbCI6ImFnZW50LXdvcmtzcGFjZS10ZW1wbGF0ZSIsInByb2ZpbGUiOiJleGFtcGxlLXByb2ZpbGUiLCJpYXQiOjE3ODk5OTk5OTAuNSwiZXhwIjoxNzkwMDAzNjAwLCJyZXBvcyI6W3sicmVwbyI6ImJpdGJ1Y2tldC5leGFtcGxlLm5ldC9wcm9qL3NlcnZpY2UiLCJhY2Nlc3MiOiJydyJ9LHsicmVwbyI6ImdpdGh1Yi5jb20vZXhhbXBsZS1vcmcvYXBwIiwiYWNjZXNzIjoicncifV19.RiJ6kFZThDZrjSAH-Gf4o2QjoQhgPhfH07CnX8KpYQ0qeFJXFUw7fsb-1ESuNr8lxCwz8FiyAenwyrBXrZdm2w",
+      "keys": {
+        "signer-1": "p256-a"
+      },
+      "now": 1790000000,
+      "expected": {
+        "claim": "sbx-7f3a9c",
+        "namespace": "sandboxes",
+        "template": "agent-workspace-template"
+      },
+      "result": {
+        "ok": false,
+        "reason": "invalid-payload"
+      }
+    },
+    {
+      "name": "invalid-payload-negative-iat",
+      "about": "iat is negative.",
+      "token": "eyJhbGciOiJFUzI1NiIsInR5cCI6Inh5bmUtZ2l0LXNjb3BlK2p3dCIsImtpZCI6InNpZ25lci0xIn0.eyJ2IjoxLCJjbGFpbSI6InNieC03ZjNhOWMiLCJucyI6InNhbmRib3hlcyIsInRwbCI6ImFnZW50LXdvcmtzcGFjZS10ZW1wbGF0ZSIsInByb2ZpbGUiOiJleGFtcGxlLXByb2ZpbGUiLCJpYXQiOi0xLCJleHAiOjE3OTAwMDM2MDAsInJlcG9zIjpbeyJyZXBvIjoiYml0YnVja2V0LmV4YW1wbGUubmV0L3Byb2ovc2VydmljZSIsImFjY2VzcyI6InJ3In0seyJyZXBvIjoiZ2l0aHViLmNvbS9leGFtcGxlLW9yZy9hcHAiLCJhY2Nlc3MiOiJydyJ9XX0.7GkGY_0mqJh-A87JHlxbaPYceX1AFF94toAtfqGvZy-B_FY3f4-gxI3zBlybh1X5nhR2p7EtPcIOOlF3rompaw",
+      "keys": {
+        "signer-1": "p256-a"
+      },
+      "now": 1790000000,
+      "expected": {
+        "claim": "sbx-7f3a9c",
+        "namespace": "sandboxes",
+        "template": "agent-workspace-template"
+      },
+      "result": {
+        "ok": false,
+        "reason": "invalid-payload"
+      }
+    },
+    {
+      "name": "invalid-payload-repos-not-an-array",
+      "about": "repos is an object.",
+      "token": "eyJhbGciOiJFUzI1NiIsInR5cCI6Inh5bmUtZ2l0LXNjb3BlK2p3dCIsImtpZCI6InNpZ25lci0xIn0.eyJ2IjoxLCJjbGFpbSI6InNieC03ZjNhOWMiLCJucyI6InNhbmRib3hlcyIsInRwbCI6ImFnZW50LXdvcmtzcGFjZS10ZW1wbGF0ZSIsInByb2ZpbGUiOiJleGFtcGxlLXByb2ZpbGUiLCJpYXQiOjE3ODk5OTk5OTAsImV4cCI6MTc5MDAwMzYwMCwicmVwb3MiOnsiZ2l0aHViLmNvbS9leGFtcGxlLW9yZy9hcHAiOiJydyJ9fQ.p48SXjDpkZekEi_Tddf6SS1YGVkE2EhIPWbTrqAylH2kXJBMEXqV8C_M4eEnKU7vn9gFF8O8M4LosyFdLkUT-g",
+      "keys": {
+        "signer-1": "p256-a"
+      },
+      "now": 1790000000,
+      "expected": {
+        "claim": "sbx-7f3a9c",
+        "namespace": "sandboxes",
+        "template": "agent-workspace-template"
+      },
+      "result": {
+        "ok": false,
+        "reason": "invalid-payload"
+      }
+    },
+    {
+      "name": "invalid-payload-repo-entry-is-a-string",
+      "about": "A repos entry is a string.",
+      "token": "eyJhbGciOiJFUzI1NiIsInR5cCI6Inh5bmUtZ2l0LXNjb3BlK2p3dCIsImtpZCI6InNpZ25lci0xIn0.eyJ2IjoxLCJjbGFpbSI6InNieC03ZjNhOWMiLCJucyI6InNhbmRib3hlcyIsInRwbCI6ImFnZW50LXdvcmtzcGFjZS10ZW1wbGF0ZSIsInByb2ZpbGUiOiJleGFtcGxlLXByb2ZpbGUiLCJpYXQiOjE3ODk5OTk5OTAsImV4cCI6MTc5MDAwMzYwMCwicmVwb3MiOlsiZ2l0aHViLmNvbS9leGFtcGxlLW9yZy9hcHAiXX0.brrnWCQTor5Fy2dOwz9tS1ukJBoKqKCg_atRvqyqqQEDDFz-h8Zz4fLvMESQkW33XRGbja_9P1Zc8o37TIhSWQ",
+      "keys": {
+        "signer-1": "p256-a"
+      },
+      "now": 1790000000,
+      "expected": {
+        "claim": "sbx-7f3a9c",
+        "namespace": "sandboxes",
+        "template": "agent-workspace-template"
+      },
+      "result": {
+        "ok": false,
+        "reason": "invalid-payload"
+      }
+    },
+    {
+      "name": "invalid-payload-repo-entry-extra-member",
+      "about": "A repos entry has a third member.",
+      "token": "eyJhbGciOiJFUzI1NiIsInR5cCI6Inh5bmUtZ2l0LXNjb3BlK2p3dCIsImtpZCI6InNpZ25lci0xIn0.eyJ2IjoxLCJjbGFpbSI6InNieC03ZjNhOWMiLCJucyI6InNhbmRib3hlcyIsInRwbCI6ImFnZW50LXdvcmtzcGFjZS10ZW1wbGF0ZSIsInByb2ZpbGUiOiJleGFtcGxlLXByb2ZpbGUiLCJpYXQiOjE3ODk5OTk5OTAsImV4cCI6MTc5MDAwMzYwMCwicmVwb3MiOlt7InJlcG8iOiJnaXRodWIuY29tL2V4YW1wbGUtb3JnL2FwcCIsImFjY2VzcyI6InJ3IiwiYnJhbmNoIjoibWFpbiJ9XX0.iQ9TWh8l0U9TsRaLoeRxxiJIIAwCTem2XzuK0y9A22i0gemgkBmWa-bKOQ-ca4HMJp54UZfpBm6MECiaMztppA",
+      "keys": {
+        "signer-1": "p256-a"
+      },
+      "now": 1790000000,
+      "expected": {
+        "claim": "sbx-7f3a9c",
+        "namespace": "sandboxes",
+        "template": "agent-workspace-template"
+      },
+      "result": {
+        "ok": false,
+        "reason": "invalid-payload"
+      }
+    },
+    {
+      "name": "invalid-payload-repo-entry-no-access",
+      "about": "A repos entry has no access.",
+      "token": "eyJhbGciOiJFUzI1NiIsInR5cCI6Inh5bmUtZ2l0LXNjb3BlK2p3dCIsImtpZCI6InNpZ25lci0xIn0.eyJ2IjoxLCJjbGFpbSI6InNieC03ZjNhOWMiLCJucyI6InNhbmRib3hlcyIsInRwbCI6ImFnZW50LXdvcmtzcGFjZS10ZW1wbGF0ZSIsInByb2ZpbGUiOiJleGFtcGxlLXByb2ZpbGUiLCJpYXQiOjE3ODk5OTk5OTAsImV4cCI6MTc5MDAwMzYwMCwicmVwb3MiOlt7InJlcG8iOiJnaXRodWIuY29tL2V4YW1wbGUtb3JnL2FwcCJ9XX0.9rhaS5M-eZ2OwP2XZhgAdvuPf-N5ptlqA0KiZLkJF5U2yzEQ-7lfGuTRGhPNTjhPly3JsN4FXKbmU67CYORgNA",
+      "keys": {
+        "signer-1": "p256-a"
+      },
+      "now": 1790000000,
+      "expected": {
+        "claim": "sbx-7f3a9c",
+        "namespace": "sandboxes",
+        "template": "agent-workspace-template"
+      },
+      "result": {
+        "ok": false,
+        "reason": "invalid-payload"
+      }
+    },
+    {
+      "name": "invalid-payload-access-unknown",
+      "about": "access is \"w\".",
+      "token": "eyJhbGciOiJFUzI1NiIsInR5cCI6Inh5bmUtZ2l0LXNjb3BlK2p3dCIsImtpZCI6InNpZ25lci0xIn0.eyJ2IjoxLCJjbGFpbSI6InNieC03ZjNhOWMiLCJucyI6InNhbmRib3hlcyIsInRwbCI6ImFnZW50LXdvcmtzcGFjZS10ZW1wbGF0ZSIsInByb2ZpbGUiOiJleGFtcGxlLXByb2ZpbGUiLCJpYXQiOjE3ODk5OTk5OTAsImV4cCI6MTc5MDAwMzYwMCwicmVwb3MiOlt7InJlcG8iOiJnaXRodWIuY29tL2V4YW1wbGUtb3JnL2FwcCIsImFjY2VzcyI6IncifV19.Mr6YwRD5B8ubXJ3I08gGwVwTLp9oFrfOSFBJghR_ZzluNoV2fGGjVgoAHsgP91NUBgAFf0AA7nioqIsvjAOKdQ",
+      "keys": {
+        "signer-1": "p256-a"
+      },
+      "now": 1790000000,
+      "expected": {
+        "claim": "sbx-7f3a9c",
+        "namespace": "sandboxes",
+        "template": "agent-workspace-template"
+      },
+      "result": {
+        "ok": false,
+        "reason": "invalid-payload"
+      }
+    },
+    {
+      "name": "invalid-payload-access-upper-case",
+      "about": "access is \"RW\".",
+      "token": "eyJhbGciOiJFUzI1NiIsInR5cCI6Inh5bmUtZ2l0LXNjb3BlK2p3dCIsImtpZCI6InNpZ25lci0xIn0.eyJ2IjoxLCJjbGFpbSI6InNieC03ZjNhOWMiLCJucyI6InNhbmRib3hlcyIsInRwbCI6ImFnZW50LXdvcmtzcGFjZS10ZW1wbGF0ZSIsInByb2ZpbGUiOiJleGFtcGxlLXByb2ZpbGUiLCJpYXQiOjE3ODk5OTk5OTAsImV4cCI6MTc5MDAwMzYwMCwicmVwb3MiOlt7InJlcG8iOiJnaXRodWIuY29tL2V4YW1wbGUtb3JnL2FwcCIsImFjY2VzcyI6IlJXIn1dfQ.xgyJIw1hXTW0Rs9M1qyBW-hwcVUM_0oOxndrqIJXD1O_wFHzzBXASM6P-qAoGX15pXgMUbJ4-mZRRT7bmW39rg",
+      "keys": {
+        "signer-1": "p256-a"
+      },
+      "now": 1790000000,
+      "expected": {
+        "claim": "sbx-7f3a9c",
+        "namespace": "sandboxes",
+        "template": "agent-workspace-template"
+      },
+      "result": {
+        "ok": false,
+        "reason": "invalid-payload"
+      }
+    },
+    {
+      "name": "invalid-payload-repo-is-an-address",
+      "about": "repo is a clone address, not host/path.",
+      "token": "eyJhbGciOiJFUzI1NiIsInR5cCI6Inh5bmUtZ2l0LXNjb3BlK2p3dCIsImtpZCI6InNpZ25lci0xIn0.eyJ2IjoxLCJjbGFpbSI6InNieC03ZjNhOWMiLCJucyI6InNhbmRib3hlcyIsInRwbCI6ImFnZW50LXdvcmtzcGFjZS10ZW1wbGF0ZSIsInByb2ZpbGUiOiJleGFtcGxlLXByb2ZpbGUiLCJpYXQiOjE3ODk5OTk5OTAsImV4cCI6MTc5MDAwMzYwMCwicmVwb3MiOlt7InJlcG8iOiJodHRwczovL2dpdGh1Yi5jb20vZXhhbXBsZS1vcmcvYXBwLmdpdCIsImFjY2VzcyI6InJ3In1dfQ.7_1TELdn-3-yyULyRLmHLHufCUe1NzfrySQ2MU2SuTCrsPHsHs2iNLKSEflUFI_4icjr5FQQIl84rgVD6-aexw",
+      "keys": {
+        "signer-1": "p256-a"
+      },
+      "now": 1790000000,
+      "expected": {
+        "claim": "sbx-7f3a9c",
+        "namespace": "sandboxes",
+        "template": "agent-workspace-template"
+      },
+      "result": {
+        "ok": false,
+        "reason": "invalid-payload"
+      }
+    },
+    {
+      "name": "invalid-payload-repo-upper-case",
+      "about": "repo is not lower-case.",
+      "token": "eyJhbGciOiJFUzI1NiIsInR5cCI6Inh5bmUtZ2l0LXNjb3BlK2p3dCIsImtpZCI6InNpZ25lci0xIn0.eyJ2IjoxLCJjbGFpbSI6InNieC03ZjNhOWMiLCJucyI6InNhbmRib3hlcyIsInRwbCI6ImFnZW50LXdvcmtzcGFjZS10ZW1wbGF0ZSIsInByb2ZpbGUiOiJleGFtcGxlLXByb2ZpbGUiLCJpYXQiOjE3ODk5OTk5OTAsImV4cCI6MTc5MDAwMzYwMCwicmVwb3MiOlt7InJlcG8iOiJnaXRodWIuY29tL0V4YW1wbGUtT3JnL2FwcCIsImFjY2VzcyI6InJ3In1dfQ.llsUjV5SeOFaGEThg6-6AemwFjRmQupv0WrC0-wuugX32dv6kDznsT21q5h_G9SM8XCKQtEzr1pL5wc779gvFQ",
+      "keys": {
+        "signer-1": "p256-a"
+      },
+      "now": 1790000000,
+      "expected": {
+        "claim": "sbx-7f3a9c",
+        "namespace": "sandboxes",
+        "template": "agent-workspace-template"
+      },
+      "result": {
+        "ok": false,
+        "reason": "invalid-payload"
+      }
+    },
+    {
+      "name": "invalid-payload-repo-git-suffix",
+      "about": "repo keeps .git.",
+      "token": "eyJhbGciOiJFUzI1NiIsInR5cCI6Inh5bmUtZ2l0LXNjb3BlK2p3dCIsImtpZCI6InNpZ25lci0xIn0.eyJ2IjoxLCJjbGFpbSI6InNieC03ZjNhOWMiLCJucyI6InNhbmRib3hlcyIsInRwbCI6ImFnZW50LXdvcmtzcGFjZS10ZW1wbGF0ZSIsInByb2ZpbGUiOiJleGFtcGxlLXByb2ZpbGUiLCJpYXQiOjE3ODk5OTk5OTAsImV4cCI6MTc5MDAwMzYwMCwicmVwb3MiOlt7InJlcG8iOiJnaXRodWIuY29tL2V4YW1wbGUtb3JnL2FwcC5naXQiLCJhY2Nlc3MiOiJydyJ9XX0.bI7g0W2nIIEB5V41BoD-DNWMlMAGXYaET377JZ5JZaWLlMGhckZA1qKJBMyVYiBggZWylO30byusZuALtMCs8g",
+      "keys": {
+        "signer-1": "p256-a"
+      },
+      "now": 1790000000,
+      "expected": {
+        "claim": "sbx-7f3a9c",
+        "namespace": "sandboxes",
+        "template": "agent-workspace-template"
+      },
+      "result": {
+        "ok": false,
+        "reason": "invalid-payload"
+      }
+    },
+    {
+      "name": "invalid-payload-repo-scm-prefix",
+      "about": "repo keeps Bitbucket's scm/.",
+      "token": "eyJhbGciOiJFUzI1NiIsInR5cCI6Inh5bmUtZ2l0LXNjb3BlK2p3dCIsImtpZCI6InNpZ25lci0xIn0.eyJ2IjoxLCJjbGFpbSI6InNieC03ZjNhOWMiLCJucyI6InNhbmRib3hlcyIsInRwbCI6ImFnZW50LXdvcmtzcGFjZS10ZW1wbGF0ZSIsInByb2ZpbGUiOiJleGFtcGxlLXByb2ZpbGUiLCJpYXQiOjE3ODk5OTk5OTAsImV4cCI6MTc5MDAwMzYwMCwicmVwb3MiOlt7InJlcG8iOiJiaXRidWNrZXQuZXhhbXBsZS5uZXQvc2NtL3Byb2ovc2VydmljZSIsImFjY2VzcyI6InJ3In1dfQ.7uS4h93jEqVX6Axu1SKjHOruBJ0wT_f7593YkVp5u0Y3m1Gd1EVIUAq_WUxz4L8zGs8Id4tcV_kn8cQVM8ohag",
+      "keys": {
+        "signer-1": "p256-a"
+      },
+      "now": 1790000000,
+      "expected": {
+        "claim": "sbx-7f3a9c",
+        "namespace": "sandboxes",
+        "template": "agent-workspace-template"
+      },
+      "result": {
+        "ok": false,
+        "reason": "invalid-payload"
+      }
+    },
+    {
+      "name": "invalid-payload-repo-ssh-host",
+      "about": "repo keeps the ssh. host prefix.",
+      "token": "eyJhbGciOiJFUzI1NiIsInR5cCI6Inh5bmUtZ2l0LXNjb3BlK2p3dCIsImtpZCI6InNpZ25lci0xIn0.eyJ2IjoxLCJjbGFpbSI6InNieC03ZjNhOWMiLCJucyI6InNhbmRib3hlcyIsInRwbCI6ImFnZW50LXdvcmtzcGFjZS10ZW1wbGF0ZSIsInByb2ZpbGUiOiJleGFtcGxlLXByb2ZpbGUiLCJpYXQiOjE3ODk5OTk5OTAsImV4cCI6MTc5MDAwMzYwMCwicmVwb3MiOlt7InJlcG8iOiJzc2guYml0YnVja2V0LmV4YW1wbGUubmV0L3Byb2ovc2VydmljZSIsImFjY2VzcyI6InJ3In1dfQ.39mUCVRinVpu6LiERdahNBU-u2Xxs9SYaRsqKA9OYngOOdcfra5AJEYv0zvmxsG20PXDz91Ai7T0dmTkCbKJtA",
+      "keys": {
+        "signer-1": "p256-a"
+      },
+      "now": 1790000000,
+      "expected": {
+        "claim": "sbx-7f3a9c",
+        "namespace": "sandboxes",
+        "template": "agent-workspace-template"
+      },
+      "result": {
+        "ok": false,
+        "reason": "invalid-payload"
+      }
+    },
+    {
+      "name": "invalid-payload-repo-port",
+      "about": "repo keeps a port.",
+      "token": "eyJhbGciOiJFUzI1NiIsInR5cCI6Inh5bmUtZ2l0LXNjb3BlK2p3dCIsImtpZCI6InNpZ25lci0xIn0.eyJ2IjoxLCJjbGFpbSI6InNieC03ZjNhOWMiLCJucyI6InNhbmRib3hlcyIsInRwbCI6ImFnZW50LXdvcmtzcGFjZS10ZW1wbGF0ZSIsInByb2ZpbGUiOiJleGFtcGxlLXByb2ZpbGUiLCJpYXQiOjE3ODk5OTk5OTAsImV4cCI6MTc5MDAwMzYwMCwicmVwb3MiOlt7InJlcG8iOiJiaXRidWNrZXQuZXhhbXBsZS5uZXQ6Nzk5OS9wcm9qL3NlcnZpY2UiLCJhY2Nlc3MiOiJydyJ9XX0.GQfSNNklSw9fe5qsbp3occsWXdfM5EX7020OE6-j9Z6Q68AqtPkxxG14ftjMFKtVUDHbHQaODRUiL1Twx0i5Dw",
+      "keys": {
+        "signer-1": "p256-a"
+      },
+      "now": 1790000000,
+      "expected": {
+        "claim": "sbx-7f3a9c",
+        "namespace": "sandboxes",
+        "template": "agent-workspace-template"
+      },
+      "result": {
+        "ok": false,
+        "reason": "invalid-payload"
+      }
+    },
+    {
+      "name": "invalid-payload-repo-one-segment",
+      "about": "repo has one path segment.",
+      "token": "eyJhbGciOiJFUzI1NiIsInR5cCI6Inh5bmUtZ2l0LXNjb3BlK2p3dCIsImtpZCI6InNpZ25lci0xIn0.eyJ2IjoxLCJjbGFpbSI6InNieC03ZjNhOWMiLCJucyI6InNhbmRib3hlcyIsInRwbCI6ImFnZW50LXdvcmtzcGFjZS10ZW1wbGF0ZSIsInByb2ZpbGUiOiJleGFtcGxlLXByb2ZpbGUiLCJpYXQiOjE3ODk5OTk5OTAsImV4cCI6MTc5MDAwMzYwMCwicmVwb3MiOlt7InJlcG8iOiJnaXRodWIuY29tL2V4YW1wbGUtb3JnIiwiYWNjZXNzIjoicncifV19.jr9_6QHre-zvk9DKSQoqj_Ka7HngEICUrB78ez8b8ddZFifJTMs2bF3wWEQY3Lc_0ct62LpO09iJs7wCbSTCbQ",
+      "keys": {
+        "signer-1": "p256-a"
+      },
+      "now": 1790000000,
+      "expected": {
+        "claim": "sbx-7f3a9c",
+        "namespace": "sandboxes",
+        "template": "agent-workspace-template"
+      },
+      "result": {
+        "ok": false,
+        "reason": "invalid-payload"
+      }
+    },
+    {
+      "name": "invalid-payload-repo-dot-segment",
+      "about": "repo has a .. segment.",
+      "token": "eyJhbGciOiJFUzI1NiIsInR5cCI6Inh5bmUtZ2l0LXNjb3BlK2p3dCIsImtpZCI6InNpZ25lci0xIn0.eyJ2IjoxLCJjbGFpbSI6InNieC03ZjNhOWMiLCJucyI6InNhbmRib3hlcyIsInRwbCI6ImFnZW50LXdvcmtzcGFjZS10ZW1wbGF0ZSIsInByb2ZpbGUiOiJleGFtcGxlLXByb2ZpbGUiLCJpYXQiOjE3ODk5OTk5OTAsImV4cCI6MTc5MDAwMzYwMCwicmVwb3MiOlt7InJlcG8iOiJnaXRodWIuY29tL2V4YW1wbGUtb3JnLy4uL2FwcCIsImFjY2VzcyI6InJ3In1dfQ.QC4WsCyXRX5clNN3Wx9sBNZ_EmOHkIfsEoXspNlcW_0egN6VS_D0xSTdwzCAa-2cA3UwD-OsGJjjsDATpt0UOA",
+      "keys": {
+        "signer-1": "p256-a"
+      },
+      "now": 1790000000,
+      "expected": {
+        "claim": "sbx-7f3a9c",
+        "namespace": "sandboxes",
+        "template": "agent-workspace-template"
+      },
+      "result": {
+        "ok": false,
+        "reason": "invalid-payload"
+      }
+    },
+    {
+      "name": "invalid-payload-repo-trailing-slash",
+      "about": "repo ends with a slash.",
+      "token": "eyJhbGciOiJFUzI1NiIsInR5cCI6Inh5bmUtZ2l0LXNjb3BlK2p3dCIsImtpZCI6InNpZ25lci0xIn0.eyJ2IjoxLCJjbGFpbSI6InNieC03ZjNhOWMiLCJucyI6InNhbmRib3hlcyIsInRwbCI6ImFnZW50LXdvcmtzcGFjZS10ZW1wbGF0ZSIsInByb2ZpbGUiOiJleGFtcGxlLXByb2ZpbGUiLCJpYXQiOjE3ODk5OTk5OTAsImV4cCI6MTc5MDAwMzYwMCwicmVwb3MiOlt7InJlcG8iOiJnaXRodWIuY29tL2V4YW1wbGUtb3JnL2FwcC8iLCJhY2Nlc3MiOiJydyJ9XX0.x5Aopw-4-F7iIiDYDtV6gFrKQQIqCG6jQOyNOX_PiSLquhveBvuL-rQdpbaMwbiXc_KwXDd_43Vv8vGq4Klexg",
+      "keys": {
+        "signer-1": "p256-a"
+      },
+      "now": 1790000000,
+      "expected": {
+        "claim": "sbx-7f3a9c",
+        "namespace": "sandboxes",
+        "template": "agent-workspace-template"
+      },
+      "result": {
+        "ok": false,
+        "reason": "invalid-payload"
+      }
+    },
+    {
+      "name": "invalid-payload-repo-wildcard",
+      "about": "repo is a pattern.",
+      "token": "eyJhbGciOiJFUzI1NiIsInR5cCI6Inh5bmUtZ2l0LXNjb3BlK2p3dCIsImtpZCI6InNpZ25lci0xIn0.eyJ2IjoxLCJjbGFpbSI6InNieC03ZjNhOWMiLCJucyI6InNhbmRib3hlcyIsInRwbCI6ImFnZW50LXdvcmtzcGFjZS10ZW1wbGF0ZSIsInByb2ZpbGUiOiJleGFtcGxlLXByb2ZpbGUiLCJpYXQiOjE3ODk5OTk5OTAsImV4cCI6MTc5MDAwMzYwMCwicmVwb3MiOlt7InJlcG8iOiJnaXRodWIuY29tL2V4YW1wbGUtb3JnLyoiLCJhY2Nlc3MiOiJydyJ9XX0.CLZuqfnhlZrOt_mhomzeot2kCCIZj6BGG7VugYLugtvzPtLvp87vu-95Fd0gdc3AvDJQKNmNE7_bPQr_LubUWA",
+      "keys": {
+        "signer-1": "p256-a"
+      },
+      "now": 1790000000,
+      "expected": {
+        "claim": "sbx-7f3a9c",
+        "namespace": "sandboxes",
+        "template": "agent-workspace-template"
+      },
+      "result": {
+        "ok": false,
+        "reason": "invalid-payload"
+      }
+    },
+    {
+      "name": "invalid-payload-repo-twice",
+      "about": "The same repo twice, with different access.",
+      "token": "eyJhbGciOiJFUzI1NiIsInR5cCI6Inh5bmUtZ2l0LXNjb3BlK2p3dCIsImtpZCI6InNpZ25lci0xIn0.eyJ2IjoxLCJjbGFpbSI6InNieC03ZjNhOWMiLCJucyI6InNhbmRib3hlcyIsInRwbCI6ImFnZW50LXdvcmtzcGFjZS10ZW1wbGF0ZSIsInByb2ZpbGUiOiJleGFtcGxlLXByb2ZpbGUiLCJpYXQiOjE3ODk5OTk5OTAsImV4cCI6MTc5MDAwMzYwMCwicmVwb3MiOlt7InJlcG8iOiJnaXRodWIuY29tL2V4YW1wbGUtb3JnL2FwcCIsImFjY2VzcyI6InIifSx7InJlcG8iOiJnaXRodWIuY29tL2V4YW1wbGUtb3JnL2FwcCIsImFjY2VzcyI6InJ3In1dfQ.Pe9jVq_5tgts5fnxbwiKcI0ZQ0v-K3YohNQjCT4YyybBn_t1TkEaKt6GR7M7QODIhNf0kPV-Id2T5XqHW5wriA",
+      "keys": {
+        "signer-1": "p256-a"
+      },
+      "now": 1790000000,
+      "expected": {
+        "claim": "sbx-7f3a9c",
+        "namespace": "sandboxes",
+        "template": "agent-workspace-template"
+      },
+      "result": {
+        "ok": false,
+        "reason": "invalid-payload"
+      }
+    },
+    {
+      "name": "not-for-this-claim",
+      "about": "A valid list, carried by another claim in the same namespace.",
+      "token": "eyJhbGciOiJFUzI1NiIsInR5cCI6Inh5bmUtZ2l0LXNjb3BlK2p3dCIsImtpZCI6InNpZ25lci0xIn0.eyJ2IjoxLCJjbGFpbSI6InNieC03ZjNhOWMiLCJucyI6InNhbmRib3hlcyIsInRwbCI6ImFnZW50LXdvcmtzcGFjZS10ZW1wbGF0ZSIsInByb2ZpbGUiOiJleGFtcGxlLXByb2ZpbGUiLCJpYXQiOjE3ODk5OTk5OTAsImV4cCI6MTc5MDAwMzYwMCwicmVwb3MiOlt7InJlcG8iOiJiaXRidWNrZXQuZXhhbXBsZS5uZXQvcHJvai9zZXJ2aWNlIiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXRodWIuY29tL2V4YW1wbGUtb3JnL2FwcCIsImFjY2VzcyI6InJ3In1dfQ.NAPX63F9EWz25chKkaVBYLS133mn9q3sqrUWqWLKmMLQNgldMpQvBFNdDpZ8uUILDVOxATB2Xyi9L489s1nl4A",
+      "keys": {
+        "signer-1": "p256-a"
+      },
+      "now": 1790000000,
+      "expected": {
+        "claim": "sbx-000000",
+        "namespace": "sandboxes",
+        "template": "agent-workspace-template"
+      },
+      "result": {
+        "ok": false,
+        "reason": "not-for-this-claim"
+      }
+    },
+    {
+      "name": "wrong-namespace",
+      "about": "A valid list, carried by a claim of the same name in another namespace.",
+      "token": "eyJhbGciOiJFUzI1NiIsInR5cCI6Inh5bmUtZ2l0LXNjb3BlK2p3dCIsImtpZCI6InNpZ25lci0xIn0.eyJ2IjoxLCJjbGFpbSI6InNieC03ZjNhOWMiLCJucyI6InNhbmRib3hlcyIsInRwbCI6ImFnZW50LXdvcmtzcGFjZS10ZW1wbGF0ZSIsInByb2ZpbGUiOiJleGFtcGxlLXByb2ZpbGUiLCJpYXQiOjE3ODk5OTk5OTAsImV4cCI6MTc5MDAwMzYwMCwicmVwb3MiOlt7InJlcG8iOiJiaXRidWNrZXQuZXhhbXBsZS5uZXQvcHJvai9zZXJ2aWNlIiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXRodWIuY29tL2V4YW1wbGUtb3JnL2FwcCIsImFjY2VzcyI6InJ3In1dfQ.NAPX63F9EWz25chKkaVBYLS133mn9q3sqrUWqWLKmMLQNgldMpQvBFNdDpZ8uUILDVOxATB2Xyi9L489s1nl4A",
+      "keys": {
+        "signer-1": "p256-a"
+      },
+      "now": 1790000000,
+      "expected": {
+        "claim": "sbx-7f3a9c",
+        "namespace": "other",
+        "template": "agent-workspace-template"
+      },
+      "result": {
+        "ok": false,
+        "reason": "wrong-namespace"
+      }
+    },
+    {
+      "name": "wrong-template",
+      "about": "A valid list, carried by a claim that uses another template.",
+      "token": "eyJhbGciOiJFUzI1NiIsInR5cCI6Inh5bmUtZ2l0LXNjb3BlK2p3dCIsImtpZCI6InNpZ25lci0xIn0.eyJ2IjoxLCJjbGFpbSI6InNieC03ZjNhOWMiLCJucyI6InNhbmRib3hlcyIsInRwbCI6ImFnZW50LXdvcmtzcGFjZS10ZW1wbGF0ZSIsInByb2ZpbGUiOiJleGFtcGxlLXByb2ZpbGUiLCJpYXQiOjE3ODk5OTk5OTAsImV4cCI6MTc5MDAwMzYwMCwicmVwb3MiOlt7InJlcG8iOiJiaXRidWNrZXQuZXhhbXBsZS5uZXQvcHJvai9zZXJ2aWNlIiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXRodWIuY29tL2V4YW1wbGUtb3JnL2FwcCIsImFjY2VzcyI6InJ3In1dfQ.NAPX63F9EWz25chKkaVBYLS133mn9q3sqrUWqWLKmMLQNgldMpQvBFNdDpZ8uUILDVOxATB2Xyi9L489s1nl4A",
+      "keys": {
+        "signer-1": "p256-a"
+      },
+      "now": 1790000000,
+      "expected": {
+        "claim": "sbx-7f3a9c",
+        "namespace": "sandboxes",
+        "template": "other-template"
+      },
+      "result": {
+        "ok": false,
+        "reason": "wrong-template"
+      }
+    },
+    {
+      "name": "expired-at-exp",
+      "about": "now = exp.",
+      "token": "eyJhbGciOiJFUzI1NiIsInR5cCI6Inh5bmUtZ2l0LXNjb3BlK2p3dCIsImtpZCI6InNpZ25lci0xIn0.eyJ2IjoxLCJjbGFpbSI6InNieC03ZjNhOWMiLCJucyI6InNhbmRib3hlcyIsInRwbCI6ImFnZW50LXdvcmtzcGFjZS10ZW1wbGF0ZSIsInByb2ZpbGUiOiJleGFtcGxlLXByb2ZpbGUiLCJpYXQiOjE3ODk5OTk5OTAsImV4cCI6MTc5MDAwMzYwMCwicmVwb3MiOlt7InJlcG8iOiJiaXRidWNrZXQuZXhhbXBsZS5uZXQvcHJvai9zZXJ2aWNlIiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXRodWIuY29tL2V4YW1wbGUtb3JnL2FwcCIsImFjY2VzcyI6InJ3In1dfQ.NAPX63F9EWz25chKkaVBYLS133mn9q3sqrUWqWLKmMLQNgldMpQvBFNdDpZ8uUILDVOxATB2Xyi9L489s1nl4A",
+      "keys": {
+        "signer-1": "p256-a"
+      },
+      "now": 1790003600,
+      "expected": {
+        "claim": "sbx-7f3a9c",
+        "namespace": "sandboxes",
+        "template": "agent-workspace-template"
+      },
+      "result": {
+        "ok": false,
+        "reason": "expired"
+      }
+    },
+    {
+      "name": "expired-a-day-later",
+      "about": "now = exp + 86400.",
+      "token": "eyJhbGciOiJFUzI1NiIsInR5cCI6Inh5bmUtZ2l0LXNjb3BlK2p3dCIsImtpZCI6InNpZ25lci0xIn0.eyJ2IjoxLCJjbGFpbSI6InNieC03ZjNhOWMiLCJucyI6InNhbmRib3hlcyIsInRwbCI6ImFnZW50LXdvcmtzcGFjZS10ZW1wbGF0ZSIsInByb2ZpbGUiOiJleGFtcGxlLXByb2ZpbGUiLCJpYXQiOjE3ODk5OTk5OTAsImV4cCI6MTc5MDAwMzYwMCwicmVwb3MiOlt7InJlcG8iOiJiaXRidWNrZXQuZXhhbXBsZS5uZXQvcHJvai9zZXJ2aWNlIiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXRodWIuY29tL2V4YW1wbGUtb3JnL2FwcCIsImFjY2VzcyI6InJ3In1dfQ.NAPX63F9EWz25chKkaVBYLS133mn9q3sqrUWqWLKmMLQNgldMpQvBFNdDpZ8uUILDVOxATB2Xyi9L489s1nl4A",
+      "keys": {
+        "signer-1": "p256-a"
+      },
+      "now": 1790090000,
+      "expected": {
+        "claim": "sbx-7f3a9c",
+        "namespace": "sandboxes",
+        "template": "agent-workspace-template"
+      },
+      "result": {
+        "ok": false,
+        "reason": "expired"
+      }
+    },
+    {
+      "name": "expired-issued-in-the-future",
+      "about": "iat is 61 seconds ahead of the verifier's clock.",
+      "token": "eyJhbGciOiJFUzI1NiIsInR5cCI6Inh5bmUtZ2l0LXNjb3BlK2p3dCIsImtpZCI6InNpZ25lci0xIn0.eyJ2IjoxLCJjbGFpbSI6InNieC03ZjNhOWMiLCJucyI6InNhbmRib3hlcyIsInRwbCI6ImFnZW50LXdvcmtzcGFjZS10ZW1wbGF0ZSIsInByb2ZpbGUiOiJleGFtcGxlLXByb2ZpbGUiLCJpYXQiOjE3OTAwMDAwNjEsImV4cCI6MTc5MDAwMzYwMCwicmVwb3MiOlt7InJlcG8iOiJiaXRidWNrZXQuZXhhbXBsZS5uZXQvcHJvai9zZXJ2aWNlIiwiYWNjZXNzIjoicncifSx7InJlcG8iOiJnaXRodWIuY29tL2V4YW1wbGUtb3JnL2FwcCIsImFjY2VzcyI6InJ3In1dfQ.O70GBfkucfnYibTTMipbekO51zOYPESwfzAVdM1IoXe_f70HJ1eUzhXrXzs0q6zpvdKpWQm-3GGRBlFlog_duA",
+      "keys": {
+        "signer-1": "p256-a"
+      },
+      "now": 1790000000,
+      "expected": {
+        "claim": "sbx-7f3a9c",
+        "namespace": "sandboxes",
+        "template": "agent-workspace-template"
+      },
+      "result": {
+        "ok": false,
+        "reason": "expired"
+      }
+    }
+  ],
+  "addresses": [
+    {
+      "address": "ssh://git@github.com/example-org/app.git",
+      "repo": "github.com/example-org/app"
+    },
+    {
+      "address": "git@github.com:example-org/app.git",
+      "repo": "github.com/example-org/app"
+    },
+    {
+      "address": "git@github.com:example-org/app",
+      "repo": "github.com/example-org/app"
+    },
+    {
+      "address": "https://github.com/example-org/app",
+      "repo": "github.com/example-org/app"
+    },
+    {
+      "address": "https://github.com/example-org/app.git",
+      "repo": "github.com/example-org/app"
+    },
+    {
+      "address": "https://github.com/Example-Org/App.git",
+      "repo": "github.com/example-org/app"
+    },
+    {
+      "address": "HTTPS://GITHUB.COM/EXAMPLE-ORG/APP",
+      "repo": "github.com/example-org/app"
+    },
+    {
+      "address": "https://github.com/example-org/app/",
+      "repo": "github.com/example-org/app"
+    },
+    {
+      "address": "https://www.github.com/example-org/app",
+      "repo": "github.com/example-org/app"
+    },
+    {
+      "address": "https://user@github.com/example-org/app.git",
+      "repo": "github.com/example-org/app"
+    },
+    {
+      "address": "git+ssh://git@github.com/example-org/app.git",
+      "repo": "github.com/example-org/app"
+    },
+    {
+      "address": "https://github.com/example-org/app/tree/main/src",
+      "repo": "github.com/example-org/app"
+    },
+    {
+      "address": "github.com/example-org/app",
+      "repo": "github.com/example-org/app"
+    },
+    {
+      "address": "  https://github.com/example-org/app.git\n",
+      "repo": "github.com/example-org/app"
+    },
+    {
+      "address": "ssh://git@ssh.bitbucket.example.net/proj/service.git",
+      "repo": "bitbucket.example.net/proj/service"
+    },
+    {
+      "address": "ssh://git@ssh.bitbucket.example.net:7999/proj/service.git",
+      "repo": "bitbucket.example.net/proj/service"
+    },
+    {
+      "address": "ssh://git@ssh.bitbucket.example.net:7999/PROJ/service.git",
+      "repo": "bitbucket.example.net/proj/service"
+    },
+    {
+      "address": "git@ssh.bitbucket.example.net:proj/service.git",
+      "repo": "bitbucket.example.net/proj/service"
+    },
+    {
+      "address": "https://bitbucket.example.net/scm/proj/service.git",
+      "repo": "bitbucket.example.net/proj/service"
+    },
+    {
+      "address": "https://bitbucket.example.net/scm/PROJ/service",
+      "repo": "bitbucket.example.net/proj/service"
+    },
+    {
+      "address": "https://bitbucket.example.net/projects/PROJ/repos/service/browse",
+      "repo": "bitbucket.example.net/proj/service"
+    },
+    {
+      "address": "https://bitbucket.example.net/projects/PROJ/repos/service",
+      "repo": "bitbucket.example.net/proj/service"
+    },
+    {
+      "address": "ssh://git@ssh.bitbucket.example.net:7999/~jdoe/tools.git",
+      "repo": "bitbucket.example.net/~jdoe/tools"
+    },
+    {
+      "address": "https://bitbucket.example.net/scm/~jdoe/tools.git",
+      "repo": "bitbucket.example.net/~jdoe/tools"
+    },
+    {
+      "address": "https://bitbucket.example.net/scm/~JDOE/tools.git",
+      "repo": "bitbucket.example.net/~jdoe/tools"
+    },
+    {
+      "address": "https://bitbucket.example.net/projects/~JDOE/repos/tools/browse",
+      "repo": "bitbucket.example.net/~jdoe/tools"
+    },
+    {
+      "address": "https://gitlab.example.com/group/subgroup/project.git",
+      "repo": "gitlab.example.com/group/subgroup/project"
+    },
+    {
+      "address": "git@gitlab.example.com:group/subgroup/project.git",
+      "repo": "gitlab.example.com/group/subgroup/project"
+    },
+    {
+      "address": "app",
+      "repo": null
+    },
+    {
+      "address": "https://github.com/example-org",
+      "repo": null
+    },
+    {
+      "address": "file:///srv/git/app.git",
+      "repo": null
+    },
+    {
+      "address": "https://github.com/example-org/app with space",
+      "repo": null
+    },
+    {
+      "address": "https://github.com/example-org/app%20name",
+      "repo": null
+    },
+    {
+      "address": "https://github.com/example-org/../other/app",
+      "repo": null
+    },
+    {
+      "address": "https://user:p@ss@github.com/example-org/app.git",
+      "repo": null
+    },
+    {
+      "address": "https://[2001:db8::1]/example-org/app.git",
+      "repo": null
+    },
+    {
+      "address": "https://github.com./example-org/app.git",
+      "repo": null
+    },
+    {
+      "address": "https://github.com/example-org/app.git.git",
+      "repo": null
+    }
+  ],
+  "profiles": [
+    {
+      "name": "main-and-aux",
+      "about": "repoUrl plus auxRepos, sorted.",
+      "config": {
+        "repoUrl": "ssh://git@ssh.bitbucket.example.net/proj/service.git",
+        "auxRepos": [
+          {
+            "name": "tools",
+            "url": "ssh://git@ssh.bitbucket.example.net/~jdoe/tools.git",
+            "defaultBranch": "main",
+            "workDir": "/workspace/tools"
+          },
+          {
+            "name": "app",
+            "url": "git@github.com:example-org/app.git",
+            "defaultBranch": "main",
+            "workDir": "/workspace/app"
+          }
+        ]
+      },
+      "repos": [
+        "bitbucket.example.net/proj/service",
+        "bitbucket.example.net/~jdoe/tools",
+        "github.com/example-org/app"
+      ]
+    },
+    {
+      "name": "same-repo-twice",
+      "about": "An aux repo that is the main repo in another spelling is listed once.",
+      "config": {
+        "repoUrl": "https://github.com/example-org/app",
+        "auxRepos": [
+          {
+            "name": "again",
+            "url": "git@github.com:Example-Org/App.git",
+            "defaultBranch": "main",
+            "workDir": "/workspace/again"
+          }
+        ]
+      },
+      "repos": [
+        "github.com/example-org/app"
+      ]
+    },
+    {
+      "name": "no-repo",
+      "about": "A profile without repoUrl and auxRepos.",
+      "config": {},
+      "repos": []
+    },
+    {
+      "name": "empty-main",
+      "about": "An empty repoUrl means no main repository, as an absent one does.",
+      "config": {
+        "repoUrl": ""
+      },
+      "repos": []
+    },
+    {
+      "name": "empty-aux",
+      "about": "An aux entry with an empty address is a repository that cannot be listed: the whole profile fails.",
+      "config": {
+        "repoUrl": "https://github.com/example-org/app",
+        "auxRepos": [
+          {
+            "name": "blank",
+            "url": "",
+            "defaultBranch": "main",
+            "workDir": "/workspace/blank"
+          }
+        ]
+      },
+      "repos": null
+    },
+    {
+      "name": "aux-only",
+      "about": "No main repository, one aux repository.",
+      "config": {
+        "auxRepos": [
+          {
+            "name": "app",
+            "url": "https://github.com/example-org/app.git",
+            "defaultBranch": "main",
+            "workDir": "/workspace/app"
+          }
+        ]
+      },
+      "repos": [
+        "github.com/example-org/app"
+      ]
+    },
+    {
+      "name": "bad-main",
+      "about": "repoUrl is not a repository address: the whole profile fails.",
+      "config": {
+        "repoUrl": "https://github.com/example-org"
+      },
+      "repos": null
+    },
+    {
+      "name": "bad-aux",
+      "about": "One aux address is not a repository address: the whole profile fails, the good ones are not returned.",
+      "config": {
+        "repoUrl": "https://github.com/example-org/app",
+        "auxRepos": [
+          {
+            "name": "broken",
+            "url": "not an address",
+            "defaultBranch": "main",
+            "workDir": "/workspace/broken"
+          }
+        ]
+      },
+      "repos": null
+    }
+  ],
+  "requests": [
+    {
+      "method": "GET",
+      "target": "/github.com/example-org/app.git/info/refs?service=git-upload-pack",
+      "result": {
+        "ok": true,
+        "host": "github.com",
+        "repo": "github.com/example-org/app",
+        "op": "fetch"
+      }
+    },
+    {
+      "method": "POST",
+      "target": "/github.com/example-org/app.git/git-upload-pack",
+      "result": {
+        "ok": true,
+        "host": "github.com",
+        "repo": "github.com/example-org/app",
+        "op": "fetch"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/github.com/example-org/app.git/info/refs?service=git-receive-pack",
+      "result": {
+        "ok": true,
+        "host": "github.com",
+        "repo": "github.com/example-org/app",
+        "op": "push"
+      }
+    },
+    {
+      "method": "POST",
+      "target": "/github.com/example-org/app.git/git-receive-pack",
+      "result": {
+        "ok": true,
+        "host": "github.com",
+        "repo": "github.com/example-org/app",
+        "op": "push"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/github.com/example-org/app/info/refs?service=git-upload-pack",
+      "result": {
+        "ok": true,
+        "host": "github.com",
+        "repo": "github.com/example-org/app",
+        "op": "fetch"
+      }
+    },
+    {
+      "method": "POST",
+      "target": "/github.com/example-org/app/git-receive-pack",
+      "result": {
+        "ok": true,
+        "host": "github.com",
+        "repo": "github.com/example-org/app",
+        "op": "push"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/GitHub.com/Example-Org/App.git/info/refs?service=git-upload-pack",
+      "result": {
+        "ok": true,
+        "host": "github.com",
+        "repo": "github.com/example-org/app",
+        "op": "fetch"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/www.github.com/example-org/app.git/info/refs?service=git-upload-pack",
+      "result": {
+        "ok": true,
+        "host": "github.com",
+        "repo": "github.com/example-org/app",
+        "op": "fetch"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/bitbucket.example.net/scm/proj/service.git/info/refs?service=git-upload-pack",
+      "result": {
+        "ok": true,
+        "host": "bitbucket.example.net",
+        "repo": "bitbucket.example.net/proj/service",
+        "op": "fetch"
+      }
+    },
+    {
+      "method": "POST",
+      "target": "/bitbucket.example.net/scm/PROJ/service.git/git-receive-pack",
+      "result": {
+        "ok": true,
+        "host": "bitbucket.example.net",
+        "repo": "bitbucket.example.net/proj/service",
+        "op": "push"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/bitbucket.example.net/proj/service.git/info/refs?service=git-upload-pack",
+      "result": {
+        "ok": true,
+        "host": "bitbucket.example.net",
+        "repo": "bitbucket.example.net/proj/service",
+        "op": "fetch"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/ssh.bitbucket.example.net/scm/proj/service.git/info/refs?service=git-upload-pack",
+      "result": {
+        "ok": true,
+        "host": "bitbucket.example.net",
+        "repo": "bitbucket.example.net/proj/service",
+        "op": "fetch"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/bitbucket.example.net/scm/~jdoe/tools.git/info/refs?service=git-upload-pack",
+      "result": {
+        "ok": true,
+        "host": "bitbucket.example.net",
+        "repo": "bitbucket.example.net/~jdoe/tools",
+        "op": "fetch"
+      }
+    },
+    {
+      "method": "POST",
+      "target": "/bitbucket.example.net/scm/~JDOE/tools.git/git-upload-pack",
+      "result": {
+        "ok": true,
+        "host": "bitbucket.example.net",
+        "repo": "bitbucket.example.net/~jdoe/tools",
+        "op": "fetch"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/gitlab.example.com/group/subgroup/project.git/info/refs?service=git-upload-pack",
+      "result": {
+        "ok": true,
+        "host": "gitlab.example.com",
+        "repo": "gitlab.example.com/group/subgroup/project",
+        "op": "fetch"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/github.com/example-org/scm.git/info/refs?service=git-upload-pack",
+      "result": {
+        "ok": true,
+        "host": "github.com",
+        "repo": "github.com/example-org/scm",
+        "op": "fetch"
+      }
+    },
+    {
+      "method": "POST",
+      "target": "/gitlab.example.com/group/scm/project.git/git-upload-pack",
+      "result": {
+        "ok": true,
+        "host": "gitlab.example.com",
+        "repo": "gitlab.example.com/group/scm/project",
+        "op": "fetch"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/github.com/example-org/src.git/info/refs?service=git-upload-pack",
+      "result": {
+        "ok": true,
+        "host": "github.com",
+        "repo": "github.com/example-org/src",
+        "op": "fetch"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/github.com/example-org/info/refs/info/refs?service=git-upload-pack",
+      "result": {
+        "ok": true,
+        "host": "github.com",
+        "repo": "github.com/example-org/info/refs",
+        "op": "fetch"
+      }
+    },
+    {
+      "method": "POST",
+      "target": "/github.com/example-org/git-upload-pack/git-receive-pack",
+      "result": {
+        "ok": true,
+        "host": "github.com",
+        "repo": "github.com/example-org/git-upload-pack",
+        "op": "push"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/bb/scm/proj/service.git/info/refs?service=git-upload-pack",
+      "hostMap": {
+        "bb": "bitbucket.example.net"
+      },
+      "result": {
+        "ok": true,
+        "host": "bitbucket.example.net",
+        "repo": "bitbucket.example.net/proj/service",
+        "op": "fetch"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/BB/scm/proj/service.git/info/refs?service=git-upload-pack",
+      "hostMap": {
+        "bb": "ssh.bitbucket.example.net"
+      },
+      "result": {
+        "ok": true,
+        "host": "bitbucket.example.net",
+        "repo": "bitbucket.example.net/proj/service",
+        "op": "fetch"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/github.com/example-org/app.git/info/refs?service=git-upload-pack",
+      "hostMap": {
+        "bb": "bitbucket.example.net"
+      },
+      "result": {
+        "ok": true,
+        "host": "github.com",
+        "repo": "github.com/example-org/app",
+        "op": "fetch"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/bb/scm/proj/service.git/info/refs?service=git-upload-pack",
+      "hostMap": {
+        "bb": "https://bitbucket.example.net"
+      },
+      "result": {
+        "ok": false,
+        "reason": "invalid-host"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/bb/scm/proj/service.git/info/refs?service=git-upload-pack",
+      "hostMap": {
+        "bb": "bitbucket.example.net:7999"
+      },
+      "result": {
+        "ok": false,
+        "reason": "invalid-host"
+      }
+    },
+    {
+      "method": "HEAD",
+      "target": "/github.com/example-org/app.git/info/refs?service=git-upload-pack",
+      "result": {
+        "ok": false,
+        "reason": "method-not-allowed"
+      }
+    },
+    {
+      "method": "PUT",
+      "target": "/github.com/example-org/app.git/git-receive-pack",
+      "result": {
+        "ok": false,
+        "reason": "method-not-allowed"
+      }
+    },
+    {
+      "method": "DELETE",
+      "target": "/github.com/example-org/app.git",
+      "result": {
+        "ok": false,
+        "reason": "method-not-allowed"
+      }
+    },
+    {
+      "method": "OPTIONS",
+      "target": "/github.com/example-org/app.git/git-upload-pack",
+      "result": {
+        "ok": false,
+        "reason": "method-not-allowed"
+      }
+    },
+    {
+      "method": "PROPFIND",
+      "target": "/github.com/example-org/app.git/",
+      "result": {
+        "ok": false,
+        "reason": "method-not-allowed"
+      }
+    },
+    {
+      "method": "get",
+      "target": "/github.com/example-org/app.git/info/refs?service=git-upload-pack",
+      "result": {
+        "ok": false,
+        "reason": "method-not-allowed"
+      }
+    },
+    {
+      "method": "POST",
+      "target": "/github.com/example-org/app.git/info/refs?service=git-upload-pack",
+      "result": {
+        "ok": false,
+        "reason": "method-not-allowed"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/github.com/example-org/app.git/git-upload-pack",
+      "result": {
+        "ok": false,
+        "reason": "method-not-allowed"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/github.com/example-org/app.git/git-receive-pack",
+      "result": {
+        "ok": false,
+        "reason": "method-not-allowed"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/",
+      "result": {
+        "ok": false,
+        "reason": "empty-segment"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/github.com/example-org/app.git",
+      "result": {
+        "ok": false,
+        "reason": "not-a-git-address"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/github.com/example-org/app.git/HEAD",
+      "result": {
+        "ok": false,
+        "reason": "not-a-git-address"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/github.com/example-org/app.git/objects/info/packs",
+      "result": {
+        "ok": false,
+        "reason": "not-a-git-address"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/github.com/example-org/app.git/info/lfs/objects/batch",
+      "result": {
+        "ok": false,
+        "reason": "not-a-git-address"
+      }
+    },
+    {
+      "method": "POST",
+      "target": "/github.com/example-org/app.git/info/lfs/objects/batch",
+      "result": {
+        "ok": false,
+        "reason": "not-a-git-address"
+      }
+    },
+    {
+      "method": "POST",
+      "target": "/github.com/example-org/app.git/git-upload-archive",
+      "result": {
+        "ok": false,
+        "reason": "not-a-git-address"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/github.com/example-org/app.git/INFO/REFS?service=git-upload-pack",
+      "result": {
+        "ok": false,
+        "reason": "not-a-git-address"
+      }
+    },
+    {
+      "method": "POST",
+      "target": "/github.com/example-org/app.git/GIT-UPLOAD-PACK",
+      "result": {
+        "ok": false,
+        "reason": "not-a-git-address"
+      }
+    },
+    {
+      "method": "POST",
+      "target": "/github.com/example-org/app.git/constructor",
+      "result": {
+        "ok": false,
+        "reason": "not-a-git-address"
+      }
+    },
+    {
+      "method": "POST",
+      "target": "/github.com/example-org/app.git/__proto__",
+      "result": {
+        "ok": false,
+        "reason": "not-a-git-address"
+      }
+    },
+    {
+      "method": "POST",
+      "target": "/github.com/example-org/app.git/toString",
+      "result": {
+        "ok": false,
+        "reason": "not-a-git-address"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/github.com/example-org/app.git/info/refs/extra?service=git-upload-pack",
+      "result": {
+        "ok": false,
+        "reason": "not-a-git-address"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "github.com/example-org/app.git/info/refs?service=git-upload-pack",
+      "result": {
+        "ok": false,
+        "reason": "invalid-target"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "http://gateway/github.com/example-org/app.git/info/refs?service=git-upload-pack",
+      "result": {
+        "ok": false,
+        "reason": "invalid-target"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "",
+      "result": {
+        "ok": false,
+        "reason": "invalid-target"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/github.com/example-org/app.git/info/refs",
+      "result": {
+        "ok": false,
+        "reason": "missing-service"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/github.com/example-org/app.git/info/refs?",
+      "result": {
+        "ok": false,
+        "reason": "unexpected-query"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/github.com/example-org/app.git/info/refs?service=",
+      "result": {
+        "ok": false,
+        "reason": "unknown-service"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/github.com/example-org/app.git/info/refs?service=git-upload-archive",
+      "result": {
+        "ok": false,
+        "reason": "unknown-service"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/github.com/example-org/app.git/info/refs?service=GIT-UPLOAD-PACK",
+      "result": {
+        "ok": false,
+        "reason": "unknown-service"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/github.com/example-org/app.git/info/refs?service=constructor",
+      "result": {
+        "ok": false,
+        "reason": "unknown-service"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/github.com/example-org/app.git/info/refs?service=__proto__",
+      "result": {
+        "ok": false,
+        "reason": "unknown-service"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/github.com/example-org/app.git/info/refs?service=toString",
+      "result": {
+        "ok": false,
+        "reason": "unknown-service"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/github.com/example-org/app.git/info/refs?service=git-upload-pack%00",
+      "result": {
+        "ok": false,
+        "reason": "unknown-service"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/github.com/example-org/app.git/info/refs?service=git%2Dupload%2Dpack",
+      "result": {
+        "ok": false,
+        "reason": "unknown-service"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/github.com/example-org/app.git/info/refs?service=git-upload-pack;x=1",
+      "result": {
+        "ok": false,
+        "reason": "unknown-service"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/github.com/example-org/app.git/info/refs?service=git-upload-pack?service=git-receive-pack",
+      "result": {
+        "ok": false,
+        "reason": "unknown-service"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/github.com/example-org/app.git/info/refs?service=git-upload-pack#x",
+      "result": {
+        "ok": false,
+        "reason": "unknown-service"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/github.com/example-org/app.git/info/refs?service=git-upload-pack&x=1",
+      "result": {
+        "ok": false,
+        "reason": "unexpected-query"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/github.com/example-org/app.git/info/refs?x=1&service=git-upload-pack",
+      "result": {
+        "ok": false,
+        "reason": "unexpected-query"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/github.com/example-org/app.git/info/refs?service=git-upload-pack&service=git-receive-pack",
+      "result": {
+        "ok": false,
+        "reason": "unexpected-query"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/github.com/example-org/app.git/info/refs?service=git-upload-pack&service=git-upload-pack",
+      "result": {
+        "ok": false,
+        "reason": "unexpected-query"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/github.com/example-org/app.git/info/refs?service=git-upload-pack&",
+      "result": {
+        "ok": false,
+        "reason": "unexpected-query"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/github.com/example-org/app.git/info/refs?&service=git-upload-pack",
+      "result": {
+        "ok": false,
+        "reason": "unexpected-query"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/github.com/example-org/app.git/info/refs?SERVICE=git-upload-pack",
+      "result": {
+        "ok": false,
+        "reason": "unexpected-query"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/github.com/example-org/app.git/info/refs?service[]=git-upload-pack",
+      "result": {
+        "ok": false,
+        "reason": "unexpected-query"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/github.com/example-org/app.git/info/refs?%73ervice=git-upload-pack",
+      "result": {
+        "ok": false,
+        "reason": "unexpected-query"
+      }
+    },
+    {
+      "method": "POST",
+      "target": "/github.com/example-org/app.git/git-upload-pack?service=git-upload-pack",
+      "result": {
+        "ok": false,
+        "reason": "unexpected-query"
+      }
+    },
+    {
+      "method": "POST",
+      "target": "/github.com/example-org/app.git/git-receive-pack?x=1",
+      "result": {
+        "ok": false,
+        "reason": "unexpected-query"
+      }
+    },
+    {
+      "method": "POST",
+      "target": "/github.com/example-org/app.git/git-upload-pack?",
+      "result": {
+        "ok": false,
+        "reason": "unexpected-query"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/github.com/example-org%2fapp.git/info/refs?service=git-upload-pack",
+      "result": {
+        "ok": false,
+        "reason": "encoded-slash"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/github.com/example-org%2Fapp.git/info/refs?service=git-upload-pack",
+      "result": {
+        "ok": false,
+        "reason": "encoded-slash"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/github.com/example-org/app.git%2Finfo/refs?service=git-upload-pack",
+      "result": {
+        "ok": false,
+        "reason": "encoded-slash"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/github.com/example-org/%2e%2e/other/app.git/info/refs?service=git-upload-pack",
+      "result": {
+        "ok": false,
+        "reason": "encoded-dot"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/github.com/example-org/.%2E/other/app.git/info/refs?service=git-upload-pack",
+      "result": {
+        "ok": false,
+        "reason": "encoded-dot"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/github.com/example-org/app%2egit/info/refs?service=git-upload-pack",
+      "result": {
+        "ok": false,
+        "reason": "encoded-dot"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/github.com/example-org/%252e%252e/app.git/info/refs?service=git-upload-pack",
+      "result": {
+        "ok": false,
+        "reason": "encoded-character"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/github.com/example-org/app%00.git/info/refs?service=git-upload-pack",
+      "result": {
+        "ok": false,
+        "reason": "encoded-character"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/github.com/example-org/a%70p.git/info/refs?service=git-upload-pack",
+      "result": {
+        "ok": false,
+        "reason": "encoded-character"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/github.com/example-org/app%5c..%5cother.git/info/refs?service=git-upload-pack",
+      "result": {
+        "ok": false,
+        "reason": "encoded-character"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/github.com/example-org/app%.git/info/refs?service=git-upload-pack",
+      "result": {
+        "ok": false,
+        "reason": "encoded-character"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/github.com/example-org/../other-org/app.git/info/refs?service=git-upload-pack",
+      "result": {
+        "ok": false,
+        "reason": "dot-segment"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/github.com/example-org/./app.git/info/refs?service=git-upload-pack",
+      "result": {
+        "ok": false,
+        "reason": "dot-segment"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/github.com/example-org/app.git/../../other/app.git/info/refs?service=git-upload-pack",
+      "result": {
+        "ok": false,
+        "reason": "dot-segment"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/../github.com/example-org/app.git/info/refs?service=git-upload-pack",
+      "result": {
+        "ok": false,
+        "reason": "dot-segment"
+      }
+    },
+    {
+      "method": "POST",
+      "target": "/github.com/example-org/app.git/../app.git/git-receive-pack",
+      "result": {
+        "ok": false,
+        "reason": "dot-segment"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/github.com/example-org/..git/info/refs?service=git-upload-pack",
+      "result": {
+        "ok": false,
+        "reason": "unsupported-path-form"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "//github.com/example-org/app.git/info/refs?service=git-upload-pack",
+      "result": {
+        "ok": false,
+        "reason": "empty-segment"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/github.com//example-org/app.git/info/refs?service=git-upload-pack",
+      "result": {
+        "ok": false,
+        "reason": "empty-segment"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/github.com/example-org//app.git/info/refs?service=git-upload-pack",
+      "result": {
+        "ok": false,
+        "reason": "empty-segment"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/github.com/example-org/app.git//info/refs?service=git-upload-pack",
+      "result": {
+        "ok": false,
+        "reason": "empty-segment"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/github.com/example-org/app.git/info//refs?service=git-upload-pack",
+      "result": {
+        "ok": false,
+        "reason": "empty-segment"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/github.com/example-org/app.git/info/refs/?service=git-upload-pack",
+      "result": {
+        "ok": false,
+        "reason": "empty-segment"
+      }
+    },
+    {
+      "method": "POST",
+      "target": "/github.com/example-org/app.git/git-upload-pack/",
+      "result": {
+        "ok": false,
+        "reason": "empty-segment"
+      }
+    },
+    {
+      "method": "POST",
+      "target": "/github.com/example-org/app.git//git-receive-pack",
+      "result": {
+        "ok": false,
+        "reason": "empty-segment"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/github.com/example-org\\app.git/info/refs?service=git-upload-pack",
+      "result": {
+        "ok": false,
+        "reason": "backslash"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/github.com/example-org/..\\other\\app.git/info/refs?service=git-upload-pack",
+      "result": {
+        "ok": false,
+        "reason": "backslash"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/github.com/example-org/app.git/info/refs?service=git-upload-pack\\",
+      "result": {
+        "ok": false,
+        "reason": "backslash"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/github.com/example-org/app\u0000.git/info/refs?service=git-upload-pack",
+      "result": {
+        "ok": false,
+        "reason": "control-character"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/github.com/example-org/app.git\r\n/info/refs?service=git-upload-pack",
+      "result": {
+        "ok": false,
+        "reason": "control-character"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/github.com/example-org/app\t.git/info/refs?service=git-upload-pack",
+      "result": {
+        "ok": false,
+        "reason": "control-character"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/github.com/example-org/app.git/info/refs?service=git-upload-pack",
+      "result": {
+        "ok": false,
+        "reason": "control-character"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/github.com/example-org/app.git/info/refs?service=git-upload-pack\n",
+      "result": {
+        "ok": false,
+        "reason": "control-character"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/github.com/example-org/app name.git/info/refs?service=git-upload-pack",
+      "result": {
+        "ok": false,
+        "reason": "invalid-character"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/git@github.com/example-org/app.git/info/refs?service=git-upload-pack",
+      "result": {
+        "ok": false,
+        "reason": "invalid-character"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/github.com:443/example-org/app.git/info/refs?service=git-upload-pack",
+      "result": {
+        "ok": false,
+        "reason": "invalid-character"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/github.com/example-org/app.git;x=1/info/refs?service=git-upload-pack",
+      "result": {
+        "ok": false,
+        "reason": "invalid-character"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/github.com/example-org/app.git#/info/refs?service=git-upload-pack",
+      "result": {
+        "ok": false,
+        "reason": "invalid-character"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/github.com/example-org/*/info/refs?service=git-upload-pack",
+      "result": {
+        "ok": false,
+        "reason": "invalid-character"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/github.com/example-org/appé.git/info/refs?service=git-upload-pack",
+      "result": {
+        "ok": false,
+        "reason": "invalid-character"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/github.com/example-org/．．/app.git/info/refs?service=git-upload-pack",
+      "result": {
+        "ok": false,
+        "reason": "invalid-character"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/github.com/example-org/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.git/info/refs?service=git-upload-pack",
+      "result": {
+        "ok": false,
+        "reason": "target-too-long"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/info/refs?service=git-upload-pack",
+      "result": {
+        "ok": false,
+        "reason": "too-few-segments"
+      }
+    },
+    {
+      "method": "POST",
+      "target": "/git-upload-pack",
+      "result": {
+        "ok": false,
+        "reason": "too-few-segments"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/github.com/info/refs?service=git-upload-pack",
+      "result": {
+        "ok": false,
+        "reason": "too-few-segments"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/github.com/app.git/info/refs?service=git-upload-pack",
+      "result": {
+        "ok": false,
+        "reason": "too-few-segments"
+      }
+    },
+    {
+      "method": "POST",
+      "target": "/github.com/example-org/git-receive-pack",
+      "result": {
+        "ok": false,
+        "reason": "too-few-segments"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/bitbucket.example.net/scm/service.git/info/refs?service=git-upload-pack",
+      "result": {
+        "ok": false,
+        "reason": "too-few-segments"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/github.com./example-org/app.git/info/refs?service=git-upload-pack",
+      "result": {
+        "ok": false,
+        "reason": "invalid-host"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/-github.com/example-org/app.git/info/refs?service=git-upload-pack",
+      "result": {
+        "ok": false,
+        "reason": "invalid-host"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/git_hub.com/example-org/app.git/info/refs?service=git-upload-pack",
+      "result": {
+        "ok": false,
+        "reason": "invalid-host"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/~jdoe/example-org/app.git/info/refs?service=git-upload-pack",
+      "result": {
+        "ok": false,
+        "reason": "invalid-host"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/ssh.ssh.github.com/example-org/app.git/info/refs?service=git-upload-pack",
+      "result": {
+        "ok": false,
+        "reason": "invalid-host"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/github.com/example-org/app.GIT/info/refs?service=git-upload-pack",
+      "result": {
+        "ok": false,
+        "reason": "invalid-git-suffix"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/github.com/example-org/app.Git/info/refs?service=git-upload-pack",
+      "result": {
+        "ok": false,
+        "reason": "invalid-git-suffix"
+      }
+    },
+    {
+      "method": "POST",
+      "target": "/github.com/example-org/app.gIT/git-receive-pack",
+      "result": {
+        "ok": false,
+        "reason": "invalid-git-suffix"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/github.com/example-org/.git/info/refs?service=git-upload-pack",
+      "result": {
+        "ok": false,
+        "reason": "invalid-git-suffix"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/github.com/example-org/app/.git/info/refs?service=git-upload-pack",
+      "result": {
+        "ok": false,
+        "reason": "invalid-git-suffix"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/github.com/example-org/app.git.git/info/refs?service=git-upload-pack",
+      "result": {
+        "ok": false,
+        "reason": "unsupported-path-form"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/bitbucket.example.net/projects/PROJ/repos/service/info/refs?service=git-upload-pack",
+      "result": {
+        "ok": false,
+        "reason": "unsupported-path-form"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/bitbucket.example.net/projects/PROJ/repos/service.git/info/refs?service=git-upload-pack",
+      "result": {
+        "ok": false,
+        "reason": "unsupported-path-form"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/github.com/example-org/app/tree/main.git/info/refs?service=git-upload-pack",
+      "result": {
+        "ok": false,
+        "reason": "unsupported-path-form"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/github.com/example-org/app/blob/main/info/refs?service=git-upload-pack",
+      "result": {
+        "ok": false,
+        "reason": "unsupported-path-form"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/gitlab.example.com/group/subgroup/src/other.git/info/refs?service=git-upload-pack",
+      "result": {
+        "ok": false,
+        "reason": "unsupported-path-form"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/gitlab.example.com/group/subgroup/-/other.git/info/refs?service=git-upload-pack",
+      "result": {
+        "ok": false,
+        "reason": "unsupported-path-form"
+      }
+    },
+    {
+      "method": "POST",
+      "target": "/gitlab.example.com/group/subgroup/pulls/git-receive-pack",
+      "result": {
+        "ok": false,
+        "reason": "unsupported-path-form"
+      }
+    },
+    {
+      "method": "GET",
+      "target": "/bitbucket.example.net/scm/scm/proj/service.git/info/refs?service=git-upload-pack",
+      "result": {
+        "ok": false,
+        "reason": "unsupported-path-form"
+      }
+    }
+  ],
+  "decisions": [
+    {
+      "repos": [
+        {
+          "repo": "bitbucket.example.net/~jdoe/tools",
+          "access": "r"
+        },
+        {
+          "repo": "github.com/example-org/app",
+          "access": "rw"
+        }
+      ],
+      "request": {
+        "host": "github.com",
+        "repo": "github.com/example-org/app",
+        "op": "fetch"
+      },
+      "result": {
+        "allowed": true,
+        "access": "rw"
+      }
+    },
+    {
+      "repos": [
+        {
+          "repo": "bitbucket.example.net/~jdoe/tools",
+          "access": "r"
+        },
+        {
+          "repo": "github.com/example-org/app",
+          "access": "rw"
+        }
+      ],
+      "request": {
+        "host": "github.com",
+        "repo": "github.com/example-org/app",
+        "op": "push"
+      },
+      "result": {
+        "allowed": true,
+        "access": "rw"
+      }
+    },
+    {
+      "repos": [
+        {
+          "repo": "bitbucket.example.net/~jdoe/tools",
+          "access": "r"
+        },
+        {
+          "repo": "github.com/example-org/app",
+          "access": "rw"
+        }
+      ],
+      "request": {
+        "host": "bitbucket.example.net",
+        "repo": "bitbucket.example.net/~jdoe/tools",
+        "op": "fetch"
+      },
+      "result": {
+        "allowed": true,
+        "access": "r"
+      }
+    },
+    {
+      "repos": [
+        {
+          "repo": "bitbucket.example.net/~jdoe/tools",
+          "access": "r"
+        },
+        {
+          "repo": "github.com/example-org/app",
+          "access": "rw"
+        }
+      ],
+      "request": {
+        "host": "bitbucket.example.net",
+        "repo": "bitbucket.example.net/~jdoe/tools",
+        "op": "push"
+      },
+      "result": {
+        "allowed": false,
+        "reason": "fetch-only"
+      }
+    },
+    {
+      "repos": [
+        {
+          "repo": "bitbucket.example.net/~jdoe/tools",
+          "access": "r"
+        },
+        {
+          "repo": "github.com/example-org/app",
+          "access": "rw"
+        }
+      ],
+      "request": {
+        "host": "github.com",
+        "repo": "github.com/example-org/other",
+        "op": "fetch"
+      },
+      "result": {
+        "allowed": false,
+        "reason": "repo-not-on-list"
+      }
+    },
+    {
+      "repos": [
+        {
+          "repo": "bitbucket.example.net/~jdoe/tools",
+          "access": "r"
+        },
+        {
+          "repo": "github.com/example-org/app",
+          "access": "rw"
+        }
+      ],
+      "request": {
+        "host": "github.com",
+        "repo": "github.com/example-org/other",
+        "op": "push"
+      },
+      "result": {
+        "allowed": false,
+        "reason": "repo-not-on-list"
+      }
+    },
+    {
+      "repos": [
+        {
+          "repo": "bitbucket.example.net/~jdoe/tools",
+          "access": "r"
+        },
+        {
+          "repo": "github.com/example-org/app",
+          "access": "rw"
+        }
+      ],
+      "request": {
+        "host": "github.com",
+        "repo": "github.com/example-org/app2",
+        "op": "fetch"
+      },
+      "result": {
+        "allowed": false,
+        "reason": "repo-not-on-list"
+      }
+    },
+    {
+      "repos": [
+        {
+          "repo": "bitbucket.example.net/~jdoe/tools",
+          "access": "r"
+        },
+        {
+          "repo": "github.com/example-org/app",
+          "access": "rw"
+        }
+      ],
+      "request": {
+        "host": "github.com",
+        "repo": "github.com/example-org/ap",
+        "op": "fetch"
+      },
+      "result": {
+        "allowed": false,
+        "reason": "repo-not-on-list"
+      }
+    },
+    {
+      "repos": [
+        {
+          "repo": "bitbucket.example.net/~jdoe/tools",
+          "access": "r"
+        },
+        {
+          "repo": "github.com/example-org/app",
+          "access": "rw"
+        }
+      ],
+      "request": {
+        "host": "github.com",
+        "repo": "github.com/example-org/app/sub",
+        "op": "fetch"
+      },
+      "result": {
+        "allowed": false,
+        "reason": "repo-not-on-list"
+      }
+    },
+    {
+      "repos": [
+        {
+          "repo": "bitbucket.example.net/~jdoe/tools",
+          "access": "r"
+        },
+        {
+          "repo": "github.com/example-org/app",
+          "access": "rw"
+        }
+      ],
+      "request": {
+        "host": "github.com",
+        "repo": "github.com/example-org",
+        "op": "fetch"
+      },
+      "result": {
+        "allowed": false,
+        "reason": "repo-not-on-list"
+      }
+    },
+    {
+      "repos": [
+        {
+          "repo": "bitbucket.example.net/~jdoe/tools",
+          "access": "r"
+        },
+        {
+          "repo": "github.com/example-org/app",
+          "access": "rw"
+        }
+      ],
+      "request": {
+        "host": "gitlab.example.com",
+        "repo": "gitlab.example.com/example-org/app",
+        "op": "fetch"
+      },
+      "result": {
+        "allowed": false,
+        "reason": "repo-not-on-list"
+      }
+    }
+  ]
+}
