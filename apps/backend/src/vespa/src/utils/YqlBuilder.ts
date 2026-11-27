@@ -16,6 +16,19 @@ import {
 import { CallType } from '@xyne/shared';
 import { parseDateToTimestamp, parseTimeKeyword } from './dateParser';
 
+type MatchTargetSpec = { schema: VespaSchema; field: string; order: string; keyed?: true; filters: Record<string, string> };
+
+/**
+ * Gram fields the match-ids search (vespaSearch type=match_ids) may query, by target name. A new partial-match
+ * field (sender, form field, ...) is one entry here. keyed: the field holds "<fieldKey>::<text>" entries.
+ * filters: request filter name -> Vespa field.
+ */
+export const MATCH_TARGETS = {
+  ticketTitle: { schema: ticketSchema, field: 'title_gram', order: 'createdAtTimestamp', filters: { ticketType: 'ticketType' } },
+} as const satisfies Record<string, MatchTargetSpec>;
+
+export type MatchTarget = keyof typeof MATCH_TARGETS;
+
 type AppName = 'chat' | 'ticket' | 'user' | 'file' | 'collection' | 'transcript' | 'mail' | 'xyneapp' | 'call';
 
 const VESPA_MISSING_DYNAMIC_FIELD_VALUE = '__VESPA_MISSING__';
@@ -1403,6 +1416,48 @@ export class YqlBuilder {
     }
 
     const yql = `select * from sources ${appSchema} where ${conditions.join(' and ')}`;
+    return { yql, params: params.toRequestProperties() };
+  }
+
+  /**
+   * Build YQL for a match-ids search on one gram field of MATCH_TARGETS (hashed through the encryption gateway):
+   * every query word must match part of the field, newest first, under the schema's usual access guard.
+   */
+  buildMatchIdsYql(opts: {
+    target: MatchTarget;
+    query: string;
+    fieldKey?: string;
+    userId: string;
+    workspaceId: string;
+    filters?: Record<string, { in?: string[]; notIn?: string[] }>;
+  }): {
+    yql: string;
+    params: Record<string, string>;
+  } {
+    const target: MatchTargetSpec = MATCH_TARGETS[opts.target];
+    const params = new VespaQueryParams();
+    const conditions: string[] = [];
+    if (target.keyed) {
+      if (!opts.fieldKey) throw new Error(`fieldKey is required for target ${opts.target}`);
+      conditions.push(`${target.field} contains ${params.bind('word', `${opts.fieldKey}::${opts.query.trim()}`)}`);
+    } else {
+      const words = opts.query.trim().split(/\s+/).filter(Boolean);
+      // A 1-character word only matches a 1-character word (grams are 2 characters), so while a longer
+      // word is there it is left out: "issue r" mid-typing still finds "issue resolve".
+      const longWords = words.filter((word) => [...word].length >= 2);
+      for (const word of longWords.length ? longWords : words) {
+        conditions.push(`${target.field} contains ${params.bind('word', word)}`);
+      }
+    }
+    conditions.push(this.buildPermGuard([target.schema], opts.userId, params, opts.workspaceId));
+    for (const [name, values] of Object.entries(opts.filters ?? {})) {
+      const field = target.filters[name];
+      if (!field) throw new Error(`filter ${name} is not allowed for target ${opts.target}`);
+      if (values.in?.length) conditions.push(`${field} in (${params.bind(name, values.in.join(','))})`);
+      if (values.notIn?.length) conditions.push(`!(${field} in (${params.bind(name, values.notIn.join(','))}))`);
+    }
+
+    const yql = `select docId from ${target.schema} where ${conditions.join(' and ')} order by ${target.order} desc`;
     return { yql, params: params.toRequestProperties() };
   }
 

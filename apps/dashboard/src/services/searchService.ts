@@ -41,6 +41,25 @@ export interface VespaTagSearchFilters {
   limit?: number | undefined;
 }
 
+interface MatchIdsSearchResponse {
+  success: boolean;
+  data?: { ids: string[] };
+  error?: string;
+}
+
+/** The fields the backend's match-ids search may query (MATCH_TARGETS in YqlBuilder). */
+export type MatchTarget = 'ticketTitle';
+
+export interface MatchIdsSearchFilters {
+  target: MatchTarget;
+  query: string;
+  /** The key of a keyed target (e.g. a form field id). */
+  fieldKey?: string | undefined;
+  ticketTypes?: string[] | undefined;
+  excludeTicketTypes?: string[] | undefined;
+  limit?: number | undefined;
+}
+
 export class SearchService {
   private vespaBaseUrl = '/vespaSearch';
 
@@ -432,6 +451,31 @@ export class SearchService {
       }
       throw new Error('Vespa tag search request failed');
     }
+  }
+
+  /**
+   * Ids of the docs whose target field contains every word of the query, newest first
+   */
+  async searchMatchIds(filters: MatchIdsSearchFilters, signal?: AbortSignal): Promise<string[]> {
+    const params: Record<string, string> = {
+      type: 'match_ids',
+      target: filters.target,
+      q: sanitizeSearchQuery(filters.query),
+    };
+    if (filters.fieldKey) params['fieldKey'] = filters.fieldKey;
+    if (filters.ticketTypes?.length) params['ticketType'] = filters.ticketTypes.join(',');
+    if (filters.excludeTicketTypes?.length)
+      params['excludeTicketType'] = filters.excludeTicketTypes.join(',');
+    if (filters.limit !== undefined) params['limit'] = filters.limit.toString();
+
+    const response = await apiInstance.get<MatchIdsSearchResponse>(this.vespaBaseUrl, {
+      params,
+      ...(signal ? { signal } : {}),
+    });
+    if (!response.data.success || !response.data.data) {
+      throw new Error(response.data.error || 'Match ids search request failed');
+    }
+    return response.data.data.ids;
   }
 }
 

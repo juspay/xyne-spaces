@@ -6348,19 +6348,24 @@ dmChannelsLatestMessagesPaginated: defineQuery(
     z.object({
       search: z.string().optional(),
       limit: z.number().optional(),
+      // Ids of tickets whose title matched in Vespa; when given they replace title ILIKE
+      // (titles are encrypted in Postgres). Callers that omit it keep the ILIKE.
+      titleMatchIds: z.array(z.string()).optional(),
     }),
-    ({ args: { search, limit } }) => {
+    ({ args: { search, limit, titleMatchIds } }) => {
       let query = zql.tickets
         .where('ticketType', BaseTicketType.Release)
         .orderBy('createdAt', 'desc');
       if (search && search.trim()) {
         const searchValue = `%${search.trim()}%`;
-        query = query.where(helpers =>
-          helpers.or(
-            helpers.cmp('xyneId', 'ILIKE', searchValue),
-            helpers.cmp('title', 'ILIKE', searchValue),
-          ),
-        );
+        query = query.where(helpers => {
+          const titleMatch = titleMatchIds
+            ? titleMatchIds.length > 0
+              ? [helpers.cmp('id', 'IN', titleMatchIds)]
+              : []
+            : [helpers.cmp('title', 'ILIKE', searchValue)];
+          return helpers.or(helpers.cmp('xyneId', 'ILIKE', searchValue), ...titleMatch);
+        });
       }
       return query.limit(limit ?? 10);
     },
@@ -6370,8 +6375,11 @@ dmChannelsLatestMessagesPaginated: defineQuery(
     z.object({
       search: z.string().optional(),
       limit: z.number().optional(),
+      // Ids of tickets whose title matched in Vespa; when given they replace title ILIKE
+      // (titles are encrypted in Postgres). Callers that omit it keep the ILIKE.
+      titleMatchIds: z.array(z.string()).optional(),
     }),
-    ({ args: { search, limit } }) => {
+    ({ args: { search, limit, titleMatchIds } }) => {
       // Exclude Release and Support tickets from regular search
       // Release tickets are managed separately, Support tickets are handled by IT Support Workflow
       let query = zql.tickets
@@ -6384,12 +6392,14 @@ dmChannelsLatestMessagesPaginated: defineQuery(
         .orderBy('createdAt', 'desc');
       if (search && search.trim()) {
         const searchValue = `%${search.trim()}%`;
-        query = query.where(helpers =>
-          helpers.or(
-            helpers.cmp('xyneId', 'ILIKE', searchValue),
-            helpers.cmp('title', 'ILIKE', searchValue),
-          ),
-        );
+        query = query.where(helpers => {
+          const titleMatch = titleMatchIds
+            ? titleMatchIds.length > 0
+              ? [helpers.cmp('id', 'IN', titleMatchIds)]
+              : []
+            : [helpers.cmp('title', 'ILIKE', searchValue)];
+          return helpers.or(helpers.cmp('xyneId', 'ILIKE', searchValue), ...titleMatch);
+        });
       }
       return query.limit(limit ?? 10);
     },

@@ -10,6 +10,7 @@ import { db } from '@/database/client';
 import { repositories } from '@/database/repositories';
 import { VALID_DOC_TYPES } from '@/utils/idValidator';
 import { MatchFeatures, RankProfile, SubApp, VespaDocType, VespaSearchHit, fileSchema } from '@/vespa/src/types';
+import type { MatchTarget } from '@/vespa/src/utils/YqlBuilder';
 
 
 // Create dependencies
@@ -215,6 +216,10 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
       priority,    // Priority (HIGH, MEDIUM, LOW) - comma-separated
       searchId,
       board,       // Board name/ID
+      target,            // type=match_ids: the field to match (MATCH_TARGETS)
+      fieldKey,          // type=match_ids: the key of a keyed target (e.g. a form field id)
+      ticketType,        // type=match_ids: ticket type(s) to keep - comma-separated
+      excludeTicketType, // type=match_ids: ticket type(s) to drop - comma-separated
       tags,        // Comma-separated tags (ticket Tag framework — NOT thread types)
       threadType,  // Thread classification type(s) - comma-separated; matches thread roots
       entity,      // Entity name(s) - comma-separated; AND-ed across slack + ticket results
@@ -647,6 +652,31 @@ export const searchHandler = async (req: Request, res: Response): Promise<void> 
           total,
         },
       });
+      return;
+    }
+
+    // Partial match on one gram field (e.g. ticket titles for the link pickers): just the matching doc ids.
+    // Short-circuits the normal search pipeline; the client loads the docs by id.
+    if (String(type).trim() === 'match_ids') {
+      const ids = await vespaService.searchService.searchMatchIds({
+        target: target as MatchTarget,
+        query: String(q ?? ''),
+        ...(fieldKey ? { fieldKey: String(fieldKey) } : {}),
+        userId,
+        workspaceId,
+        filters: {
+          ...(ticketType || excludeTicketType
+            ? {
+                ticketType: {
+                  ...(ticketType ? { in: toFilterValues(ticketType, 'ticketType') } : {}),
+                  ...(excludeTicketType ? { notIn: toFilterValues(excludeTicketType, 'excludeTicketType') } : {}),
+                },
+              }
+            : {}),
+        },
+        limit: limit ? Number(limit) : 20,
+      });
+      res.json({ success: true, data: { ids } });
       return;
     }
 
