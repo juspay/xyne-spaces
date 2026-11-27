@@ -285,6 +285,8 @@ private final class MtlsSocketConnection: NSObject, URLSessionWebSocketDelegate,
     for (key, value) in headers {
       let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
       guard !key.isEmpty, !trimmed.isEmpty else { continue }
+      // Cookies come from the shared store below, the same way the mTLS API requests get them.
+      if key.caseInsensitiveCompare("Cookie") == .orderedSame { continue }
       request.setValue(trimmed, forHTTPHeaderField: key)
     }
     if !protocols.isEmpty {
@@ -292,6 +294,12 @@ private final class MtlsSocketConnection: NSObject, URLSessionWebSocketDelegate,
     }
 
     let configuration = URLSessionConfiguration.ephemeral
+    // The sync server forwards the upgrade request's cookies to the backend, which reads the
+    // session only from them. A hand-set Cookie header did not reach it (401 TOKEN_MISSING on
+    // every query), so let URLSession attach them from the shared store, like the API requests.
+    configuration.httpShouldSetCookies = true
+    configuration.httpCookieAcceptPolicy = .always
+    configuration.httpCookieStorage = HTTPCookieStorage.shared
     let session = URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
     self.session = session
     self.task = session.webSocketTask(with: request)
