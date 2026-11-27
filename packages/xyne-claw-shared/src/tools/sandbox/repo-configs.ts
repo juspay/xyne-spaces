@@ -243,6 +243,8 @@ export interface SbxGitConfig {
   template: string;
   /** Stable key under which the single shared session is cached + reused. */
   sharedSessionKey: string;
+  /** Profile key the shared sandbox's signed git scope is requested for. */
+  profileKey: string;
   /** Long session lifetime — this sandbox is meant to stay up. */
   sessionTimeoutMs: number;
   /** Where each repo is checked out inside the shared pod: repoName → path. */
@@ -254,6 +256,7 @@ export interface SbxGitConfig {
 export const SBX_GIT: SbxGitConfig = {
   template: "sbx-git-template",
   sharedSessionKey: "sbx-git:shared",
+  profileKey: "sbx-git",
   sessionTimeoutMs: 24 * 60 * 60 * 1000, // 24h; kept warm/refreshed by a cron
   // Repos cloned to /workspace/<repo> in the shared pod's prebake. MUST stay in
   // sync with the prebake clone list (02-sbx-git-prebake CM `REPOS`). This is the

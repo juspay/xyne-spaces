@@ -1,5 +1,5 @@
 import { KataClient } from "@xyne/kata-sdk";
-import type { Session } from "@xyne/kata-sdk";
+import type { JobStatus, Session } from "@xyne/kata-sdk";
 import type { ToolDefinition, ToolExecutionContext } from "../types.js";
 import { SDLC_META_KEYS } from "../../sdlc/meta.js";
 import { redactSecrets, redactAndStringify } from "./redact.js";
@@ -9,7 +9,8 @@ import { createLogger } from "../../logger.js";
 import { createReadStream } from "node:fs";
 import { resolve, join, sep } from "node:path";
 import { hasRange, sliceLines } from "./read-range.js";
-import { findSandboxKeys, resolveSandboxProfile } from "./repo-url.js";
+import { findSandboxKeys, normalizeRepoUrl, resolveSandboxProfile } from "./repo-url.js";
+import { gitScopeForProfile } from "./git-scope-signer.js";
 import {
   cleanupSdlcGitCredentialMaterial,
   installSdlcRepositoryAccess,
@@ -48,13 +49,16 @@ const SESSION_STORE = new Map<string, Session>();
 // instead of claiming more pods.
 const REPO_SETUP_INFLIGHT = new Map<string, Promise<string>>();
 
-function withRepoSetupSingleFlight(tool: ToolDefinition): ToolDefinition {
+// Keyed by profile too: a setup for another profile must not be handed this
+// profile's sandbox (each sandbox's git scope is signed for one profile).
+function withRepoSetupSingleFlight(tool: ToolDefinition, profileKey: string): ToolDefinition {
   const run = tool.execute.bind(tool);
   return {
     ...tool,
     async execute(params, context) {
-      const key = context ? storeKeyFromContext(context) : undefined;
-      if (!key) return run(params, context);
+      const chatKey = context ? storeKeyFromContext(context) : undefined;
+      if (!chatKey) return run(params, context);
+      const key = `${chatKey}\u0000${profileKey}`;
       const inflight = REPO_SETUP_INFLIGHT.get(key);
       if (inflight) return inflight;
       const started = (async () => run(params, context))();
@@ -93,6 +97,11 @@ const SESSION_CREATED_AT = new Map<string, number>();
 // encode the template name, so the check evicts perfectly good sessions
 // and spawns duplicate claims.
 const SESSION_TEMPLATE = new Map<string, string>();
+// Profile key the session was created for, next to its template. A sandbox's
+// signed git scope is made for ONE profile, so a cached sandbox is reused for a
+// profile only when it was created for that same profile. Absent = no profile
+// (and no git scope).
+const SESSION_PROFILE = new Map<string, string>();
 // Sessions younger than this are considered "still warming up" — probe
 // failures during this window get retried/ignored instead of triggering
 // eviction. Matches the SandboxTemplate's prebake budget (~8 min).
@@ -377,7 +386,13 @@ async function reportExperimentDelivery(
   await postToExperiment(context, "/delivered", { filenames }, { filenames: filenames.length });
 }
 
-function rememberSession(storeKey: string | undefined, session: Session, template?: string, owner?: SessionOwner): void {
+function rememberSession(
+  storeKey: string | undefined,
+  session: Session,
+  template?: string,
+  owner?: SessionOwner,
+  profile?: string,
+): void {
   if (storeKey) SESSION_STORE.set(storeKey, session);
   SESSION_STORE.set(session.id, session);
   const now = Date.now();
@@ -391,6 +406,20 @@ function rememberSession(storeKey: string | undefined, session: Session, templat
     if (storeKey) SESSION_TEMPLATE.set(storeKey, template);
     SESSION_TEMPLATE.set(session.id, template);
   }
+  if (profile) {
+    if (storeKey) SESSION_PROFILE.set(storeKey, profile);
+    SESSION_PROFILE.set(session.id, profile);
+  }
+}
+
+/** The profile key a cached session was created for; undefined when it has none. */
+function sessionProfile(session: Session, storeKey?: string): string | undefined {
+  return (storeKey ? SESSION_PROFILE.get(storeKey) : undefined) ?? SESSION_PROFILE.get(session.id);
+}
+
+/** createSession options that request and attach the signed git scope for `profile`. */
+function gitScopeOptions(context: ToolExecutionContext, profile: string) {
+  return { gitScope: gitScopeForProfile(profile, context.config) };
 }
 
 function isSessionOwnedByContext(session: Session, lookupKey: string | undefined, context: { meta?: Record<string, string> } | undefined): boolean {
@@ -436,17 +465,20 @@ function evictSession(session: Session, storeKey?: string): void {
     SESSION_CREATED_AT.delete(storeKey);
     SESSION_OWNER.delete(storeKey);
     SESSION_TEMPLATE.delete(storeKey);
+    SESSION_PROFILE.delete(storeKey);
   }
   SESSION_STORE.delete(session.id);
   SESSION_CREATED_AT.delete(session.id);
   SESSION_OWNER.delete(session.id);
   SESSION_TEMPLATE.delete(session.id);
+  SESSION_PROFILE.delete(session.id);
   for (const [k, v] of SESSION_STORE.entries()) {
     if (v === session) {
       SESSION_STORE.delete(k);
       SESSION_CREATED_AT.delete(k);
       SESSION_OWNER.delete(k);
       SESSION_TEMPLATE.delete(k);
+      SESSION_PROFILE.delete(k);
     }
   }
 }
@@ -798,6 +830,15 @@ export const SANDBOX_CONFIG_SCHEMA = {
     required: false as const,
     placeholder: "kata-workspace-template",
   },
+  GIT_SCOPE_SIGNER_URL: {
+    label: "Git Scope Signer URL",
+    // Every sandbox created for a profile needs a signed list from this
+    // service; without it those creations fail. Sandboxes with no profile
+    // never call it.
+    default: "",
+    required: false as const,
+    placeholder: "http://<signer-service>:<port>",
+  },
 };
 
 function makeClient(config: Record<string, string>, templateOverride?: string): KataClient {
@@ -822,9 +863,15 @@ function makeClient(config: Record<string, string>, templateOverride?: string): 
  * when no pin is set (callers then fall back to an explicit param / the default).
  */
 async function pinnedTemplateForContext(context: ToolExecutionContext): Promise<string | undefined> {
+  return (await pinnedProfileForContext(context))?.template;
+}
+
+/** The UI-pinned profile (key + template), or undefined when none is pinned or it is unknown. */
+async function pinnedProfileForContext(context: ToolExecutionContext): Promise<{ key: string; template: string } | undefined> {
   const pinnedRepo = context.meta?.["sandboxRepo"]?.trim();
   if (!pinnedRepo) return undefined;
-  return (await runRepoConfigs(context))[pinnedRepo]?.template;
+  const template = (await runRepoConfigs(context))[pinnedRepo]?.template;
+  return template ? { key: pinnedRepo, template } : undefined;
 }
 
 /** The profiles this run may use: built-ins plus its workspace's own. */
@@ -952,7 +999,11 @@ export const sandboxCreate: ToolDefinition = {
     if (byRepo && "error" in byRepo) return byRepo.error;
     // A repo-matched profile, then a UI-pinned sandbox repo, win over whatever template the LLM passed —
     // a pinned agent must always get its own sandbox, never the legacy kata one.
-    const pinnedTemplate = byRepo?.config.template ?? (await pinnedTemplateForContext(context));
+    const pinned = byRepo ? undefined : await pinnedProfileForContext(context);
+    // The profile this sandbox is for (repo match, else the pin). None → a plain
+    // sandbox with no git scope.
+    const profileKey = byRepo?.key ?? pinned?.key;
+    const pinnedTemplate = byRepo?.config.template ?? pinned?.template;
     const requestedTemplate = pinnedTemplate ?? (await knownTemplate(params["template"]));
     // ROTATE, exactly as the repo-setup path does. Without this, every
     // sandbox-create on a pinned agent clones the BASE template's single
@@ -971,8 +1022,10 @@ export const sandboxCreate: ToolDefinition = {
       if (!isSessionOwnedByContext(existing, storeKey, context)) {
         return "Error: Existing sandbox session is not authorized for this user/conversation.";
       }
-      const alive = await probeSession(existing, storeKey);
-      if (alive) {
+      // A sandbox for a profile is reused only by that same profile: its git
+      // scope was signed for it. Calls without a profile reuse as before.
+      const otherProfile = profileKey !== undefined && sessionProfile(existing, storeKey) !== profileKey;
+      if (!otherProfile && await probeSession(existing, storeKey)) {
         return JSON.stringify({ sessionId: existing.id, status: "ready", reused: true });
       }
       evictSession(existing, storeKey);
@@ -980,8 +1033,13 @@ export const sandboxCreate: ToolDefinition = {
 
     try {
       const client = makeClient(context.config, template);
-      const session = await client.createSession({ timeoutMs, idleTimeoutMs, ...(template ? { template } : {}) });
-      rememberSession(storeKey, session, template, ownerFromContext(context));
+      const session = await client.createSession({
+        timeoutMs,
+        idleTimeoutMs,
+        ...(template ? { template } : {}),
+        ...(profileKey ? gitScopeOptions(context, profileKey) : {}),
+      });
+      rememberSession(storeKey, session, template, ownerFromContext(context), profileKey);
       await reportExperimentSandboxCreated(
         context,
         session,
@@ -1133,13 +1191,18 @@ export const sandboxRun: ToolDefinition = {
     try {
       const byRepo = await repoProfileFor(params, context);
       if (byRepo && "error" in byRepo) return byRepo.error;
-      const pinnedTemplate = byRepo?.config.template ?? (await pinnedTemplateForContext(context));
+      const pinned = byRepo ? undefined : await pinnedProfileForContext(context);
+      const profileKey = byRepo?.key ?? pinned?.key;
+      const pinnedTemplate = byRepo?.config.template ?? pinned?.template;
       // Rotate here too — a one-shot exec still provisions a VM from the
       // template's snapshot, so an un-rotated base name concentrates clones
       // the same way sandbox-create did.
       const oneShotTemplate = pinnedTemplate ? rotateTemplate(pinnedTemplate) : pinnedTemplate;
       const client = makeClient(context.config, oneShotTemplate);
-      const result = await client.exec(cmd, { timeoutMs });
+      const result = await client.exec(cmd, {
+        timeoutMs,
+        ...(profileKey ? gitScopeOptions(context, profileKey) : {}),
+      });
       return redactAndStringify({
         stdout: result.stdout,
         stderr: result.stderr,
@@ -1938,7 +2001,29 @@ async function configureGitIdentity(
   }
 }
 
-export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
+/** git's last non-empty stderr line, redacted and capped, for an error message. */
+function lastStderrLine(stderr: string | null | undefined): string {
+  const lines = (stderr ?? "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const last = lines[lines.length - 1] ?? "";
+  return redactSecrets(last.length > 300 ? `${last.slice(0, 300)}…` : last);
+}
+
+/** The setup tool's answer when a fetch/checkout job ended non-zero (e.g. the git-gateway refused it). */
+function fetchRefusedError(what: string, branch: string, status: JobStatus, sessionId: string): string {
+  const detail = lastStderrLine(status.stderr);
+  return redactSecrets(
+    `Error: The ${what} could not be fetched: git exited ${status.exitCode} while fetching/checking out ${branch}` +
+      `${detail ? ` (${detail})` : ""}. The sandbox may not have access to this repository. ` +
+      `Sandbox ${sessionId} was NOT set up on ${branch}.`,
+  );
+}
+
+/**
+ * `profileKey` is the key of `config` in the run's profile map. Every sandbox
+ * this tool creates gets the signed git scope for that profile, and a cached
+ * sandbox is reused only when it was created for the same profile.
+ */
+export function makeRepoSetupTool(config: RepoSetupConfig, profileKey: string): ToolDefinition {
   // Build input schema. When the config has auxRepos, add an optional
   // auxBranches field so the agent can override branches on the bundled
   // repos independently of the primary branchName.
@@ -1998,7 +2083,9 @@ export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
           if (!isSessionOwnedByContext(existing, storeKey, context)) {
             return unauthorizedSessionMessage(existing.id);
           }
-          if (await probeSession(existing, storeKey)) {
+          // Reuse only a sandbox made for this profile; another profile's
+          // sandbox carries another profile's git scope.
+          if (sessionProfile(existing, storeKey) === profileKey && await probeSession(existing, storeKey)) {
             return JSON.stringify({ sessionId: existing.id, status: "ready", reused: true });
           }
           evictSession(existing, storeKey);
@@ -2009,8 +2096,9 @@ export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
           timeoutMs: noRepoDuration,
           idleTimeoutMs: idleTimeoutForSessionCreation(context, undefined, config.idleTimeoutMs || 60 * 60 * 1000),
           template: config.template,
+          ...gitScopeOptions(context, profileKey),
         });
-        rememberSession(storeKey, session, config.template, ownerFromContext(context));
+        rememberSession(storeKey, session, config.template, ownerFromContext(context), profileKey);
         await reportExperimentSandboxCreated(context, session, config.template);
         return JSON.stringify({ sessionId: session.id, status: "ready", template: config.template, ports: config.ports || {} });
       }
@@ -2031,11 +2119,12 @@ export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
 
       // Fetch + checkout each auxiliary repo onto the requested branch
       // (or its default). Idempotent: if the branch is already current,
-      // git fetch + checkout -B is a no-op on the worktree. Failures are
-      // logged but don't abort setup — the image's baked default branch
-      // is still usable.
-      const checkoutAuxBranches = async (session: Session) => {
-        if (!config.auxRepos?.length) return;
+      // git fetch + checkout -B is a no-op on the worktree. A job that ends
+      // non-zero (git refused the fetch) stops setup with an error naming the
+      // repository; other failures are logged and setup continues on the
+      // image's baked default branch.
+      const checkoutAuxBranches = async (session: Session): Promise<string | null> => {
+        if (!config.auxRepos?.length) return null;
         for (const aux of config.auxRepos) {
           const branch = auxBranches[aux.name] ?? aux.defaultBranch;
           try {
@@ -2051,10 +2140,9 @@ export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
               if (status.done) {
                 done = true;
                 if (status.exitCode !== null && status.exitCode !== 0) {
-                  log.push(`Aux ${aux.name}: WARN ${branch} checkout failed (exit ${status.exitCode}); leaving on baked default.`);
-                } else {
-                  log.push(`Aux ${aux.name}: on ${branch}`);
+                  return fetchRefusedError(`auxiliary repository ${aux.name}`, branch, status, session.id);
                 }
+                log.push(`Aux ${aux.name}: on ${branch}`);
                 break;
               }
             }
@@ -2063,6 +2151,7 @@ export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
             log.push(`Aux ${aux.name}: WARN error — ${redactSecrets(err instanceof Error ? err.message : String(err))}`);
           }
         }
+        return null;
       };
 
       const cached = SESSION_STORE.get(storeKey);
@@ -2090,7 +2179,10 @@ export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
           const isRepoTemplate = cachedTemplate
             ? isSameTemplateFamily(cachedTemplate, config.template)
             : cached.id.includes("agent-workspace") || cached.id.includes("docker-dev");
-          if (isRepoTemplate && await probeSession(cached, storeKey)) {
+          // Same template is not enough: the sandbox's git scope was signed for
+          // one profile, so another profile (even on this template) gets a new claim.
+          const isSameProfile = sessionProfile(cached, storeKey) === profileKey;
+          if (isRepoTemplate && isSameProfile && await probeSession(cached, storeKey)) {
             log.push(`Reusing existing sandbox session ${cached.id}`);
             try {
               // The pod prebakes a shallow clone of the default branch.
@@ -2108,19 +2200,31 @@ export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
                 `git fetch origin ${baseBranch} && git checkout -B ${baseBranch} FETCH_HEAD && git checkout -B ${branchName}; fi)`,
               );
               const deadline = Date.now() + 30_000;
+              let finished: JobStatus | undefined;
               while (Date.now() < deadline) {
                 await new Promise((r) => setTimeout(r, 1_000));
                 const status = await cached.commands.pollJob(checkoutJob);
-                if (status.done) break;
+                if (status.done) {
+                  finished = status;
+                  break;
+                }
               }
-              log.push(`Checked out ${branchName} on existing session.`);
+              if (finished && finished.exitCode !== null && finished.exitCode !== 0) {
+                return fetchRefusedError(`repository ${normalizeRepoUrl(config.repoUrl ?? "") ?? config.name}`, branchName, finished, cached.id);
+              }
+              log.push(
+                finished
+                  ? `Checked out ${branchName} on existing session.`
+                  : `Checkout of ${branchName} still running after 30s on existing session; continuing.`,
+              );
             } catch (err) {
               log.push(`Branch checkout failed: ${redactSecrets(err instanceof Error ? err.message : String(err))} (continuing anyway)`);
             }
             // Re-run aux branch checkouts even on reuse: caller may have
             // passed a different auxBranches map this turn. Idempotent if
             // already on the requested branches.
-            await checkoutAuxBranches(cached);
+            const auxRefused = await checkoutAuxBranches(cached);
+            if (auxRefused) return auxRefused;
             // Refresh git identity on reuse too — the userEmail/userName in
             // meta come from the caller's /run payload, so if a different
             // user picks up the conversation we want their identity now.
@@ -2136,6 +2240,8 @@ export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
           }
           if (!isRepoTemplate) {
             log.push(`Cached session ${cached.id} is on the wrong template — discarding and creating a fresh repo-template VM.`);
+          } else if (!isSameProfile) {
+            log.push(`Cached session ${cached.id} was created for another profile — creating a new sandbox for ${profileKey}.`);
           } else {
             log.push(`Cached session ${cached.id} is dead — recreating.`);
           }
@@ -2156,26 +2262,30 @@ export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
         idleTimeoutMs: idleTimeoutForSessionCreation(context, undefined, config.idleTimeoutMs || 60 * 60 * 1000),
         template: claimTemplate,
         readyTimeoutMs: config.readyTimeoutMs || 10 * 60 * 1000,
+        ...gitScopeOptions(context, profileKey),
       });
-      rememberSession(storeKey, session, claimTemplate, ownerFromContext(context));
+      rememberSession(storeKey, session, claimTemplate, ownerFromContext(context), profileKey);
       await reportExperimentSandboxCreated(context, session, claimTemplate);
       log.push(`Session created: ${session.id}`);
 
-      const pollUntilDone = async (jobId: string, label: string, timeoutMs: number) => {
+      // Wait for a job and return its final status, whatever its exit code.
+      const pollUntilFinished = async (jobId: string, label: string, timeoutMs: number) => {
         const deadline = Date.now() + timeoutMs;
         while (Date.now() < deadline) {
           await new Promise((r) => setTimeout(r, 5_000));
           const status = await session.commands.pollJob(jobId);
-          if (status.done) {
-            if (status.exitCode !== null && status.exitCode !== 0) {
-              throw new Error(`${label} failed (exit ${status.exitCode}): ${redactSecrets(status.stderr ?? "")}`);
-            }
-            log.push(`${label} done.`);
-            return status;
-          }
+          if (status.done) return status;
           log.push(`${label} still running...`);
         }
         throw new Error(`${label} timed out after ${timeoutMs / 1000}s`);
+      };
+      const pollUntilDone = async (jobId: string, label: string, timeoutMs: number) => {
+        const status = await pollUntilFinished(jobId, label, timeoutMs);
+        if (status.exitCode !== null && status.exitCode !== 0) {
+          throw new Error(`${label} failed (exit ${status.exitCode}): ${redactSecrets(status.stderr ?? "")}`);
+        }
+        log.push(`${label} done.`);
+        return status;
       };
 
       // Probe for a baked clone in the workspace image.
@@ -2277,7 +2387,12 @@ export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
             `git checkout -B ${branchName} FETCH_HEAD; else ` +
             `git fetch origin ${baseBranch} && git checkout -B ${baseBranch} FETCH_HEAD && git checkout -B ${branchName}; fi)`,
           );
-          await pollUntilDone(branchJobId, `git fetch+checkout ${branchName}`, 60_000);
+          const fetchLabel = `git fetch+checkout ${branchName}`;
+          const fetched = await pollUntilFinished(branchJobId, fetchLabel, 60_000);
+          if (fetched.exitCode !== null && fetched.exitCode !== 0) {
+            return fetchRefusedError(`repository ${normalizeRepoUrl(config.repoUrl ?? "") ?? config.name}`, branchName, fetched, session.id);
+          }
+          log.push(`${fetchLabel} done.`);
         }
 
         // Prebake (entrypoint runs npm ci × 3 + nix build .#xyne-space-services
@@ -2401,7 +2516,8 @@ export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
       // prebake clones these alongside the primary; here we just refresh
       // them to the agent's requested branch. No-op when config has no
       // auxRepos (xyne-spaces and any other single-repo template).
-      await checkoutAuxBranches(session);
+      const auxRefused = await checkoutAuxBranches(session);
+      if (auxRefused) return auxRefused;
 
       // Author every commit as the human who triggered this run, with
       // Xyne Spaces as committer. Runs across primary + aux workdirs.
@@ -2552,7 +2668,7 @@ export function makeRepoSetupTool(config: RepoSetupConfig): ToolDefinition {
       });
     },
   };
-  return withRepoSetupSingleFlight(tool);
+  return withRepoSetupSingleFlight(tool, profileKey);
 }
 
 // Read-only git for the shared sbx-git sandbox: read ANY branch by ref without
@@ -2696,9 +2812,12 @@ async function resolveSbxGit(requestedRepo: string, context: ToolExecutionContex
       timeoutMs: SBX_GIT.sessionTimeoutMs,
       idleTimeoutMs: idleTimeoutForSessionCreation(context, undefined, 10 * 60 * 1000),
       template: SBX_GIT.template,
+      // The shared read-only sandbox has its own profile key and list (one
+      // list for the one sandbox, whichever repo the caller asked about).
+      ...gitScopeOptions(context, SBX_GIT.profileKey),
     });
     // No owner → shared across conversations; mark it so ownership checks pass.
-    rememberSession(key, session, SBX_GIT.template);
+    rememberSession(key, session, SBX_GIT.template, undefined, SBX_GIT.profileKey);
     bindCaller(session);
     SHARED_SESSIONS.add(session.id);
     READONLY_SESSIONS.add(session.id);
@@ -2793,7 +2912,7 @@ export const sandboxRepoSetup: ToolDefinition = {
     const profile = pinnedRepo ? repoConfigs[pinnedRepo] : undefined;
     if (profile && !profile.repoUrl && context.meta?.["forceReadOnlySandbox"] !== "true") {
       try {
-        return await makeRepoSetupTool(profile).execute(
+        return await makeRepoSetupTool(profile, pinnedRepo!).execute(
           sessionDurationMs ? { sessionDurationMs } : {},
           context,
         );
@@ -2857,7 +2976,7 @@ export const sandboxRepoSetup: ToolDefinition = {
     };
 
     // Create a temporary tool using the factory and execute it
-    const repoTool = makeRepoSetupTool(writeConfig);
+    const repoTool = makeRepoSetupTool(writeConfig, repoName);
     let result: string;
     try {
       result = await repoTool.execute(
