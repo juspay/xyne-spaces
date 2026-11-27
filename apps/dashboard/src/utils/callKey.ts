@@ -1,4 +1,4 @@
-import type { CallEncryptionCredentials } from '../zero/types.js';
+import type { CallEncryptionCredentials } from '@xyne/shared';
 
 /**
  * The media key of a call to hand to LiveKit's key provider. A derived key comes as is. A key
@@ -8,7 +8,8 @@ import type { CallEncryptionCredentials } from '../zero/types.js';
  */
 export function openCallKey(credentials: CallEncryptionCredentials, roomName: string): string {
   if (credentials.encryptedKey === undefined) {
-    if (typeof credentials.key !== 'string' || !credentials.key) throw new Error('Call key missing');
+    if (typeof credentials.key !== 'string' || !credentials.key)
+      throw new Error('Call key missing');
     return credentials.key;
   }
   let payload: { callId?: unknown; key?: unknown };

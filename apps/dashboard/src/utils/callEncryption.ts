@@ -1,6 +1,7 @@
 import { ExternalE2EEKeyProvider, type E2EEOptions, type Room } from 'livekit-client';
 import E2EEWorker from 'livekit-client/e2ee-worker?worker';
-import { openCallKey, type CallEncryptionCredentials } from '@xyne/shared';
+import type { CallEncryptionCredentials } from '@xyne/shared';
+import { openCallKey } from './callKey';
 
 /**
  * End-to-end encryption for calls (web, desktop, external guests).

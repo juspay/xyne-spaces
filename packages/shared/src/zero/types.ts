@@ -450,7 +450,7 @@ export interface CallEncryptionCredentials {
   /**
    * Calls keyed by the encryption service: `{"callId","key"}`, sent as transit ciphertext for
    * this client's transit key (the backend can't read it) and decrypted by the client's
-   * response interceptor. `openCallKey` checks it was issued for the call being joined.
+   * response interceptor. The dashboard checks it was issued for the call being joined.
    */
   encryptedKey?: string;
 }
