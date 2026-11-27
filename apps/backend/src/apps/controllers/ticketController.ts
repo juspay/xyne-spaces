@@ -67,6 +67,12 @@ import {
   etaSignalsFromResult,
 } from '@/services/etaManagement';
 import { transferTicketToBoardTx } from '@/bypassAcl/transactions/controllersTicketController';
+import {
+  createFormEntityValue,
+  findFormEntityValue,
+  findFormEntityValues,
+  updateFormEntityValue,
+} from '@/database/repositories/formEntityValueRepository';
 
 const externalSourceRepo = new ExternalSourceRepository();
 const externalMessageRepo = new ExternalMessageRepository();
@@ -486,17 +492,11 @@ export class TicketController {
       return new Set();
     }
 
-    const formEntityValues = await prismaClient.formEntityValues.findMany({
+    const formEntityValues = await findFormEntityValues(prismaClient, {
       where: {
         entityType: 'TICKET',
         entityId: { in: ticketIds },
         fieldId: { in: requestedFilters.map(filter => filter.fieldId) },
-      },
-      select: {
-        entityId: true,
-        fieldId: true,
-        fieldValue: true,
-        actualFieldValue: true,
       },
     });
 
@@ -514,7 +514,7 @@ export class TicketController {
       const fieldMatches = new Set(
         values
           .filter(value =>
-            this.matchesCustomFieldFilter(value.actualFieldValue ?? value.fieldValue, expectedValue),
+            this.matchesCustomFieldFilter(value.value, expectedValue),
           )
           .map(value => value.entityId),
       );
@@ -639,7 +639,7 @@ export class TicketController {
       // Disabled (LLM)
       // const duplicateScopeValues: DuplicateScopeFieldValue[] | undefined =
       //   customFieldValues && customFieldValues.fieldValues.length > 0
-      //     ? customFieldValues.fieldValues.map(fv => ({ fieldId: fv.fieldId, value: fv.actualFieldValue }))
+      //     ? customFieldValues.fieldValues.map(fv => ({ fieldId: fv.fieldId, value: fv.value }))
       //     : undefined;
 
       // Resolve channelId from channelName if not provided
@@ -1966,7 +1966,7 @@ export class TicketController {
           [{
             fieldName: field.fieldName,
             fieldType: field.fieldType,
-            actualFieldValue: normalizedFieldValue.actualFieldValue,
+            value: normalizedFieldValue.value,
           }],
           ticket.workspaceId,
         );
@@ -1982,41 +1982,37 @@ export class TicketController {
       const stringValue = normalizedFieldValue.fieldValue;
 
       // Upsert the form entity value
-      const existing = await prismaClient.formEntityValues.findFirst({
+      const existing = await findFormEntityValue(prismaClient, {
         where: { entityId: ticketId, entityType: 'TICKET', fieldId: field.id },
       });
+      const existingValue = existing ? existing.value : undefined;
 
       if (existing) {
-        await prismaClient.formEntityValues.update({
-          where: { id: existing.id },
-          data: {
-            fieldValue: stringValue,
-            actualFieldValue: normalizedFieldValue.actualFieldValue,
-            updatedAt: timestamp,
-          },
+        await updateFormEntityValue(prismaClient, existing.id, {
+          fieldType: field.fieldType,
+          value: normalizedFieldValue.value,
+          updatedAt: timestamp,
         });
       } else {
-        await prismaClient.formEntityValues.create({
-          data: {
-            id: `fev_${ticketId}_${field.id}_${Date.now()}`,
-            entityId: ticketId,
-            entityType: 'TICKET',
-            formId: formMapping.formId,
-            fieldId: field.id,
-            fieldValue: stringValue,
-            actualFieldValue: normalizedFieldValue.actualFieldValue,
-            workspaceId: ticket.workspaceId,
-            createdAt: timestamp,
-            updatedAt: timestamp,
-          },
+        await createFormEntityValue(prismaClient, {
+          id: `fev_${ticketId}_${field.id}_${Date.now()}`,
+          entityId: ticketId,
+          entityType: 'TICKET',
+          formId: formMapping.formId,
+          fieldId: field.id,
+          fieldType: field.fieldType,
+          value: normalizedFieldValue.value,
+          workspaceId: ticket.workspaceId,
+          createdAt: timestamp,
+          updatedAt: timestamp,
         });
       }
 
       await createTicketCustomFieldActivity({
         ticketId,
         fieldName: field.fieldName,
-        oldValue: existing?.actualFieldValue ?? existing?.fieldValue,
-        newValue: normalizedFieldValue.actualFieldValue,
+        oldValue: existingValue,
+        newValue: normalizedFieldValue.value,
         updatedBy: req.user!.id,
         timestamp,
       });
@@ -2047,7 +2043,9 @@ export class TicketController {
             boardName: board.name,
             fieldName,
             fieldValue: stringValue,
-            previousValue: existing?.fieldValue || undefined,
+            previousValue:
+              (Array.isArray(existingValue) ? existingValue.join(',') : existingValue?.toString()) ||
+              undefined,
             updatedBy: req.user!.id,
             workspaceId,
           };
@@ -2067,8 +2065,8 @@ export class TicketController {
         // Emit TICKET_UPDATED
         // Key by fieldId + fieldName + fieldName.toLowerCase() so conditions referencing
         // either the ID or the name resolve correctly.
-        const prevValue = existing?.actualFieldValue ?? existing?.fieldValue ?? null;
-        const newValue = normalizedFieldValue.actualFieldValue ?? stringValue;
+        const prevValue = existingValue ?? null;
+        const newValue = normalizedFieldValue.value ?? stringValue;
         const toChangeValue = (v: unknown): string | number | null => {
           if (typeof v === 'string' || typeof v === 'number') return v;
           if (v == null) return null;
@@ -2997,7 +2995,7 @@ export class TicketController {
       // field sync below (timing constraint) — hand it the precomputed payload.
       const scopeFieldValues: DuplicateScopeFieldValue[] | undefined =
         customFieldValues && customFieldValues.fieldValues.length > 0
-          ? customFieldValues.fieldValues.map(fv => ({ fieldId: fv.fieldId, value: fv.actualFieldValue }))
+          ? customFieldValues.fieldValues.map(fv => ({ fieldId: fv.fieldId, value: fv.value }))
           : undefined;
 
       const result = await emailService.createConversationWithEmail({

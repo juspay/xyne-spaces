@@ -2356,8 +2356,24 @@ export const formEntityValuesTable = table("form_entity_values")
     version: number().optional(),
     fieldValue: string(),
     actualFieldValue: json().optional(),
+    textValue: string().optional(),
+    textHash: string().optional(),
+    numberValue: number().optional(),
+    dateValue: number().optional(),
+    boolValue: boolean().optional(),
+    plainValue: string().optional(),
     createdAt: number(),
     updatedAt: number(),
+  })
+  .primaryKey("id");
+
+export const formEntityValueItemsTable = table("form_entity_value_items")
+  .columns({
+    workspaceId: string(),
+    id: string(),
+    valueId: string(),
+    item: string(),
+    createdAt: number(),
   })
   .primaryKey("id");
 
@@ -5164,6 +5180,22 @@ export const formFieldsTableRelationships = relationships(formFieldsTable, ({ on
   })
 }));
 
+export const formEntityValuesTableRelationships = relationships(formEntityValuesTable, ({ many }) => ({
+  items: many({
+    sourceField: ["id"],
+    destField: ["valueId"],
+    destSchema: formEntityValueItemsTable,
+  })
+}));
+
+export const formEntityValueItemsTableRelationships = relationships(formEntityValueItemsTable, ({ one }) => ({
+  value: one({
+    sourceField: ["valueId"],
+    destField: ["id"],
+    destSchema: formEntityValuesTable,
+  })
+}));
+
 export const collectionTableRelationships = relationships(collectionTable, ({ one, many }) => ({
   parent: one({
     sourceField: ["parentId"],
@@ -5683,6 +5715,7 @@ export const schema = createSchema(
       globalFieldTable,
       formFieldsTable,
       formEntityValuesTable,
+      formEntityValueItemsTable,
       dashboardTable,
       queryTable,
       dashboardQueryMappingTable,
@@ -5843,6 +5876,8 @@ export const schema = createSchema(
       formTableRelationships,
       globalFieldTableRelationships,
       formFieldsTableRelationships,
+      formEntityValuesTableRelationships,
+      formEntityValueItemsTableRelationships,
       collectionTableRelationships,
       collectionItemTableRelationships,
       collectionPermissionTableRelationships,
@@ -6012,6 +6047,7 @@ export type FormContextMapping = Row<typeof schema.tables.forms_context_mapping>
 export type GlobalField = Row<typeof schema.tables.global_fields>;
 export type FormFields = Row<typeof schema.tables.form_fields>;
 export type FormEntityValues = Row<typeof schema.tables.form_entity_values>;
+export type FormEntityValueItems = Row<typeof schema.tables.form_entity_value_items>;
 export type Dashboard = Row<typeof schema.tables.dashboards>;
 export type Query = Row<typeof schema.tables.queries>;
 export type dashboardQueryMapping = Row<typeof schema.tables.dashboard_queries_mapping>;

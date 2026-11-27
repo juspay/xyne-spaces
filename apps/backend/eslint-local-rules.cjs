@@ -8,5 +8,6 @@
 
 module.exports = {
   'no-rocicorp-define-query': require('../../packages/shared/eslint-rules/no-rocicorp-define-query.cjs'),
-  'require-is-deleted-filter': require('../../packages/shared/eslint-rules/require-is-deleted-filter.cjs')
+  'require-is-deleted-filter': require('../../packages/shared/eslint-rules/require-is-deleted-filter.cjs'),
+  'form-entity-values-through-repository': require('../../packages/shared/eslint-rules/form-entity-values-through-repository.cjs'),
 }

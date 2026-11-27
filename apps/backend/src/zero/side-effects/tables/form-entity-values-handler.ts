@@ -12,14 +12,18 @@ import { mailSchema, ticketSchema } from '@/vespa/src/types';
 import { normalizeVespaFieldValue } from '@/zero/vespa-injection/core/form-fields';
 import { createTicketCustomFieldActivity } from '@/services/ticketCustomFieldActivityService';
 import { emitTicketUpdated } from '@/automations/triggers/ticket-updated.trigger';
-import { FormFieldType, ActivityType } from '@xyne/shared';
+import { FormFieldType, ActivityType, sameFormEntityValue } from '@xyne/shared';
 import { stringFromFormValue } from '@xyne/shared/zero';
 import { resolveFieldDefinitionById } from '@/utils/fieldDefinition';
+import {
+  findFormEntityValue,
+  findFormEntityValueKeys,
+} from '@/database/repositories/formEntityValueRepository';
 import { resolveFormActivityContext } from './form-entity-value-activity-context';
 
 const getPreviousFormEntityValue = (
   previousValue: FormEntityValuePreviousValue | undefined,
-): unknown => previousValue?.actualFieldValue ?? previousValue?.fieldValue;
+): unknown => previousValue?.value;
 
 /**
  * Side effect handler for form_entity_values table.
@@ -56,7 +60,7 @@ export class FormEntityValuesSideEffectHandler extends BaseSideEffectHandler {
     const currentFormEntityValue =
       operation === 'delete'
         ? null
-        : await db.formEntityValues.findUnique({ where: { id: job.entityId } });
+        : (await findFormEntityValueKeys(db, { where: { id: job.entityId } }))[0];
     const entityType = currentFormEntityValue?.entityType ?? previousValue?.entityType;
     const ticketId = currentFormEntityValue?.entityId ?? previousValue?.entityId;
     const fieldId = currentFormEntityValue?.fieldId ?? previousValue?.fieldId;
@@ -159,9 +163,7 @@ export class FormEntityValuesSideEffectHandler extends BaseSideEffectHandler {
 
     try {
       // Get the form entity value
-      const formEntityValue = await db.formEntityValues.findUnique({
-        where: { id: entityId },
-      });
+      const formEntityValue = await findFormEntityValue(db, { where: { id: entityId } });
 
       if (!formEntityValue) {
         logger.warn('[FormEntityValuesSideEffectHandler] Form entity value not found:', entityId);
@@ -181,7 +183,7 @@ export class FormEntityValuesSideEffectHandler extends BaseSideEffectHandler {
 
       const ticketId = formEntityValue.entityId;
       const fieldName = globalField?.fieldName ?? legacyFormField?.fieldName;
-      const fieldValue = formEntityValue.actualFieldValue ?? formEntityValue.fieldValue;
+      const fieldValue = formEntityValue.value;
 
       if (!ticketId || !fieldName) {
         logger.warn('[FormEntityValuesSideEffectHandler] Missing ticketId or fieldName');
@@ -266,7 +268,7 @@ export class FormEntityValuesSideEffectHandler extends BaseSideEffectHandler {
         : null;
 
       // Skip emit if value didn't actually change (no-op re-save)
-      if (operation === 'update' && prevFormValue === fieldValue) return;
+      if (operation === 'update' && sameFormEntityValue(prevFormValue, fieldValue)) return;
       const toTicketChangeValue = (v: unknown): string | number | null => {
         if (typeof v === 'string' || typeof v === 'number') return v;
         if (v === null || v === undefined) return null;
@@ -303,17 +305,7 @@ export class FormEntityValuesSideEffectHandler extends BaseSideEffectHandler {
     const previousValue = job.previousValue as FormEntityValuePreviousValue | undefined;
 
     try {
-      const formEntityValue = await db.formEntityValues.findUnique({
-        where: { id: job.entityId },
-        select: {
-          entityId: true,
-          entityType: true,
-          fieldId: true,
-          contextId: true,
-          fieldValue: true,
-          actualFieldValue: true,
-        },
-      });
+      const formEntityValue = await findFormEntityValue(db, { where: { id: job.entityId } });
 
       if (!formEntityValue || formEntityValue.entityType !== 'TICKET') {
         return;
@@ -338,6 +330,7 @@ export class FormEntityValuesSideEffectHandler extends BaseSideEffectHandler {
         return;
       }
 
+      const currentValue = formEntityValue.value;
       const previousRawValue = operation === 'update'
         ? getPreviousFormEntityValue(previousValue)
         : null;
@@ -346,7 +339,7 @@ export class FormEntityValuesSideEffectHandler extends BaseSideEffectHandler {
           formEntityValue.entityId,
           fieldDefinition.fieldName,
           stringFromFormValue(previousRawValue),
-          stringFromFormValue(formEntityValue.actualFieldValue),
+          stringFromFormValue(currentValue),
           activityContext.name,
         );
         return;
@@ -356,7 +349,7 @@ export class FormEntityValuesSideEffectHandler extends BaseSideEffectHandler {
         ticketId: formEntityValue.entityId,
         fieldName: fieldDefinition.fieldName,
         oldValue: previousRawValue,
-        newValue: formEntityValue.actualFieldValue ?? formEntityValue.fieldValue,
+        newValue: currentValue,
         updatedBy: this.ctx.userID,
         contextName: activityContext.name,
       });

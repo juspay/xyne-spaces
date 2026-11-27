@@ -2,6 +2,7 @@ import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service';
 import { MessageType, TicketStatusV2, FormFieldType, ActivityType } from '@xyne/shared';
+import { findFormEntityValues } from '@/database/repositories/formEntityValueRepository';
 import { v4 as uuidv4 } from 'uuid';
 
 export const OPEN_STATUSES = [TicketStatusV2.TODO, TicketStatusV2.STARTED, TicketStatusV2.PAUSED];
@@ -50,18 +51,16 @@ export async function getFormUsersMap(
   }
 
   try {
-    const formValues = await db.formEntityValues.findMany({
+    const formValues = await findFormEntityValues(db, {
       where: {
         entityId: { in: ticketIds },
-        entityType: 'TICKET' as any,
+        entityType: 'TICKET',
         fieldId: { in: userFieldIds },
       },
-      select: { entityId: true, actualFieldValue: true },
     });
 
     for (const value of formValues) {
-      if (!value.actualFieldValue) continue;
-      const userIds = parseUserIdsFromFieldValue(value.actualFieldValue);
+      const userIds = parseUserIdsFromFieldValue(value.value);
       if (userIds.length > 0) {
         const existingUsers = formUsersMap.get(value.entityId) || [];
         formUsersMap.set(value.entityId, [...existingUsers, ...userIds]);

@@ -105,6 +105,7 @@ import subTicketRoutes from '@/routes/subTickets';
 import boardConfigCopyRoutes from '@/routes/boardConfigCopy';
 import auditLogRoutes from '@/routes/auditLogs';
 import recordingPointerBackfillRoutes from '@/routes/recordingPointerBackfill';
+import formEntityValueBackfillRoutes from '@/routes/formEntityValueBackfill';
 import sdlcRepoCredentialBackfillRoutes from '@/routes/sdlcRepoCredentialBackfill';
 import searchMetricsRoutes from '@/routes/searchMetrics';
 import searchFeedbackRoutes from '@/routes/searchFeedback';
@@ -464,6 +465,9 @@ export class App {
     // this one-off repair links summary canvases across every workspace. The
     // '-backfill' path suffix also puts it behind backfillMountGuard above.
     this.app.use('/api/admin/recording-pointer-backfill', recordingPointerBackfillRoutes);
+    // Copies custom-field values written before the typed columns existed; spans every workspace
+    // (runs as the system actor), and the '-backfill' suffix puts it behind backfillMountGuard.
+    this.app.use('/api/admin/form-entity-value-backfill', formEntityValueBackfillRoutes);
     this.app.use('/api/admin/sdlc-repo-credential-backfill', sdlcRepoCredentialBackfillRoutes);
     // Same shape: the one-off SDLC multi-repo data migration spans every workspace,
     // so it opens its own runAsSystem scope rather than taking workspaceScopedRoute.

@@ -8,6 +8,10 @@ import { randomUUID } from 'crypto';
 import { resolveWorkspaceIdFromModel } from '@/database/tenant/workspace-utils';
 import type { LocalFieldDefinitionInput } from '@/database/repositories/formsRepository';
 import { serializeGlobalFieldEnum } from '@/utils/globalFieldEnum';
+import {
+  countFormEntityValues,
+  updateFormEntityValuePlacement,
+} from '@/database/repositories/formEntityValueRepository';
 
 
 export type FormFieldSequenceState = { formId: string; currentMaxSequence: number };
@@ -403,11 +407,9 @@ export async function deleteRemovedMembershipRows(tx: Prisma.TransactionClient, 
           continue;
         }
 
-        const valueCount = await tx.formEntityValues.count({
-          where: {
-            formId,
-            fieldId: row.id,
-          },
+        const valueCount = await countFormEntityValues(tx, {
+          formId,
+          fieldId: row.id,
         });
         if (valueCount > 0) {
           throw new Error(`Cannot delete field "${row.fieldName ?? row.id}" because it has saved values`);
@@ -418,10 +420,11 @@ export async function deleteRemovedMembershipRows(tx: Prisma.TransactionClient, 
 
       const definitionId = await ensureLegacyGlobalField(tx, projectId, row);
       if (definitionId && definitionId !== row.id) {
-        await tx.formEntityValues.updateMany({
-          where: { formId, fieldId: row.id },
-          data: { fieldId: definitionId, updatedAt: new Date() },
-        });
+        await updateFormEntityValuePlacement(
+          tx,
+          { formId, fieldId: row.id },
+          { fieldId: definitionId, updatedAt: new Date() },
+        );
       }
 
       await tx.formFields.delete({ where: { id: row.id } });

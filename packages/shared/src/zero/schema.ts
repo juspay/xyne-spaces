@@ -1870,8 +1870,25 @@ export const formEntityValuesTable = table('form_entity_values')
     version: number().optional(), // NULL treated as 1 in code
     fieldValue: string(),
     actualFieldValue: json<FormFieldValue>().optional(),
+    textValue: string().optional(), // STRING; the text as entered (filter on textHash, not this)
+    textHash: string().optional(), // STRING; HMAC of lower(trim(value)) for exact-match filters
+    numberValue: number().optional(),
+    dateValue: number().optional(),
+    boolValue: boolean().optional(),
+    plainValue: string().optional(), // SINGLE_SELECT option, TICKET id, DOC attachment id
     createdAt: number(),
     updatedAt: number(),
+  })
+  .primaryKey('id');
+
+// One row per selected option (MULTI_SELECT) or user (USER) of a form_entity_values row.
+export const formEntityValueItemsTable = table('form_entity_value_items')
+  .columns({
+    workspaceId: string(), // denormalized tenant key (stamped on insert)
+    id: string(),
+    valueId: string(),
+    item: string(),
+    createdAt: number(),
   })
   .primaryKey('id');
 
@@ -4781,6 +4798,19 @@ export const formEntityValuesTableRelationships = relationships(formEntityValues
     destField: ['id'],
     destSchema: ticketTable,
   }),
+  items: many({
+    sourceField: ['id'],
+    destField: ['valueId'],
+    destSchema: formEntityValueItemsTable,
+  }),
+}));
+
+export const formEntityValueItemsTableRelationships = relationships(formEntityValueItemsTable, ({ one }) => ({
+  value: one({
+    sourceField: ['valueId'],
+    destField: ['id'],
+    destSchema: formEntityValuesTable,
+  }),
 }));
 
 export const ticketStageRequestTableRelationships = relationships(ticketStageRequestTable, ({ one }) => ({
@@ -5153,6 +5183,7 @@ export const schema = createSchema({
     globalFieldsTable,
     formFieldsTable,
     formEntityValuesTable,
+    formEntityValueItemsTable,
     stageApproversTable,
     ticketStageRequestTable,
     stageTransitionTable,
@@ -5291,6 +5322,7 @@ export const schema = createSchema({
     globalFieldsTableRelationships,
     formFieldsTableRelationships,
     formEntityValuesTableRelationships,
+    formEntityValueItemsTableRelationships,
     ticketStageRequestTableRelationships,
     stageTransitionTableRelationships,
     stageApproversTableRelationships,
@@ -5429,6 +5461,7 @@ export type FormContextMapping = Row<typeof schema.tables.forms_context_mapping>
 export type GlobalField = Row<typeof schema.tables.global_fields>;
 export type FormFields = Row<typeof schema.tables.form_fields>;
 export type FormEntityValues = Row<typeof schema.tables.form_entity_values>;
+export type FormEntityValueItems = Row<typeof schema.tables.form_entity_value_items>;
 export type StageApprovers = Row<typeof schema.tables.stage_approvers>;
 export type TicketStageRequest = Row<typeof schema.tables.ticket_stage_requests>;
 export type Dashboard = Row<typeof schema.tables.dashboards>;

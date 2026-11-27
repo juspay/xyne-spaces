@@ -77,6 +77,7 @@ import { FormContextMappingsACL } from '../tables/form-context-mappings-acl';
 import { FormFieldsACL } from '../tables/form-fields-acl';
 import { GlobalFieldsACL } from '../tables/global-fields-acl';
 import { FormEntityValuesACL } from '../tables/form-entity-values-acl';
+import { FormEntityValueItemsACL } from '../tables/form-entity-value-items-acl';
 import { DelayedMessagesACL } from '../tables/delayed-messages-acl';
 import { DraftMessagesACL } from '../tables/draft-messages-acl';
 import { AgentToolsMappingsACL } from '../tables/agent-tools-mappings-acl';
@@ -340,6 +341,8 @@ export class ACLFactory {
         return new GlobalFieldsACL(ctx);
       case 'form_entity_values':
         return new FormEntityValuesACL(ctx);
+      case 'form_entity_value_items':
+        return new FormEntityValueItemsACL(ctx);
       case 'rcas':
         return new RcasACL(ctx);
       case 'impacts':

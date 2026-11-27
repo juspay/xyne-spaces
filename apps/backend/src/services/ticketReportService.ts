@@ -1,6 +1,14 @@
 import { z } from 'zod';
 import * as XLSX from 'xlsx';
-import { AccessType, ProjectType, TicketPriority, TicketStatusV2, UserStatus, WorkspaceRole } from '@xyne/shared';
+import {
+  AccessType,
+  ProjectType,
+  TicketPriority,
+  TicketStatusV2,
+  UserStatus,
+  WorkspaceRole,
+} from '@xyne/shared';
+import { findFormEntityValues } from '@/database/repositories/formEntityValueRepository';
 import { Prisma } from '@prisma/client';
 import { DatabaseClient } from '@/database/client';
 import { repositories } from '@/database/repositories';
@@ -707,7 +715,7 @@ export class TicketReportService {
   ): Promise<TicketExportTicket[]> {
     const ticketIds = tickets.map(t => t.id);
     const fieldValues = ticketIds.length
-      ? await prisma.formEntityValues.findMany({
+      ? await findFormEntityValues(prisma, {
           where: { entityId: { in: ticketIds }, entityType: 'TICKET' },
         })
       : [];
@@ -753,7 +761,7 @@ export class TicketReportService {
     for (const fv of fieldValues) {
       const field = fieldById.get(fv.fieldId);
       if (field?.type !== 'USER') continue;
-      this.flattenDisplayValues(fv.actualFieldValue ?? fv.fieldValue).forEach(value =>
+      this.flattenDisplayValues(fv.value).forEach(value =>
         userIds.add(value),
       );
     }
@@ -787,7 +795,7 @@ export class TicketReportService {
       const name = field?.name ?? 'Unknown custom field';
       if (!name) continue;
       const existing = valuesByTicket.get(fv.entityId) ?? {};
-      const raw: unknown = fv.actualFieldValue ?? fv.fieldValue;
+      const raw: unknown = fv.value;
       const values = this.flattenDisplayValues(raw).map(value =>
         redactOpaqueExportIdentifier(
           userNameById.get(value) ?? field?.options.get(value) ?? value,
