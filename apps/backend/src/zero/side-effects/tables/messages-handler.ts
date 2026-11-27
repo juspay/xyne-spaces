@@ -1,7 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import { BaseSideEffectHandler } from '../base-handler';
 import type { SideEffectJobConfig, MessagePreviousValue } from '../types';
-import type { DerivedFacts, RequestDerived, mutatorContracts } from '@xyne/shared';
+import type { DerivedFacts, RequestDerived, mutatorContracts } from '@xyne/contracts';
 
 /** The content facts a message insert job carries, as the message contract picks them. */
 type MessageContentFacts = NonNullable<RequestDerived<(typeof mutatorContracts)['conversations.send']>['fields']['content']>;

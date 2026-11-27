@@ -19,7 +19,7 @@
  */
 
 import { Router, type Request, type Response } from 'express';
-import { isMutatorName, mutatorContracts } from '@xyne/shared';
+import { isMutatorName, mutatorContracts } from '@xyne/contracts';
 import { config } from '@/config/env';
 import { handle } from './handler';
 import { MENTION_FIELDS } from './v1/parser';

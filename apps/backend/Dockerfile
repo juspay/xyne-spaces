@@ -22,6 +22,7 @@ ENV NODE_OPTIONS="--max-old-space-size=8192"
 # Manifests + lockfile first so the install layer caches independently of source.
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
 COPY packages/shared/package.json           packages/shared/
+COPY packages/contracts/package.json        packages/contracts/
 COPY packages/storage/package.json          packages/storage/
 COPY packages/cache/package.json            packages/cache/
 COPY packages/secrets-vault/package.json    packages/secrets-vault/
@@ -40,6 +41,7 @@ RUN pnpm --filter xyne-spaces-backend add -O @napi-rs/canvas-linux-arm64-gnu || 
 RUN npm install -g @xyne/xyne-cli@latest || echo "xyne-cli installation failed, continuing..."
 
 COPY packages/shared        packages/shared
+COPY packages/contracts     packages/contracts
 COPY packages/storage       packages/storage
 COPY packages/cache         packages/cache
 COPY packages/secrets-vault packages/secrets-vault
@@ -47,7 +49,7 @@ COPY apps/backend           apps/backend
 COPY scripts                scripts
 
 # backend consumes both from their built dist/
-RUN pnpm --filter @xyne/shared --filter @xyne/storage --filter @xyne/cache --filter @xyne/secrets-vault run build
+RUN pnpm --filter @xyne/shared --filter @xyne/contracts --filter @xyne/storage --filter @xyne/cache --filter @xyne/secrets-vault run build
 
 # Cache-busting argument to ensure db:generate always runs
 ARG CACHEBUST=1

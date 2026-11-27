@@ -13,9 +13,10 @@ set -euo pipefail
 #   UnreadableString ->  reveal()                               zero/unreadableTransaction.ts (the write unwrap),
 #   its value                                                    services/encryption/compose.ts (composeBatch)
 #
-# reveal is defined in @xyne/shared, so packages/shared/src is checked too: a shared helper that
-# reveals would hand the backend the value without the backend ever naming reveal. There it may
+# reveal is defined in @xyne/contracts, so packages/contracts/src is checked too: a helper there
+# that reveals would hand the backend the value without the backend ever naming reveal. It may
 # appear only where it is defined, exported, and used by the compose template runner.
+# packages/shared/src may not use it at all: shared is loaded by the clients and holds no contract.
 #
 # This guard fails the build when any of them is reached from another file. It runs as the
 # backend `prebuild` hook, so it runs in the pre-commit build, in CI and in the image build:
@@ -28,7 +29,8 @@ set -euo pipefail
 #     (`provider['compose']`), and one-line destructuring (`const { deriveFacts } = provider`).
 #     The provider's own definitions (`async compose(...)`) are not member access.
 
-# It also runs from the pre-commit hook, so a commit that touches only packages/shared is checked.
+# It also runs from the pre-commit hook, so a commit that touches only packages/contracts or
+# packages/shared is checked.
 #
 # Paths are resolved from the repo root, not the cwd: pnpm runs `prebuild` in apps/backend, and
 # the image build has no .git, so fall back to the parent of scripts/ (as validate-no-acl-bypass.sh).
@@ -45,7 +47,8 @@ apps/backend/src|reveal|word|zero/unreadableTransaction.ts,services/encryption/c
 apps/backend/src|transformRequest|member|zero/encryptedMutation.ts,middleware/encryptedRoute.ts,services/callAi/gatewayLlm.ts|A mutator gets its args transformed by defineContractMutator (encryptedMutation.ts); a REST route by encryptedRoute().
 apps/backend/src|deriveFacts|member|zero/unreadableTransaction.ts|Ask for the facts with tx.read(query, { <column>: { <fact>: derive.<fact> } }).
 apps/backend/src|compose|member|services/encryption/compose.ts|Build the value with composeSafe() from services/encryption/compose.ts.
-packages/shared/src|reveal|name|enc-contracts/unreadable-string.ts,enc-contracts/index.ts,enc-contracts/compose.ts|Shared code carries an UnreadableString and never reads it: no helper here may reveal on the backend's behalf. The compose template runner (runComposeTemplate) is the one user.
+packages/contracts/src|reveal|name|unreadable-string.ts,index.ts,compose.ts|Contract code carries an UnreadableString and never reads it: no helper here may reveal on the backend's behalf. The compose template runner (runComposeTemplate) is the one user.
+packages/shared/src|reveal|word||Shared code is loaded by the clients and holds no contract: it never reads an UnreadableString.
 EOF
 )
 
@@ -112,5 +115,5 @@ if [ "$failed" -ne 0 ]; then
   exit 1
 fi
 
-echo -e "${GREEN}✅ Unreadable boundary guard: reveal, transformRequest, deriveFacts and compose stay in their files (apps/backend, packages/shared).${RESET}"
+echo -e "${GREEN}✅ Unreadable boundary guard: reveal, transformRequest, deriveFacts and compose stay in their files (apps/backend, packages/contracts, packages/shared).${RESET}"
 exit 0

@@ -44,6 +44,7 @@ export {
   encryptFormDataWithRule,
 } from './manifest-encrypt.js';
 export type { FieldEncryptor } from './manifest-encrypt.js';
+export { matchesRoute, normalizeRequestPath } from './route-match.js';
 export {
   FILE_CONTAINER_MAGIC,
   FILE_ENCRYPTION_HEADER,

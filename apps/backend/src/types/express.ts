@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import type { DerivedFacts, RequestContract, RequestOf } from '@xyne/shared';
+import type { DerivedFacts, RequestContract, RequestOf } from '@xyne/contracts';
 
 export interface ApiResponse<T = any> {
   success: boolean;

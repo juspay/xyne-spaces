@@ -1,8 +1,8 @@
 import { Request, Response } from 'express';
-import type { replyToConversationClient } from '@xyne/shared';
+import type { replyToConversationClient } from '@xyne/contracts';
 import type { ContractRequest } from '@/types/express';
 import { isEncryptedField } from '@xyne/shared';
-import type { FieldFacts } from '@xyne/shared';
+import type { FieldFacts } from '@xyne/contracts';
 import { keepMentionsWithin } from '@/utils/mentionParser';
 import {
   ConversationRepository,

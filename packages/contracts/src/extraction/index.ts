@@ -1,5 +1,5 @@
-import { EXTRACTORS } from '../enc-contracts/extractors.js';
-import type { DerivedFacts, ExtractorGroups, ExtractorName, ExtractorOutput, FieldFacts } from '../enc-contracts/extractors.js';
+import { EXTRACTORS } from '../extractors.js';
+import type { DerivedFacts, ExtractorGroups, ExtractorName, ExtractorOutput, FieldFacts } from '../extractors.js';
 import { extractMentions } from './mentions.js';
 import { extractLinks } from './links.js';
 import { extractCommand } from './command.js';
@@ -7,12 +7,15 @@ import { extractText } from './text.js';
 import { extractForwardedRefs } from './forwarded.js';
 import { extractFlowJsonPresent } from './flow.js';
 import { extractFileExtension, extractIsHeic } from './files.js';
-import { extractAllMentions } from '../utils/mentionParser.js';
-import { keptExtensionOf } from '../sdlc.js';
-import { parseSlashCommandArtifactMessage } from '../utils/slashCommandArtifact.js';
-import { parseForwardedMessageXml } from '../forwardedMessage.js';
-import { getMessageContentLength } from '../utils/messageContent.js';
-import { parseParentMessageMd, resolveConversationAnchorType } from '../utils/activityMetadataParser.js';
+import {
+  extractAllMentions,
+  getMessageContentLength,
+  keptExtensionOf,
+  parseForwardedMessageXml,
+  parseParentMessageMd,
+  parseSlashCommandArtifactMessage,
+  resolveConversationAnchorType,
+} from '@xyne/shared';
 
 export { extractMentions, extractSpecialMentionFlags } from './mentions.js';
 export {

@@ -249,7 +249,13 @@ import { RETIRED_SDK_VERSIONS, createSdkRetiredRouter } from '@/api/sdk/retired'
 import { errorHandler as sdkErrorHandler } from '@/api/sdk/handler';
 import sdkSsoRoutes from '@/routes/sdk-sso';
 import { authenticateSdk } from '@/middleware/sdkAuth';
-import { EXTRACTORS, isComposeTemplateName, runComposeTemplate, runExtractors, type ExtractorName } from '@xyne/shared';
+import {
+  EXTRACTORS,
+  isComposeTemplateName,
+  runComposeTemplate,
+  runExtractors,
+  type ExtractorName,
+} from '@xyne/contracts';
 import type { ZodError } from 'zod';
 import channelsDeskRoutes from '@/routes/channelsDesks';
 import proactivityRoutes from '@/routes/proactivity';

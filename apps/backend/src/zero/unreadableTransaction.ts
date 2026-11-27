@@ -10,8 +10,9 @@ import type {
   UpdateValue,
   UpsertValue,
 } from '@rocicorp/zero';
-import { UnreadableString, isCiphertextValue, reveal, runExtractors } from '@xyne/shared';
-import type { DerivedSpec, ExtractorName, FieldDerived, FieldFacts } from '@xyne/shared';
+import { isCiphertextValue } from '@xyne/shared';
+import { UnreadableString, reveal, runExtractors } from '@xyne/contracts';
+import type { DerivedSpec, ExtractorName, FieldDerived, FieldFacts } from '@xyne/contracts';
 import { config } from '@/config/env';
 import { getEncryptionProvider } from '@/services/encryption';
 import { logger } from '@/utils/logger';

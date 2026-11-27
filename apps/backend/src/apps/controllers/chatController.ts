@@ -8,7 +8,8 @@ import { SlackBlockKitParser } from '@/integrations/adapters/slack-webhook-ticke
 import { SlackAttachment } from '@/integrations/adapters/slack-webhook-tickets/utils/slackBlockKitTypes';
 import { config } from '@/config/env';
 import { resolveChannelId } from '../utils/channelUtils';
-import { MessageType, type DerivedFacts } from '@xyne/shared';
+import { MessageType } from '@xyne/shared';
+import { type DerivedFacts } from '@xyne/contracts';
 import { validateFlowDefinition, formatValidationErrors, MESSAGE_DELIVERY, flowFallbackLabel } from '@xyne/shared';
 import { deliverEphemeralMessage } from '../core/ephemeralDelivery';
 import { ContentFormat } from '../types';

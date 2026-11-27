@@ -1,5 +1,5 @@
-import type { ExtractorGroups } from '../enc-contracts/extractors.js';
-import { stripCodeRegions } from '../utils/mentionParser.js';
+import { stripCodeRegions } from '@xyne/shared';
+import type { ExtractorGroups } from '../extractors.js';
 
 const ZWSP = '\u200B';
 

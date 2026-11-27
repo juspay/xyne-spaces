@@ -1,12 +1,12 @@
+import { isCiphertextValue } from '@xyne/shared';
 import {
   UnreadableString,
-  isCiphertextValue,
   reveal,
   runComposeTemplate,
   type ComposeInputs,
   type ComposeResult,
   type ComposeTemplate,
-} from '@xyne/shared';
+} from '@xyne/contracts';
 import { config } from '@/config/env';
 import { getEncryptionProvider } from './provider';
 import type { ComposeItemResult } from './types';

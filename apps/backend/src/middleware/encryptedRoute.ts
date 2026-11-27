@@ -2,13 +2,8 @@ import { Request, Response, NextFunction } from 'express';
 import { AppError } from '@/middleware/errorHandler';
 import { getCryptoOperations } from '@/services/otel/cryptoMetrics';
 import { logger } from '@/utils/logger';
-import {
-  derivedFactsSchema,
-  derivedNames,
-  makeUnreadable,
-  sourceFieldNames,
-} from '@xyne/shared';
-import type { RequestContract } from '@xyne/shared';
+import { derivedFactsSchema, derivedNames, makeUnreadable, sourceFieldNames } from '@xyne/contracts';
+import type { RequestContract } from '@xyne/contracts';
 import { config } from '@/config/env';
 import {
   getEncryptionProvider,

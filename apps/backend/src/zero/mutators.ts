@@ -110,11 +110,9 @@ import {
   withSlashCommandArtifactClosedMetadata,
 } from '@xyne/shared';
 import { ConnectEntityType } from '@xyne/shared';
-import type { ExtractorOutput } from '@xyne/shared';
-import { forwardedMessageEditTemplate, forwardedMessageTemplate, repliesMdAddReplierTemplate } from '@xyne/shared';
-import {
-  derive,
-} from '@xyne/shared';
+import type { ExtractorOutput } from '@xyne/contracts';
+import { forwardedMessageEditTemplate, forwardedMessageTemplate, repliesMdAddReplierTemplate } from '@xyne/contracts';
+import { derive } from '@xyne/contracts';
 import { SDLC_HUB_KNOWLEDGE_FOLDER } from '@xyne/shared';
 import { isSdlcTreeItemType, refileSdlcFolderEdges } from '@xyne/shared';
 import {

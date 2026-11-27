@@ -1,15 +1,16 @@
 import { z } from 'zod';
 import { UnreadableString, isUnreadableSchema, reveal, unreadableString } from './unreadable-string.js';
-import { buildForwardedMessageContent, createForwardedMessageXml, parseForwardedMessageXml } from '../forwardedMessage.js';
 import {
   addReplyToData,
+  buildForwardedMessageContent,
   buildInitialMessageMd,
+  createForwardedMessageXml,
+  parseForwardedMessageXml,
   parseRepliesMd,
   serializeParentMessageMd,
   serializeRepliesMd,
-} from '../utils/activityMetadataParser.js';
-import type { ConversationAnchorType } from '../utils/activityMetadataParser.js';
-import type { MessageType } from '../zero/schema.js';
+} from '@xyne/shared';
+import type { ConversationAnchorType, MessageType } from '@xyne/shared';
 
 /**
  * A value the server stores encrypted but cannot build itself, because it is made from values it

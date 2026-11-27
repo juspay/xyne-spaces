@@ -1,4 +1,4 @@
-import type { FieldFacts } from '@xyne/shared';
+import type { FieldFacts } from '@xyne/contracts';
 import { config } from '@/config/env';
 import type {
   ClientEncryptionConfig,

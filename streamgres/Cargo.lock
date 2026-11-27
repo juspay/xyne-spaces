@@ -2140,6 +2140,40 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
 
 [[package]]
+name = "streamgres"
+version = "0.1.0"
+dependencies = [
+ "arc-swap",
+ "axum",
+ "base64 0.22.1",
+ "bytes",
+ "chrono",
+ "fallible-iterator 0.2.0",
+ "futures-util",
+ "jemalloc_pprof",
+ "libc",
+ "log",
+ "memchr",
+ "once_cell",
+ "percent-encoding",
+ "pgoutput",
+ "pgwire-replication",
+ "postgres-protocol",
+ "pyroscope",
+ "reqwest 0.12.28",
+ "rustc-hash",
+ "rustls",
+ "serde",
+ "serde_json",
+ "socket2",
+ "tikv-jemallocator",
+ "tokio",
+ "tokio-postgres",
+ "tokio-tungstenite",
+ "uuid",
+]
+
+[[package]]
 name = "stringprep"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2940,40 +2974,6 @@ name = "writeable"
 version = "0.6.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3ad82d2a33cdc9674dc7465672f271e096168fcdbe0f799d9e6db8c5892679dc"
-
-[[package]]
-name = "streamgres"
-version = "0.1.0"
-dependencies = [
- "arc-swap",
- "axum",
- "base64 0.22.1",
- "bytes",
- "chrono",
- "fallible-iterator 0.2.0",
- "futures-util",
- "jemalloc_pprof",
- "libc",
- "log",
- "memchr",
- "once_cell",
- "percent-encoding",
- "pgoutput",
- "pgwire-replication",
- "postgres-protocol",
- "pyroscope",
- "reqwest 0.12.28",
- "rustc-hash",
- "rustls",
- "serde",
- "serde_json",
- "socket2",
- "tikv-jemallocator",
- "tokio",
- "tokio-postgres",
- "tokio-tungstenite",
- "uuid",
-]
 
 [[package]]
 name = "yoke"

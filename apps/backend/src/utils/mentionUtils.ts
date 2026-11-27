@@ -11,8 +11,8 @@ import {logger} from '@/utils/logger';
 // A mention inside <pre>/<code> is a false positive — e.g. `@Example` inside the
 // email `alice@Example.com` in a SQL snippet — and must not notify.
 import { stripCodeRegions } from '@xyne/shared/utils';
-import { extractSpecialMentionFlags } from '@xyne/shared';
-import type { ExtractorOutput } from '@xyne/shared';
+import { extractSpecialMentionFlags } from '@xyne/contracts';
+import type { ExtractorOutput } from '@xyne/contracts';
 
 export interface ExtractedMention {
   userId: string;

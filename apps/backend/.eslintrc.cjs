@@ -51,8 +51,8 @@ const GCS_IMPORT_PATTERNS = [
 // everywhere else an unreadable value is carried, written through tx.mutate, or decided on facts.
 const REVEAL_MESSAGE =
   'reveal() reads an unreadable value. Decide on derived facts (tx.read / the mutator facts) and write it through tx.mutate instead.';
-const REVEAL_IMPORT_PATHS = [{ name: '@xyne/shared', importNames: ['reveal'], message: REVEAL_MESSAGE }];
-const REVEAL_IMPORT_PATTERNS = [{ group: ['**/enc-contracts/unreadable-string', '**/enc-contracts/unreadable-string.js'], message: REVEAL_MESSAGE }];
+const REVEAL_IMPORT_PATHS = [{ name: '@xyne/contracts', importNames: ['reveal'], message: REVEAL_MESSAGE }];
+const REVEAL_IMPORT_PATTERNS = [{ group: ['**/contracts/src/unreadable-string', '**/contracts/src/unreadable-string.js', '**/contracts/dist/unreadable-string.js'], message: REVEAL_MESSAGE }];
 
 module.exports = {
   parser: '@typescript-eslint/parser',

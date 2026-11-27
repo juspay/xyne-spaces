@@ -1,8 +1,4 @@
 import { z } from 'zod';
-import { FlowPlanSchema } from '../board-types/flow-plan.js';
-import { createSdlcLinkSchema, entityLinkContextSchema, sdlcIconNameSchema, sdlcTrackStatusSchema } from '../sdlc.js';
-import { MAX_PUBLISHED_APP_ID_LENGTH } from '../utils/channel.js';
-import { MAX_NOTIFICATION_KEYWORD_LENGTH, MAX_NOTIFICATION_KEYWORDS } from '../utils/notificationKeywords.js';
 import {
   AccessType,
   ActivityClassification,
@@ -22,13 +18,19 @@ import {
   ChannelVisibility,
   COEStatus,
   CollectionRole,
+  createSdlcLinkSchema,
   EmailMergeMode,
+  entityLinkContextSchema,
+  FlowPlanSchema,
   FormContextType,
   FormEntityType,
   FormFieldType,
   MailboxState,
   MAX_DUPLICATE_LOOKBACK_DAYS,
   MAX_DUPLICATE_SCOPE_FIELDS,
+  MAX_NOTIFICATION_KEYWORD_LENGTH,
+  MAX_NOTIFICATION_KEYWORDS,
+  MAX_PUBLISHED_APP_ID_LENGTH,
   MessageType,
   OrgRole,
   PRStatusEvent,
@@ -39,14 +41,17 @@ import {
   SavedConfigContextType,
   SavedConfigEntityName,
   SavedConfigVisibility,
+  sdlcIconNameSchema,
+  sdlcTrackStatusSchema,
   SEVERITY,
   TicketReferenceRelation,
   TicketStageRequestStatus,
   TicketStatusV2,
+  upsertManyFormEntityValuesArgs,
   UserResponsibility,
   ViewAccessEntityType,
   WorkspaceRole,
-} from '../zero/types.js';
+} from '@xyne/shared';
 import { defineRequestContract, type RequestContract } from './define.js';
 import { derive } from './extractors.js';
 import { unreadableString } from './unreadable-string.js';
@@ -1516,58 +1521,7 @@ export const mutatorContracts = {
   }),
 
   'formEntityValue.upsertMany': defineRequestContract({
-    schema: z
-      .object({
-        entityId: z.string(),
-        entityType: z.nativeEnum(FormEntityType),
-        formId: z.string(),
-        timestamp: z.number(),
-        contextId: z.string().optional(),
-        version: z.number().optional(),
-        values: z
-          .array(
-            z.discriminatedUnion('op', [
-              z.object({
-                op: z.literal('create'),
-                id: z.string(),
-                fieldId: z.string(),
-                newValue: z.array(z.string()),
-              }),
-              z.object({
-                op: z.literal('update'),
-                formEntityValueId: z.string(),
-                newValue: z.array(z.string()),
-                expectedValueUpdatedAt: z.number().nullable().optional(),
-              }),
-            ]),
-          )
-          .min(1),
-      })
-      .superRefine(({ values }, ctx) => {
-        const seenValueIds = new Set<string>();
-        const seenCreateFieldIds = new Set<string>();
-        values.forEach((value, index) => {
-          const valueId = value.op === 'create' ? value.id : value.formEntityValueId;
-          if (seenValueIds.has(valueId)) {
-            ctx.addIssue({
-              code: 'custom',
-              path: ['values', index],
-              message: `Form value ${valueId} appears more than once in this save`,
-            });
-          }
-          seenValueIds.add(valueId);
-
-          if (value.op !== 'create') return;
-          if (seenCreateFieldIds.has(value.fieldId)) {
-            ctx.addIssue({
-              code: 'custom',
-              path: ['values', index],
-              message: `Field ${value.fieldId} appears more than once in this save`,
-            });
-          }
-          seenCreateFieldIds.add(value.fieldId);
-        });
-      }),
+    schema: upsertManyFormEntityValuesArgs,
   }),
 
   'impact.create': defineRequestContract({

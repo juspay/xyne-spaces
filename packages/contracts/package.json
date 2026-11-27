@@ -1,0 +1,33 @@
+{
+  "name": "@xyne/contracts",
+  "version": "1.0.0",
+  "description": "Request contracts for every Zero mutator and the encrypted REST routes, UnreadableString, the fact extractors and the compose templates. Used by the backend and the encryption extractor; the clients never load it.",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "watch": "tsc --watch",
+    "test": "tsc && tsx --test \"test/*.test.mjs\"",
+    "prepare": "pnpm run build"
+  },
+  "dependencies": {
+    "@xyne/shared": "workspace:*",
+    "zod": "4.6.6"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.1",
+    "tsx": "4.23.1",
+    "typescript": "5.9.3"
+  }
+}

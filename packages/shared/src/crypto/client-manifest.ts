@@ -1,5 +1,5 @@
 import { getTransitPlatform } from './transit-platform.js';
-import type { ClientEncryptionManifest } from '../enc-contracts/manifest.js';
+import type { ClientEncryptionManifest } from './manifest.js';
 import { decryptField, isEncryptedField } from './field-decrypt.js';
 import type { TransitKeyring } from './keyring.js';
 
@@ -9,7 +9,7 @@ export type {
   ClientManifestFieldRule,
   ClientManifestRule,
   ClientEncryptionManifest,
-} from '../enc-contracts/manifest.js';
+} from './manifest.js';
 
 export const CLIENT_MANIFEST_STALE_CODE = 'ENC_MANIFEST_STALE';
 
