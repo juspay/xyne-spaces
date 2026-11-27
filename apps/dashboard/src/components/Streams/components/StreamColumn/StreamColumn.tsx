@@ -573,7 +573,7 @@ const StreamColumn = ({
         // scroll-snap and virtualisation break each other. Stopping at the next
         // page bounds the travel to something the window always covers. The
         // file viewer's carousel already does this for the same reason.
-        snap && '[scroll-snap-stop:always]',
+        snap && 'snap-always',
         // The focused column is marked, the rest are left alone. Dimming them was
         // tried and dropped: in a view whose entire purpose is watching several
         // things at once, fading all but one of them fights the feature.
@@ -945,7 +945,7 @@ const StreamColumn = ({
         // the header. Nothing sat between the two once the per-column
         // "Catch me up" bar became opt-out, so the first message was being cut
         // dead across the middle of its own text.
-        className='[--fade-head:14px] [-webkit-mask-image:linear-gradient(to_bottom,transparent_0,#000_var(--fade-head))] [mask-image:linear-gradient(to_bottom,transparent_0,#000_var(--fade-head))] relative min-h-0 flex-1 overflow-hidden'
+        className='[--fade-head:14px] [-webkit-mask-image:linear-gradient(to_bottom,transparent_0,#000_var(--fade-head))] mask-[linear-gradient(to_bottom,transparent_0,#000_var(--fade-head))] relative min-h-0 flex-1 overflow-hidden'
         // Same reveal as the header, and here it is the one that matters: the
         // body holds a live chat panel with a virtualised list, and relaying it
         // out on every frame of a 240ms tween is the expensive way to animate a

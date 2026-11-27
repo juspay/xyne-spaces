@@ -311,7 +311,7 @@ export const DashboardShareModal = ({
                         </Select.Icon>
                       </Select.Trigger>
                       <Select.Portal>
-                        <Select.Content className='bg-background rounded border border-border shadow-md z-[60] overflow-hidden'>
+                        <Select.Content className='bg-background rounded border border-border shadow-md z-60 overflow-hidden'>
                           <Select.Viewport className='p-1'>
                             {[
                               DashboardRole.VIEWER,
@@ -321,7 +321,7 @@ export const DashboardShareModal = ({
                               <Select.Item
                                 key={role}
                                 value={role}
-                                className='relative flex items-center px-6 py-1.5 text-xs rounded-sm cursor-pointer hover:bg-accent outline-none select-none data-[highlighted]:bg-accent'
+                                className='relative flex items-center px-6 py-1.5 text-xs rounded-sm cursor-pointer hover:bg-accent outline-hidden select-none data-highlighted:bg-accent'
                               >
                                 <Select.ItemText>{getRoleName(role)}</Select.ItemText>
                                 <Select.ItemIndicator className='absolute left-1.5'>

@@ -171,7 +171,7 @@ const UnpublishTabButton = ({
           const appId = appIdOf(tab.value);
           if (appId) publish.setPublished(appId, false, label);
         }}
-        className='absolute right-1.5 top-1/2 z-[1] flex size-5 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary'
+        className='absolute right-1.5 top-1/2 z-1 flex size-5 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary'
         data-track-category='CHANNELS'
         data-track-name='UnpublishChannelAppFromTab'
         data-track-metadata={JSON.stringify({ tab: tab.value })}

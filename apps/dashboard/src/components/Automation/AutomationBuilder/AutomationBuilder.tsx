@@ -828,7 +828,7 @@ export function AutomationBuilder({
                 className={cn(
                   'flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground',
                   'hover:text-foreground hover:bg-accent/40',
-                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/40',
+                  'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-foreground/40',
                 )}
               >
                 <ArrowLeft className='size-4' aria-hidden='true' />
@@ -894,7 +894,7 @@ export function AutomationBuilder({
                 className={cn(
                   'flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground',
                   'hover:bg-red-500/10 hover:text-red-600',
-                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-500/40',
+                  'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-red-500/40',
                 )}
               >
                 <Trash2 className='size-4' aria-hidden='true' />
@@ -1755,7 +1755,7 @@ function SummaryRow({
     >
       <span
         aria-hidden='true'
-        className='mt-1.5 size-1 flex-shrink-0 rounded-full bg-muted-foreground'
+        className='mt-1.5 size-1 shrink-0 rounded-full bg-muted-foreground'
       />
       <span className='leading-relaxed'>{children}</span>
     </li>
@@ -1805,7 +1805,7 @@ function BuilderSection({
         <span
           aria-hidden='true'
           className={cn(
-            'flex size-6 flex-shrink-0 items-center justify-center rounded-full',
+            'flex size-6 shrink-0 items-center justify-center rounded-full',
             'bg-foreground text-background text-[11px] font-semibold',
           )}
         >
@@ -1897,11 +1897,11 @@ function InlineEditableText({
         data-track-category='automation-builder'
         data-track-name='inline-edit-input'
         className={cn(
-          'placeholder:text-muted-foreground w-full min-w-0 rounded-md border bg-transparent px-3 py-1 text-base text-foreground shadow-xs transition-[color,box-shadow] outline-none md:text-sm',
+          'placeholder:text-muted-foreground w-full min-w-0 rounded-md border bg-transparent px-3 py-1 text-base text-foreground transition-[color,box-shadow] outline-hidden md:text-sm',
           'h-8 px-2',
           invalid
-            ? 'border-red-500 focus-visible:border-red-500 focus-visible:ring-red-500/20 focus-visible:ring-[2px] placeholder:text-red-500/70'
-            : 'border-input focus-visible:border-ring focus-visible:ring-ring/10 focus-visible:ring-[2px]',
+            ? 'border-red-500 focus-visible:border-red-500 focus-visible:ring-red-500/20 focus-visible:ring-2 placeholder:text-red-500/70'
+            : 'border-input focus-visible:border-ring focus-visible:ring-ring/10 focus-visible:ring-2',
           className,
         )}
       />
@@ -1935,7 +1935,7 @@ function InlineEditableText({
       className={cn(
         'cursor-text truncate rounded-md px-2 py-1 text-left',
         'transition-colors',
-        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/40',
+        'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-foreground/40',
         !value && (invalid ? 'text-red-500' : 'text-muted-foreground'),
         invalid ? 'border border-red-500 bg-red-500/5 hover:bg-red-500/10' : 'hover:bg-accent/40',
         className,

@@ -23,7 +23,7 @@ export function RecordingReconnectingOverlay(): ReactElement {
     <div
       role='status'
       aria-live='polite'
-      className='absolute inset-0 z-20 flex flex-col items-center justify-center bg-background/90 dark:bg-gray-900/90 backdrop-blur-sm animate-in fade-in duration-200'
+      className='absolute inset-0 z-20 flex flex-col items-center justify-center bg-background/90 dark:bg-gray-900/90 backdrop-blur-xs animate-in fade-in duration-200'
     >
       <div className='text-center px-4'>
         <div className='animate-spin rounded-full h-12 w-12 border-b-2 border-t-2 border-yellow-500 mx-auto mb-4' />
@@ -59,7 +59,7 @@ export function RecordingConnectionWarningModal({
       role='dialog'
       aria-modal='true'
       aria-labelledby='recording-conn-warning-title'
-      className='fixed inset-0 z-[70] flex items-center justify-center'
+      className='fixed inset-0 z-70 flex items-center justify-center'
     >
       {/* Backdrop */}
       <div className='absolute inset-0 bg-black/50 animate-in fade-in duration-200' />
@@ -67,7 +67,7 @@ export function RecordingConnectionWarningModal({
       {/* Panel */}
       <div className='relative bg-background dark:bg-gray-800 rounded-xl shadow-2xl border border-border dark:border-gray-700 w-full max-w-sm mx-4 p-6 animate-in zoom-in-95 fade-in duration-200'>
         <div className='flex items-start gap-4'>
-          <div className='flex-shrink-0 w-10 h-10 rounded-full bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center'>
+          <div className='shrink-0 w-10 h-10 rounded-full bg-amber-100 dark:bg-amber-900/30 flex items-center justify-center'>
             <WifiOff className='w-5 h-5 text-amber-600 dark:text-amber-400' />
           </div>
           <div className='flex-1'>

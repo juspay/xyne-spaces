@@ -117,7 +117,7 @@ const MeetWithPanel = ({
             })}
             <input
               ref={inputRef}
-              className='bg-transparent text-sm text-foreground placeholder:text-muted-foreground outline-none shrink-0'
+              className='bg-transparent text-sm text-foreground placeholder:text-muted-foreground outline-hidden shrink-0'
               style={{ minWidth: selectedUsers.length > 0 ? '80px' : '120px' }}
               placeholder={selectedUsers.length === 0 ? 'Meet with people' : ''}
               value={query}

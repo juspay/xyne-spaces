@@ -8,7 +8,7 @@ import { createMarkdownComponents } from '../../../utils/markdownComponents';
 
 export const UserBubble = ({ content }: { content: string }): ReactElement => (
   <div className='flex gap-3 justify-end'>
-    <div className='max-w-[80%] rounded-2xl bg-muted px-4 py-2 text-sm text-foreground whitespace-pre-wrap break-words'>
+    <div className='max-w-[80%] rounded-2xl bg-muted px-4 py-2 text-sm text-foreground whitespace-pre-wrap wrap-break-word'>
       {content}
     </div>
   </div>
@@ -40,7 +40,7 @@ export const AssistantBubble = ({
 
   return (
     <div className='flex gap-3 justify-start'>
-      <div className='flex-shrink-0 mt-2.5'>
+      <div className='shrink-0 mt-2.5'>
         <img src='/svgs/icons/ai-bot-gradient-star.svg' alt='AI' width='16' height='16' />
       </div>
       <div className='flex-1 min-w-0 max-w-full overflow-hidden'>

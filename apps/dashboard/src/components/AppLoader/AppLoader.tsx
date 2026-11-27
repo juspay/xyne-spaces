@@ -24,11 +24,11 @@ const AppLoader = (): ReactElement => {
         animate={{ opacity: 1 }}
         exit={{ opacity: 0, backdropFilter: 'blur(4px)' }}
         transition={{ duration: 0.3, ease: 'easeOut' }}
-        className='fixed inset-0 flex flex-col gap-4 items-center justify-center z-[1000] backdrop-blur-lg'
+        className='fixed inset-0 flex flex-col gap-4 items-center justify-center z-1000 backdrop-blur-lg'
         style={{ background: 'var(--root-bg)' }}
       >
         <div className='absolute inset-0 backdrop-blur-3xl'></div>
-        <AppLoaderMark size='lg' className='z-[1100]' />
+        <AppLoaderMark size='lg' className='z-1100' />
       </motion.div>
     </AnimatePresence>
   );

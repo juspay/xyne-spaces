@@ -98,7 +98,7 @@ export const LegalDocumentScreen = ({
     <ThemeProvider>
       <div
         ref={scrollRef}
-        className='relative h-[100dvh] w-full overflow-y-auto scroll-smooth bg-background'
+        className='relative h-dvh w-full overflow-y-auto scroll-smooth bg-background'
       >
         {/* Section-sign watermark — the classic legal mark, laid faintly beside the text */}
         <span
@@ -198,7 +198,7 @@ export const LegalDocumentScreen = ({
                     <span className='text-[13.5px] font-medium text-foreground transition-colors group-hover:text-primary'>
                       {section.title}
                     </span>
-                    <span className='flex-1 -translate-y-[3px] border-b border-dotted border-border transition-colors group-hover:border-foreground' />
+                    <span className='flex-1 translate-y-[-3px] border-b border-dotted border-border transition-colors group-hover:border-foreground' />
                   </a>
                 </li>
               ))}

@@ -307,7 +307,7 @@ const ExcelViewer: React.FC<BaseViewerProps> = ({ source, searchable }) => {
           <button
             key={sheet.name}
             onClick={() => onSheetChange(idx)}
-            className={`${isMobile ? 'px-2 py-1 text-xs' : 'px-3 py-1 text-sm'} border rounded whitespace-nowrap flex-shrink-0 ${
+            className={`${isMobile ? 'px-2 py-1 text-xs' : 'px-3 py-1 text-sm'} border rounded whitespace-nowrap shrink-0 ${
               idx === activeSheet
                 ? 'bg-action-primary text-action-primary-foreground'
                 : 'bg-background text-foreground '

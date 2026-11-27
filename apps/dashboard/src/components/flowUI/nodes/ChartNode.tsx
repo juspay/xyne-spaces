@@ -66,7 +66,7 @@ export const ChartNode: React.FC<{ node: FlowComponent; children?: React.ReactNo
       <div className='border-t border-border px-2 py-3'>{chartView(CHART_HEIGHT_PX)}</div>
 
       {props.caption && (
-        <div className='border-t border-border bg-foreground/[0.03] px-4 py-3'>
+        <div className='border-t border-border bg-foreground/3 px-4 py-3'>
           <p className='text-xs leading-[1.2] text-muted-foreground'>{props.caption}</p>
         </div>
       )}

@@ -162,7 +162,7 @@ const ProposedCall: React.FC<{
         </div>
       </div>
 
-      <div className='flex items-center gap-2 border-t border-border bg-foreground/[0.03] px-4 py-3'>
+      <div className='flex items-center gap-2 border-t border-border bg-foreground/3 px-4 py-3'>
         <button
           type='button'
           disabled={state.submitting}
@@ -222,7 +222,7 @@ const ScheduledCall: React.FC<{
 // Reuses the plan card's approved-chip tokens (green success pill).
 const ScheduledChip: React.FC = () => (
   <span className='flex h-[18px] shrink-0 items-center'>
-    <span className='rounded px-1 py-px text-xs font-semibold leading-[18px] tracking-[0.2px] bg-[var(--plan-chip-approved-bg)] text-[var(--plan-chip-approved-fg)]'>
+    <span className='rounded px-1 py-px text-xs font-semibold leading-[18px] tracking-[0.2px] bg-(--plan-chip-approved-bg) text-(--plan-chip-approved-fg)'>
       Scheduled
     </span>
   </span>
@@ -271,7 +271,7 @@ const DurationSwitcher: React.FC<{
         <ChevronDown size={16} className='shrink-0' />
       </button>
     </DropdownMenuTrigger>
-    <DropdownMenuContent align='end' className='min-w-[7rem]'>
+    <DropdownMenuContent align='end' className='min-w-28'>
       {DURATION_OPTIONS.map(d => (
         <DropdownMenuItem
           key={d}

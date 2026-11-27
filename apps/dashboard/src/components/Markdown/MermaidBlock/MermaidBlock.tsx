@@ -161,7 +161,7 @@ const MermaidBlockComponent = ({
               : 'opacity-100'
           }`}
         >
-          <div className='flex items-center gap-1 bg-background/90 backdrop-blur-sm rounded-lg shadow-sm border border-border p-1'>
+          <div className='flex items-center gap-1 bg-background/90 backdrop-blur-xs rounded-lg shadow-xs border border-border p-1'>
             <button
               onClick={() => setViewMode('diagram')}
               className={`flex items-center rounded p-1.5 transition-colors ${
@@ -289,7 +289,7 @@ const MermaidBlockComponent = ({
             />
             {/* Show subtle loading indicator if re-rendering */}
             {isRendering && (
-              <div className='absolute bottom-2 left-2 flex items-center gap-1 px-2 py-1 bg-background/90 rounded shadow-sm text-xs text-muted-foreground'>
+              <div className='absolute bottom-2 left-2 flex items-center gap-1 px-2 py-1 bg-background/90 rounded shadow-xs text-xs text-muted-foreground'>
                 <div className='animate-spin h-3 w-3 border-2 border-blue-500 border-t-transparent rounded-full' />
                 <span>Updating...</span>
               </div>
@@ -297,7 +297,7 @@ const MermaidBlockComponent = ({
           </>
         ) : (
           <div className='bg-muted/50 border border-border rounded-lg p-4'>
-            <pre className='text-sm text-foreground overflow-x-auto whitespace-pre-wrap break-words'>
+            <pre className='text-sm text-foreground overflow-x-auto whitespace-pre-wrap wrap-break-word'>
               {chart}
             </pre>
           </div>

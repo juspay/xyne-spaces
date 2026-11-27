@@ -118,7 +118,7 @@ const UserGuideScreen = (): ReactElement => {
           <div className='mt-4 inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-border bg-muted/60 text-sm text-muted-foreground'>
             <BookOpen size={13} className='shrink-0 text-foreground/50' />
             <span>Keyboard Shortcuts</span>
-            <kbd className='inline-flex items-center px-1.5 py-0.5 rounded border border-border bg-background font-mono text-[12px] text-foreground font-semibold shadow-sm'>
+            <kbd className='inline-flex items-center px-1.5 py-0.5 rounded border border-border bg-background font-mono text-[12px] text-foreground font-semibold shadow-xs'>
               {shortcutLabel}
             </kbd>
           </div>
@@ -136,7 +136,7 @@ const UserGuideScreen = (): ReactElement => {
                 placeholder="Try 'create ticket' or 'Xyne AI'"
                 data-track-category='USER_GUIDE'
                 data-track-name='SEARCH_FEATURES'
-                className='w-full rounded-xl border border-border bg-background py-2.5 pl-10 pr-3.5 text-base text-foreground outline-none focus:ring-2 focus:ring-primary/35 placeholder:text-muted-foreground/55'
+                className='w-full rounded-xl border border-border bg-background py-2.5 pl-10 pr-3.5 text-base text-foreground outline-hidden focus:ring-2 focus:ring-primary/35 placeholder:text-muted-foreground/55'
               />
             </div>
           </label>
@@ -195,7 +195,7 @@ const UserGuideScreen = (): ReactElement => {
                 onChange={e => scrollToSection(`guide-${e.target.value}`)}
                 data-track-category='USER_GUIDE'
                 data-track-name='JUMP_TO_SECTION'
-                className='w-full rounded-lg border border-border bg-background px-3 py-2 text-base text-foreground focus:ring-2 focus:ring-primary/35 outline-none'
+                className='w-full rounded-lg border border-border bg-background px-3 py-2 text-base text-foreground focus:ring-2 focus:ring-primary/35 outline-hidden'
               >
                 {grouped.map(({ category }) => (
                   <option key={category.id} value={category.id}>

@@ -76,7 +76,7 @@ export const AddSectionForm = ({
         </button>
       </div>
       <div className='space-y-1.5'>
-        <label htmlFor='section-name' className='text-sm font-medium text-foreground'>
+        <label htmlFor='section-name' className='block text-sm font-medium text-foreground'>
           Section name
         </label>
         <div
@@ -113,7 +113,7 @@ export const AddSectionForm = ({
             aria-invalid={showError}
             data-track-category='CHAT_SIDEBAR'
             data-track-name='RENAME_SECTION_NAME'
-            className='flex-1 border-0 bg-transparent py-2 text-sm text-foreground outline-none placeholder:text-muted-foreground'
+            className='flex-1 border-0 bg-transparent py-2 text-sm text-foreground outline-hidden placeholder:text-muted-foreground'
           />
         </div>
         {showError && <p className='text-sm text-destructive'>{nameError}</p>}
@@ -139,7 +139,7 @@ export const AddSectionForm = ({
               trackId='save_section'
               disabled={!!nameError}
               className={cn(
-                'bg-action-primary text-action-primary-foreground hover:bg-action-primary/90',
+                'bg-action-primary text-action-primary-foreground ',
                 !!nameError && 'pointer-events-none',
               )}
             >

@@ -79,7 +79,7 @@ const ReleaseManagerView = (): ReactElement => {
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
               placeholder='Search by name or project code...'
-              className='w-full px-3 py-2 text-sm rounded-md border border-border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring'
+              className='w-full px-3 py-2 text-sm rounded-md border border-border bg-background text-foreground placeholder:text-muted-foreground focus:outline-hidden focus:ring-2 focus:ring-ring'
               data-track-category='ReleaseManager'
               data-track-name='SearchReleaseProjects'
             />
@@ -144,7 +144,7 @@ const ReleaseManagerView = (): ReactElement => {
               value={pickerQuery}
               onChange={e => setPickerQuery(e.target.value)}
               placeholder='Search projects...'
-              className='mb-3 w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring'
+              className='mb-3 w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-hidden focus:ring-2 focus:ring-ring'
               data-track-category='ReleaseManager'
               data-track-name='SearchAttachableProjects'
             />

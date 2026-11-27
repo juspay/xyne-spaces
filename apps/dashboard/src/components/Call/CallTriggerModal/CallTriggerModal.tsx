@@ -136,7 +136,7 @@ export const CallTriggerModal: React.FC<CallTriggerModalProps> = ({
     <button
       disabled={disabled}
       className={cn(
-        'h-full transition-colors rounded-lg w-8.5 !p-2',
+        'h-full transition-colors rounded-lg p-2!',
         usesCustomTriggerStyle && 'w-full',
         !usesCustomTriggerStyle && 'bg-primary',
         'flex items-center justify-center gap-2',
@@ -147,7 +147,7 @@ export const CallTriggerModal: React.FC<CallTriggerModalProps> = ({
       <PhoneDefault
         className={cn(
           'h-4 w-4',
-          isMobile && '!w-6',
+          isMobile && 'w-6!',
           !usesCustomTriggerStyle && (isMobile ? 'text-foreground' : 'text-background'),
         )}
       />
@@ -198,7 +198,7 @@ export const CallTriggerModal: React.FC<CallTriggerModalProps> = ({
           <div
             className={cn(
               'text-xs font-medium text-muted-foreground p-6 pb-2 font-mono',
-              isMobile ? '!pt-2' : '',
+              isMobile ? 'pt-2!' : '',
             )}
           >
             Live Calls
@@ -222,7 +222,7 @@ export const CallTriggerModal: React.FC<CallTriggerModalProps> = ({
           <div
             className={cn(
               'text-xs font-medium text-muted-foreground p-6 pb-2 font-mono',
-              isMobile && validActiveCalls.length === 1 && currentCallData ? '!pt-2' : '',
+              isMobile && validActiveCalls.length === 1 && currentCallData ? 'pt-2!' : '',
             )}
           >
             Other Options
@@ -268,7 +268,7 @@ export const CallTriggerModal: React.FC<CallTriggerModalProps> = ({
           trigger={triggerButton}
           side='left'
           sideOffset={-100}
-          className='w-auto min-w-[400px] rounded-lg border border-border bg-background shadow-lg p-0 mt-24 z-[1000]'
+          className='w-auto min-w-[400px] rounded-lg border border-border bg-background shadow-lg p-0 mt-24 z-1000'
           open={isOpen}
           onOpenChange={handleOpenChange}
         >

@@ -173,7 +173,7 @@ export function RecordingSearchInput({
           onOpenAutoFocus={event => event.preventDefault()}
           onInteractOutside={closeSuggestions}
           onEscapeKeyDown={closeSuggestions}
-          className='z-[9999] w-[var(--radix-popover-trigger-width)] min-w-64 overflow-hidden rounded-md border border-border bg-popover shadow-lg'
+          className='z-9999 w-(--radix-popover-trigger-width) min-w-64 overflow-hidden rounded-md border border-border bg-popover shadow-lg'
         >
           {mentionSearchType === ChipType.USER ? (
             ownerSuggestions.length > 0 ? (

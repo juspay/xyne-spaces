@@ -112,7 +112,7 @@ export const AddDmForm: React.FC<AddDmFormProps> = ({ onSubmit, loading, onCance
         >
           {field => (
             <div className='space-y-1.5'>
-              <label htmlFor='dm-message' className='text-sm font-medium text-foreground'>
+              <label htmlFor='dm-message' className='block text-sm font-medium text-foreground'>
                 Message (optional)
               </label>
               <Textarea
@@ -165,7 +165,7 @@ export const AddDmForm: React.FC<AddDmFormProps> = ({ onSubmit, loading, onCance
                 type='submit'
                 variant='default'
                 size='default'
-                className='bg-action-primary text-action-primary-foreground hover:bg-action-primary/90'
+                className='bg-action-primary text-action-primary-foreground'
                 loading={loading || false}
                 disabled={selectedUsers.length === 0 || !canSubmit}
                 data-testid='start-dm-btn'

@@ -554,7 +554,7 @@ const CopilotConfigForm = ({
             href={device.verificationUri}
             target='_blank'
             rel='noreferrer'
-            className='text-sm font-medium text-[color:var(--mention-color)] underline underline-offset-2'
+            className='text-sm font-medium text-(--mention-color) underline underline-offset-2'
           >
             {device.verificationUri}
           </a>
@@ -811,7 +811,7 @@ const GenericProviderConfigForm = ({
           </div>
 
           {isOauth && isClaude && (
-            <div className='mt-2 flex flex-col gap-2 rounded-lg border border-[var(--claw-ai-border)] bg-[var(--claw-ai-surface)] px-3 py-2.5 text-xs text-[var(--claw-ai-fg)]'>
+            <div className='mt-2 flex flex-col gap-2 rounded-lg border border-(--claw-ai-border) bg-(--claw-ai-surface) px-3 py-2.5 text-xs text-(--claw-ai-fg)'>
               {!claudeFlow ? (
                 <>
                   <p>
@@ -874,7 +874,7 @@ const GenericProviderConfigForm = ({
           )}
 
           {isOauth && isCodex && (
-            <div className='mt-2 flex flex-col gap-2 rounded-lg border border-[var(--claw-ai-border)] bg-[var(--claw-ai-surface)] px-3 py-2.5 text-xs text-[var(--claw-ai-fg)]'>
+            <div className='mt-2 flex flex-col gap-2 rounded-lg border border-(--claw-ai-border) bg-(--claw-ai-surface) px-3 py-2.5 text-xs text-(--claw-ai-fg)'>
               {!codexFlow ? (
                 <Button
                   size='sm'
@@ -1058,7 +1058,7 @@ const AuthMethodOption = ({
     className={cn(
       'flex min-h-16 flex-col gap-0.5 rounded-lg border px-3 py-2.5 text-left transition-colors',
       selected
-        ? 'border-[var(--claw-ai-border)] bg-[var(--claw-ai-surface)] text-[var(--claw-ai-fg)]'
+        ? 'border-(--claw-ai-border) bg-(--claw-ai-surface) text-(--claw-ai-fg)'
         : 'border-border bg-background text-foreground hover:bg-muted',
     )}
   >

@@ -65,7 +65,7 @@ export const TicketPreviewPanel = ({ ticket }: TicketPreviewPanelProps): ReactEl
   const statusStyles = getStatusStyles(searchContext?.ticketStatus);
 
   return (
-    <div className='flex min-h-0 flex-col self-stretch overflow-hidden border-l border-border/30 w-80 flex-shrink-0 bg-background'>
+    <div className='flex min-h-0 flex-col self-stretch overflow-hidden border-l border-border/30 w-80 shrink-0 bg-background'>
       {/* Header */}
       <div className='flex shrink-0 items-center justify-between px-4 py-3 border-b border-border/30 bg-muted/30'>
         <div className='flex items-center gap-2'>
@@ -113,7 +113,7 @@ export const TicketPreviewPanel = ({ ticket }: TicketPreviewPanelProps): ReactEl
         {isDesk && (searchContext?.senderName || searchContext?.senderEmail) && (
           <div className='p-4 border-b border-border/30'>
             <div className='flex items-center gap-3'>
-              <div className='flex items-center justify-center w-8 h-8 rounded-md bg-blue-50 flex-shrink-0'>
+              <div className='flex items-center justify-center w-8 h-8 rounded-md bg-blue-50 shrink-0'>
                 <User size={14} className='text-blue-600' />
               </div>
               <div className='flex flex-col min-w-0'>
@@ -139,7 +139,7 @@ export const TicketPreviewPanel = ({ ticket }: TicketPreviewPanelProps): ReactEl
             {/* Assignee */}
             {searchContext?.assignedTo && (
               <div className='flex items-center gap-3'>
-                <div className='flex items-center justify-center w-8 h-8 rounded-md bg-blue-50 flex-shrink-0'>
+                <div className='flex items-center justify-center w-8 h-8 rounded-md bg-blue-50 shrink-0'>
                   <User size={14} className='text-blue-600' />
                 </div>
                 <div className='flex flex-col min-w-0'>
@@ -159,7 +159,7 @@ export const TicketPreviewPanel = ({ ticket }: TicketPreviewPanelProps): ReactEl
             {/* Creator */}
             {searchContext?.createdBy && (
               <div className='flex items-center gap-3'>
-                <div className='flex items-center justify-center w-8 h-8 rounded-md bg-purple-50 flex-shrink-0'>
+                <div className='flex items-center justify-center w-8 h-8 rounded-md bg-purple-50 shrink-0'>
                   <UserPlus size={14} className='text-purple-600' />
                 </div>
                 <div className='flex flex-col min-w-0'>
@@ -180,7 +180,7 @@ export const TicketPreviewPanel = ({ ticket }: TicketPreviewPanelProps): ReactEl
             {searchContext?.ticketStatus && (
               <div className='flex items-center gap-3 pt-1'>
                 <div
-                  className={`flex items-center justify-center w-8 h-8 rounded-md flex-shrink-0 ${statusStyles.bg}`}
+                  className={`flex items-center justify-center w-8 h-8 rounded-md shrink-0 ${statusStyles.bg}`}
                 >
                   <span className={`w-3 h-3 rounded-full ${statusStyles.dot}`} />
                 </div>
@@ -201,7 +201,7 @@ export const TicketPreviewPanel = ({ ticket }: TicketPreviewPanelProps): ReactEl
         {metadata?.timestamp && (
           <div className='p-4'>
             <div className='flex items-center gap-3 text-muted-foreground'>
-              <div className='flex items-center justify-center w-8 h-8 rounded-md bg-gray-100 flex-shrink-0'>
+              <div className='flex items-center justify-center w-8 h-8 rounded-md bg-gray-100 shrink-0'>
                 <Calendar size={14} className='text-gray-600' />
               </div>
               <div className='flex flex-col'>

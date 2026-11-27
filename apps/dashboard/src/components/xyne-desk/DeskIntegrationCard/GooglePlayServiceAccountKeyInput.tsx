@@ -49,7 +49,7 @@ export const GooglePlayServiceAccountKeyInput: React.FC<GooglePlayServiceAccount
 
   return (
     <div className='space-y-2'>
-      <label htmlFor={id} className='text-sm text-foreground'>
+      <label htmlFor={id} className='block text-sm text-foreground'>
         Service account key <span className='text-muted-foreground'>*</span>
       </label>
       <input

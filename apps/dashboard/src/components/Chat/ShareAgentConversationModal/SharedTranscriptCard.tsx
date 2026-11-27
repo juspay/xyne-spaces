@@ -55,7 +55,7 @@ export const SharedTranscriptCard: React.FC<SharedTranscriptCardProps> = ({
             {renderBody ? (
               renderBody(content)
             ) : (
-              <pre className='whitespace-pre-wrap break-words font-sans text-sm text-foreground'>
+              <pre className='whitespace-pre-wrap wrap-break-word font-sans text-sm text-foreground'>
                 {content}
               </pre>
             )}

@@ -22,7 +22,7 @@ function ResizeCornerHandle(_axis: ResizeHandleAxis, ref: React.Ref<HTMLElement>
   return (
     <div
       ref={ref as React.Ref<HTMLDivElement>}
-      className='react-resizable-handle react-resizable-handle-se !w-5 !h-5 !right-0 !bottom-0 !bg-none !p-0 !m-0 opacity-50 hover:opacity-100 transition-opacity'
+      className='react-resizable-handle react-resizable-handle-se w-5! h-5! right-0! bottom-0! bg-none! p-0! m-0!'
       data-track-category='DYNAMIC_DASHBOARD'
       data-track-name='Resize_Tile'
       aria-label='Resize'

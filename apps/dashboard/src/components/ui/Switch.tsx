@@ -49,7 +49,7 @@ export const Switch: React.FC<SwitchProps> = ({
         data-track-name={trackName ?? id ?? ariaLabel ?? label ?? 'TOGGLE'}
         data-track-metadata={JSON.stringify({ toChecked: !checked })}
         className={cn(
-          'relative inline-flex shrink-0 items-center rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-background',
+          'relative inline-flex shrink-0 items-center rounded-full transition-colors focus:outline-hidden focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-background',
           isDesk ? 'focus-visible:ring-desk-accent/40' : 'focus-visible:ring-primary/40',
           disabled && 'opacity-50 cursor-not-allowed',
           isDesk
@@ -62,11 +62,11 @@ export const Switch: React.FC<SwitchProps> = ({
             'inline-block rounded-full transition-transform',
             isDesk
               ? cn(
-                  'h-[14px] w-[14px] bg-background shadow-sm',
+                  'h-[14px] w-[14px] bg-background shadow-xs',
                   checked ? 'translate-x-[10px]' : 'translate-x-0',
                 )
               : cn(
-                  'h-3.5 w-3.5 bg-background shadow-sm',
+                  'h-3.5 w-3.5 bg-background shadow-xs',
                   checked ? 'translate-x-4' : 'translate-x-0',
                 ),
           )}

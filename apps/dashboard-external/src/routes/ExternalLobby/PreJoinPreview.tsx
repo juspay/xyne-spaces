@@ -64,8 +64,8 @@ export function PreJoinPreview({ media, displayName, locked = false }: PreJoinPr
         )}
 
         {/* Gradient keeps the name + controls legible over bright video */}
-        <div className='pointer-events-none absolute inset-x-0 top-0 h-20 bg-gradient-to-b from-black/50 to-transparent' />
-        <div className='pointer-events-none absolute inset-x-0 bottom-0 h-28 bg-gradient-to-t from-black/60 to-transparent' />
+        <div className='pointer-events-none absolute inset-x-0 top-0 h-20 bg-linear-to-b from-black/50 to-transparent' />
+        <div className='pointer-events-none absolute inset-x-0 bottom-0 h-28 bg-linear-to-t from-black/60 to-transparent' />
 
         {name && (
           <div className='absolute left-4 top-3 max-w-[70%] truncate text-sm font-medium text-white'>
@@ -164,7 +164,7 @@ function PreviewToggle({ on, issue, disabled, onClick, onIcon, offIcon, label, t
       title={issue === 'blocked' ? `${label} (access blocked)` : label}
       data-track-category='CALLS'
       data-track-name={trackName}
-      className={`relative flex h-14 w-14 items-center justify-center rounded-full transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white disabled:cursor-not-allowed disabled:opacity-60 ${
+      className={`relative flex h-14 w-14 items-center justify-center rounded-full transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-white disabled:cursor-not-allowed disabled:opacity-60 ${
         on
           ? 'border border-white/70 bg-transparent text-white hover:bg-white/15'
           : 'bg-[#dc362e] text-white hover:bg-[#e3554e]'

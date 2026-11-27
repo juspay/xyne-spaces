@@ -2446,7 +2446,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
     >
       {/* Drag overlay */}
       {isDraggingOverModal && (
-        <div className='absolute inset-0 bg-blue-50 bg-opacity-90 rounded-lg flex items-center justify-center z-50 pointer-events-none'>
+        <div className='absolute inset-0 bg-blue-50/90 rounded-lg flex items-center justify-center z-50 pointer-events-none'>
           <div className='text-center'>
             <Paperclip className='w-12 h-12 text-blue-500 mx-auto mb-2' />
             <p className='text-blue-700 font-medium'>Drop files to attach</p>
@@ -2566,7 +2566,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
               }}
             >
               {field => (
-                <div className='space-y-1'>
+                <div className='flex flex-col gap-1'>
                   {isTitleGenerating ? (
                     <div className='flex h-8 items-center'>
                       <TextShimmer
@@ -2603,13 +2603,13 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                           channelId,
                         })}
                         className={cn(
-                          '!text-[21px] !leading-tight truncate tracking-[-0.4px]',
+                          'text-[21px]! leading-tight! truncate tracking-[-0.4px]',
                           'rounded-none border-0 border-b-[1.5px] px-0 pb-0.5 focus-visible:ring-0',
                           'font-semibold text-foreground placeholder:text-[21px] placeholder:text-muted-foreground/50',
                           'transition-colors duration-150',
                           field.state.meta.errors.length > 0
-                            ? '!border-b-destructive'
-                            : '!border-b-transparent',
+                            ? 'border-b-destructive!'
+                            : 'border-b-transparent!',
                         )}
                       />
                       {/* Disabled (LLM) */}
@@ -2663,7 +2663,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
               }}
             >
               {field => (
-                <div className='space-y-1'>
+                <div className='flex flex-col gap-1'>
                   <Textarea
                     ref={descriptionTextareaRef}
                     rows={2}
@@ -2705,10 +2705,10 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                     }}
                     className={cn(
                       'rounded-[10px] border px-0 py-1 focus-visible:ring-0 min-h-[150px] transition-colors duration-150',
-                      'max-h-[280px] text-[14px] !leading-[22.4px] font-normal text-foreground',
+                      'max-h-[280px] text-[14px] leading-[22.4px]! font-normal text-foreground',
                       field.state.meta.errors.length > 0
-                        ? '!border-destructive bg-destructive/5 px-2'
-                        : '!border-transparent',
+                        ? 'border-destructive! bg-destructive/5 px-2'
+                        : 'border-transparent!',
                       'resize-none overflow-y-auto',
                       'placeholder:text-muted-foreground/50 text-foreground',
                       field.state.meta.errors.length > 0 && 'text-red-600',
@@ -2895,7 +2895,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
                       searchPlaceholder='Search boards'
                       placeholder='Select a board'
                       inputIcon={<SquareKanban className='size-3.5' strokeWidth={2.33} />}
-                      inputClassName='!h-8 rounded-lg'
+                      inputClassName='h-8! rounded-lg'
                       showIndicator={true}
                       testId='ticket-board-selector'
                       isOpen={boardSelectorOpen}
@@ -3024,7 +3024,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
         <div className='-mx-5 mt-auto flex shrink-0 items-center gap-3 border-t border-border/60 px-5 pb-4 pt-3.5'>
           <div
             data-ticket-chip-row
-            className='no-scrollbar flex min-w-0 flex-1 items-center gap-[9px] overflow-x-auto [&>*]:shrink-0 [&>*:first-child]:min-w-0 [&>*:first-child]:max-w-[220px] [&_*]:whitespace-nowrap'
+            className='no-scrollbar flex min-w-0 flex-1 items-center gap-[9px] overflow-x-auto *:shrink-0 [&>*:first-child]:min-w-0 [&>*:first-child]:max-w-[220px] **:whitespace-nowrap'
           >
             {/* Assignee Selection */}
             {!releaseOnly && (
@@ -3276,7 +3276,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
           }}
           title={`Discard this ${noun.singular}?`}
           description='The details you have filled in will be lost.'
-          zIndexClassName='z-[60]'
+          zIndexClassName='z-60'
           className='max-w-sm rounded-xl border border-border'
           testId='discard-ticket-confirm'
         >
@@ -3316,7 +3316,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
   if (standalone) {
     return (
       <div className='h-screen w-full overflow-y-auto bg-background'>
-        <div className='mx-auto w-full max-w-screen-md'>{modalContent}</div>
+        <div className='mx-auto w-full max-w-(--breakpoint-md)'>{modalContent}</div>
       </div>
     );
   }
@@ -3345,7 +3345,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
       className={cn(
         'flex max-h-[85vh] w-full flex-col overflow-hidden rounded-2xl border border-border p-0',
         visibleDynamicFields.length > 0 ? 'max-w-[1060px]' : 'max-w-[880px]',
-        'top-1/3 !-translate-y-1/3',
+        'top-1/3 -translate-y-1/3!',
       )}
     >
       {modalContent}

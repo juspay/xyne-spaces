@@ -83,7 +83,7 @@ export const InvitationPreviewStep: React.FC<InvitationPreviewStepProps> = ({
     editorProps: {
       attributes: {
         class:
-          'tiptap prose prose-sm max-w-none focus:outline-none px-3 py-3 text-sm whitespace-pre-wrap break-words',
+          'tiptap prose prose-sm max-w-none focus:outline-hidden px-3 py-3 text-sm whitespace-pre-wrap wrap-break-word',
       },
     },
     content: messageHtml || '',
@@ -347,7 +347,7 @@ const LabeledInput: React.FC<{
       placeholder={placeholder}
       data-track-category='CALLS'
       data-track-name='edit-invitation-field'
-      className='h-8 px-2.5 text-[13px] border border-border rounded-md bg-background focus:outline-none focus:ring-1 focus:ring-foreground/40'
+      className='h-8 px-2.5 text-[13px] border border-border rounded-md bg-background focus:outline-hidden focus:ring-1 focus:ring-foreground/40'
     />
   </label>
 );

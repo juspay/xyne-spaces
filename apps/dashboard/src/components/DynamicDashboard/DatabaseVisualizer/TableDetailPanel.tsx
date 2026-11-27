@@ -140,7 +140,7 @@ function StructurePanel({
       <div className='rounded-xl border border-border overflow-hidden'>
         <table className='w-full border-collapse text-[12px]'>
           <thead className='sticky top-0 z-10'>
-            <tr className='bg-muted/80 backdrop-blur supports-[backdrop-filter]:bg-muted/60'>
+            <tr className='bg-muted/80 backdrop-blur-sm supports-backdrop-filter:bg-muted/60'>
               <th className='text-left font-semibold text-[10px] uppercase tracking-wider text-muted-foreground px-4 py-2.5'>
                 Column
               </th>

@@ -93,7 +93,7 @@ export const DeskConnectionCard = ({
             disabled={isDisconnecting}
             className={cn(
               'inline-flex h-[32px] shrink-0 items-center gap-1.5 px-[10px] py-1.5 text-desk-label',
-              'text-desk-destructive border rounded-[10px] shadow-sm',
+              'text-desk-destructive border rounded-[10px] shadow-xs',
               'hover:bg-red-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed',
             )}
             data-track-category={trackCategory}
@@ -111,7 +111,7 @@ export const DeskConnectionCard = ({
               disabled={isReconnecting}
               className={cn(
                 'inline-flex shrink-0 items-center gap-1.5 px-3 py-1.5 text-sm font-medium',
-                'text-foreground border border-border rounded-[10px] bg-background shadow-sm',
+                'text-foreground border border-border rounded-[10px] bg-background shadow-xs',
                 'hover:bg-desk-accent-subtle transition-colors disabled:opacity-50 disabled:cursor-not-allowed',
               )}
               data-track-category={trackCategory}

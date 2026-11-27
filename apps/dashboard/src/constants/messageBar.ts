@@ -40,8 +40,8 @@ export const BAR_MAX_TILT = 8;
 export const BAR_DROP_REACH = 28;
 
 export const BAR_SOCKET_CLASS =
-  'pointer-events-none absolute inset-0 rounded-md border-[1.5px] border-dashed border-foreground/15 bg-foreground/[0.02] opacity-0';
+  'pointer-events-none absolute inset-0 rounded-md border-[1.5px] border-dashed border-foreground/15 bg-foreground/2 opacity-0';
 export const BAR_SLOT_CLASS =
-  'absolute inset-0 rounded-sm border-[1.5px] border-dashed border-foreground/15 bg-foreground/[0.02]';
+  'absolute inset-0 rounded-sm border-[1.5px] border-dashed border-foreground/15 bg-foreground/2';
 export const BAR_PREVIEW_SLOT_CLASS = 'flex size-7 shrink-0 items-center justify-center';
 export const BAR_PREVIEW_ICON_SLOT_CLASS = `${BAR_PREVIEW_SLOT_CLASS} text-muted-foreground`;

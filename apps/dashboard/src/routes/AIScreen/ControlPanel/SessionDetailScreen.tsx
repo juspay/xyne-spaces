@@ -764,14 +764,14 @@ const ControlPanelSessionScreen = (): ReactElement => {
       />
 
       {notFound ? (
-        <section className='rounded-xl border border-border bg-card p-5 shadow-sm'>
+        <section className='rounded-xl border border-border bg-card p-5 shadow-xs'>
           <EmptyState
             title='No usage you can see for this session'
             detail='It may have no recorded model calls, or belong to someone else.'
           />
         </section>
       ) : session.isError ? (
-        <section className='rounded-xl border border-border bg-card p-5 shadow-sm'>
+        <section className='rounded-xl border border-border bg-card p-5 shadow-xs'>
           <ErrorState
             what='this session'
             error={session.error}

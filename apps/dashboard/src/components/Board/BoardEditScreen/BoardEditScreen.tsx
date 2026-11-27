@@ -1556,7 +1556,7 @@ const BoardEditScreen = ({
 
         <div className='flex-1 flex overflow-hidden'>
           <div className='w-[50%] flex flex-col bg-background overflow-hidden'>
-            <div className='p-6 flex-shrink-0'>
+            <div className='p-6 shrink-0'>
               <h2 className='text-[16px] font-semibold text-foreground'>Define Fields</h2>
               <p className='text-[14px] text-xyne-gray-600 mt-1'>
                 Choose the fields needed in your tickets, arrange their order, and preview how
@@ -1570,7 +1570,7 @@ const BoardEditScreen = ({
                   type='text'
                   value={boardName}
                   onChange={e => setBoardName(e.target.value)}
-                  className={`text-[22px] font-semibold bg-transparent border-none focus:outline-none focus:ring-0 p-0 w-full ${
+                  className={`text-[22px] font-semibold bg-transparent border-none focus:outline-hidden focus:ring-0 p-0 w-full ${
                     boardName ? 'text-foreground' : 'text-xyne-gray-300'
                   } placeholder:text-muted-foreground/50 tracking-[-0.44px]`}
                   placeholder='Enter Board Name'
@@ -1638,14 +1638,14 @@ const BoardEditScreen = ({
                             data-track-name='field-row'
                           >
                             {/* Grip icon - visible only on hover, but space is reserved */}
-                            <div className='w-4 flex-shrink-0'>
+                            <div className='w-4 shrink-0'>
                               {hoveredFieldId === field.id && (
                                 <GripVertical size={16} className='text-xyne-gray-300' />
                               )}
                             </div>
                             <div className='flex-1 flex items-center gap-3'>
                               {editingFieldLabelId === field.id ? (
-                                <div className='flex items-center min-w-[150px] flex-shrink-0'>
+                                <div className='flex items-center min-w-[150px] shrink-0'>
                                   <input
                                     ref={editLabelInputRef}
                                     type='text'
@@ -1660,7 +1660,7 @@ const BoardEditScreen = ({
                                       }
                                     }}
                                     onBlur={saveFieldLabel}
-                                    className='font-medium text-muted-foreground text-[14px] leading-[20px] bg-transparent border-0 p-0 focus:outline-none focus:ring-0'
+                                    className='font-medium text-muted-foreground text-[14px] leading-[20px] bg-transparent border-0 p-0 focus:outline-hidden focus:ring-0'
                                     data-track-category='board_edit'
                                     data-track-name='edit_label_input'
                                   />
@@ -1675,7 +1675,7 @@ const BoardEditScreen = ({
                                       startEditFieldLabel(field);
                                     }
                                   }}
-                                  className={`font-medium text-muted-foreground text-[14px] leading-[20px] min-w-[150px] flex-shrink-0 text-left bg-transparent border-0 p-0 ${!DEFAULT_TICKET_FIELDS.some(f => f.id === field.id) ? 'cursor-pointer hover:text-foreground' : ''}`}
+                                  className={`font-medium text-muted-foreground text-[14px] leading-[20px] min-w-[150px] shrink-0 text-left bg-transparent border-0 p-0 ${!DEFAULT_TICKET_FIELDS.some(f => f.id === field.id) ? 'cursor-pointer hover:text-foreground' : ''}`}
                                   disabled={DEFAULT_TICKET_FIELDS.some(f => f.id === field.id)}
                                   data-track-category='board_edit'
                                   data-track-name='edit_field_label'
@@ -1877,7 +1877,7 @@ const BoardEditScreen = ({
                                           }),
                                         );
                                       }}
-                                      className={`w-[28px] h-[18px] rounded-full transition-colors relative flex-shrink-0 ${
+                                      className={`w-[28px] h-[18px] rounded-full transition-colors relative shrink-0 ${
                                         field.required ? 'bg-[#6276BE]' : 'bg-gray-600'
                                       }`}
                                       data-track-category='form'
@@ -1920,7 +1920,7 @@ const BoardEditScreen = ({
                                           }),
                                         );
                                       }}
-                                      className={`w-[28px] h-[18px] rounded-full transition-colors relative flex-shrink-0 ${
+                                      className={`w-[28px] h-[18px] rounded-full transition-colors relative shrink-0 ${
                                         field.visibleInCreate ? 'bg-[#6276BE]' : 'bg-gray-600'
                                       }`}
                                       data-track-category='form'
@@ -1963,7 +1963,7 @@ const BoardEditScreen = ({
                                           }),
                                         );
                                       }}
-                                      className={`w-[28px] h-[18px] rounded-full transition-colors relative flex-shrink-0 ${
+                                      className={`w-[28px] h-[18px] rounded-full transition-colors relative shrink-0 ${
                                         field.visibleInCreate ? 'bg-[#6276BE]' : 'bg-gray-600'
                                       }`}
                                       data-track-category='form'
@@ -1983,7 +1983,7 @@ const BoardEditScreen = ({
                                 {/* Show delete button only for custom fields */}
                                 {!DEFAULT_TICKET_FIELDS.some(f => f.id === field.id) && (
                                   <>
-                                    <div className='w-[1px] h-[20px] bg-muted mx-1' />
+                                    <div className='w-px h-[20px] bg-muted mx-1' />
                                     <Button
                                       aria-label={`Delete ${field.label}`}
                                       onClick={e => {

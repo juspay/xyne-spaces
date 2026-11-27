@@ -105,7 +105,7 @@ export function useFindBar(finder: FindProvider | null): {
           aria-label='Find in file'
           data-track-category='FilePreview'
           data-track-name='PreviewFindTyped'
-          className='h-full w-52 bg-transparent text-[13px] text-foreground outline-none placeholder:text-muted-foreground'
+          className='h-full w-52 bg-transparent text-[13px] text-foreground outline-hidden placeholder:text-muted-foreground'
         />
         <span
           aria-live='polite'
@@ -139,7 +139,7 @@ export function useFindBar(finder: FindProvider | null): {
             aria-label={action.title}
             disabled={found.count === 0}
             onClick={() => step(action.by)}
-            className='outline-none flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-foreground/[0.08] focus-visible:bg-foreground/[0.08] hover:text-foreground focus-visible:text-foreground disabled:pointer-events-none disabled:opacity-40'
+            className='outline-hidden flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-foreground/8 focus-visible:bg-foreground/8 hover:text-foreground focus-visible:text-foreground disabled:pointer-events-none disabled:opacity-40'
             data-track-category='FilePreview'
             data-track-name={action.track}
           >
@@ -151,7 +151,7 @@ export function useFindBar(finder: FindProvider | null): {
           title='Close (Esc)'
           aria-label='Close find'
           onClick={close}
-          className='outline-none flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-foreground/[0.08] focus-visible:bg-foreground/[0.08] hover:text-foreground focus-visible:text-foreground'
+          className='outline-hidden flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-foreground/8 focus-visible:bg-foreground/8 hover:text-foreground focus-visible:text-foreground'
           data-track-category='FilePreview'
           data-track-name='PreviewFindClosed'
         >

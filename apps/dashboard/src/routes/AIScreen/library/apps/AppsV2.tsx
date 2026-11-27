@@ -307,7 +307,7 @@ const AppsV2 = ({ query }: { query: string }): ReactElement => {
             section.key === 'archived' ? (
               // An archived app's page answers "not found", so the card goes
               // nowhere: restoring it is the one thing to do from here.
-              <div key={app.id} className='group/card relative [&>:first-child]:pr-12'>
+              <div key={app.id} className='group/card relative *:first:pr-12'>
                 <LibraryCard
                   testId='artifact-app-card-archived'
                   dimmed
@@ -322,7 +322,7 @@ const AppsV2 = ({ query }: { query: string }): ReactElement => {
                   description={app.description ?? undefined}
                   meta={metaFor(app)}
                 />
-                <div className='absolute right-2 top-2 z-[1] flex items-center'>
+                <div className='absolute right-2 top-2 z-1 flex items-center'>
                   <button
                     type='button'
                     onClick={() => unarchive.mutate({ app })}
@@ -368,7 +368,7 @@ const AppsV2 = ({ query }: { query: string }): ReactElement => {
                   z-10`, and a pin at the same level paints over it on scroll —
                   the buttons slid across the "Agent Hub" title and the tab bar.
                   One is enough to clear the Link, which is unpositioned. */}
-                <div className='absolute right-2 top-2 z-[1] flex items-center gap-0.5'>
+                <div className='absolute right-2 top-2 z-1 flex items-center gap-0.5'>
                   {/* Only the owner can archive, and "Created by me" is exactly
                     the owner's apps. */}
                   {section.key === 'mine' && (

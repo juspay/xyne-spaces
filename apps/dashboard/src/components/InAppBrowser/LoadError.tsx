@@ -98,7 +98,7 @@ export function LoadError(props: {
           <button
             type='button'
             onClick={props.onRetry}
-            className='flex h-8 items-center rounded-lg bg-foreground px-3.5 text-[13px] font-medium text-background outline-none transition-opacity hover:opacity-90 focus-visible:opacity-90'
+            className='flex h-8 items-center rounded-lg bg-foreground px-3.5 text-[13px] font-medium text-background outline-hidden transition-opacity hover:opacity-90 focus-visible:opacity-90'
             data-track-category={props.trackCategory}
             data-track-name='EmbeddedPageRetried'
           >
@@ -108,7 +108,7 @@ export function LoadError(props: {
             <button
               type='button'
               onClick={() => openLink(props.error.url, null, { force: 'external' })}
-              className='flex h-8 items-center rounded-lg border border-border px-3.5 text-[13px] font-medium text-foreground outline-none transition-colors hover:bg-muted focus-visible:bg-muted'
+              className='flex h-8 items-center rounded-lg border border-border px-3.5 text-[13px] font-medium text-foreground outline-hidden transition-colors hover:bg-muted focus-visible:bg-muted'
               data-track-category={props.trackCategory}
               data-track-name='EmbeddedPageOpenedExternally'
             >

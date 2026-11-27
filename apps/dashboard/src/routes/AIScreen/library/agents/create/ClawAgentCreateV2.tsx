@@ -258,7 +258,7 @@ const ClawAgentCreateV2 = ({
                     aria-expanded={colorOpen}
                     data-track-category='Claw Agents'
                     data-track-name='Create agent v2: open colour picker'
-                    className='group relative shrink-0 rounded-xl transition-transform hover:scale-105 active:scale-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
+                    className='group relative shrink-0 rounded-xl transition-transform hover:scale-105 active:scale-95 focus:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
                   >
                     <LibraryIconTile
                       name={state.name || 'Agent'}
@@ -268,7 +268,7 @@ const ClawAgentCreateV2 = ({
                     <span
                       aria-hidden
                       className={cn(
-                        'absolute -bottom-1 -right-1 flex size-5 items-center justify-center rounded-full border border-border bg-background text-muted-foreground opacity-0 shadow-sm transition-opacity',
+                        'absolute -bottom-1 -right-1 flex size-5 items-center justify-center rounded-full border border-border bg-background text-muted-foreground opacity-0 shadow-xs transition-opacity',
                         'group-hover:opacity-100 group-focus-visible:opacity-100',
                         colorOpen && 'opacity-100',
                       )}
@@ -362,9 +362,9 @@ const ClawAgentCreateV2 = ({
                 )}
 
                 {isEdit && (
-                  <p className='flex items-center gap-1.5 text-sm leading-[1.5] text-foreground'>
+                  <p className='flex items-center gap-1.5 text-sm leading-normal text-foreground'>
                     Built by
-                    <span className='text-[color:var(--mention-color)]'>@{builtBy}</span>
+                    <span className='text-(--mention-color)'>@{builtBy}</span>
                   </p>
                 )}
               </div>
@@ -389,7 +389,7 @@ const ClawAgentCreateV2 = ({
                 aria-label='Agent description'
                 data-track-category='Claw Agents'
                 data-track-name='Create agent v2: description'
-                className='block w-full resize-none overflow-hidden bg-transparent text-sm leading-6 text-foreground placeholder:text-muted-foreground focus:outline-none'
+                className='block w-full resize-none overflow-hidden bg-transparent text-sm leading-6 text-foreground placeholder:text-muted-foreground focus:outline-hidden'
               />
             </div>
 
@@ -473,7 +473,7 @@ const ClawAgentCreateV2 = ({
                 data-track-category='Claw Agents'
                 data-track-name='Create agent v2: prompt'
                 className={cn(
-                  '-mx-2 block w-[calc(100%+1rem)] resize-none overflow-y-auto rounded-lg bg-transparent px-2 py-0 text-sm leading-6 text-foreground transition-colors duration-500 placeholder:text-muted-foreground focus:outline-none',
+                  '-mx-2 block w-[calc(100%+1rem)] resize-none overflow-y-auto rounded-lg bg-transparent px-2 py-0 text-sm leading-6 text-foreground transition-colors duration-500 placeholder:text-muted-foreground focus:outline-hidden',
                   promptFlash && 'bg-primary/5',
                 )}
               />

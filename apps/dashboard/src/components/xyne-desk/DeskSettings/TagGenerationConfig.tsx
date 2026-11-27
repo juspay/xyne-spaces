@@ -439,13 +439,13 @@ export const TagGenerationConfig: React.FC<TagGenerationConfigProps> = ({
                   placeholder='eg. topic'
                   disabled={fieldDisabled}
                   autoComplete='off'
-                  className='w-full max-w-[300px] rounded-[10px] border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-desk-helper focus:outline-none focus:ring-1 focus:ring-desk-accent disabled:opacity-50'
+                  className='w-full max-w-[300px] rounded-[10px] border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-desk-helper focus:outline-hidden focus:ring-1 focus:ring-desk-accent disabled:opacity-50'
                   data-track-category='DeskSettings'
                   data-track-name='TagCategoryName'
                 />
                 {nameFormatError && <p className='mt-1 text-xs text-red-500'>{nameFormatError}</p>}
                 {showNameSuggestions && nameSuggestions.length > 0 && (
-                  <div className='absolute left-0 top-full z-10 mt-1 max-h-[14rem] w-full overflow-y-auto rounded-[10px] border border-border bg-background py-1 shadow-lg'>
+                  <div className='absolute left-0 top-full z-10 mt-1 max-h-56 w-full overflow-y-auto rounded-[10px] border border-border bg-background py-1 shadow-lg'>
                     {nameSuggestions.map(entry => (
                       <button
                         key={entry.name}
@@ -527,7 +527,7 @@ export const TagGenerationConfig: React.FC<TagGenerationConfigProps> = ({
                   placeholder='Describe how to choose tags for this category'
                   spellCheck={false}
                   disabled={fieldDisabled}
-                  className='h-[100px] w-full rounded-[10px] border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-desk-helper focus:outline-none focus:ring-1 focus:ring-desk-accent disabled:opacity-50'
+                  className='h-[100px] w-full rounded-[10px] border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-desk-helper focus:outline-hidden focus:ring-1 focus:ring-desk-accent disabled:opacity-50'
                   data-track-category='DeskSettings'
                   data-track-name='TagCategoryPrompt'
                 />
@@ -595,7 +595,7 @@ export const TagGenerationConfig: React.FC<TagGenerationConfigProps> = ({
                   }}
                   placeholder='eg. 3'
                   disabled={fieldDisabled}
-                  className='w-full max-w-[120px] rounded-[10px] border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-desk-helper focus:outline-none focus:ring-1 focus:ring-desk-accent disabled:opacity-50'
+                  className='w-full max-w-[120px] rounded-[10px] border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-desk-helper focus:outline-hidden focus:ring-1 focus:ring-desk-accent disabled:opacity-50'
                   data-track-category='DeskSettings'
                   data-track-name='TagCategoryMaxTags'
                 />

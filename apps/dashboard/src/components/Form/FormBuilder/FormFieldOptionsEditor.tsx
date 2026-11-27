@@ -164,7 +164,7 @@ export const FormFieldOptionsEditor = ({
             disabled={disabled}
             placeholder='One option per line. Paste from a spreadsheet, comma-separated list, etc.'
             rows={8}
-            className='w-full min-h-[120px] max-h-[240px] px-[10px] py-[8px] text-[13px] text-foreground bg-background border border-border rounded-[8px] resize-y focus:outline-none focus:ring-1 focus:ring-[#6276be]/40'
+            className='w-full min-h-[120px] max-h-[240px] px-[10px] py-[8px] text-[13px] text-foreground bg-background border border-border rounded-[8px] resize-y focus:outline-hidden focus:ring-1 focus:ring-[#6276be]/40'
             data-track-category={trackingCategory}
             data-track-name='bulk_options_textarea'
           />
@@ -236,7 +236,7 @@ export const FormFieldOptionsEditor = ({
                     ? 'Add another option (paste multiple at once)'
                     : 'Add option (paste multiple at once)'
                 }
-                className='flex-1 text-[13px] bg-transparent border-0 focus:outline-none focus:ring-0 p-0'
+                className='flex-1 text-[13px] bg-transparent border-0 focus:outline-hidden focus:ring-0 p-0'
                 onKeyDown={bulkOptionInputHandlers.onKeyDown}
                 onPaste={bulkOptionInputHandlers.onPaste}
                 data-track-category={trackingCategory}

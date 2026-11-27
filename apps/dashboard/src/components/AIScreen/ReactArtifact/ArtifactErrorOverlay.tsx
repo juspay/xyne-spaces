@@ -144,7 +144,7 @@ export const ArtifactErrorOverlay = ({
           <AlertTriangle className='mt-0.5 h-4 w-4 shrink-0 text-destructive' aria-hidden='true' />
           <div className='min-w-0 flex-1'>
             <p className='text-sm font-medium text-foreground'>This app hit an error</p>
-            <pre className='mt-1 max-h-40 overflow-auto whitespace-pre-wrap break-words font-mono text-xs text-muted-foreground'>
+            <pre className='mt-1 max-h-40 overflow-auto whitespace-pre-wrap wrap-break-word font-mono text-xs text-muted-foreground'>
               {text}
             </pre>
           </div>

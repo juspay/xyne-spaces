@@ -34,7 +34,7 @@ interface AgentSummaryProps {
 
 // global.css paints every anchor inside message content link-blue and
 // underlined; these are buttons by intent, not links in prose.
-const LINK_BUTTON = '!text-foreground !no-underline hover:!text-foreground';
+const LINK_BUTTON = 'text-foreground! no-underline! hover:text-foreground!';
 
 export const AgentSummaryNode: React.FC<{ node: FlowComponent; children?: React.ReactNode }> = ({
   node,
@@ -61,7 +61,7 @@ export const AgentSummaryNode: React.FC<{ node: FlowComponent; children?: React.
             {agents.map(agent => (
               <div
                 key={agent.slug}
-                className='-mx-1 flex items-center gap-3 rounded-xl px-2 py-2.5 hover:bg-foreground/[0.04]'
+                className='-mx-1 flex items-center gap-3 rounded-xl px-2 py-2.5 hover:bg-foreground/4'
               >
                 <Link
                   to={`/ai/library/agent/${encodeURIComponent(agent.slug)}?tab=persona`}

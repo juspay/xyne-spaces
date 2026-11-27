@@ -176,7 +176,7 @@ export function PresentationModeOverlay({
       {isOpen && (
         <motion.div
           ref={overlayRef}
-          className='fixed inset-0 z-[9999] bg-black flex items-center justify-center'
+          className='fixed inset-0 z-9999 bg-black flex items-center justify-center'
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
@@ -204,7 +204,7 @@ export function PresentationModeOverlay({
               onClick={e => {
                 e.stopPropagation();
               }}
-              className='absolute top-4 left-1/2 -translate-x-1/2 z-50 w-10 h-10 rounded-full bg-black/50 hover:bg-black/70 border border-white/20 flex items-center justify-center text-white/90 hover:text-white transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-white/30'
+              className='absolute top-4 left-1/2 -translate-x-1/2 z-50 w-10 h-10 rounded-full bg-black/50 hover:bg-black/70 border border-white/20 flex items-center justify-center text-white/90 hover:text-white transition-all duration-200 focus:outline-hidden focus:ring-2 focus:ring-white/30'
               title='Enable Xyne Telepresence'
               aria-label='Enable Xyne Telepresence'
               data-track-category='CALLS'
@@ -222,7 +222,7 @@ export function PresentationModeOverlay({
                 e.stopPropagation();
                 onExit();
               }}
-              className='absolute top-4 right-4 z-50 w-10 h-10 rounded-full bg-black/50 hover:bg-black/70 border border-white/20 flex items-center justify-center text-white/90 hover:text-white transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-white/30'
+              className='absolute top-4 right-4 z-50 w-10 h-10 rounded-full bg-black/50 hover:bg-black/70 border border-white/20 flex items-center justify-center text-white/90 hover:text-white transition-all duration-200 focus:outline-hidden focus:ring-2 focus:ring-white/30'
               aria-label='Exit presentation mode'
               data-track-category='CALLS'
               data-track-name='EXIT_PRESENTATION_MODE_FALLBACK'

@@ -462,7 +462,7 @@ function CollectionBrowser({
           }}
           placeholder={inFolder ? 'Search…' : 'Search collections'}
           aria-label={inFolder ? 'Search this folder' : 'Search collections'}
-          className='h-9 min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground'
+          className='h-9 min-w-0 flex-1 bg-transparent text-sm outline-hidden placeholder:text-muted-foreground'
           data-track-category='XyneAI'
           data-track-name={inFolder ? 'KB_FOLDER_SEARCH_INPUT' : 'COLLECTION_SEARCH_INPUT'}
         />

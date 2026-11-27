@@ -272,7 +272,7 @@ function PendingRow({
         className={cn(
           'flex cursor-pointer flex-col gap-3 rounded-xl border border-border bg-background p-4 transition-colors',
           'hover:border-foreground/20 hover:bg-muted/40',
-          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/40',
+          'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-foreground/40',
           'sm:flex-row sm:items-start sm:justify-between',
         )}
         data-track-category='automation-approvals'
@@ -298,7 +298,7 @@ function PendingRow({
           row so they know what's in flight. The data-row-stop attr keeps
           clicks here from bubbling up and triggering the card's onOpen. */}
         {isAdmin ? (
-          <div data-row-stop className='flex flex-shrink-0 items-center gap-2'>
+          <div data-row-stop className='flex shrink-0 items-center gap-2'>
             <Button
               variant='outline'
               size='sm'

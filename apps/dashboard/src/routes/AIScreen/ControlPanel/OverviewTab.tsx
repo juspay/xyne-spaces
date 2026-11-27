@@ -243,7 +243,7 @@ const CostBreakdown = ({ s }: { s: UsageSummary }): ReactElement => {
     <section
       id='cost-breakdown'
       aria-label='Cost and tokens by type'
-      className='flex flex-col gap-2 rounded-xl border border-border bg-card p-4 shadow-sm'
+      className='flex flex-col gap-2 rounded-xl border border-border bg-card p-4 shadow-xs'
     >
       <div>
         <h3 className='text-sm font-semibold text-foreground'>Cost and tokens by type</h3>
@@ -571,7 +571,7 @@ export const OverviewTab = ({
 
   if (summary.data && summary.data.totals.calls === 0) {
     return (
-      <section className='rounded-xl border border-border bg-card p-5 shadow-sm'>
+      <section className='rounded-xl border border-border bg-card p-5 shadow-xs'>
         <EmptyState
           detail={
             onClear

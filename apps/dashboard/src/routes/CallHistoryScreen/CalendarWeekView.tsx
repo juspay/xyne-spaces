@@ -151,7 +151,7 @@ function WeekViewCallCard({
           data-track-category='CALLS'
           data-track-name='calendar-week-call-card'
           className={cn(
-            'group absolute right-1 overflow-hidden rounded-lg border text-left z-[5] transition-colors focus:outline-none',
+            'group absolute right-1 overflow-hidden rounded-lg border text-left z-5 transition-colors focus:outline-hidden',
             getCallPillVariantClasses(variant),
             isMaybe && 'border-foreground/50',
             variant === 'highlighted' &&
@@ -204,7 +204,7 @@ function WeekViewCallCard({
                 )}
                 <span
                   className={cn(
-                    'min-w-0 flex-1 truncate text-[11px] font-semibold leading-tight max-sm:whitespace-normal max-sm:overflow-visible max-sm:break-words',
+                    'min-w-0 flex-1 truncate text-[11px] font-semibold leading-tight max-sm:whitespace-normal max-sm:overflow-visible max-sm:wrap-break-word',
                     isDeclined && 'line-through',
                   )}
                 >
@@ -353,8 +353,8 @@ function DroppableDayColumn({
       className={cn(
         'border-r last:border-r-0 border-border',
         isWeekend && !isToday && 'bg-muted/50',
-        isToday && 'bg-primary/[0.02]',
-        isOver && 'bg-primary/[0.04]',
+        isToday && 'bg-primary/2',
+        isOver && 'bg-primary/4',
       )}
     >
       {children}
@@ -695,7 +695,7 @@ const CalendarWeekView = ({
                               open={openCallId === event.id}
                               onOpenChange={open => setOpenCallId(open ? event.id : null)}
                               gutterPx={1}
-                              zClass='z-[3]'
+                              zClass='z-3'
                               interactive
                               onClick={e => e.stopPropagation()}
                               onPointerDown={e => e.stopPropagation()}

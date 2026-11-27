@@ -192,7 +192,7 @@ const ProposedPlan: React.FC<{
         className={cn(
           'inline-flex items-center gap-1.5 rounded-lg border border-transparent px-2 py-1.5',
           'text-sm font-medium leading-[1.2] text-muted-foreground',
-          'hover:bg-foreground/[0.04] hover:text-foreground',
+          'hover:bg-foreground/4 hover:text-foreground',
           'disabled:cursor-not-allowed disabled:opacity-60',
         )}
         data-track-category='PLAN_ARTIFACT'
@@ -225,7 +225,7 @@ const ProposedPlan: React.FC<{
             disabled={locked}
             className={cn(
               'flex items-start gap-3 rounded-lg px-3 py-2.5 text-left transition-colors',
-              !terminal && 'hover:bg-foreground/[0.03]',
+              !terminal && 'hover:bg-foreground/3',
               'disabled:cursor-not-allowed',
               !terminal && 'disabled:opacity-60',
             )}
@@ -281,7 +281,7 @@ const ProposedPlan: React.FC<{
       </div>
 
       {/* Footer — audit for a decided plan, or the Approve / Reject actions. */}
-      <div className='border-t border-border bg-foreground/[0.03] px-4 py-3'>
+      <div className='border-t border-border bg-foreground/3 px-4 py-3'>
         {terminal ? <AuditLine text={auditText} /> : actionControls}
       </div>
 
@@ -391,7 +391,7 @@ const ExecutingPlan: React.FC<{
       </div>
 
       {auditText && (
-        <div className='border-t border-border bg-foreground/[0.03] px-4 py-3'>
+        <div className='border-t border-border bg-foreground/3 px-4 py-3'>
           <AuditLine text={auditText} />
         </div>
       )}
@@ -495,8 +495,7 @@ const StatusChip: React.FC<{ label: string; tone?: 'approved' | 'muted' | 'rejec
         tone === 'muted' && 'bg-muted text-muted-foreground',
         // Mild red — a superseded plan the agent re-planned away from.
         tone === 'rejected' && 'bg-destructive/10 text-destructive',
-        tone === 'approved' &&
-          'bg-[var(--plan-chip-approved-bg)] text-[var(--plan-chip-approved-fg)]',
+        tone === 'approved' && 'bg-(--plan-chip-approved-bg) text-(--plan-chip-approved-fg)',
       )}
     >
       {label}
@@ -549,7 +548,7 @@ const withDecisionTime = (label: string, iso?: string): string => {
 const TitleBlock: React.FC<{ title: string; desc?: string | undefined }> = ({ title, desc }) => (
   <div className='flex flex-col'>
     <p className='text-lg font-semibold leading-[1.2] text-foreground'>{title}</p>
-    {desc && <p className='text-sm leading-[1.5] tracking-[-0.15px] text-foreground/80'>{desc}</p>}
+    {desc && <p className='text-sm leading-normal tracking-[-0.15px] text-foreground/80'>{desc}</p>}
   </div>
 );
 
@@ -590,7 +589,7 @@ const PlanPreviewContent: React.FC<{
       <div className='flex flex-col gap-1'>
         <h1 className='text-2xl font-semibold leading-[1.2] text-foreground'>{title}</h1>
         {desc && (
-          <p className='text-sm leading-[1.5] tracking-[-0.15px] text-foreground/70'>{desc}</p>
+          <p className='text-sm leading-normal tracking-[-0.15px] text-foreground/70'>{desc}</p>
         )}
       </div>
       {todos}

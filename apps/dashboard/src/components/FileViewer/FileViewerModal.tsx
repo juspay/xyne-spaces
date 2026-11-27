@@ -289,7 +289,7 @@ const ErrorState: React.FC<{
     <div className='flex gap-2'>
       <button
         onClick={onRetry}
-        className='px-4 py-2 bg-background/10 text-white rounded hover:bg-background/20 transition-colors text-sm backdrop-blur-sm'
+        className='px-4 py-2 bg-background/10 text-white rounded hover:bg-background/20 transition-colors text-sm backdrop-blur-xs'
         data-track-category='FileViewer'
         data-track-name='RETRY_LOAD_FILE'
         data-track-metadata={JSON.stringify({ error })}
@@ -299,7 +299,7 @@ const ErrorState: React.FC<{
       </button>
       <button
         onClick={onDownload}
-        className='px-4 py-2 bg-background/10 text-white rounded hover:bg-background/20 flex items-center gap-2 transition-colors text-sm backdrop-blur-sm'
+        className='px-4 py-2 bg-background/10 text-white rounded hover:bg-background/20 flex items-center gap-2 transition-colors text-sm backdrop-blur-xs'
         data-track-category='FileViewer'
         data-track-name='DOWNLOAD_FILE'
       >
@@ -324,7 +324,7 @@ const UnsupportedFileState: React.FC<{
     </div>
     <button
       onClick={onDownload}
-      className='px-4 py-2 bg-background/10 text-white rounded hover:bg-background/20 flex items-center gap-2 transition-colors backdrop-blur-sm'
+      className='px-4 py-2 bg-background/10 text-white rounded hover:bg-background/20 flex items-center gap-2 transition-colors backdrop-blur-xs'
       data-track-category='FileViewer'
       data-track-name='DOWNLOAD_UNSUPPORTED_FILE'
     >
@@ -346,7 +346,7 @@ const FilePreviewModalInner: React.FC<FilePreviewModalProps> = ({
   files,
   currentIndex = 0,
   onNavigate,
-  zIndexClass = 'z-[56]',
+  zIndexClass = 'z-56',
 }) => {
   // Simple state - service handles all caching and complexity
   const [fileData, setFileData] = useState<File | null>(null);
@@ -683,7 +683,7 @@ const FilePreviewModalInner: React.FC<FilePreviewModalProps> = ({
         {files!.map((file, index) => (
           <div
             key={file.attachmentId || `file-${index}-${file.fileName}`}
-            className='flex-shrink-0 w-full h-full flex items-center justify-center [scroll-snap-align:center] [scroll-snap-stop:always]'
+            className='shrink-0 w-full h-full flex items-center justify-center snap-center snap-always'
           >
             {mountedSlides.has(index) ? (
               <SlideContent
@@ -753,7 +753,7 @@ const FilePreviewModalInner: React.FC<FilePreviewModalProps> = ({
       } w-full`}
     >
       {/* Gradient overlay - always full width */}
-      <div className='absolute inset-0 bg-gradient-to-b from-black/60 to-transparent w-full' />
+      <div className='absolute inset-0 bg-linear-to-b from-black/60 to-transparent w-full' />
       {/* Content */}
       <div className='relative flex items-center justify-between w-full'>
         <div className='flex-1 min-w-0'>
@@ -867,7 +867,7 @@ const FilePreviewModalInner: React.FC<FilePreviewModalProps> = ({
           className={`fixed inset-0 flex items-center justify-center bg-black/50 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 ${zIndexClass}`}
         />
         <Dialog.Content
-          className={`fixed ${zIndexClass} bg-black focus:outline-none
+          className={`fixed ${zIndexClass} bg-black focus:outline-hidden
           data-[state=closed]:fade-out transition-all ease-in-out duration-300
           data-[state=open]:fade-in overflow-hidden
           ${
@@ -1455,7 +1455,7 @@ const AttachmentGalleryModalInner: React.FC = () => {
         {files.map((file, index) => (
           <div
             key={file.attachmentId || file.fileUrl}
-            className='flex-shrink-0 w-full h-full flex items-center justify-center'
+            className='shrink-0 w-full h-full flex items-center justify-center'
             style={{ scrollSnapAlign: 'center' }}
           >
             {mountedSlides.has(index) ? (
@@ -1499,7 +1499,7 @@ const AttachmentGalleryModalInner: React.FC = () => {
         isHovered ? 'opacity-100' : 'opacity-0'
       } w-full`}
     >
-      <div className='absolute inset-0 bg-gradient-to-b from-black/60 to-transparent w-full' />
+      <div className='absolute inset-0 bg-linear-to-b from-black/60 to-transparent w-full' />
       <div className='relative flex items-center justify-between w-full'>
         <div className='flex-1 min-w-0'>
           <Dialog.Title className='text-base font-medium text-white truncate drop-shadow-[0_2px_8px_rgba(0,0,0,0.8)]'>

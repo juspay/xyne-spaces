@@ -55,7 +55,7 @@ export function FilterSelect({
           <SelectItem key={option.value || 'all'} value={option.value || 'all'}>
             <span className='flex min-w-0 items-center gap-2'>
               {option.icon}
-              <span className='block max-w-[15rem] truncate'>{option.label}</span>
+              <span className='block max-w-60 truncate'>{option.label}</span>
             </span>
           </SelectItem>
         ))}

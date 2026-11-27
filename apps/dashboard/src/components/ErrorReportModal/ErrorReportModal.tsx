@@ -373,7 +373,7 @@ export const ErrorReportModal = ({
 
         {isSubmitted ? (
           <div className='flex-1 flex flex-col items-center justify-center px-6 py-12 gap-4'>
-            <div className='rounded-full bg-action-primary/10 p-3'>
+            <div className='rounded-full p-3'>
               <CheckCircle2 className='size-8 text-action-primary' />
             </div>
             <div className='text-center flex flex-col gap-1'>
@@ -387,7 +387,7 @@ export const ErrorReportModal = ({
                   onClose();
                   void navigate(getTicketsPath(cacConfig.channelId, cacConfig.boardId, user?.id));
                 }}
-                className='inline-flex items-center gap-1.5 text-sm font-medium text-action-primary hover:text-action-primary/80 transition-colors'
+                className='inline-flex items-center gap-1.5 text-sm font-medium text-action-primary transition-colors'
                 data-track-category='ERROR_REPORT'
                 data-track-name='ViewMyTickets'
               >
@@ -474,7 +474,7 @@ export const ErrorReportModal = ({
                           onClick={() => setMicEnabled(prev => !prev)}
                           className={`flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs transition-colors ${
                             micEnabled
-                              ? 'border-action-primary bg-action-primary/10 text-action-primary'
+                              ? 'border-action-primary text-action-primary'
                               : 'border-border bg-background text-muted-foreground hover:text-foreground'
                           }`}
                           aria-label={micEnabled ? 'Disable microphone' : 'Enable microphone'}
@@ -507,7 +507,7 @@ export const ErrorReportModal = ({
                           key={source.id}
                           type='button'
                           onClick={() => handleSourceSelect(source)}
-                          className='flex flex-col items-center gap-1.5 rounded-lg border border-border bg-background hover:border-action-primary hover:bg-action-primary/5 p-2 transition-colors text-left'
+                          className='flex flex-col items-center gap-1.5 rounded-lg border border-border bg-background hover:border-action-primary p-2 transition-colors text-left'
                           data-track-category='ERROR_REPORT'
                           data-track-name='SelectSource'
                         >
@@ -537,9 +537,7 @@ export const ErrorReportModal = ({
                       data-track-name='DragDropArea'
                       onDrop={handleDrop}
                       className={`flex-1 rounded-lg border border-dashed border-action-primary transition-all flex flex-col items-center justify-center gap-2 px-4 py-8 text-sm cursor-pointer text-action-primary ${
-                        isDragging
-                          ? 'bg-action-primary/10'
-                          : 'bg-action-primary/5 hover:bg-action-primary/10'
+                        isDragging ? '' : 'bg-action-primary/5 hover:bg-action-primary/10'
                       }`}
                     >
                       <Upload className='size-6' />
@@ -630,7 +628,7 @@ export const ErrorReportModal = ({
                   onClick={() => void handleSubmit()}
                   loading={isSubmitting}
                   disabled={!title.trim() || !description.trim()}
-                  className='bg-action-primary text-action-primary-foreground hover:bg-action-primary/90'
+                  className='bg-action-primary text-action-primary-foreground'
                   data-track-category='ERROR_REPORT'
                   data-track-name='Submit'
                 >

@@ -179,7 +179,7 @@ export const DeskLabelsSidebar = ({
 
       <div>
         {list.length === 0 ? (
-          <div className='px-3 py-1 text-xs text-sidebar-foreground/60 italic'>No labels yet</div>
+          <div className='px-3 py-1 text-xs italic'>No labels yet</div>
         ) : (
           list.map(label => {
             const color = label.color ?? colorForName(label.name);
@@ -219,7 +219,7 @@ export const DeskLabelsSidebar = ({
                     {label.name}
                   </span>
                   {showUnread && (
-                    <span className='shrink-0 min-w-4 px-1 rounded-full text-center text-[10px] font-semibold leading-4 bg-sidebar-accent-foreground/10 text-sidebar-accent-foreground'>
+                    <span className='shrink-0 min-w-4 px-1 rounded-full text-center text-[10px] font-semibold leading-4 text-sidebar-accent-foreground'>
                       {count > 99 ? '99+' : count}
                     </span>
                   )}
@@ -286,7 +286,7 @@ export const DeskLabelsSidebar = ({
                 }
               }}
               placeholder='Label name'
-              className='w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-ring'
+              className='w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground outline-hidden focus:ring-2 focus:ring-ring'
               data-track-category='Support'
               data-track-name='NewLabelNameInput'
             />
@@ -306,7 +306,7 @@ export const DeskLabelsSidebar = ({
               onClick={() => void handleCreate()}
               disabled={!newName.trim()}
               data-ph-capture-attribute-track-id='create_desk_label'
-              className='text-sm font-medium px-4 py-2 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm disabled:opacity-50 disabled:pointer-events-none transition-colors'
+              className='text-sm font-medium px-4 py-2 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 shadow-xs disabled:opacity-50 disabled:pointer-events-none transition-colors'
               data-track-category='Support'
               data-track-name='ConfirmCreateLabel'
             >

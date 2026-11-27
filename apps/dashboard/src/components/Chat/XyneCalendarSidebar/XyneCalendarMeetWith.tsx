@@ -162,7 +162,7 @@ export const XyneCalendarMeetWith = memo(
             aria-controls={listboxId}
             aria-autocomplete='list'
             aria-activedescendant={isOpen ? activeSuggestionId : undefined}
-            className='h-6 min-w-16 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground'
+            className='h-6 min-w-16 flex-1 bg-transparent text-sm text-foreground outline-hidden placeholder:text-muted-foreground'
             placeholder={hasSelection ? '' : 'Search for people'}
             value={query}
             onChange={event => {

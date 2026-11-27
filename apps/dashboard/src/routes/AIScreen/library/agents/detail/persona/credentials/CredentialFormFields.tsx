@@ -19,7 +19,7 @@ import { CredentialOauthFlow } from './CredentialOauthFlow';
 import type { CredentialScope } from './credentialScope';
 
 const FIELD =
-  'h-11 w-full rounded-lg border border-border bg-card px-4 text-sm leading-5 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring';
+  'h-11 w-full rounded-lg border border-border bg-card px-4 text-sm leading-5 text-foreground placeholder:text-muted-foreground focus:outline-hidden focus:ring-1 focus:ring-ring';
 
 const Field = ({
   label,

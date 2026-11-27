@@ -124,7 +124,7 @@ const LocalHarnessOnboardingStep: React.FC<Props> = ({ installations, onNext }) 
                   'absolute inset-0 transition-opacity duration-500',
                   phase === 'connected'
                     ? 'bg-emerald-500/40'
-                    : 'bg-[linear-gradient(90deg,currentColor_50%,transparent_50%)] bg-[length:6px_1px] text-border',
+                    : 'bg-[linear-gradient(90deg,currentColor_50%,transparent_50%)] bg-size-[6px_1px] text-border',
                 )}
               />
               {busy && (
@@ -167,7 +167,7 @@ const LocalHarnessOnboardingStep: React.FC<Props> = ({ installations, onNext }) 
                   'flex items-center gap-3 py-3 text-left transition-opacity',
                   i > 0 && 'border-t border-border',
                   !single &&
-                    'cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground',
+                    'cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground',
                   !single && !isSelected && 'opacity-45 hover:opacity-80',
                   busy && 'pointer-events-none',
                 )}
@@ -235,7 +235,7 @@ const LocalHarnessOnboardingStep: React.FC<Props> = ({ installations, onNext }) 
               disabled={busy}
               data-track-category='Onboarding'
               data-track-name='Connect local harness'
-              className='rounded-full bg-foreground px-6 py-3 text-sm font-medium text-background transition hover:opacity-90 active:scale-[0.98] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground disabled:opacity-50 motion-reduce:active:scale-100'
+              className='rounded-full bg-foreground px-6 py-3 text-sm font-medium text-background transition hover:opacity-90 active:scale-[0.98] focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground disabled:opacity-50 motion-reduce:active:scale-100'
             >
               {busy ? 'Connecting…' : `Connect this ${noun}`}
             </button>
@@ -245,7 +245,7 @@ const LocalHarnessOnboardingStep: React.FC<Props> = ({ installations, onNext }) 
               disabled={busy}
               data-track-category='Onboarding'
               data-track-name='Skip local harness'
-              className='text-sm text-muted-foreground underline-offset-4 transition hover:text-foreground hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground disabled:opacity-50'
+              className='text-sm text-muted-foreground underline-offset-4 transition hover:text-foreground hover:underline focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-foreground disabled:opacity-50'
             >
               Not now
             </button>

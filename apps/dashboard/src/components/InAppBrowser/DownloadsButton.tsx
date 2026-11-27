@@ -39,7 +39,7 @@ function RowButton(props: {
       title={props.label}
       aria-label={props.label}
       onClick={props.onClick}
-      className='flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-foreground/10 hover:text-foreground focus-visible:bg-foreground/10 focus-visible:text-foreground'
+      className='flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground outline-hidden transition-colors hover:bg-foreground/10 hover:text-foreground focus-visible:bg-foreground/10 focus-visible:text-foreground'
       data-track-category='BROWSER'
       data-track-name={props.trackName}
     >
@@ -121,7 +121,7 @@ export function DownloadsButton(props: {
           <button
             type='button'
             onClick={clearFinishedDownloads}
-            className='rounded px-1 text-[11.5px] text-muted-foreground outline-none hover:text-foreground focus-visible:text-foreground'
+            className='rounded px-1 text-[11.5px] text-muted-foreground outline-hidden hover:text-foreground focus-visible:text-foreground'
             data-track-category='BROWSER'
             data-track-name='DownloadsCleared'
           >
@@ -147,7 +147,7 @@ export function DownloadsButton(props: {
                       ? `${download.filename} runs something when opened: open it from Finder, where macOS checks it first`
                       : download.filename
                 }
-                className='min-w-0 flex-1 text-left outline-none disabled:cursor-default'
+                className='min-w-0 flex-1 text-left outline-hidden disabled:cursor-default'
                 data-track-category='BROWSER'
                 data-track-name='DownloadOpened'
               >

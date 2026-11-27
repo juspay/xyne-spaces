@@ -88,7 +88,7 @@ export const TableOfContents: React.FC<TableOfContentsProps> = ({
                 {headings.map(heading => (
                   <div
                     key={heading.id}
-                    className={`h-[2px] bg-muted-foreground/60 rounded-full transition-all flex-shrink-0 ${
+                    className={`h-[2px] bg-muted-foreground/60 rounded-full transition-all shrink-0 ${
                       heading.level === 1 ? 'w-4' : heading.level === 2 ? 'w-3' : 'w-2'
                     }`}
                   />

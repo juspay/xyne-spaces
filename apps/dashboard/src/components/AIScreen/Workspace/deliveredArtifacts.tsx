@@ -89,7 +89,7 @@ export function DeliveredArtifactChip({
         data-track-name='DeliveredArtifactOpen'
       >
         {artifactKindIcon(artifact.kind, 'h-4 w-4 shrink-0 text-muted-foreground')}
-        <span className='min-w-[3rem] truncate text-sm font-medium text-foreground'>
+        <span className='min-w-12 truncate text-sm font-medium text-foreground'>
           {artifact.title}
         </span>
         <span className='min-w-0 shrink truncate text-[13px] text-muted-foreground'>

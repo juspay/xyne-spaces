@@ -134,7 +134,7 @@ const ProjectsListView = (): ReactElement => {
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
               placeholder='Search by name or project code...'
-              className='w-full px-3 py-2 text-sm rounded-md border border-border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring'
+              className='w-full px-3 py-2 text-sm rounded-md border border-border bg-background text-foreground placeholder:text-muted-foreground focus:outline-hidden focus:ring-2 focus:ring-ring'
               data-track-category='Projects'
               data-track-name='SearchProjects'
             />

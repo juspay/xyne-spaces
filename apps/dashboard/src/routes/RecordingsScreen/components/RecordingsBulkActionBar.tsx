@@ -49,7 +49,7 @@ export function RecordingsBulkActionBar({
   );
 
   return (
-    <div className='sticky top-0 z-30 mb-4 flex items-center justify-between gap-3 rounded-lg border border-border dark:border-gray-700 bg-background dark:bg-gray-800 px-4 py-2.5 shadow-sm'>
+    <div className='sticky top-0 z-30 mb-4 flex items-center justify-between gap-3 rounded-lg border border-border dark:border-gray-700 bg-background dark:bg-gray-800 px-4 py-2.5 shadow-xs'>
       <div className='flex items-center gap-2'>
         <button
           onClick={onClear}

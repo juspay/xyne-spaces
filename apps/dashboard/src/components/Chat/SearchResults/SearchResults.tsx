@@ -1514,7 +1514,7 @@ const SearchResults = (): ReactElement => {
                     className={cn(
                       'inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-md active:scale-[0.96] transition',
                       feedbackOpen
-                        ? 'bg-primary text-primary-foreground shadow-sm'
+                        ? 'bg-primary text-primary-foreground shadow-xs'
                         : 'text-muted-foreground hover:text-foreground hover:bg-muted/60 border border-border',
                     )}
                   >
@@ -1532,7 +1532,7 @@ const SearchResults = (): ReactElement => {
                   className={cn(
                     'inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-md active:scale-[0.96] transition',
                     compareMode
-                      ? 'bg-primary text-primary-foreground shadow-sm'
+                      ? 'bg-primary text-primary-foreground shadow-xs'
                       : 'text-muted-foreground hover:text-foreground hover:bg-muted/60 border border-border',
                   )}
                 >
@@ -1595,7 +1595,7 @@ const SearchResults = (): ReactElement => {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: 12 }}
               transition={{ type: 'spring', duration: 0.3, bounce: 0 }}
-              className='pointer-events-auto flex items-center gap-2 rounded-full border border-border bg-background/95 backdrop-blur shadow-lg py-1.5 pl-4 pr-1.5'
+              className='pointer-events-auto flex items-center gap-2 rounded-full border border-border bg-background/95 backdrop-blur-sm shadow-lg py-1.5 pl-4 pr-1.5'
             >
               <span className='text-xs text-foreground'>
                 <span className='font-semibold tabular-nums'>{selected.length}</span> selected
@@ -1613,7 +1613,7 @@ const SearchResults = (): ReactElement => {
                 disabled={selected.length < 2}
                 data-track-category='SEARCH_RESULTS'
                 data-track-name='OPEN_COMPARE'
-                className='inline-flex items-center gap-1.5 text-xs font-medium bg-primary text-primary-foreground px-3 py-1.5 rounded-full shadow-sm hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.96] transition'
+                className='inline-flex items-center gap-1.5 text-xs font-medium bg-primary text-primary-foreground px-3 py-1.5 rounded-full shadow-xs hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.96] transition'
               >
                 <GitCompare size={13} />
                 Compare in depth
@@ -2608,7 +2608,7 @@ function DesktopLayout({ selectedPanel, onClose, resultsColumn }: LayoutProps): 
       {selectedPanel && (
         <>
           <Separator className='w-1 hover:bg-blue-50 active:bg-blue-100 transition-colors duration-200 cursor-col-resize flex items-center justify-center group'>
-            <div className='w-[1px] h-full bg-border' />
+            <div className='w-px h-full bg-border' />
           </Separator>
           <Panel id='search-side-panel' defaultSize={SIDE_PANEL_SIZE} minSize={SIDE_PANEL_MIN_SIZE}>
             <div {...{ [SIDE_PANEL_ATTR]: '' }} className='h-full animate-slide-in-from-right'>

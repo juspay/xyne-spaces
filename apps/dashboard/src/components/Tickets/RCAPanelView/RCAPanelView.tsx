@@ -424,7 +424,7 @@ export const RCAPanelView = ({ ticketId }: RCAPanelViewProps): React.ReactElemen
           </span>
           <button
             type='button'
-            className='rounded-md bg-background/90 p-2 shadow-sm ring-1 ring-border hover:bg-background transition-colors'
+            className='rounded-md bg-background/90 p-2 shadow-xs ring-1 ring-border hover:bg-background transition-colors'
             onClick={() => setIsExpanded(true)}
             aria-label='Expand RCA panel'
             title='Expand'

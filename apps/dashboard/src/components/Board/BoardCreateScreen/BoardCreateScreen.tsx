@@ -217,7 +217,7 @@ const BoardCreateScreen = ({
                       placeholder='Search boards...'
                       value={searchQuery}
                       onChange={e => setSearchQuery(e.target.value)}
-                      className='pl-[36px] pr-[12px] py-[8px] text-[14px] text-foreground bg-background border border-border rounded-[10px] focus:outline-none focus:ring-2 focus:ring-[#6276be]'
+                      className='pl-[36px] pr-[12px] py-[8px] text-[14px] text-foreground bg-background border border-border rounded-[10px] focus:outline-hidden focus:ring-2 focus:ring-[#6276be]'
                       data-track-category='BOARD_CREATE'
                       data-track-name='SEARCH_BOARDS'
                     />
@@ -233,9 +233,7 @@ const BoardCreateScreen = ({
                       <div className='flex-1 text-[14px] font-semibold min-w-0'>Created by</div>
                       <div className='flex-1 text-[14px] font-semibold min-w-0'>Automations</div>
                       <div className='flex-1 text-[14px] font-semibold min-w-0'>Custom Fields</div>
-                      <div className='w-[200px] flex-shrink-0 text-[14px] font-semibold'>
-                        Actions
-                      </div>
+                      <div className='w-[200px] shrink-0 text-[14px] font-semibold'>Actions</div>
                     </div>
 
                     {/* Table Rows */}

@@ -65,7 +65,7 @@ export function FilesEmptyState(props: {
             key={option.label}
             type='button'
             onClick={option.run}
-            className='group flex flex-col items-start gap-3 rounded-xl border border-border p-3.5 text-left transition-colors hover:border-foreground/20 hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+            className='group flex flex-col items-start gap-3 rounded-xl border border-border p-3.5 text-left transition-colors hover:border-foreground/20 hover:bg-muted/40 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring'
             data-track-category='SdlcHub'
             data-track-name={option.track}
             data-track-metadata={JSON.stringify({ place: props.place ?? 'files-empty' })}

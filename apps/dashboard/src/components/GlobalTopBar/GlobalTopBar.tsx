@@ -214,7 +214,7 @@ const NavigationAndSearch = (): ReactElement => {
                 setPendingMention(null);
                 setPendingCommand(false);
               }}
-              className='z-[9999] bg-background border border-border rounded-2xl shadow-[0px_7px_15px_0px_#0000000D,0px_28px_28px_0px_#00000017,0px_62px_37px_0px_#0000000D] overflow-hidden max-h-[80vh]'
+              className='z-9999 bg-background border border-border rounded-2xl shadow-[0px_7px_15px_0px_#0000000D,0px_28px_28px_0px_#00000017,0px_62px_37px_0px_#0000000D] overflow-hidden max-h-[80vh]'
               style={{
                 width: 'calc(var(--radix-popper-anchor-width) + 96px)',
                 minWidth: '560px',
@@ -244,7 +244,7 @@ const NavigationAndSearch = (): ReactElement => {
         <button
           onClick={() => void navigate('/guide')}
           style={{ color: 'var(--nav-search-btn-text)' }}
-          className='flex items-center justify-center h-[28px] w-[28px] rounded-lg cursor-pointer hover:bg-[var(--nav-search-btn-bg)]'
+          className='flex items-center justify-center h-[28px] w-[28px] rounded-lg cursor-pointer hover:bg-(--nav-search-btn-bg)'
           aria-label='User Guide'
           title='User Guide'
           data-track-category='GLOBAL_TOP_BAR'
@@ -329,25 +329,25 @@ const GlobalTopBar = ({
             >
               <button
                 type='button'
-                className='flex h-6 items-center gap-2 rounded-md px-2 font-sans font-medium text-xs leading-none tracking-normal text-[var(--metrics-bar-color)] hover:bg-[var(--metrics-bar-hover-bg)]/80 transition-colors cursor-pointer'
+                className='flex h-6 items-center gap-2 rounded-md px-2 font-sans font-medium text-xs leading-none tracking-normal text-(--metrics-bar-color) hover:bg-(--metrics-bar-hover-bg)/80 transition-colors cursor-pointer'
                 aria-label='support'
                 aria-haspopup='true'
                 aria-expanded={supportMenuOpen}
                 data-track-category='ERROR_REPORT'
                 data-track-name='OpenSupportMenu'
               >
-                <Headset size={14} className='text-[var(--metrics-bar-color)]' />
+                <Headset size={14} className='text-(--metrics-bar-color)' />
                 <span>Support</span>
               </button>
               {supportMenuOpen && (
                 <div
                   role='menu'
-                  className='absolute right-0 top-full mt-1 z-[60] min-w-[8rem] overflow-hidden rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md whitespace-nowrap'
+                  className='absolute right-0 top-full mt-1 z-60 min-w-32 overflow-hidden rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md whitespace-nowrap'
                 >
                   <button
                     type='button'
                     role='menuitem'
-                    className='relative flex w-full cursor-pointer select-none items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none hover:bg-accent hover:text-accent-foreground'
+                    className='relative flex w-full cursor-pointer select-none items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-hidden hover:bg-accent hover:text-accent-foreground'
                     onClick={() => {
                       onOpenErrorReport();
                       setSupportMenuOpen(false);
@@ -362,7 +362,7 @@ const GlobalTopBar = ({
                     <button
                       type='button'
                       role='menuitem'
-                      className='relative flex w-full cursor-pointer select-none items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none hover:bg-accent hover:text-accent-foreground'
+                      className='relative flex w-full cursor-pointer select-none items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-hidden hover:bg-accent hover:text-accent-foreground'
                       onClick={() => {
                         onViewMyTickets();
                         setSupportMenuOpen(false);

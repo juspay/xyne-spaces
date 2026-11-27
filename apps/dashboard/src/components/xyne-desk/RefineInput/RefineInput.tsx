@@ -36,7 +36,7 @@ export const RefineInput = forwardRef<HTMLInputElement, RefineInputProps>(
           }}
           disabled={disabled}
           placeholder={placeholder}
-          className='w-full text-sm border border-border rounded-lg bg-muted/30 pl-3 pr-9 py-2 outline-none placeholder:text-muted-foreground/60 disabled:opacity-50'
+          className='w-full text-sm border border-border rounded-lg bg-muted/30 pl-3 pr-9 py-2 outline-hidden placeholder:text-muted-foreground/60 disabled:opacity-50'
           data-track-category='AIDraft'
           data-track-name='RefineInput'
         />

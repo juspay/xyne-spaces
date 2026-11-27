@@ -70,7 +70,7 @@ export const ProfileAgentCard: React.FC<{ node: FlowComponent; props: AgentProfi
             // preview dialog only summarises.
             <Link
               to={`/ai/library/agent/${encodeURIComponent(props.agent.slug)}?tab=persona`}
-              className='shrink-0 rounded-[10px] px-2 py-1 text-sm font-medium leading-5 !text-muted-foreground !no-underline transition-colors hover:bg-accent hover:!text-foreground'
+              className='shrink-0 rounded-[10px] px-2 py-1 text-sm font-medium leading-5 text-muted-foreground! no-underline! transition-colors hover:bg-accent hover:text-foreground!'
               data-track-category='AGENT_ARTIFACT'
               data-track-name='VIEW_AGENT_FROM_CARD'
             >
@@ -81,7 +81,7 @@ export const ProfileAgentCard: React.FC<{ node: FlowComponent; props: AgentProfi
 
         <div className='flex flex-col gap-3'>
           <div className='flex min-w-0 flex-col gap-1 pl-1'>
-            <p className='break-words text-sm font-semibold leading-5 text-foreground'>
+            <p className='wrap-break-word text-sm font-semibold leading-5 text-foreground'>
               {props.agent.name}
             </p>
             <span className='block truncate text-sm font-normal leading-5 tracking-[-0.07px] text-foreground'>
@@ -94,7 +94,7 @@ export const ProfileAgentCard: React.FC<{ node: FlowComponent; props: AgentProfi
               <p className='truncate text-sm font-semibold leading-5 text-foreground'>
                 Description
               </p>
-              <span className='block break-words text-sm font-normal leading-5 tracking-[-0.07px] text-foreground'>
+              <span className='block wrap-break-word text-sm font-normal leading-5 tracking-[-0.07px] text-foreground'>
                 {props.agent.description}
               </span>
             </div>

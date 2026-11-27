@@ -216,7 +216,7 @@ export const CustomiseViewPopover = (props: CustomiseViewPopoverProps): ReactEle
           align='end'
           sideOffset={6}
           onFocusOutside={e => e.preventDefault()}
-          className='z-[60] w-[300px] overflow-hidden rounded-[12px] border border-border bg-background shadow-[0_16px_44px_rgba(20,22,26,0.18)] outline-none data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:slide-in-from-top-1'
+          className='z-60 w-[300px] overflow-hidden rounded-[12px] border border-border bg-background shadow-[0_16px_44px_rgba(20,22,26,0.18)] outline-hidden data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:slide-in-from-top-1'
         >
           {step === 'main' ? (
             <div>
@@ -435,7 +435,7 @@ export const CustomiseViewPopover = (props: CustomiseViewPopoverProps): ReactEle
                   value={columnQuery}
                   onChange={e => setColumnQuery(e.target.value)}
                   placeholder='Search fields'
-                  className='min-w-0 flex-1 bg-transparent text-[14px] text-foreground outline-none placeholder:text-muted-foreground/60'
+                  className='min-w-0 flex-1 bg-transparent text-[14px] text-foreground outline-hidden placeholder:text-muted-foreground/60'
                   data-track-category='Tickets'
                   data-track-name='SearchColumns'
                 />

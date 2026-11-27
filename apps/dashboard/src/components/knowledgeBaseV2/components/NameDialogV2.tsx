@@ -84,7 +84,7 @@ export const NameDialogV2: React.FC<NameDialogV2Props> = ({
             value={name}
             onChange={e => setName(e.target.value)}
             placeholder={placeholder}
-            className='mt-1 block w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring'
+            className='mt-1 block w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-ring focus:outline-hidden focus:ring-1 focus:ring-ring'
             disabled={submitting}
             data-track-category='knowledge-base'
             data-track-name='name-dialog-input'

@@ -359,7 +359,7 @@ function HomePageCard(): ReactElement {
           aria-invalid={invalid}
           spellCheck={false}
           className={cn(
-            'h-8 min-w-0 flex-1 rounded-md border bg-background px-2.5 text-sm text-foreground outline-none focus:ring-1',
+            'h-8 min-w-0 flex-1 rounded-md border bg-background px-2.5 text-sm text-foreground outline-hidden focus:ring-1',
             invalid ? 'border-destructive focus:ring-destructive' : 'border-border focus:ring-ring',
           )}
           data-track-category='PREFERENCES'

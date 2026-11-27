@@ -757,7 +757,7 @@ const ControlPanelSettingsScreen = (): ReactElement => {
         subtitle='Model prices behind the control panel’s cost'
       />
       {prices.isError && !prices.data ? (
-        <section className='rounded-xl border border-border bg-card p-5 shadow-sm'>
+        <section className='rounded-xl border border-border bg-card p-5 shadow-xs'>
           <ErrorState what='prices' error={prices.error} onRetry={() => void prices.refetch()} />
         </section>
       ) : (

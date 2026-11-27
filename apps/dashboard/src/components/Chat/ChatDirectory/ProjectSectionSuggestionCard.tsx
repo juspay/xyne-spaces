@@ -13,7 +13,7 @@ export const ProjectSectionSuggestionCard = ({
 }: ProjectSectionSuggestionCardProps): ReactElement => {
   return (
     <div
-      className='mx-3 mb-4 rounded-lg border border-sidebar-accent-ring bg-sidebar-accent/40 p-3'
+      className='mx-3 mb-4 rounded-lg border border-sidebar-accent-ring p-3'
       data-testid='project-section-suggestion-card'
     >
       <div className='flex items-start justify-between gap-2'>
@@ -28,15 +28,13 @@ export const ProjectSectionSuggestionCard = ({
           title='Dismiss — you can still find this under New section'
           data-track-category='CHAT_SIDEBAR'
           data-track-name='DISMISS_SECTION_SUGGESTION'
-          className='-mr-1 -mt-1 shrink-0 rounded p-0.5 text-sidebar-foreground/60 transition-colors hover:bg-sidebar-item-hover hover:text-sidebar-foreground'
+          className='-mr-1 -mt-1 shrink-0 rounded p-0.5 transition-colors hover:bg-sidebar-item-hover hover:text-sidebar-foreground'
         >
           <MultipleCrossCancelDefault size={14} />
         </button>
       </div>
 
-      <p className='mt-1.5 text-xs leading-relaxed text-sidebar-foreground/70'>
-        Keep everything easier to find.
-      </p>
+      <p className='mt-1.5 text-xs leading-relaxed'>Keep everything easier to find.</p>
 
       <div className='mt-2.5 flex items-center justify-end'>
         <Button

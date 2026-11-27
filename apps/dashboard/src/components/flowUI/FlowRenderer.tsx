@@ -394,7 +394,7 @@ export const FlowRenderer: React.FC<FlowRendererProps> = ({
           <summary className='cursor-pointer text-muted-foreground'>
             Unsupported card (<code>{component.type}</code>) — update to view it properly
           </summary>
-          <pre className='mt-2 overflow-x-auto whitespace-pre-wrap break-words text-[11px] leading-snug'>
+          <pre className='mt-2 overflow-x-auto whitespace-pre-wrap wrap-break-word text-[11px] leading-snug'>
             {JSON.stringify(component, null, 2)}
           </pre>
         </details>

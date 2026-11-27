@@ -79,8 +79,8 @@ const DmSearchBoxComponent = ({
         type='text'
         className={
           isMobile
-            ? 'w-full h-11 pl-12 pr-10 py-3 bg-background rounded-full border border-border text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-0'
-            : 'w-full pl-9 pr-8 py-2 bg-muted rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-ring'
+            ? 'w-full h-11 pl-12 pr-10 py-3 bg-background rounded-full border border-border text-sm text-foreground placeholder:text-muted-foreground focus:outline-hidden focus:ring-0'
+            : 'w-full pl-9 pr-8 py-2 bg-muted rounded-lg text-sm focus:outline-hidden focus:ring-1 focus:ring-ring'
         }
         placeholder='Search DMs (Cmd+K)'
         aria-label='Search DMs'

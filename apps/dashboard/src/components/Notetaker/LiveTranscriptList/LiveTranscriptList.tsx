@@ -130,8 +130,8 @@ export const LiveTranscriptList = ({
                     itemIndex={index}
                     currentMatchIndex={search.currentIndex}
                     matchRefs={search.matchRefs}
-                    currentMatchClassName='bg-primary text-background [[data-theme=midnight]_&]:text-foreground py-0.5'
-                    otherMatchClassName='bg-yellow-200 [[data-theme=midnight]_&]:bg-yellow-300 text-yellow-950 py-0.5'
+                    currentMatchClassName='bg-primary text-background in-data-[theme=midnight]:text-foreground py-0.5'
+                    otherMatchClassName='bg-yellow-200 in-data-[theme=midnight]:bg-yellow-300 text-yellow-950 py-0.5'
                   />
                 </p>
               </div>
@@ -260,7 +260,7 @@ export const LiveTranscriptList = ({
                   variant='outline'
                   size='sm'
                   onClick={() => scrollToCurrent()}
-                  className='pointer-events-auto flex h-7 items-center gap-1.5 rounded-full border border-border/70 bg-foreground px-3 text-xs font-medium text-background shadow-lg backdrop-blur-sm outline-none transition-colors hover:text-background'
+                  className='pointer-events-auto flex h-7 items-center gap-1.5 rounded-full border border-border/70 bg-foreground px-3 text-xs font-medium text-background shadow-lg backdrop-blur-xs outline-hidden transition-colors hover:text-background'
                   data-track-category={trackCategory}
                   data-track-name='return_to_current'
                 >

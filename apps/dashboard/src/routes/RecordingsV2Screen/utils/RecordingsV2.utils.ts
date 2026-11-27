@@ -26,7 +26,7 @@ export type RecordingDatePreset =
 export type RecordingOwnershipTab = 'all' | 'created' | 'shared';
 
 export const LIST_TAB_CLASS_NAME =
-  'flex h-8 flex-1 items-center justify-center whitespace-nowrap rounded-lg px-3 text-sm font-semibold leading-none transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-muted sm:flex-none';
+  'flex h-8 flex-1 items-center justify-center whitespace-nowrap rounded-lg px-3 text-sm font-semibold leading-none transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-muted sm:flex-none';
 
 export const RECORDING_DATE_PRESETS: ReadonlyArray<{
   value: RecordingDatePreset;

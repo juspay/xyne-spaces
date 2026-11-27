@@ -147,9 +147,9 @@ const ClawSkillCreateV2 = (props: {
                 </div>
               </div>
 
-              <p className='flex items-center gap-1.5 text-sm leading-[1.5] text-foreground'>
+              <p className='flex items-center gap-1.5 text-sm leading-normal text-foreground'>
                 Built by
-                <span className='text-[color:var(--mention-color)]'>@{builtBy}</span>
+                <span className='text-(--mention-color)'>@{builtBy}</span>
               </p>
             </div>
           </div>
@@ -166,7 +166,7 @@ const ClawSkillCreateV2 = (props: {
                 placeholder='What this skill covers and when agents should reach for it.'
                 data-track-category='Claw Agents'
                 data-track-name='Create skill v2: description'
-                className='h-[86px] w-full resize-y rounded-2xl border border-border bg-card p-4 text-sm leading-5 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring'
+                className='h-[86px] w-full resize-y rounded-2xl border border-border bg-card p-4 text-sm leading-5 text-foreground placeholder:text-muted-foreground focus:outline-hidden focus:ring-1 focus:ring-ring'
               />
             </div>
 
@@ -181,7 +181,7 @@ const ClawSkillCreateV2 = (props: {
                 placeholder='The markdown playbook an agent reads while working…'
                 data-track-category='Claw Agents'
                 data-track-name='Create skill v2: content'
-                className='h-[250px] w-full resize-y rounded-2xl border border-border bg-card p-4 text-sm leading-5 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring'
+                className='h-[250px] w-full resize-y rounded-2xl border border-border bg-card p-4 text-sm leading-5 text-foreground placeholder:text-muted-foreground focus:outline-hidden focus:ring-1 focus:ring-ring'
               />
               <span className='self-end text-xs leading-4 text-muted-foreground'>
                 {content.length} characters

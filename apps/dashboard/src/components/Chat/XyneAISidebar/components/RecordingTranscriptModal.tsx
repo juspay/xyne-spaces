@@ -63,7 +63,7 @@ export const RecordingTranscriptModal = ({
       testId='recording-transcript-modal'
       focusRef={containerRef}
     >
-      <div ref={containerRef} tabIndex={-1} className='h-full outline-none'>
+      <div ref={containerRef} tabIndex={-1} className='h-full outline-hidden'>
         <TranscriptSidePanel
           transcript={transcript}
           isLoading={isLoading}

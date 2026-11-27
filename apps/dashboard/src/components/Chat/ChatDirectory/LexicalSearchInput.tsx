@@ -769,7 +769,7 @@ export function LexicalSearchInput({
               <span className='flex items-center gap-2'>
                 {showLeadingIcon && <Search size={16} className='ml-3 text-muted-foreground' />}
                 <ContentEditable
-                  className='min-h-5 py-1 text-sm text-foreground focus:outline-none flex-1'
+                  className='min-h-5 py-1 text-sm text-foreground focus:outline-hidden flex-1'
                   spellCheck={true}
                   autoCorrect='on'
                   autoCapitalize='none'

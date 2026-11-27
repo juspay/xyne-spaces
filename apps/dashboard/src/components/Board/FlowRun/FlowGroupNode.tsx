@@ -83,7 +83,7 @@ const coverHandles = (connectable: boolean, color: string): React.ReactNode => (
       type='target'
       position={Position.Top}
       isConnectable={connectable}
-      className='!w-3 !h-3 !border-2 !border-background !rounded-full'
+      className='w-3! h-3! border-2! border-background! rounded-full!'
       style={{ top: -7, background: color }}
     />
     <Handle
@@ -91,7 +91,7 @@ const coverHandles = (connectable: boolean, color: string): React.ReactNode => (
       type='source'
       position={Position.Bottom}
       isConnectable={connectable}
-      className='!w-3 !h-3 !border-2 !border-background !rounded-full'
+      className='w-3! h-3! border-2! border-background! rounded-full!'
       style={{ bottom: -7, background: color }}
     />
   </>
@@ -110,7 +110,7 @@ const coverFlowHandles = (color: string): React.ReactNode => (
       type='source'
       position={Position.Bottom}
       isConnectable={false}
-      className='!w-3 !h-3 !border-2 !border-background !rounded-full'
+      className='w-3! h-3! border-2! border-background! rounded-full!'
       style={{ top: -7, bottom: 'auto', background: color, pointerEvents: 'none' }}
     />
     <Handle
@@ -118,7 +118,7 @@ const coverFlowHandles = (color: string): React.ReactNode => (
       type='target'
       position={Position.Top}
       isConnectable={false}
-      className='!w-3 !h-3 !border-2 !border-background !rounded-full'
+      className='w-3! h-3! border-2! border-background! rounded-full!'
       style={{ bottom: -7, top: 'auto', background: color, pointerEvents: 'none' }}
     />
   </>
@@ -194,7 +194,7 @@ export const FlowGroupNode: React.FC<NodeProps<FlowGroupNodeData>> = ({ data, se
                 title={backlogDisabledReason}
                 data-track-category='flow_board'
                 data-track-name='backlog_group'
-                className='flex cursor-pointer select-none items-start gap-2 rounded-sm px-2 py-1.5 text-xs outline-none hover:bg-muted focus:bg-muted data-[disabled]:cursor-not-allowed data-[disabled]:opacity-60'
+                className='flex cursor-pointer select-none items-start gap-2 rounded-sm px-2 py-1.5 text-xs outline-hidden hover:bg-muted focus:bg-muted data-disabled:cursor-not-allowed data-disabled:opacity-60'
               >
                 <Archive size={13} className='mt-0.5 shrink-0 text-amber-600' />
                 <span className='flex min-w-0 flex-col'>
@@ -214,7 +214,7 @@ export const FlowGroupNode: React.FC<NodeProps<FlowGroupNodeData>> = ({ data, se
                 title={skipDisabledReason}
                 data-track-category='flow_board'
                 data-track-name='skip_group'
-                className='flex cursor-pointer select-none items-start gap-2 rounded-sm px-2 py-1.5 text-xs outline-none hover:bg-muted focus:bg-muted data-[disabled]:cursor-not-allowed data-[disabled]:opacity-60'
+                className='flex cursor-pointer select-none items-start gap-2 rounded-sm px-2 py-1.5 text-xs outline-hidden hover:bg-muted focus:bg-muted data-disabled:cursor-not-allowed data-disabled:opacity-60'
               >
                 <SkipForward size={13} className='mt-0.5 shrink-0 text-teal-600' />
                 <span className='flex min-w-0 flex-col'>
@@ -237,7 +237,7 @@ export const FlowGroupNode: React.FC<NodeProps<FlowGroupNodeData>> = ({ data, se
       // pointer-events-auto: React Flow disables pointer events on wrappers of
       // non-draggable, non-selectable nodes — keep the cover clickable either way.
       <div
-        className='pointer-events-auto h-full w-full cursor-pointer rounded-xl border-2 shadow-sm transition-colors'
+        className='pointer-events-auto h-full w-full cursor-pointer rounded-xl border-2 shadow-xs transition-colors'
         style={{
           borderColor: neutral ? 'hsl(var(--border))' : `${color}80`,
           backgroundColor: neutral ? 'hsl(var(--muted))' : `${color}14`,
@@ -250,7 +250,7 @@ export const FlowGroupNode: React.FC<NodeProps<FlowGroupNodeData>> = ({ data, se
           onClick={onToggleCollapse}
           data-track-category='flow_board'
           data-track-name='toggle_group_collapse'
-          className='block h-full w-full rounded-[10px] text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50'
+          className='block h-full w-full rounded-[10px] text-left focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring/50'
         >
           <span
             className='flex items-center gap-2 border-b px-3 py-2'
@@ -319,7 +319,7 @@ export const FlowGroupNode: React.FC<NodeProps<FlowGroupNodeData>> = ({ data, se
       {coverHandles(connectable, displayColor)}
       {coverFlowHandles(displayColor)}
       <div
-        className={`flex items-center gap-1.5 px-3 py-2 ${canToggleFromHeader ? 'cursor-pointer hover:bg-black/[0.025]' : ''}`}
+        className={`flex items-center gap-1.5 px-3 py-2 ${canToggleFromHeader ? 'cursor-pointer hover:bg-black/2.5' : ''}`}
         role={canToggleFromHeader ? 'button' : undefined}
         tabIndex={canToggleFromHeader ? 0 : undefined}
         aria-label={canToggleFromHeader ? `Collapse ${name || 'group'}` : undefined}
@@ -337,7 +337,7 @@ export const FlowGroupNode: React.FC<NodeProps<FlowGroupNodeData>> = ({ data, se
             placeholder='Group name'
             data-track-category='flow_plan_editor'
             data-track-name='input_group_name'
-            className='nodrag min-w-0 flex-1 bg-transparent text-[12px] font-semibold placeholder:opacity-50 focus:outline-none'
+            className='nodrag min-w-0 flex-1 bg-transparent text-[12px] font-semibold placeholder:opacity-50 focus:outline-hidden'
             style={{ color: displayColor }}
             onPointerDown={e => e.stopPropagation()}
           />

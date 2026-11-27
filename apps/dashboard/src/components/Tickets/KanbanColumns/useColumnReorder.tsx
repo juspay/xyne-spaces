@@ -108,7 +108,7 @@ const ColumnDragLayer: React.FC<{
     <div
       ref={layerRef}
       aria-hidden
-      className='pointer-events-none fixed z-[60]'
+      className='pointer-events-none fixed z-60'
       style={{
         left: session.rect.left,
         top: session.rect.top,

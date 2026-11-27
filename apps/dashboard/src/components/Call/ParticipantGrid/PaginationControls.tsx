@@ -31,7 +31,7 @@ export function PaginationControls({
           className={cn(
             'absolute z-10',
             'bg-background hover:bg-muted text-foreground rounded-full',
-            'transition-all backdrop-blur-sm',
+            'transition-all backdrop-blur-xs',
             compact ? 'p-1' : 'p-2',
             vertical ? 'left-1/2 -translate-x-1/2 top-2' : 'left-2 top-1/2 -translate-y-1/2',
           )}
@@ -49,7 +49,7 @@ export function PaginationControls({
           className={cn(
             'absolute z-10',
             'bg-background hover:bg-muted text-foreground rounded-full',
-            'transition-all backdrop-blur-sm',
+            'transition-all backdrop-blur-xs',
             compact ? 'p-1' : 'p-2',
             vertical ? 'left-1/2 -translate-x-1/2 bottom-2' : 'right-2 top-1/2 -translate-y-1/2',
           )}

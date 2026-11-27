@@ -73,7 +73,7 @@ const FieldTypeDropdown = ({
     <DropdownMenuTrigger asChild disabled={disabled}>
       <button
         type='button'
-        className='w-full h-[32px] px-[8px] py-[7px] bg-background border border-border rounded-[8px] text-[13px] text-left focus:outline-none focus:ring-0 cursor-pointer disabled:text-muted-foreground/50 disabled:cursor-not-allowed flex items-center justify-between'
+        className='w-full h-[32px] px-[8px] py-[7px] bg-background border border-border rounded-[8px] text-[13px] text-left focus:outline-hidden focus:ring-0 cursor-pointer disabled:text-muted-foreground/50 disabled:cursor-not-allowed flex items-center justify-between'
       >
         <span className='text-foreground'>{getTypeLabel(value)}</span>
         <ChevronDown size={14} className='text-muted-foreground shrink-0 ml-1' />
@@ -301,7 +301,7 @@ export const FormFieldEditor = ({ field, nested, ctx }: FormFieldEditorProps): R
               inputRef={el => ctx.registerInputRef(field.rowId, el)}
               placeholder='Enter question'
               disabled={ctx.disabled}
-              className='w-full text-[14px] text-foreground bg-transparent border-0 focus:outline-none focus:ring-0 p-0'
+              className='w-full text-[14px] text-foreground bg-transparent border-0 focus:outline-hidden focus:ring-0 p-0'
               selectedField={selectedGlobalField}
               onCreateNew={
                 selectedGlobalField ? () => ctx.onCreateAsNewField(field.rowId) : undefined
@@ -351,7 +351,7 @@ export const FormFieldEditor = ({ field, nested, ctx }: FormFieldEditorProps): R
                           onClick={() => ctx.onToggleOptionPanel(option.id)}
                           aria-expanded={ctx.isOptionPanelOpen(option.id)}
                           className={cn(
-                            'text-[11px] font-mono px-2 py-[3px] rounded-full whitespace-nowrap flex-shrink-0',
+                            'text-[11px] font-mono px-2 py-[3px] rounded-full whitespace-nowrap shrink-0',
                             count > 0
                               ? 'bg-[#6276be]/10 text-[#6276be] hover:bg-[#6276be] hover:text-white'
                               : 'border border-dashed border-border text-muted-foreground hover:border-[#6276be] hover:text-[#6276be] hover:bg-[#6276be]/10',

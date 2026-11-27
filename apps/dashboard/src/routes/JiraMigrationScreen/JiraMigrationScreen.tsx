@@ -1555,14 +1555,14 @@ const JiraMigrationScreen = (): ReactElement => {
               </div>
             </div>
             <div className='grid grid-cols-2 gap-3 text-left lg:min-w-[320px]'>
-              <div className='rounded-xl border border-border bg-background/80 p-3 shadow-sm'>
+              <div className='rounded-xl border border-border bg-background/80 p-3 shadow-xs'>
                 <p className='text-[11px] uppercase tracking-wide text-muted-foreground'>
                   Execution
                 </p>
                 <p className='mt-1 text-sm font-semibold text-foreground'>Async backend job</p>
                 <p className='mt-1 text-xs text-muted-foreground'>Progress tracked in Redis</p>
               </div>
-              <div className='rounded-xl border border-border bg-background/80 p-3 shadow-sm'>
+              <div className='rounded-xl border border-border bg-background/80 p-3 shadow-xs'>
                 <p className='text-[11px] uppercase tracking-wide text-muted-foreground'>
                   Recovery
                 </p>
@@ -1577,7 +1577,7 @@ const JiraMigrationScreen = (): ReactElement => {
 
         <div className='p-6 space-y-6'>
           {useCase === 'channel-only' ? (
-            <section className='overflow-hidden rounded-3xl border border-border/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(248,250,252,0.96))] shadow-sm'>
+            <section className='overflow-hidden rounded-3xl border border-border/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(248,250,252,0.96))] shadow-xs'>
               <div className='border-b border-border/70 bg-[linear-gradient(135deg,rgba(15,118,110,0.08),rgba(14,165,233,0.05),transparent)] px-5 py-4'>
                 <div className='flex flex-col gap-1'>
                   <h3 className='text-sm font-semibold text-foreground'>
@@ -1592,7 +1592,7 @@ const JiraMigrationScreen = (): ReactElement => {
 
               <div className='p-5'>
                 <div className='grid grid-cols-1 gap-4 lg:grid-cols-3'>
-                  <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm'>
+                  <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-xs'>
                     <p className='mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'>
                       Source Project
                     </p>
@@ -1614,7 +1614,7 @@ const JiraMigrationScreen = (): ReactElement => {
                     />
                   </div>
 
-                  <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm'>
+                  <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-xs'>
                     <p className='mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'>
                       Channel
                     </p>
@@ -1636,7 +1636,7 @@ const JiraMigrationScreen = (): ReactElement => {
                     </p>
                   </div>
 
-                  <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm'>
+                  <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-xs'>
                     <p className='mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'>
                       Target Project
                     </p>
@@ -1656,8 +1656,8 @@ const JiraMigrationScreen = (): ReactElement => {
                   </div>
                 </div>
 
-                <div className='mt-4 grid grid-cols-1 gap-4 lg:grid-cols-[1fr,auto]'>
-                  <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm'>
+                <div className='mt-4 grid grid-cols-1 gap-4 lg:grid-cols-[1fr_auto]'>
+                  <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-xs'>
                     <label
                       htmlFor='jira-move-channel-updated-at'
                       className='mb-2 block text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'
@@ -1692,7 +1692,7 @@ const JiraMigrationScreen = (): ReactElement => {
               </div>
             </section>
           ) : useCase === 'purge-project' ? (
-            <section className='overflow-hidden rounded-3xl border border-border/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(248,250,252,0.96))] shadow-sm'>
+            <section className='overflow-hidden rounded-3xl border border-border/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(248,250,252,0.96))] shadow-xs'>
               <div className='border-b border-border/70 bg-[linear-gradient(135deg,rgba(225,29,72,0.08),rgba(14,165,233,0.04),transparent)] px-5 py-4'>
                 <div className='flex flex-col gap-1'>
                   <h3 className='text-sm font-semibold text-foreground'>
@@ -1707,7 +1707,7 @@ const JiraMigrationScreen = (): ReactElement => {
 
               <div className='p-5 space-y-4'>
                 <div className='grid grid-cols-1 gap-4 lg:grid-cols-3'>
-                  <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm'>
+                  <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-xs'>
                     <p className='mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'>
                       Project
                     </p>
@@ -1732,7 +1732,7 @@ const JiraMigrationScreen = (): ReactElement => {
                     />
                   </div>
 
-                  <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm'>
+                  <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-xs'>
                     <p className='mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'>
                       Jira Migration Source
                     </p>
@@ -1765,7 +1765,7 @@ const JiraMigrationScreen = (): ReactElement => {
                     </p>
                   </div>
 
-                  <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm'>
+                  <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-xs'>
                     <label
                       htmlFor='jira-purge-confirm'
                       className='mb-2 block text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'
@@ -1790,7 +1790,7 @@ const JiraMigrationScreen = (): ReactElement => {
                     </p>
                   </div>
 
-                  <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm'>
+                  <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-xs'>
                     <p className='mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'>
                       Mode
                     </p>
@@ -1951,7 +1951,7 @@ const JiraMigrationScreen = (): ReactElement => {
               </div>
             </section>
           ) : useCase === 'move-jira-project-channel' ? (
-            <section className='overflow-hidden rounded-3xl border border-border/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(248,250,252,0.96))] shadow-sm'>
+            <section className='overflow-hidden rounded-3xl border border-border/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(248,250,252,0.96))] shadow-xs'>
               <div className='border-b border-border/70 bg-[linear-gradient(135deg,rgba(15,118,110,0.08),rgba(14,165,233,0.04),transparent)] px-5 py-4'>
                 <div className='flex flex-col gap-1'>
                   <h3 className='text-sm font-semibold text-foreground'>
@@ -1966,7 +1966,7 @@ const JiraMigrationScreen = (): ReactElement => {
 
               <div className='p-5 space-y-4'>
                 <div className='grid grid-cols-1 gap-4 lg:grid-cols-4'>
-                  <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm'>
+                  <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-xs'>
                     <label
                       htmlFor='jira-move-channel-project-key'
                       className='mb-2 block text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'
@@ -1984,7 +1984,7 @@ const JiraMigrationScreen = (): ReactElement => {
                     />
                   </div>
 
-                  <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm'>
+                  <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-xs'>
                     <p className='mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'>
                       Xyne Project
                     </p>
@@ -2009,7 +2009,7 @@ const JiraMigrationScreen = (): ReactElement => {
                     />
                   </div>
 
-                  <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm'>
+                  <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-xs'>
                     <p className='mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'>
                       Source Channel
                     </p>
@@ -2031,7 +2031,7 @@ const JiraMigrationScreen = (): ReactElement => {
                     />
                   </div>
 
-                  <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm'>
+                  <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-xs'>
                     <p className='mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'>
                       Target Channel
                     </p>
@@ -2057,7 +2057,7 @@ const JiraMigrationScreen = (): ReactElement => {
                 </div>
 
                 <div className='grid grid-cols-1 gap-4 lg:grid-cols-3'>
-                  <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm'>
+                  <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-xs'>
                     <p className='mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'>
                       Mode
                     </p>
@@ -2095,7 +2095,7 @@ const JiraMigrationScreen = (): ReactElement => {
                   </div>
 
                   {!moveChannelDryRun && (
-                    <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm lg:col-span-2'>
+                    <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-xs lg:col-span-2'>
                       <label
                         htmlFor='jira-move-channel-confirm'
                         className='mb-2 block text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'
@@ -2172,7 +2172,7 @@ const JiraMigrationScreen = (): ReactElement => {
               </div>
             </section>
           ) : useCase === 'move-jira-project-board' ? (
-            <section className='overflow-hidden rounded-3xl border border-border/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(248,250,252,0.96))] shadow-sm'>
+            <section className='overflow-hidden rounded-3xl border border-border/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(248,250,252,0.96))] shadow-xs'>
               <div className='border-b border-border/70 bg-[linear-gradient(135deg,rgba(15,118,110,0.08),rgba(14,165,233,0.04),transparent)] px-5 py-4'>
                 <div className='flex flex-col gap-1'>
                   <h3 className='text-sm font-semibold text-foreground'>
@@ -2188,7 +2188,7 @@ const JiraMigrationScreen = (): ReactElement => {
 
               <div className='p-5 space-y-4'>
                 <div className='grid grid-cols-1 gap-4 lg:grid-cols-5'>
-                  <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm'>
+                  <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-xs'>
                     <label
                       htmlFor='jira-move-project-key'
                       className='mb-2 block text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'
@@ -2205,7 +2205,7 @@ const JiraMigrationScreen = (): ReactElement => {
                     />
                   </div>
 
-                  <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm'>
+                  <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-xs'>
                     <p className='mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'>
                       Xyne Project
                     </p>
@@ -2231,7 +2231,7 @@ const JiraMigrationScreen = (): ReactElement => {
                     />
                   </div>
 
-                  <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm'>
+                  <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-xs'>
                     <p className='mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'>
                       Channel
                     </p>
@@ -2250,7 +2250,7 @@ const JiraMigrationScreen = (): ReactElement => {
                     />
                   </div>
 
-                  <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm'>
+                  <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-xs'>
                     <p className='mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'>
                       Source Board
                     </p>
@@ -2269,7 +2269,7 @@ const JiraMigrationScreen = (): ReactElement => {
                     />
                   </div>
 
-                  <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm'>
+                  <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-xs'>
                     <p className='mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'>
                       Target Board
                     </p>
@@ -2289,7 +2289,7 @@ const JiraMigrationScreen = (): ReactElement => {
                   </div>
                 </div>
 
-                <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm'>
+                <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-xs'>
                   <label
                     htmlFor='jira-move-project-tags'
                     className='mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'
@@ -2312,7 +2312,7 @@ const JiraMigrationScreen = (): ReactElement => {
                 </div>
 
                 <div className='grid grid-cols-1 gap-4 lg:grid-cols-3'>
-                  <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm'>
+                  <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-xs'>
                     <p className='mb-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'>
                       Mode
                     </p>
@@ -2350,7 +2350,7 @@ const JiraMigrationScreen = (): ReactElement => {
                   </div>
 
                   {!moveDryRun && (
-                    <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm lg:col-span-2'>
+                    <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-xs lg:col-span-2'>
                       <label
                         htmlFor='jira-move-project-confirm'
                         className='mb-2 block text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'
@@ -2417,7 +2417,7 @@ const JiraMigrationScreen = (): ReactElement => {
               </div>
             </section>
           ) : (
-            <section className='overflow-hidden rounded-3xl border border-border/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(248,250,252,0.96))] shadow-sm'>
+            <section className='overflow-hidden rounded-3xl border border-border/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(248,250,252,0.96))] shadow-xs'>
               <div className='border-b border-border/70 bg-[linear-gradient(135deg,rgba(15,118,110,0.08),rgba(14,165,233,0.05),transparent)] px-5 py-4'>
                 <div className='flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between'>
                   <div>
@@ -2439,9 +2439,9 @@ const JiraMigrationScreen = (): ReactElement => {
               </div>
 
               <div className='p-5'>
-                <div className='grid grid-cols-1 gap-4 xl:grid-cols-[1.1fr,0.9fr]'>
+                <div className='grid grid-cols-1 gap-4 xl:grid-cols-[1.1fr_0.9fr]'>
                   <div className='grid grid-cols-1 gap-4 md:grid-cols-2'>
-                    <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm'>
+                    <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-xs'>
                       <label
                         htmlFor='jira-project-key'
                         className='mb-2 block text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'
@@ -2512,7 +2512,7 @@ const JiraMigrationScreen = (): ReactElement => {
                       </Button>
                     </div>
 
-                    <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm'>
+                    <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-xs'>
                       <label
                         htmlFor='jira-target-project'
                         className='mb-2 block text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'
@@ -2547,7 +2547,7 @@ const JiraMigrationScreen = (): ReactElement => {
                       />
                     </div>
 
-                    <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm'>
+                    <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-xs'>
                       <label
                         htmlFor='jira-target-board'
                         className='mb-2 block text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'
@@ -2582,7 +2582,7 @@ const JiraMigrationScreen = (): ReactElement => {
                       />
                     </div>
 
-                    <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm'>
+                    <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-xs'>
                       <label
                         htmlFor='jira-target-channel'
                         className='mb-2 block text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'
@@ -2620,7 +2620,7 @@ const JiraMigrationScreen = (): ReactElement => {
                   {jiraBoards.length > 0 && (
                     <div
                       ref={boardSectionRef}
-                      className='col-span-full rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm'
+                      className='col-span-full rounded-2xl border border-border/70 bg-card/80 p-4 shadow-xs'
                     >
                       <p className='text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground mb-2'>
                         Jira Boards Found
@@ -2836,7 +2836,7 @@ const JiraMigrationScreen = (): ReactElement => {
                     </div>
                   )}
 
-                  <div className='rounded-2xl border border-border/70 bg-slate-50/80 p-4 shadow-sm'>
+                  <div className='rounded-2xl border border-border/70 bg-slate-50/80 p-4 shadow-xs'>
                     <label
                       htmlFor='jira-ticket-range'
                       className='mb-2 block text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'
@@ -2860,7 +2860,7 @@ const JiraMigrationScreen = (): ReactElement => {
                         setPageTokens([undefined]);
                         setPageIndex(0);
                       }}
-                      className='w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm text-foreground shadow-sm'
+                      className='w-full rounded-xl border border-border bg-background px-3 py-2.5 text-sm text-foreground shadow-xs'
                     >
                       <option value='all'>All Time</option>
                       <option value='last_1_month'>Last 1 Month</option>
@@ -2966,7 +2966,7 @@ const JiraMigrationScreen = (): ReactElement => {
                                 placeholder='Search epics...'
                                 searchPlaceholder='Search epics...'
                                 width='100%'
-                                inputClassName='w-full min-h-10 rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground shadow-sm'
+                                inputClassName='w-full min-h-10 rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground shadow-xs'
                               />
                             </div>
                             <div>
@@ -2990,7 +2990,7 @@ const JiraMigrationScreen = (): ReactElement => {
                                 placeholder='Search assignees...'
                                 searchPlaceholder='Search assignees...'
                                 width='100%'
-                                inputClassName='w-full min-h-10 rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground shadow-sm'
+                                inputClassName='w-full min-h-10 rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground shadow-xs'
                               />
                             </div>
                             <div>
@@ -3014,7 +3014,7 @@ const JiraMigrationScreen = (): ReactElement => {
                                 placeholder='Search reporters...'
                                 searchPlaceholder='Search reporters...'
                                 width='100%'
-                                inputClassName='w-full min-h-10 rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground shadow-sm'
+                                inputClassName='w-full min-h-10 rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground shadow-xs'
                               />
                             </div>
                             <div>
@@ -3038,7 +3038,7 @@ const JiraMigrationScreen = (): ReactElement => {
                                 placeholder='Search creators...'
                                 searchPlaceholder='Search creators...'
                                 width='100%'
-                                inputClassName='w-full min-h-10 rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground shadow-sm'
+                                inputClassName='w-full min-h-10 rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground shadow-xs'
                               />
                             </div>
                             <div>
@@ -3058,7 +3058,7 @@ const JiraMigrationScreen = (): ReactElement => {
                                 placeholder='Search labels...'
                                 searchPlaceholder='Search labels...'
                                 width='100%'
-                                inputClassName='w-full min-h-10 rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground shadow-sm'
+                                inputClassName='w-full min-h-10 rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground shadow-xs'
                               />
                             </div>
                           </div>
@@ -3142,7 +3142,7 @@ const JiraMigrationScreen = (): ReactElement => {
 
           {/* Step 2: Map Statuses */}
           {preview && migrationPhase === 'map-statuses' && (
-            <section className='overflow-hidden rounded-3xl border border-border/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(248,250,252,0.96))] shadow-sm'>
+            <section className='overflow-hidden rounded-3xl border border-border/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(248,250,252,0.96))] shadow-xs'>
               <div className='border-b border-border/70 bg-[linear-gradient(135deg,rgba(15,118,110,0.08),rgba(14,165,233,0.05),transparent)] px-5 py-4'>
                 <div className='flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between'>
                   <div>
@@ -3180,7 +3180,7 @@ const JiraMigrationScreen = (): ReactElement => {
                         }}
                         data-track-category='jira_migration'
                         data-track-name='jira_board_select'
-                        className='w-full max-w-md rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground shadow-sm'
+                        className='w-full max-w-md rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground shadow-xs'
                       >
                         <option value=''>Select Jira board</option>
                         {preview.jiraBoards.map(board => (
@@ -3279,7 +3279,7 @@ const JiraMigrationScreen = (): ReactElement => {
                               [mapping.jiraStatus]: selectedStatusV2,
                             }));
                           }}
-                          className='mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground shadow-sm'
+                          className='mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground shadow-xs'
                         >
                           <option value=''>Select StatusV2</option>
                           {TICKET_STATUS_V2_OPTIONS.map(statusV2 => (
@@ -3320,7 +3320,7 @@ const JiraMigrationScreen = (): ReactElement => {
 
                   <div className='mt-3 max-h-72 overflow-auto rounded-xl border border-border bg-background'>
                     <table className='w-full text-left text-xs'>
-                      <thead className='sticky top-0 bg-background/90 backdrop-blur'>
+                      <thead className='sticky top-0 bg-background/90 backdrop-blur-sm'>
                         <tr>
                           <th className='px-3 py-2 font-medium text-muted-foreground'>#</th>
                           <th className='px-3 py-2 font-medium text-muted-foreground'>
@@ -3436,7 +3436,7 @@ const JiraMigrationScreen = (): ReactElement => {
                                     }}
                                     data-track-category='jira_migration'
                                     data-track-name={`jira_stage_sequence_set_position:${status}`}
-                                    className='w-20 rounded-lg border border-border bg-background px-2 py-1 text-xs text-foreground shadow-sm'
+                                    className='w-20 rounded-lg border border-border bg-background px-2 py-1 text-xs text-foreground shadow-xs'
                                     disabled={excluded}
                                   />
                                 </td>
@@ -3495,7 +3495,7 @@ const JiraMigrationScreen = (): ReactElement => {
 
           {/* Step 3: Migrate action bar */}
           {preview && migrationPhase === 'migrate' && (
-            <section className='overflow-hidden rounded-3xl border border-emerald-200/60 bg-[linear-gradient(135deg,rgba(16,185,129,0.06),rgba(255,255,255,0.96))] shadow-sm'>
+            <section className='overflow-hidden rounded-3xl border border-emerald-200/60 bg-[linear-gradient(135deg,rgba(16,185,129,0.06),rgba(255,255,255,0.96))] shadow-xs'>
               <div className='flex flex-wrap items-center justify-between gap-3 px-5 py-4'>
                 <div>
                   <div className='inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-medium uppercase tracking-[0.12em] text-emerald-800'>
@@ -3808,7 +3808,7 @@ const JiraMigrationScreen = (): ReactElement => {
 
                   <div className='mt-3 max-h-64 overflow-auto rounded-xl border border-emerald-100 bg-background/70'>
                     <table className='w-full text-left text-xs'>
-                      <thead className='sticky top-0 bg-background/90 backdrop-blur'>
+                      <thead className='sticky top-0 bg-background/90 backdrop-blur-sm'>
                         <tr>
                           <th className='px-3 py-2 font-medium text-muted-foreground'>#</th>
                           <th className='px-3 py-2 font-medium text-muted-foreground'>
@@ -3838,7 +3838,7 @@ const JiraMigrationScreen = (): ReactElement => {
           )}
 
           {migrationProgress && (
-            <section className='rounded-2xl border border-emerald-200 bg-[linear-gradient(135deg,rgba(16,185,129,0.12),rgba(255,255,255,0.92))] p-5 shadow-sm'>
+            <section className='rounded-2xl border border-emerald-200 bg-[linear-gradient(135deg,rgba(16,185,129,0.12),rgba(255,255,255,0.92))] p-5 shadow-xs'>
               <div className='flex items-start justify-between gap-4'>
                 <div>
                   <h3 className='text-sm font-semibold text-foreground'>Live Migration Progress</h3>
@@ -3961,7 +3961,7 @@ const JiraMigrationScreen = (): ReactElement => {
                           </div>
                           <div className='mt-2 max-h-56 overflow-auto rounded-md border border-emerald-100 bg-background/60'>
                             <table className='w-full text-left text-xs'>
-                              <thead className='sticky top-0 bg-background/80 backdrop-blur'>
+                              <thead className='sticky top-0 bg-background/80 backdrop-blur-sm'>
                                 <tr>
                                   <th className='px-2 py-1 font-medium text-muted-foreground'>#</th>
                                   <th className='px-2 py-1 font-medium text-muted-foreground'>
@@ -4011,7 +4011,7 @@ const JiraMigrationScreen = (): ReactElement => {
           )}
 
           {result && (
-            <section className='rounded-2xl border border-border bg-background p-5 shadow-sm'>
+            <section className='rounded-2xl border border-border bg-background p-5 shadow-xs'>
               <div className='flex items-start justify-between gap-4'>
                 <div>
                   <h3 className='text-sm font-semibold text-foreground'>Last Import Result</h3>
@@ -4213,7 +4213,7 @@ const JiraMigrationScreen = (): ReactElement => {
             description='Persisted Jira migration sources already imported into Xyne.'
             className='max-w-4xl'
           >
-            <div className='rounded-2xl bg-background p-5 shadow-sm'>
+            <div className='rounded-2xl bg-background p-5 shadow-xs'>
               <div className='flex items-start justify-between gap-4 border-b border-border pb-4'>
                 <div>
                   <h3 className='text-sm font-semibold text-foreground'>Migrated Jira Projects</h3>
@@ -4293,7 +4293,7 @@ const JiraMigrationScreen = (): ReactElement => {
           {preview && migrationPhase === 'migrate' && (
             <>
               <section className='grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4'>
-                <div className='rounded-2xl border border-border bg-[linear-gradient(135deg,rgba(15,118,110,0.08),rgba(255,255,255,0.96))] p-5 shadow-sm'>
+                <div className='rounded-2xl border border-border bg-[linear-gradient(135deg,rgba(15,118,110,0.08),rgba(255,255,255,0.96))] p-5 shadow-xs'>
                   <p className='text-[11px] uppercase tracking-[0.14em] text-muted-foreground'>
                     Jira Scope
                   </p>
@@ -4304,7 +4304,7 @@ const JiraMigrationScreen = (): ReactElement => {
                     {preview.jiraProject.totalIssues} issues in project
                   </p>
                 </div>
-                <div className='rounded-2xl border border-border bg-background p-5 shadow-sm'>
+                <div className='rounded-2xl border border-border bg-background p-5 shadow-xs'>
                   <p className='text-[11px] uppercase tracking-[0.14em] text-muted-foreground'>
                     Target
                   </p>
@@ -4313,7 +4313,7 @@ const JiraMigrationScreen = (): ReactElement => {
                   </h3>
                   <p className='mt-1 text-sm text-muted-foreground'>{preview.target.projectName}</p>
                 </div>
-                <div className='rounded-2xl border border-border bg-background p-5 shadow-sm'>
+                <div className='rounded-2xl border border-border bg-background p-5 shadow-xs'>
                   <p className='text-[11px] uppercase tracking-[0.14em] text-muted-foreground'>
                     Custom Fields
                   </p>
@@ -4324,7 +4324,7 @@ const JiraMigrationScreen = (): ReactElement => {
                     Create {previewActionCounts.create} • Reuse {previewActionCounts.reuse}
                   </p>
                 </div>
-                <div className='rounded-2xl border border-border bg-background p-5 shadow-sm'>
+                <div className='rounded-2xl border border-border bg-background p-5 shadow-xs'>
                   <p className='text-[11px] uppercase tracking-[0.14em] text-muted-foreground'>
                     Preview Page
                   </p>
@@ -4335,7 +4335,7 @@ const JiraMigrationScreen = (): ReactElement => {
                 </div>
               </section>
 
-              <section className='rounded-2xl border border-border bg-background p-5 shadow-sm'>
+              <section className='rounded-2xl border border-border bg-background p-5 shadow-xs'>
                 <div className='flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between'>
                   <div>
                     <h3 className='text-sm font-semibold text-foreground'>Preview Workspace</h3>
@@ -4402,7 +4402,7 @@ const JiraMigrationScreen = (): ReactElement => {
                 </div>
 
                 {previewSection === 'overview' && (
-                  <div className='mt-5 grid grid-cols-1 gap-5 xl:grid-cols-[1.15fr,0.85fr]'>
+                  <div className='mt-5 grid grid-cols-1 gap-5 xl:grid-cols-[1.15fr_0.85fr]'>
                     <div className='rounded-xl border border-border p-4'>
                       <div className='flex items-center justify-between gap-3'>
                         <div>

@@ -141,7 +141,7 @@ export const PdfPageViewer: React.FC<PdfPageViewerProps> = ({
         {/* Title bar */}
         <div className='flex items-center justify-between px-3 py-2 border-b border-border'>
           <div className='flex items-center gap-2 min-w-0'>
-            <FileText size={14} className='text-muted-foreground flex-shrink-0' />
+            <FileText size={14} className='text-muted-foreground shrink-0' />
             <span
               className="text-xs font-semibold text-foreground font-['Inter'] truncate"
               title={title}
@@ -149,7 +149,7 @@ export const PdfPageViewer: React.FC<PdfPageViewerProps> = ({
               {displayTitle}
             </span>
           </div>
-          <div className='flex items-center gap-2 ml-2 flex-shrink-0'>
+          <div className='flex items-center gap-2 ml-2 shrink-0'>
             <button
               onClick={enterPresent}
               className='flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors'
@@ -191,7 +191,7 @@ export const PdfPageViewer: React.FC<PdfPageViewerProps> = ({
               </div>
             )}
             {/* Overlay gradient to indicate it's a preview */}
-            <div className='absolute inset-0 bg-gradient-to-t from-black/10 to-transparent pointer-events-none' />
+            <div className='absolute inset-0 bg-linear-to-t from-black/10 to-transparent pointer-events-none' />
           </div>
         </div>
       </div>
@@ -226,7 +226,7 @@ export const PdfPageViewer: React.FC<PdfPageViewerProps> = ({
             }}
           >
             <div className='flex items-center gap-2 min-w-0'>
-              <FileText size={16} className='text-gray-400 flex-shrink-0' />
+              <FileText size={16} className='text-gray-400 shrink-0' />
               <span
                 style={{
                   color: '#fff',

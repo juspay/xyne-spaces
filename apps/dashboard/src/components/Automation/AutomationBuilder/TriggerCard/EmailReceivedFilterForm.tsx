@@ -68,7 +68,7 @@ export function EmailReceivedFilterForm({
           data-track-name='email-filter-toggle-exclude'
           className={cn(
             'flex w-full items-center justify-between gap-2 rounded-lg px-3 py-2 text-left',
-            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/40',
+            'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-foreground/40',
             'hover:bg-accent/40',
           )}
         >

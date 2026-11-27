@@ -36,6 +36,7 @@ RUN pnpm --filter @xyne/icons run build
 
 # dashboard/src is aliased as @/ in vite.config.ts
 COPY apps/dashboard/src apps/dashboard/src
+COPY apps/dashboard/postcss.config.js apps/dashboard/postcss.config.js
 
 # Copy remaining source LAST to maximise layer caching
 COPY apps/dashboard-external apps/dashboard-external

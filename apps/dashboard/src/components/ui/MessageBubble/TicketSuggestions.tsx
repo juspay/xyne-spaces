@@ -137,7 +137,7 @@ export const TicketSuggestions: React.FC<TicketSuggestionsProps> = ({
               onClick={() => handleNavigateToTicket(created)}
               data-track-category='MESSAGE'
               data-track-name='OPEN_SUGGESTED_TICKET'
-              className='text-sm text-left hover:underline focus:outline-none bg-transparent border-none p-0'
+              className='text-sm text-left hover:underline focus:outline-hidden bg-transparent border-none p-0'
             >
               <span className='font-semibold text-primary'>{created.xyneId}</span>
               <span className='mx-1.5 text-muted-foreground'>•</span>

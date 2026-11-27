@@ -276,7 +276,7 @@ export function SdlcChatPanel({
   const header = (
     <div
       className={cn(
-        'z-10 flex h-[52px] shrink-0 items-center gap-1.5 bg-background/95 px-3 backdrop-blur',
+        'z-10 flex h-[52px] shrink-0 items-center gap-1.5 bg-background/95 px-3 backdrop-blur-sm',
         headerRule && 'border-b',
       )}
     >
@@ -286,7 +286,7 @@ export function SdlcChatPanel({
           onClick={back.run}
           title={back.label}
           aria-label={back.label}
-          className='shrink-0 rounded p-0.5 text-muted-foreground transition-colors hover:bg-foreground/[0.08] hover:text-foreground'
+          className='shrink-0 rounded p-0.5 text-muted-foreground transition-colors hover:bg-foreground/8 hover:text-foreground'
           data-track-category='SdlcHub'
           data-track-name={back.trackName}
         >
@@ -328,7 +328,7 @@ export function SdlcChatPanel({
               onClick={scopeHeader.onOpen}
               title={`Open ${scopeHeader.name}`}
               aria-label={`Open ${scopeHeader.name}`}
-              className='flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-[11.5px] font-medium text-muted-foreground transition-colors hover:bg-foreground/[0.08] hover:text-foreground'
+              className='flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-[11.5px] font-medium text-muted-foreground transition-colors hover:bg-foreground/8 hover:text-foreground'
               data-track-category='SdlcHub'
               data-track-name='SdlcChatScopeOpened'
             >
@@ -339,21 +339,21 @@ export function SdlcChatPanel({
         </span>
       )}
       {!threadOpen && listActions ? (
-        <div className='flex shrink-0 items-center gap-1 [&_button]:!size-7 [&_button]:!rounded-lg'>
+        <div className='flex shrink-0 items-center gap-1 [&_button]:size-7! [&_button]:rounded-lg!'>
           {listActions}
         </div>
       ) : null}
       {/* Where ThreadMessages portals its actions. */}
       <div
         ref={setHeaderActionsEl}
-        className='flex shrink-0 items-center [&>div]:animate-in [&>div]:fade-in [&>div]:duration-300 [&>div]:!gap-1'
+        className='flex shrink-0 items-center [&>div]:animate-in [&>div]:fade-in [&>div]:duration-300 [&>div]:gap-1!'
       />
       <button
         type='button'
         onClick={onClose}
         title='Close'
         aria-label='Close discussions'
-        className='shrink-0 rounded-lg p-1 text-muted-foreground transition-colors hover:bg-foreground/[0.08] hover:text-foreground'
+        className='shrink-0 rounded-lg p-1 text-muted-foreground transition-colors hover:bg-foreground/8 hover:text-foreground'
         data-track-category='SdlcHub'
         data-track-name='SdlcChatClosed'
       >

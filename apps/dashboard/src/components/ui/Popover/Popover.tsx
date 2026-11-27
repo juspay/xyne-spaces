@@ -253,8 +253,8 @@ export const Popover = ({
             'data-[side=left]:slide-in-from-right-2',
             'data-[side=right]:slide-in-from-left-2',
             'data-[side=top]:slide-in-from-bottom-2',
-            'z-[60] w-fit origin-[--radix-popover-content-transform-origin]',
-            'rounded-md border p-4 shadow-md outline-hidden',
+            'z-60 w-fit origin-(--radix-popover-content-transform-origin)',
+            'rounded-md border p-4 shadow-md ',
             className,
           )}
         >
@@ -269,7 +269,7 @@ export const Popover = ({
           {showClose && (
             <PopoverPrimitive.Close
               className={cn(
-                'absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none',
+                'absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-hidden focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none',
                 closeButtonClassName,
               )}
               aria-label='Close'

@@ -49,7 +49,7 @@ const RecordingControlsOverlay = ({
           <button
             type='button'
             onClick={onStart}
-            className='flex h-9 w-full min-w-0 cursor-pointer items-center justify-center gap-2.5 rounded-full px-1 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-foreground/60 focus-visible:ring-offset-2 focus-visible:ring-offset-primary'
+            className='flex h-9 w-full min-w-0 cursor-pointer items-center justify-center gap-2.5 rounded-full px-1 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary-foreground/60 focus-visible:ring-offset-2 focus-visible:ring-offset-primary'
             aria-label='Start recording'
             aria-keyshortcuts='Meta+Alt+X Control+Alt+X'
             data-track-category='RecordingControlsOverlay'
@@ -64,7 +64,7 @@ const RecordingControlsOverlay = ({
             <span className='ml-1 hidden items-center gap-1 sm:flex' aria-hidden='true'>
               <kbd
                 className={cn(
-                  'flex h-5 items-center justify-center rounded-md border border-primary-foreground/20 bg-primary-foreground/10 text-primary-foreground/80 shadow-xs',
+                  'flex h-5 items-center justify-center rounded-md border border-primary-foreground/20 bg-primary-foreground/10 text-primary-foreground/80 ',
                   isApplePlatform ? 'w-5' : 'min-w-8 px-1 font-sans text-[9px] font-semibold',
                 )}
               >
@@ -72,7 +72,7 @@ const RecordingControlsOverlay = ({
               </kbd>
               <kbd
                 className={cn(
-                  'flex h-5 items-center justify-center rounded-md border border-primary-foreground/20 bg-primary-foreground/10 text-primary-foreground/80 shadow-xs',
+                  'flex h-5 items-center justify-center rounded-md border border-primary-foreground/20 bg-primary-foreground/10 text-primary-foreground/80 ',
                   isApplePlatform ? 'w-5' : 'min-w-8 px-1 font-sans text-[9px] font-semibold',
                 )}
               >
@@ -84,7 +84,7 @@ const RecordingControlsOverlay = ({
                   'Alt'
                 )}
               </kbd>
-              <kbd className='flex size-5 items-center justify-center rounded-md border border-primary-foreground/20 bg-primary-foreground/10 font-mono text-[10px] font-semibold text-primary-foreground/80 shadow-xs'>
+              <kbd className='flex size-5 items-center justify-center rounded-md border border-primary-foreground/20 bg-primary-foreground/10 font-mono text-[10px] font-semibold text-primary-foreground/80'>
                 X
               </kbd>
             </span>

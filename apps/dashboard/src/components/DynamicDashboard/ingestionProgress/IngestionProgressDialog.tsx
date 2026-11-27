@@ -296,7 +296,7 @@ export const IngestionProgressDialog = ({
                 placeholder='Filter tables…'
                 data-track-category='DYNAMIC_DASHBOARD'
                 data-track-name='Filter_Ingestion_Tables'
-                className='w-full h-8 pl-8 pr-3 rounded-lg border border-xyne-gray-200 bg-white text-[13px] text-xyne-gray-900 placeholder:text-xyne-gray-400 outline-none focus:border-xyne-gray-400 transition-colors'
+                className='w-full h-8 pl-8 pr-3 rounded-lg border border-xyne-gray-200 bg-white text-[13px] text-xyne-gray-900 placeholder:text-xyne-gray-400 outline-hidden focus:border-xyne-gray-400 transition-colors'
               />
             </div>
           </div>

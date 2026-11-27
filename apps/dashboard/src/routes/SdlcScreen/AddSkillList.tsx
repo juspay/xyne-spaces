@@ -31,7 +31,7 @@ function importBlocked(skill: ImportPreviewSkill): string | null {
 const compact = new Intl.NumberFormat(undefined, { notation: 'compact' });
 
 // One height for every row in both sections, the placeholders included.
-const rowClass = 'flex min-h-[4.5rem] items-center gap-3 rounded-lg px-2 py-3';
+const rowClass = 'flex min-h-18 items-center gap-3 rounded-lg px-2 py-3';
 
 const errorText = (error: unknown): string =>
   error instanceof Error ? error.message : 'Something went wrong.';
@@ -295,7 +295,7 @@ export function AddSkillList(props: {
             {hub ? 'Added' : 'Imported'}
           </span>
         ) : row.reason ? (
-          <span className='max-w-[12rem] shrink-0 text-right text-xs text-muted-foreground'>
+          <span className='max-w-48 shrink-0 text-right text-xs text-muted-foreground'>
             {row.reason}
           </span>
         ) : (

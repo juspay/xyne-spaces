@@ -71,7 +71,7 @@ const InlineNameCell: React.FC<{
       aria-label='Rename'
       data-track-category='knowledge-base'
       data-track-name='rename-entry-inline'
-      className='h-6 w-full min-w-0 rounded-md border border-border bg-background px-1.5 text-[13.5px] font-medium text-foreground focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring'
+      className='h-6 w-full min-w-0 rounded-md border border-border bg-background px-1.5 text-[13.5px] font-medium text-foreground focus:border-ring focus:outline-hidden focus:ring-1 focus:ring-ring'
     />
   );
 };
@@ -203,7 +203,7 @@ export const EntryListV2: React.FC<EntryListV2Props> = ({
                     this row is the rename target. */}
                 {editingId === e.id && onRenameCommit && onRenameCancel ? (
                   <div className='flex min-w-0 items-center gap-3'>
-                    <span className='flex-shrink-0 pr-1'>
+                    <span className='shrink-0 pr-1'>
                       {e.type === 'FOLDER' ? (
                         <div className='relative flex h-7 w-7 items-center justify-center'>
                           <Folder className='h-5 w-5 text-muted-foreground' strokeWidth={1.5} />
@@ -246,7 +246,7 @@ export const EntryListV2: React.FC<EntryListV2Props> = ({
                       data-track-category='knowledge-base'
                       data-track-name='open-entry'
                     >
-                      <span className='flex-shrink-0 pr-1'>
+                      <span className='shrink-0 pr-1'>
                         {e.type === 'FOLDER' ? (
                           <div className='relative flex h-7 w-7 items-center justify-center'>
                             <Folder className='h-5 w-5 text-muted-foreground' strokeWidth={1.5} />

@@ -819,7 +819,7 @@ const AIScreen = (): ReactElement => {
               workspaceControlsRef={workspaceControlsRef}
             >
               {isDragging && !showChatView && (
-                <div className='pointer-events-none absolute inset-0 z-50 flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-primary/50 bg-background/95 backdrop-blur-sm'>
+                <div className='pointer-events-none absolute inset-0 z-50 flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-primary/50 bg-background/95 backdrop-blur-xs'>
                   <div className='flex flex-col items-center gap-3'>
                     <div className='rounded-full bg-primary/10 p-4'>
                       <Upload className='h-8 w-8 text-primary' />

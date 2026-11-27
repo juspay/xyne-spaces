@@ -809,16 +809,16 @@ export const TicketListView = function TicketListView({
         data-slot='ticket-list-view'
         role='list'
         aria-label='Tickets'
-        className={cn('h-full w-full overflow-y-auto outline-none', className)}
+        className={cn('h-full w-full overflow-y-auto outline-hidden', className)}
       >
         <div className='flex flex-col'>
           {Array.from({ length: skeletonRowCount }).map((_, i) => (
             <div key={i} className='flex items-center gap-3 px-6 py-3 border-b border-border'>
-              <Skeleton className='h-3.5 w-3.5 rounded-full flex-shrink-0' />
-              <Skeleton className='h-3 w-24 flex-shrink-0' />
+              <Skeleton className='h-3.5 w-3.5 rounded-full shrink-0' />
+              <Skeleton className='h-3 w-24 shrink-0' />
               <Skeleton className='h-3.5 w-full max-w-[300px]' />
               <div className='flex-1' />
-              <Skeleton className='h-3 w-12 flex-shrink-0' />
+              <Skeleton className='h-3 w-12 shrink-0' />
             </div>
           ))}
         </div>
@@ -838,7 +838,7 @@ export const TicketListView = function TicketListView({
           setSelectedIndex(0);
         }
       }}
-      className={cn('h-full w-full outline-none')}
+      className={cn('h-full w-full outline-hidden')}
       initialTopMostItemIndex={0}
       increaseViewportBy={{ top: 1200, bottom: 1200 }}
       totalListHeightChanged={setBodyContentHeight}
@@ -1105,7 +1105,7 @@ export const TicketListView = function TicketListView({
                   data-track-category='Support'
                   data-track-name='ResizeTicketListColumn'
                   data-track-metadata={JSON.stringify({ column: column.key })}
-                  className='group pointer-events-auto absolute -right-3 inset-y-0 w-3 cursor-col-resize touch-none select-none border-0 bg-transparent p-0 outline-none'
+                  className='group pointer-events-auto absolute -right-3 inset-y-0 w-3 cursor-col-resize touch-none select-none border-0 bg-transparent p-0 outline-hidden'
                 >
                   <span
                     className={cn(

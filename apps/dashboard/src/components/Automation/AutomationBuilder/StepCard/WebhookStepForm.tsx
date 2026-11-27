@@ -408,7 +408,7 @@ function Collapsible({
         data-track-name='webhook-collapsible-toggle'
         className={cn(
           'flex w-full items-center justify-between gap-2 rounded-lg px-3 py-2 text-left',
-          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/40',
+          'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-foreground/40',
           'hover:bg-accent/40',
         )}
       >
@@ -489,9 +489,9 @@ function AuthEditor({
                 data-track-category='automation-builder'
                 data-track-name='webhook-toggle-password-visibility'
                 className={cn(
-                  'flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md border border-border',
+                  'flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border',
                   'text-muted-foreground hover:text-foreground hover:bg-accent/40',
-                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/40',
+                  'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-foreground/40',
                 )}
               >
                 {showPassword ? (
@@ -682,7 +682,7 @@ function HeadersEditor({
               className={cn(
                 'flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground',
                 'hover:text-red-600 hover:bg-red-500/10',
-                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/40',
+                'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-foreground/40',
               )}
             >
               <Trash2 className='size-4' aria-hidden='true' />

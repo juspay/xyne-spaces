@@ -44,7 +44,7 @@ export const AddPeopleHistoryStep: React.FC<AddPeopleHistoryStepProps> = ({
             <div key={option.mode} className='space-y-2'>
               <RadioGroupPrimitive.Item
                 value={option.mode}
-                className='flex w-full items-center gap-3 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-ring/50'
+                className='flex w-full items-center gap-3 rounded-md text-left outline-hidden focus-visible:ring-2 focus-visible:ring-ring/50'
                 data-track-category='ADD_CHAT_PARTICIPANTS'
                 data-track-name='SELECT_HISTORY_SCOPE'
               >
@@ -117,7 +117,7 @@ export const AddPeopleHistoryStep: React.FC<AddPeopleHistoryStepProps> = ({
                               {formatMessageTime(conversation.createdAt)}
                             </span>
                           </div>
-                          <p className='whitespace-pre-wrap break-words text-sm text-foreground/80'>
+                          <p className='whitespace-pre-wrap wrap-break-word text-sm text-foreground/80'>
                             {toPreviewText(conversation.initialMessage?.content)}
                           </p>
 

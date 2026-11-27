@@ -223,7 +223,7 @@ const CallAskAIModal = ({
             onChange={event => setQuery(event.target.value)}
             placeholder='Search calls, people or labels...'
             aria-label='Search calls, people or labels'
-            className='w-full bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground'
+            className='w-full bg-transparent text-sm text-foreground outline-hidden placeholder:text-muted-foreground'
             data-track-category='CALLS'
             data-track-name='search_ask_ai_context_calls'
           />

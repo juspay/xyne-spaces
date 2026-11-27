@@ -88,7 +88,7 @@ const ProjectsScreen = (): ReactElement => {
             onClick={toggleSidebar}
             aria-label='Expand sidebar'
             aria-controls='projects-sidebar-region'
-            className='-ml-1 flex size-[30px] shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring'
+            className='-ml-1 flex size-[30px] shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring'
             data-track-category='Projects'
             data-track-name='ToggleProjectsSidebar'
           >

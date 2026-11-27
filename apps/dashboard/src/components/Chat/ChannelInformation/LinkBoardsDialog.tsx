@@ -106,7 +106,7 @@ function ProjectRow({
                   disabled={isLinked}
                   onClick={() => onToggleBoard(board.id)}
                   className={cn(
-                    'w-full flex items-center gap-2 px-2 py-2 rounded-md text-left transition-colors outline-none',
+                    'w-full flex items-center gap-2 px-2 py-2 rounded-md text-left transition-colors outline-hidden',
                     isLinked && 'cursor-not-allowed opacity-60',
                     !isLinked && isSelected && 'bg-accent text-accent-foreground',
                     !isLinked && !isSelected && 'hover:bg-muted text-foreground',
@@ -258,7 +258,7 @@ export const LinkBoardsDialog = ({
           />
         </div>
 
-        <div className='max-h-72 min-h-[9rem] overflow-y-auto rounded-lg border border-border p-1'>
+        <div className='max-h-72 min-h-36 overflow-y-auto rounded-lg border border-border p-1'>
           {filteredProjects.length === 0 ? (
             <div className='flex h-32 items-center justify-center px-4 text-center text-sm text-muted-foreground'>
               {search ? 'No matching projects' : 'No projects found'}

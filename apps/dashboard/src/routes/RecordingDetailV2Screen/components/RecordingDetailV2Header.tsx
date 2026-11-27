@@ -50,10 +50,10 @@ const HeaderTitle = ({
     <span
       role='status'
       aria-label='Generating title'
-      className='flex h-9 w-[28rem] max-w-full items-center'
+      className='flex h-9 w-md max-w-full items-center'
     >
       <span aria-hidden='true' className='relative h-7 w-full overflow-hidden rounded-lg bg-muted'>
-        <span className='pointer-events-none absolute inset-0 bg-[linear-gradient(110deg,transparent_25%,hsl(var(--foreground)/0.12)_50%,transparent_75%)] bg-[length:200%_100%] [--duration:3s] motion-safe:animate-shine' />
+        <span className='pointer-events-none absolute inset-0 bg-[linear-gradient(110deg,transparent_25%,hsl(var(--foreground)/0.12)_50%,transparent_75%)] bg-size-[200%_100%] [--duration:3s] motion-safe:animate-shine' />
       </span>
     </span>
   ) : (
@@ -213,7 +213,7 @@ export const RecordingDetailV2Header = ({
                   onSave={() => void handleSaveTitle()}
                   onKeyDown={handleTitleKeyDown}
                   disabled={isSavingTitle}
-                  className='absolute inset-0 w-full bg-transparent border-0 p-0 text-3xl font-medium text-foreground focus:outline-none focus:ring-0 disabled:opacity-50'
+                  className='absolute inset-0 w-full bg-transparent border-0 p-0 text-3xl font-medium text-foreground focus:outline-hidden focus:ring-0 disabled:opacity-50'
                   trackCategory='RecordingDetailV2'
                 />
               </div>
@@ -229,7 +229,7 @@ export const RecordingDetailV2Header = ({
                   handleStartEdit();
                 }
               }}
-              className='flex items-baseline gap-2 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring'
+              className='flex items-baseline gap-2 rounded-md outline-hidden focus-visible:ring-2 focus-visible:ring-ring'
               data-track-category='RecordingDetailV2'
               data-track-name='edit_title_click_title'
             >

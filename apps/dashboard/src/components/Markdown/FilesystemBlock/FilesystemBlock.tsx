@@ -184,7 +184,7 @@ const FilesystemBlockComponent = ({ jsonSource }: FilesystemBlockProps): ReactEl
         {viewMode === 'diagram' ? (
           <FilesystemGraph root={currentNode} onDrillIn={handleDrillIn} />
         ) : (
-          <pre className='text-sm text-foreground overflow-x-auto whitespace-pre-wrap break-words m-0'>
+          <pre className='text-sm text-foreground overflow-x-auto whitespace-pre-wrap wrap-break-word m-0'>
             {jsonSource}
           </pre>
         )}

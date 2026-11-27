@@ -135,7 +135,7 @@ export function BriefSettingsDialog({
               className={cn(
                 'w-full resize-none rounded-lg border bg-background px-3 py-2',
                 'text-sm text-foreground placeholder:text-muted-foreground',
-                'outline-none transition-colors focus:border-ring',
+                'outline-hidden transition-colors focus:border-ring',
                 'disabled:cursor-not-allowed disabled:opacity-50',
                 overLimit ? 'border-destructive' : 'border-border',
               )}

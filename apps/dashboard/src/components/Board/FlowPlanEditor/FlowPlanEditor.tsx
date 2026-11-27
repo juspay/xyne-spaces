@@ -1423,7 +1423,7 @@ export const FlowPlanEditor: React.FC<FlowPlanEditorProps> = ({
                   onClick={handleRearrange}
                   data-track-category='flow_plan_editor'
                   data-track-name='rearrange_steps'
-                  className='flex items-center gap-1.5 bg-background border border-border rounded-lg px-2.5 py-1.5 shadow text-[12px] text-muted-foreground hover:text-[#6276be] hover:border-[#6276be] transition-colors'
+                  className='flex items-center gap-1.5 bg-background border border-border rounded-lg px-2.5 py-1.5 shadow-sm text-[12px] text-muted-foreground hover:text-[#6276be] hover:border-[#6276be] transition-colors'
                   title='Auto-arrange steps'
                 >
                   <LayoutGrid size={13} />
@@ -1448,7 +1448,7 @@ export const FlowPlanEditor: React.FC<FlowPlanEditorProps> = ({
                         groupSelectionMode ? 'cancel_create_group' : 'start_create_group'
                       }
                       className={cn(
-                        'flex items-center gap-1.5 border rounded-lg px-2.5 py-1.5 shadow text-[12px] transition-colors',
+                        'flex items-center gap-1.5 border rounded-lg px-2.5 py-1.5 shadow-sm text-[12px] transition-colors',
                         groupSelectionMode
                           ? 'border-[#6276be] bg-[#6276be] text-white'
                           : 'bg-background border-border text-muted-foreground hover:text-[#6276be] hover:border-[#6276be]',
@@ -1465,14 +1465,14 @@ export const FlowPlanEditor: React.FC<FlowPlanEditorProps> = ({
                     </button>
                     <DropdownMenu>
                       <DropdownMenuTrigger
-                        className='flex items-center gap-1.5 bg-background border border-border rounded-lg px-2.5 py-1.5 shadow text-[12px] text-muted-foreground hover:text-[#6276be] hover:border-[#6276be] transition-colors outline-none'
+                        className='flex items-center gap-1.5 bg-background border border-border rounded-lg px-2.5 py-1.5 shadow-sm text-[12px] text-muted-foreground hover:text-[#6276be] hover:border-[#6276be] transition-colors outline-hidden'
                         data-track-category='flow_plan_editor'
                         data-track-name='add_detached_node'
                       >
                         <Plus size={13} />
                         <span className='font-medium'>Add node</span>
                       </DropdownMenuTrigger>
-                      <DropdownMenuContent align='start' sideOffset={6} className='z-[9999]'>
+                      <DropdownMenuContent align='start' sideOffset={6} className='z-9999'>
                         <DropdownMenuItem
                           onSelect={() => addDetachedNode('confirmation')}
                           className='flex items-center gap-2'
@@ -1490,7 +1490,7 @@ export const FlowPlanEditor: React.FC<FlowPlanEditorProps> = ({
                       </DropdownMenuContent>
                     </DropdownMenu>
                     {groupSelectionMode && (
-                      <div className='max-w-[190px] rounded-lg border border-[#6276be]/40 bg-background/95 px-2.5 py-2 text-[11px] leading-4 text-muted-foreground shadow'>
+                      <div className='max-w-[190px] rounded-lg border border-[#6276be]/40 bg-background/95 px-2.5 py-2 text-[11px] leading-4 text-muted-foreground shadow-sm'>
                         Draw a box around the items to group. Press Esc to cancel.
                       </div>
                     )}
@@ -1501,7 +1501,7 @@ export const FlowPlanEditor: React.FC<FlowPlanEditorProps> = ({
 
             {showStatusLegend && (
               <Panel position='top-right'>
-                <div className='bg-background/95 border border-border rounded-lg px-3 py-2.5 shadow flex flex-col gap-1.5'>
+                <div className='bg-background/95 border border-border rounded-lg px-3 py-2.5 shadow-sm flex flex-col gap-1.5'>
                   <span className='text-[10px] font-semibold text-muted-foreground uppercase tracking-[0.5px]'>
                     Ticket statuses (fixed)
                   </span>

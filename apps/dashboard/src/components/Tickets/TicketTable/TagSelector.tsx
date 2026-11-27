@@ -97,7 +97,7 @@ export const TagSelector: React.FC<TagSelectorProps> = ({
           side='bottom'
           align='start'
           sideOffset={4}
-          className='z-[100] w-80 bg-background border border-border rounded-lg shadow-lg'
+          className='z-100 w-80 bg-background border border-border rounded-lg shadow-lg'
           avoidCollisions={true}
           onOpenAutoFocus={e => e.preventDefault()}
         >

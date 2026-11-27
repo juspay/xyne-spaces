@@ -100,7 +100,7 @@ export const MobileAttachmentsGrid: React.FC<MobileAttachmentsGridProps> = ({ at
           // For 3 attachments
           if (activeAttachments.length === 3) {
             return (
-              <div className='grid grid-cols-2 first:*:row-span-2 first:*:w-full gap-1 overflow-hidden'>
+              <div className='grid grid-cols-2 *:first:row-span-2 *:first:w-full gap-1 overflow-hidden'>
                 {activeAttachments.map(attachment => (
                   <div key={attachment.id} className='h-full aspect-square'>
                     <MessageAttachment
@@ -200,7 +200,7 @@ export const MobileAttachmentsGrid: React.FC<MobileAttachmentsGridProps> = ({ at
       {deletedAttachments.length > 0 && activeAttachments.length === 0 && (
         <div className='mt-1'>
           <div className='flex items-center gap-3 rounded-lg border border-border bg-muted/30 px-3 py-2'>
-            <div className='flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md bg-muted'>
+            <div className='flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-muted'>
               <Trash2 className='h-4 w-4 text-muted-foreground' />
             </div>
             <span className='text-sm text-muted-foreground'>This file was deleted.</span>

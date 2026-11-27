@@ -145,7 +145,7 @@ export function AskAiRatingButtons({
             autoFocus
             data-track-category='XyneAI'
             data-track-name='RATING_COMMENT_INPUT'
-            className='h-6 w-44 rounded-md border border-border bg-background px-2 text-[11px] text-foreground placeholder:text-muted-foreground focus:border-ring focus:outline-none'
+            className='h-6 w-44 rounded-md border border-border bg-background px-2 text-[11px] text-foreground placeholder:text-muted-foreground focus:border-ring focus:outline-hidden'
             onKeyDown={(e): void => {
               if (e.key === 'Enter') {
                 void submit('down', commentText);

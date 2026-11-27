@@ -90,7 +90,7 @@ const D2BlockComponent = ({ source }: D2BlockProps): ReactElement => {
         <p className='mt-1 text-xs text-red-500'>{error}</p>
         <details className='mt-2'>
           <summary className='text-xs text-red-500 cursor-pointer'>Show diagram code</summary>
-          <pre className='mt-2 text-xs text-foreground overflow-x-auto whitespace-pre-wrap break-words'>
+          <pre className='mt-2 text-xs text-foreground overflow-x-auto whitespace-pre-wrap wrap-break-word'>
             {source}
           </pre>
         </details>
@@ -102,12 +102,12 @@ const D2BlockComponent = ({ source }: D2BlockProps): ReactElement => {
     const iconBtn = (active: boolean): string =>
       `flex items-center justify-center rounded-md p-1 transition-colors ${
         active
-          ? 'bg-background text-foreground shadow-sm'
+          ? 'bg-background text-foreground shadow-xs'
           : 'text-muted-foreground hover:text-foreground'
       }`;
     return (
       <div className='group/d2 relative my-4 overflow-hidden rounded-xl border border-border/60 bg-muted/30'>
-        <div className='absolute right-2 top-2 z-10 flex items-center gap-0.5 rounded-lg border border-border/60 bg-background/70 p-0.5 opacity-0 shadow-sm backdrop-blur-sm transition-opacity focus-within:opacity-100 group-hover/d2:opacity-100'>
+        <div className='absolute right-2 top-2 z-10 flex items-center gap-0.5 rounded-lg border border-border/60 bg-background/70 p-0.5 opacity-0 shadow-xs backdrop-blur-xs transition-opacity focus-within:opacity-100 group-hover/d2:opacity-100'>
           <button
             onClick={() => setViewMode('diagram')}
             className={iconBtn(viewMode === 'diagram')}
@@ -181,14 +181,14 @@ const D2BlockComponent = ({ source }: D2BlockProps): ReactElement => {
           />
         ) : (
           <div className='p-3 pt-10'>
-            <pre className='overflow-x-auto whitespace-pre-wrap break-words rounded-lg bg-muted p-3 text-[12.5px] leading-relaxed text-foreground'>
+            <pre className='overflow-x-auto whitespace-pre-wrap wrap-break-word rounded-lg bg-muted p-3 text-[12.5px] leading-relaxed text-foreground'>
               {source}
             </pre>
           </div>
         )}
 
         {isRendering && (
-          <div className='absolute bottom-2 left-2 flex items-center gap-1 rounded-md bg-background/80 px-2 py-1 text-xs text-muted-foreground shadow-sm'>
+          <div className='absolute bottom-2 left-2 flex items-center gap-1 rounded-md bg-background/80 px-2 py-1 text-xs text-muted-foreground shadow-xs'>
             <div className='h-3 w-3 animate-spin rounded-full border-2 border-blue-500 border-t-transparent' />
             <span>Updating...</span>
           </div>

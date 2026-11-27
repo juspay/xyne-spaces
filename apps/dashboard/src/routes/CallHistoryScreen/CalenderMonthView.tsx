@@ -109,7 +109,7 @@ function MonthOtherUserEventRow({
           onClick={e => e.stopPropagation()}
           data-track-category='CALENDAR'
           data-track-name='calendar-month-other-user-call'
-          className='w-full focus:outline-none'
+          className='w-full focus:outline-hidden'
         >
           {row}
         </button>
@@ -340,7 +340,7 @@ const CalendarMonthView = ({
                                   data-track-category='CALLS'
                                   data-track-name='calendar-month-call-pill'
                                   className={cn(
-                                    'relative flex items-center max-sm:items-start gap-1 max-sm:gap-0.5 text-left w-full px-1 max-sm:px-0.5 py-0.5 max-sm:py-px rounded transition-colors cursor-pointer focus:outline-none',
+                                    'relative flex items-center max-sm:items-start gap-1 max-sm:gap-0.5 text-left w-full px-1 max-sm:px-0.5 py-0.5 max-sm:py-px rounded transition-colors cursor-pointer focus:outline-hidden',
                                     variant === 'past'
                                       ? 'bg-muted/50 text-muted-foreground'
                                       : variant === 'declined'
@@ -481,7 +481,7 @@ const CalendarMonthView = ({
                                 onClick={e => e.stopPropagation()}
                                 data-track-category='CALLS'
                                 data-track-name='calendar-month-overflow'
-                                className='text-[11px] max-sm:text-[10px] font-medium max-sm:font-normal px-1 cursor-pointer hover:underline text-left text-primary focus:outline-none'
+                                className='text-[11px] max-sm:text-[10px] font-medium max-sm:font-normal px-1 cursor-pointer hover:underline text-left text-primary focus:outline-hidden'
                               >
                                 +{overflow} more
                               </button>
@@ -558,7 +558,7 @@ const CalendarMonthView = ({
                                         }
                                       >
                                         <PopoverPrimitive.Trigger asChild>
-                                          <button className='relative flex items-center gap-2 w-full px-4 py-2 hover:bg-muted/50 transition-colors text-left focus:outline-none'>
+                                          <button className='relative flex items-center gap-2 w-full px-4 py-2 hover:bg-muted/50 transition-colors text-left focus:outline-hidden'>
                                             {isMaybe && call.status !== CallStatus.ENDED && (
                                               <div className='pointer-events-none absolute inset-0 overflow-hidden'>
                                                 <div

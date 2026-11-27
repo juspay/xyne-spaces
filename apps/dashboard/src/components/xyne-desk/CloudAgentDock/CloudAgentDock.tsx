@@ -185,7 +185,7 @@ function ToolbarButton({ onClick }: { onClick: () => void }): ReactElement {
     <Tooltip side='bottom' delayDuration={300} content='Open Ozonetel toolbar'>
       <button
         type='button'
-        className='flex h-8 w-8 items-center justify-center rounded-full border border-emerald-200 bg-gradient-to-r from-emerald-500 via-teal-500 to-cyan-500 text-white shadow-md shadow-emerald-500/20 transition-all hover:-translate-y-0.5 hover:shadow-lg hover:shadow-emerald-500/30 focus:outline-none focus:ring-2 focus:ring-emerald-400/50'
+        className='flex h-8 w-8 items-center justify-center rounded-full border border-emerald-200 bg-linear-to-r from-emerald-500 via-teal-500 to-cyan-500 text-white shadow-md shadow-emerald-500/20 transition-all hover:-translate-y-0.5 hover:shadow-lg hover:shadow-emerald-500/30 focus:outline-hidden focus:ring-2 focus:ring-emerald-400/50'
         aria-label='Open Ozonetel toolbar'
         data-track-category='Support'
         data-track-name='OpenOzonetelToolbar'
@@ -290,7 +290,7 @@ function FloatingCloudAgentPanel({
 
   return createPortal(
     <div
-      className='fixed z-[70] flex overflow-hidden rounded-2xl border border-border bg-background shadow-2xl'
+      className='fixed z-70 flex overflow-hidden rounded-2xl border border-border bg-background shadow-2xl'
       style={{
         width: FLOATING_WIDTH_PX,
         height: FLOATING_HEIGHT_PX,

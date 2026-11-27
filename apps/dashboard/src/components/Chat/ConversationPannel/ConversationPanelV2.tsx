@@ -358,7 +358,7 @@ const ConversationPanelV2 = ({
                 // Discussions sit in a side panel whose foot the key hint would otherwise
                 // crowd, so the composer stands as far off it as the list ends above it.
                 <div
-                  className={`${discussionList ? 'pb-5' : 'pb-3'} bg-background px-[var(--composer-px)] [--composer-px:0.75rem]`}
+                  className={`${discussionList ? 'pb-5' : 'pb-3'} bg-background px-(--composer-px) [--composer-px:0.75rem]`}
                 >
                   <ChatInput
                     // eslint-disable-next-line jsx-a11y/no-autofocus

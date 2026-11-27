@@ -180,7 +180,7 @@ export function SummaryTemplateTestPanel({
     <aside
       className={cn(
         'flex shrink-0 flex-col border-l border-border bg-background',
-        kind === 'output' ? 'w-[30rem]' : 'w-96',
+        kind === 'output' ? 'w-120' : 'w-96',
       )}
       aria-label={config.title}
     >
@@ -242,7 +242,7 @@ export function SummaryTemplateTestPanel({
             }}
             rows={10}
             placeholder='Paste a meeting transcript…'
-            className='min-h-48 w-full resize-y rounded-xl bg-muted/50 px-3 py-2.5 text-sm leading-relaxed outline-none focus-visible:ring-1 focus-visible:ring-border placeholder:text-muted-foreground/60'
+            className='min-h-48 w-full resize-y rounded-xl bg-muted/50 px-3 py-2.5 text-sm leading-relaxed outline-hidden focus-visible:ring-1 focus-visible:ring-border placeholder:text-muted-foreground/60'
             data-track-category='SummaryTemplates'
             data-track-name={`Edit${config.trackPrefix}TestTranscript`}
           />

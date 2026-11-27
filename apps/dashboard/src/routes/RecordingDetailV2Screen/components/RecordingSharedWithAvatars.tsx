@@ -52,7 +52,7 @@ export const RecordingSharedWithAvatars = ({
       <button
         type='button'
         onClick={onOpen}
-        className='inline-flex h-7 items-center rounded-lg px-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+        className='inline-flex h-7 items-center rounded-lg px-0.5 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring'
         aria-label={`${tooltipLabel}. Open share settings`}
         data-track-category='RecordingDetailV2'
         data-track-name='open_share_modal_from_avatars'

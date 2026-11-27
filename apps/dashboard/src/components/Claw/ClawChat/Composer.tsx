@@ -66,7 +66,7 @@ export function Composer({ isStreaming, onSend, onStop }: ComposerProps): ReactE
           data-track-category='CLAW_CHAT'
           data-track-name='COMPOSER_INPUT'
           className={cn(
-            'flex-1 resize-none bg-transparent text-sm text-foreground outline-none',
+            'flex-1 resize-none bg-transparent text-sm text-foreground outline-hidden',
             'placeholder:text-muted-foreground max-h-32',
           )}
         />

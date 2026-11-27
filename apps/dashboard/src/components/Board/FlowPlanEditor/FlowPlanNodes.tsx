@@ -136,7 +136,7 @@ export const StepAssigneePicker: React.FC<{
       modal
       align='end'
       sideOffset={4}
-      className='p-0 w-64 z-[9999]'
+      className='p-0 w-64 z-9999'
     >
       <div className='flex flex-col max-h-72'>
         <div className='p-2 border-b border-border'>
@@ -147,7 +147,7 @@ export const StepAssigneePicker: React.FC<{
               placeholder='Search users...'
               value={search}
               onChange={event => setSearch(event.target.value)}
-              className='w-full pl-8 pr-2 py-1.5 border border-input rounded-md bg-background text-xs text-foreground placeholder:text-muted-foreground focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none'
+              className='w-full pl-8 pr-2 py-1.5 border border-input rounded-md bg-background text-xs text-foreground placeholder:text-muted-foreground focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-hidden'
               data-track-category='flow_plan_editor'
               data-track-name='search_step_assignee'
             />
@@ -231,7 +231,7 @@ const PlanNodeCard: React.FC<NodeProps<PlanNodeData>> = ({ data, selected }) => 
           type='target'
           position={Position.Top}
           isConnectable={!readOnly}
-          className='!w-3 !h-3 !bg-[#6276be] !border-2 !border-background !rounded-full'
+          className='w-3! h-3! bg-[#6276be]! border-2! border-background! rounded-full!'
           style={{ top: -7 }}
         />
       )}
@@ -239,7 +239,7 @@ const PlanNodeCard: React.FC<NodeProps<PlanNodeData>> = ({ data, selected }) => 
         type='source'
         position={Position.Bottom}
         isConnectable={!readOnly}
-        className='!w-3 !h-3 !bg-[#6276be] !border-2 !border-background !rounded-full'
+        className='w-3! h-3! bg-[#6276be]! border-2! border-background! rounded-full!'
         style={{ bottom: -7 }}
       />
 
@@ -308,7 +308,7 @@ const PlanNodeCard: React.FC<NodeProps<PlanNodeData>> = ({ data, selected }) => 
               placeholder='Step title...'
               data-track-category='flow_plan_editor'
               data-track-name='input_step_title'
-              className='nodrag w-full text-[13px] font-medium text-foreground bg-transparent border-none focus:outline-none'
+              className='nodrag w-full text-[13px] font-medium text-foreground bg-transparent border-none focus:outline-hidden'
               onPointerDown={e => e.stopPropagation()}
             />
             <div className='mt-2 flex flex-col gap-1 text-[11px]'>
@@ -339,14 +339,14 @@ const PlanNodeCard: React.FC<NodeProps<PlanNodeData>> = ({ data, selected }) => 
         <div className='px-3 pb-2.5'>
           <DropdownMenu>
             <DropdownMenuTrigger
-              className='nodrag flex items-center gap-1.5 w-full justify-center border border-dashed border-[#6276be]/50 hover:border-[#6276be] rounded-lg px-2 py-1 text-[11px] text-[#6276be] hover:text-[#4f61a8] font-medium transition-colors outline-none'
+              className='nodrag flex items-center gap-1.5 w-full justify-center border border-dashed border-[#6276be]/50 hover:border-[#6276be] rounded-lg px-2 py-1 text-[11px] text-[#6276be] hover:text-[#4f61a8] font-medium transition-colors outline-hidden'
               onPointerDown={e => e.stopPropagation()}
               data-track-category='flow_plan_editor'
               data-track-name='add_step'
             >
               <Plus size={11} /> Add step
             </DropdownMenuTrigger>
-            <DropdownMenuContent align='center' sideOffset={18} className='z-[9999]'>
+            <DropdownMenuContent align='center' sideOffset={18} className='z-9999'>
               {data.canAddGroup && (
                 <DropdownMenuItem
                   onSelect={() => onAddStep('group')}
@@ -372,7 +372,7 @@ const PlanNodeCard: React.FC<NodeProps<PlanNodeData>> = ({ data, selected }) => 
                   </div>
                   <ChevronRight size={13} className='shrink-0 text-muted-foreground' />
                 </DropdownMenuSubTrigger>
-                <DropdownMenuSubContent sideOffset={10} className='z-[9999]'>
+                <DropdownMenuSubContent sideOffset={10} className='z-9999'>
                   <DropdownMenuItem
                     onSelect={() => onAddStep('confirmation')}
                     className='flex items-center gap-2'
@@ -437,7 +437,7 @@ const DecisionNodeCard: React.FC<NodeProps<DecisionNodeData>> = ({ data, selecte
       type='target'
       position={Position.Top}
       isConnectable={false}
-      className='!h-3 !w-3 !rounded-full !border-2 !border-background !bg-amber-500'
+      className='h-3! w-3! rounded-full! border-2! border-background! bg-amber-500!'
       style={{ top: -7 }}
     />
     <div className='flex items-center justify-between border-b border-[hsl(var(--flow-decision-divider))] px-3 py-2'>
@@ -496,7 +496,7 @@ const DecisionNodeCard: React.FC<NodeProps<DecisionNodeData>> = ({ data, selecte
           type='source'
           position={Position.Bottom}
           isConnectable={!data.readOnly}
-          className='!h-2.5 !w-2.5 !border-2 !border-background !bg-amber-500'
+          className='h-2.5! w-2.5! border-2! border-background! bg-amber-500!'
           style={{
             left: `${((index + 1) / (data.decision.routes.length + 1)) * 100}%`,
             bottom: -6,

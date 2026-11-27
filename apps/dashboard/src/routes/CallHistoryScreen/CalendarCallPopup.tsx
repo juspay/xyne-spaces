@@ -82,21 +82,21 @@ function RsvpBadge({ status }: { status: MeetingStatus }): React.ReactElement | 
   if (status === MeetingStatus.ACCEPTED) {
     return (
       <span className={cn(RSVP_BADGE_BASE_CLASS, 'bg-green-500')}>
-        <Check className='size-2.5 text-white stroke-[3]' />
+        <Check className='size-2.5 text-white stroke-3' />
       </span>
     );
   }
   if (status === MeetingStatus.DECLINED || status === MeetingStatus.HIDDEN) {
     return (
       <span className={cn(RSVP_BADGE_BASE_CLASS, 'bg-red-500')}>
-        <X className='size-2.5 text-white stroke-[3]' />
+        <X className='size-2.5 text-white stroke-3' />
       </span>
     );
   }
   // MAYBE
   return (
     <span className={cn(RSVP_BADGE_BASE_CLASS, 'bg-amber-500')}>
-      <HelpCircle className='size-2.5 text-white stroke-[3]' />
+      <HelpCircle className='size-2.5 text-white stroke-3' />
     </span>
   );
 }
@@ -747,7 +747,7 @@ const CalendarCallPopup = ({
 
       {/* Recurrence label */}
       {recurrenceLabel && (
-        <div className='mt-3 flex w-full items-center justify-center gap-1.5 rounded-lg bg-[var(--mention-current-user-bg)] px-3 py-1.5 text-xs font-medium text-status-pending'>
+        <div className='mt-3 flex w-full items-center justify-center gap-1.5 rounded-lg bg-(--mention-current-user-bg) px-3 py-1.5 text-xs font-medium text-status-pending'>
           <Satellite className='size-4 shrink-0' />
           <span>{recurrenceLabel}</span>
         </div>

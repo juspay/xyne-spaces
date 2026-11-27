@@ -126,7 +126,7 @@ export const TagsBadgePopover = ({
       sideOffset={6}
       className='p-4 shadow-lg'
     >
-      <div className='space-y-3 min-w-[13rem] max-w-[22rem]'>
+      <div className='space-y-3 min-w-52 max-w-88'>
         {isLoading ? (
           <div className='text-xs text-muted-foreground'>Loading tags…</div>
         ) : groups.length === 0 ? (

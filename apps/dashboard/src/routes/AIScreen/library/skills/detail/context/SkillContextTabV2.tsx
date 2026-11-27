@@ -198,7 +198,7 @@ export function SkillContextTabV2({
                     onClick={() => setOpenFileId(open ? null : file.id)}
                     data-track-category='Claw Agents'
                     data-track-name='Skill detail v2: toggle file'
-                    className='flex w-full items-center gap-3 p-4 text-left transition-colors hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring'
+                    className='flex w-full items-center gap-3 p-4 text-left transition-colors hover:bg-muted/30 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring'
                   >
                     <span
                       className='flex size-8 shrink-0 items-center justify-center rounded-lg border border-border bg-card text-muted-foreground'

@@ -34,7 +34,7 @@ export function CalendarToolbar({
           <button
             type='button'
             onClick={() => onNavigate('prev')}
-            className='p-2 hover:bg-background hover:shadow-sm rounded-md transition-all duration-200'
+            className='p-2 hover:bg-background hover:shadow-xs rounded-md transition-all duration-200'
             aria-label='Previous period'
             data-track-category='CALENDAR'
             data-track-name='NavigatePrevious'
@@ -44,7 +44,7 @@ export function CalendarToolbar({
           <button
             type='button'
             onClick={() => onNavigate('today')}
-            className='px-3 py-1.5 text-sm font-medium text-foreground hover:bg-background hover:shadow-sm rounded-md transition-all duration-200'
+            className='px-3 py-1.5 text-sm font-medium text-foreground hover:bg-background hover:shadow-xs rounded-md transition-all duration-200'
             data-track-category='CALENDAR'
             data-track-name='NavigateToday'
           >
@@ -53,7 +53,7 @@ export function CalendarToolbar({
           <button
             type='button'
             onClick={() => onNavigate('next')}
-            className='p-2 hover:bg-background hover:shadow-sm rounded-md transition-all duration-200'
+            className='p-2 hover:bg-background hover:shadow-xs rounded-md transition-all duration-200'
             aria-label='Next period'
             data-track-category='CALENDAR'
             data-track-name='NavigateNext'
@@ -77,7 +77,7 @@ export function CalendarToolbar({
             onClick={() => onViewModeChange(mode.value)}
             className={`relative px-4 py-2 text-sm font-medium rounded-lg transition-all duration-200 ${
               viewMode === mode.value
-                ? 'bg-background text-foreground shadow-sm'
+                ? 'bg-background text-foreground shadow-xs'
                 : 'text-muted-foreground hover:text-foreground'
             }`}
             data-track-category='CALENDAR'

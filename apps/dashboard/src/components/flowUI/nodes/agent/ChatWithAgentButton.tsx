@@ -23,7 +23,7 @@ export const ChatWithAgentButton: React.FC<{
       }}
       className={cn(
         'inline-flex h-7 shrink-0 items-center gap-1.5 rounded-lg border border-border bg-background px-2.5',
-        'text-sm font-medium leading-5 text-foreground hover:bg-foreground/[0.04]',
+        'text-sm font-medium leading-5 text-foreground hover:bg-foreground/4',
         className,
       )}
       data-track-category='AGENT_ARTIFACT'

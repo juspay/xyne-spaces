@@ -158,7 +158,7 @@ const RecordingPanelHeader = ({
           onMouseDown={stopPointerPropagation}
           onTouchStart={stopPointerPropagation}
           disabled={isSavingTitle}
-          className='min-w-0 flex-1 truncate border-0 bg-transparent p-0 text-sm font-semibold tracking-tight text-foreground focus:outline-none focus:ring-0 disabled:opacity-50'
+          className='min-w-0 flex-1 truncate border-0 bg-transparent p-0 text-sm font-semibold tracking-tight text-foreground focus:outline-hidden focus:ring-0 disabled:opacity-50'
           trackCategory={TRACK_CATEGORY}
         />
       ) : (
@@ -175,7 +175,7 @@ const RecordingPanelHeader = ({
                 handleStartEdit();
               }
             }}
-            className='min-w-0 w-min cursor-pointer rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-ring'
+            className='min-w-0 w-min cursor-pointer rounded-sm outline-hidden focus-visible:ring-2 focus-visible:ring-ring'
             data-track-category={TRACK_CATEGORY}
             data-track-name='edit_title_click_title'
           >
@@ -427,7 +427,7 @@ const RecordingControlBar = ({
           variant='outline'
           size='icon'
           onClick={isPaused ? onResume : onPause}
-          className='size-9 rounded-xl shadow-sm transition-transform active:scale-95 motion-reduce:transform-none'
+          className='size-9 rounded-xl shadow-xs transition-transform active:scale-95 motion-reduce:transform-none'
           aria-label={isPaused ? 'Resume recording' : 'Pause recording'}
           title={isPaused ? 'Resume recording' : 'Pause recording'}
           data-track-category={TRACK_CATEGORY}
@@ -445,7 +445,7 @@ const RecordingControlBar = ({
           variant='destructive'
           size='icon'
           onClick={onStop}
-          className='size-9 rounded-xl shadow-sm transition-transform active:scale-95 motion-reduce:transform-none'
+          className='size-9 rounded-xl shadow-xs transition-transform active:scale-95 motion-reduce:transform-none'
           aria-label='Stop recording'
           title='Stop recording'
           data-track-category={TRACK_CATEGORY}
@@ -566,7 +566,7 @@ const RecordingMiniPill = ({
         borderRadius: isExpanded ? 14 : PILL_COLLAPSED_WIDTH_PX / 2,
         transition: `width 240ms ${PILL_EASE}, border-radius 240ms ${PILL_EASE}`,
       }}
-      className='flex touch-none cursor-grab flex-col items-stretch gap-[5px] border border-border bg-card p-1.5 shadow-2xl ring-1 ring-foreground/5 outline-none active:cursor-grabbing focus-visible:ring-2 focus-visible:ring-ring'
+      className='flex touch-none cursor-grab flex-col items-stretch gap-[5px] border border-border bg-card p-1.5 shadow-2xl ring-1 ring-foreground/5 outline-hidden active:cursor-grabbing focus-visible:ring-2 focus-visible:ring-ring'
       aria-label='Live recording. Click to expand, drag to move.'
       title='Click to expand'
       data-track-category={TRACK_CATEGORY}
@@ -672,17 +672,17 @@ const NotesTab = ({ notesCanvasId, channelId }: NotesTabProps): ReactElement => 
         placeholder='Add your notes here, you can view the transcript live in the transcript tab'
         onFileUpload={handleFileUpload}
         className='floating-recording-notes h-full w-full
-          [&_.bn-side-menu]:!hidden
-          [&_.thin-scrollbar]:!pt-2
-          [&_.bn-editor]:!px-2
-          [&_.bn-block-content:has(.ProseMirror-trailingBreak:only-child):after]:!text-sm
-          [&_.bn-suggestion-menu]:!w-auto [&_.bn-suggestion-menu]:!no-scrollbar [&_.bn-suggestion-menu]:!max-h-60 [&_.bn-suggestion-menu]:!max-w-[calc(100vw-2rem)]
-          [&_.bn-suggestion-menu-item]:!h-8 [&_.bn-suggestion-menu-item]:!px-2 [&_.bn-suggestion-menu-item]:!py-1
-          [&_.bn-mt-suggestion-menu-item-title]:!text-xs [&_.bn-mt-suggestion-menu-item-title]:!leading-4
-          [&_.bn-mt-suggestion-menu-item-title]:!whitespace-nowrap [&_.bn-mt-suggestion-menu-item-title]:!overflow-hidden [&_.bn-mt-suggestion-menu-item-title]:!text-ellipsis
-          [&_.bn-mt-suggestion-menu-item-section_svg]:!size-4
-          [&_.bn-suggestion-menu-item]:!flex-nowrap
-          [&_.bn-suggestion-menu-item_kbd]:!shrink-0 [&_.bn-suggestion-menu-item_kbd]:!text-[9px] [&_.bn-suggestion-menu-item_kbd]:!px-1'
+          [&_.bn-side-menu]:hidden!
+          [&_.thin-scrollbar]:pt-2!
+          [&_.bn-editor]:px-2!
+          [&_.bn-block-content:has(.ProseMirror-trailingBreak:only-child):after]:text-sm!
+          [&_.bn-suggestion-menu]:w-auto! [&_.bn-suggestion-menu]:no-scrollbar! [&_.bn-suggestion-menu]:max-h-60! [&_.bn-suggestion-menu]:max-w-[calc(100vw-2rem)]!
+          [&_.bn-suggestion-menu-item]:h-8! [&_.bn-suggestion-menu-item]:px-2! [&_.bn-suggestion-menu-item]:py-1!
+          [&_.bn-mt-suggestion-menu-item-title]:text-xs! [&_.bn-mt-suggestion-menu-item-title]:leading-4!
+          [&_.bn-mt-suggestion-menu-item-title]:whitespace-nowrap! [&_.bn-mt-suggestion-menu-item-title]:overflow-hidden! [&_.bn-mt-suggestion-menu-item-title]:text-ellipsis!
+          [&_.bn-mt-suggestion-menu-item-section_svg]:size-4!
+          [&_.bn-suggestion-menu-item]:flex-nowrap!
+          [&_.bn-suggestion-menu-item_kbd]:shrink-0! [&_.bn-suggestion-menu-item_kbd]:text-[9px]! [&_.bn-suggestion-menu-item_kbd]:px-1!'
       />
     );
   }
@@ -849,7 +849,7 @@ export function NoteTakerOverlay({
             : { transformOrigin: 'right bottom' }
         }
         className={cn(
-          'absolute flex w-[calc(100vw-2rem)] max-w-[25rem] flex-col transition-opacity duration-200 motion-reduce:transition-none',
+          'absolute flex w-[calc(100vw-2rem)] max-w-100 flex-col transition-opacity duration-200 motion-reduce:transition-none',
           !panelHasDragged && DEFAULT_CORNER_POSITION_CLASS,
           panelIsDragging && 'cursor-grabbing select-none',
           isMinimized ? 'pointer-events-none opacity-0' : 'pointer-events-auto opacity-100',

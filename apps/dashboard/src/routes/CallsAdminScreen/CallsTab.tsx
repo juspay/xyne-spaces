@@ -311,7 +311,7 @@ export function CallsTab({ scope }: { scope: CallAdminListScope }): ReactElement
       <AdminTable
         headers={[
           { label: 'Call', width: 'max-w-[20rem]' },
-          { label: 'Owner', width: 'max-w-[12rem]' },
+          { label: 'Owner', width: 'max-w-48' },
           { label: 'Type' },
           { label: 'Status' },
           { label: 'When' },
@@ -337,7 +337,7 @@ export function CallsTab({ scope }: { scope: CallAdminListScope }): ReactElement
                 </span>
               </div>
             </td>
-            <td className='max-w-[12rem] px-4 py-3 align-top leading-5 text-muted-foreground'>
+            <td className='max-w-48 px-4 py-3 align-top leading-5 text-muted-foreground'>
               <PersonPill
                 userId={call.owner.id}
                 name={userLabel(call.owner)}

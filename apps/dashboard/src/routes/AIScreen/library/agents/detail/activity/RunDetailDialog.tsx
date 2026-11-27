@@ -284,7 +284,7 @@ function Field({
   return (
     <div className='flex min-w-0 flex-col gap-0.5'>
       <span className='text-[11px] uppercase tracking-wide text-muted-foreground'>{label}</span>
-      <span className='break-words text-sm text-foreground' data-testid={testId}>
+      <span className='wrap-break-word text-sm text-foreground' data-testid={testId}>
         {value}
       </span>
     </div>
@@ -305,7 +305,7 @@ function Block({
       <span className='text-sm font-semibold text-foreground'>{title}</span>
       <div
         className={cn(
-          'max-h-60 overflow-auto whitespace-pre-wrap break-words rounded-lg border px-3 py-2 text-sm',
+          'max-h-60 overflow-auto whitespace-pre-wrap wrap-break-word rounded-lg border px-3 py-2 text-sm',
           tone === 'error'
             ? 'border-destructive/40 bg-destructive/5 text-destructive'
             : 'border-border bg-muted/40 text-muted-foreground',

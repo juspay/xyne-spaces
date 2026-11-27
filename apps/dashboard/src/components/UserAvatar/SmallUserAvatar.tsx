@@ -24,7 +24,7 @@ const SmallUserAvatar = ({ userId }: { userId?: string | null }): ReactElement =
   return (
     <div
       className={cn(
-        'w-[15px] h-[15px] rounded-full flex items-center justify-center text-[8px] font-medium flex-shrink-0',
+        'w-[15px] h-[15px] rounded-full flex items-center justify-center text-[8px] font-medium shrink-0',
         colorClass.bg,
         colorClass.text,
       )}

@@ -231,7 +231,7 @@ export function McpDetailPanel({
                       onClick={() => connect.connect({})}
                       data-track-category='Claw Agents'
                       data-track-name='Create agent v2: start MCP oauth'
-                      className='flex h-7 items-center justify-center rounded-lg bg-foreground/[0.06] px-2 py-1.5 text-sm font-medium leading-5 text-foreground transition-colors hover:bg-foreground/[0.09] disabled:cursor-not-allowed disabled:opacity-50'
+                      className='flex h-7 items-center justify-center rounded-lg bg-foreground/6 px-2 py-1.5 text-sm font-medium leading-5 text-foreground transition-colors hover:bg-foreground/9 disabled:cursor-not-allowed disabled:opacity-50'
                     >
                       {connect.isPending ? 'Redirecting…' : 'Continue'}
                     </button>

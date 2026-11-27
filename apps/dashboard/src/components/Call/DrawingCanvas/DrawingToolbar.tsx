@@ -26,7 +26,7 @@ export function DrawingToolbar(): React.ReactElement {
         // ── Layout ──
         'flex flex-col items-center gap-1 px-1.5 py-2.5',
         // ── Visual ──
-        'bg-gray-900/95 backdrop-blur-sm rounded-2xl',
+        'bg-gray-900/95 backdrop-blur-xs rounded-2xl',
         'border border-white/10 shadow-2xl',
         'pointer-events-auto',
       )}

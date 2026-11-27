@@ -102,18 +102,18 @@ const CardShell: React.FC<{
 
 const TitleRow: React.FC<{ title: string; url?: string | undefined }> = ({ title, url }) => (
   <div className='flex items-center gap-[5px]'>
-    <p className='min-w-0 flex-1 break-words text-sm font-semibold leading-[1.2] text-foreground'>
+    <p className='min-w-0 flex-1 wrap-break-word text-sm font-semibold leading-[1.2] text-foreground'>
       {title}
     </p>
     {url && (
-      // Inside `.jp-message-html`, so `!text-* !no-underline` beat the global
+      // Inside `.jp-message-html`, so `!text-* no-underline!` beat the global
       // link rule (blue + underline) that otherwise wins by specificity.
       <a
         href={url}
         target='_blank'
         rel='noopener noreferrer'
         aria-label='Open pull request'
-        className='shrink-0 !text-muted-foreground !no-underline hover:!text-foreground'
+        className='shrink-0 text-muted-foreground! no-underline! hover:text-foreground!'
         data-track-category='PR_APPROVAL_ARTIFACT'
         data-track-name='OPEN_PR_LINK'
       >
@@ -140,8 +140,8 @@ const MetaRow: React.FC<{ meta: PrApprovalMeta }> = ({ meta }) => {
 
 const CI_META: Record<PrApprovalMeta['ci'] & string, { label: string; className: string }> = {
   passing: { label: 'CI passing', className: '' },
-  failing: { label: 'CI failing', className: 'text-[var(--status-failure)]' },
-  pending: { label: 'CI pending', className: 'text-[var(--status-pending)]' },
+  failing: { label: 'CI failing', className: 'text-(--status-failure)' },
+  pending: { label: 'CI pending', className: 'text-(--status-pending)' },
 };
 
 const CiStat: React.FC<{ ci: NonNullable<PrApprovalMeta['ci']> }> = ({ ci }) => {
@@ -151,9 +151,9 @@ const CiStat: React.FC<{ ci: NonNullable<PrApprovalMeta['ci']> }> = ({ ci }) => 
 
 const DiffStat: React.FC<{ added: number; removed: number }> = ({ added, removed }) => (
   <span className='tabular-nums'>
-    <span className='text-[var(--status-success)]'>+{added}</span>
+    <span className='text-(--status-success)'>+{added}</span>
     <span>/</span>
-    <span className='text-[var(--status-failure)]'>&#8722;{removed}</span>
+    <span className='text-(--status-failure)'>&#8722;{removed}</span>
     <span>{' lines'}</span>
   </span>
 );

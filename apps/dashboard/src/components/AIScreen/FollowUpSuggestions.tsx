@@ -39,7 +39,7 @@ export function FollowUpSuggestions({
             <button
               type='button'
               onClick={() => onSelect(suggestion)}
-              className='group/follow-up flex w-full items-start gap-2 rounded-md px-1 py-2 text-left text-sm leading-5 text-foreground/80 transition-colors hover:bg-accent/60 hover:text-foreground focus-visible:bg-accent/60 focus-visible:outline-none'
+              className='group/follow-up flex w-full items-start gap-2 rounded-md px-1 py-2 text-left text-sm leading-5 text-foreground/80 transition-colors hover:bg-accent/60 hover:text-foreground focus-visible:bg-accent/60 focus-visible:outline-hidden'
               data-track-category='AskAI'
               data-track-name='FollowUpSuggestion'
               data-track-metadata={JSON.stringify({

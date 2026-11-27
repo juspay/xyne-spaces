@@ -169,7 +169,7 @@ export const MobileEditor: React.FC<MobileEditorProps> = ({
           <EditorContent
             editor={editor}
             className={`
-              chat-input-field w-full resize-none border-0 outline-none bg-transparent leading-relaxed break-words text-[15px]
+              chat-input-field w-full resize-none border-0 outline-hidden bg-transparent leading-relaxed wrap-break-word text-[15px]
               text-foreground
               ${emojiSizeClass}
               [&_p.is-editor-empty:before]:hidden
@@ -209,7 +209,7 @@ export const MobileEditor: React.FC<MobileEditorProps> = ({
             data-track-category='CHAT_INPUT'
             data-track-name='ATTACH_FILES'
             disabled={disabled || isSending}
-            className='p-2 text-foreground hover:text-muted-foreground transition-colors flex-shrink-0'
+            className='p-2 text-foreground hover:text-muted-foreground transition-colors shrink-0'
             aria-label='Attach files'
             onMouseDown={e => e.preventDefault()}
           >
@@ -245,7 +245,7 @@ export const MobileEditor: React.FC<MobileEditorProps> = ({
               data-track-category='CHAT_INPUT'
               data-track-name='TOGGLE_VOICE_INPUT'
               disabled={disabled || isSending || isVoiceTranscribing}
-              className={`p-2 rounded-full transition-colors flex-shrink-0 ${
+              className={`p-2 rounded-full transition-colors shrink-0 ${
                 isVoiceRecording
                   ? 'bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400'
                   : 'text-foreground hover:text-muted-foreground'
@@ -263,7 +263,7 @@ export const MobileEditor: React.FC<MobileEditorProps> = ({
           <button
             type='button'
             disabled={true}
-            className='p-2 rounded-full bg-muted/30 text-muted-foreground cursor-not-allowed scale-90 opacity-70 flex items-center justify-center flex-shrink-0'
+            className='p-2 rounded-full bg-muted/30 text-muted-foreground cursor-not-allowed scale-90 opacity-70 flex items-center justify-center shrink-0'
             aria-label='Send message'
           >
             <ArrowUp className='h-5 w-5' strokeWidth={2.5} />

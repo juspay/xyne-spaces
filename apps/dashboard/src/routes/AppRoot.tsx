@@ -308,7 +308,7 @@ const AIOnboardingTrigger = ({ isOnboarding }: { isOnboarding: boolean }): null 
 const XyneAISidebarZIndexShell = ({ children }: { children: ReactNode }): ReactElement => {
   const { state: aiOnboarding } = useAIOnboarding();
   return (
-    <div className={aiOnboarding.isActive ? 'h-full relative z-[56]' : 'h-full relative'}>
+    <div className={aiOnboarding.isActive ? 'h-full relative z-56' : 'h-full relative'}>
       {children}
     </div>
   );

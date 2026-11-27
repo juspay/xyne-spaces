@@ -53,7 +53,7 @@ export function McpConnectForm({
             autoComplete='off'
             data-track-category='Claw Agents'
             data-track-name='Create agent v2: MCP credential input'
-            className='h-10 w-full rounded-[10px] border border-border bg-card p-3 text-sm leading-5 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring'
+            className='h-10 w-full rounded-[10px] border border-border bg-card p-3 text-sm leading-5 text-foreground placeholder:text-muted-foreground focus:outline-hidden focus:ring-1 focus:ring-ring'
           />
         </div>
       ))}
@@ -83,7 +83,7 @@ export function McpConnectForm({
           data-track-category='Claw Agents'
           data-track-name='Create agent v2: submit MCP connect'
           className={cn(
-            'flex h-7 items-center justify-center gap-1.5 rounded-lg bg-foreground/[0.06] px-2 py-1.5 text-sm font-medium leading-5 text-foreground transition-colors hover:bg-foreground/[0.09]',
+            'flex h-7 items-center justify-center gap-1.5 rounded-lg bg-foreground/6 px-2 py-1.5 text-sm font-medium leading-5 text-foreground transition-colors hover:bg-foreground/9',
             (missingRequired || isPending) && 'cursor-not-allowed opacity-50',
           )}
         >

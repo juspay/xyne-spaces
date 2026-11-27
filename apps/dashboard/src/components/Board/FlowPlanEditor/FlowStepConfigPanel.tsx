@@ -86,7 +86,7 @@ export function FlowStepConfigPanel({
   handleSavePanel,
 }: FlowStepConfigPanelProps): ReactElement {
   return (
-    <aside className='w-[360px] flex-shrink-0 h-full border-l border-border bg-muted/40 flex flex-col overflow-y-auto'>
+    <aside className='w-[360px] shrink-0 h-full border-l border-border bg-muted/40 flex flex-col overflow-y-auto'>
       <div className='flex items-center justify-between px-4 py-3 border-b border-border bg-muted/60'>
         <span className='text-[11px] font-semibold text-foreground uppercase tracking-wide truncate'>
           {configNode.title || 'Step'}

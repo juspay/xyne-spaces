@@ -62,7 +62,7 @@ export const tableMinWidth = (columns: readonly TicketTableColumn[]): number =>
   TITLE_COLUMN_MIN_WIDTH +
   columns.reduce((sum, column) => sum + column.width, 0);
 
-const cellClass = 'flex h-full min-w-0 flex-shrink-0 items-center overflow-hidden px-2';
+const cellClass = 'flex h-full min-w-0 shrink-0 items-center overflow-hidden px-2';
 const mutedText = 'truncate text-sm text-muted-foreground';
 const EMPTY = <span className='text-sm text-muted-foreground'>—</span>;
 
@@ -73,7 +73,7 @@ export const TicketTableHeader: React.FC<{ columns: readonly TicketTableColumn[]
     style={{ height: TABLE_HEADER_HEIGHT }}
     className='flex items-center border-b border-border bg-muted text-xs font-medium text-muted-foreground'
   >
-    <span style={{ width: SELECT_COLUMN_WIDTH }} className='flex-shrink-0' />
+    <span style={{ width: SELECT_COLUMN_WIDTH }} className='shrink-0' />
     <span style={{ width: ID_COLUMN_WIDTH }} className={cellClass}>
       #
     </span>
@@ -97,11 +97,7 @@ const UserCell: React.FC<{ userId: string | null | undefined }> = ({ userId }) =
   const name = getUserDisplayName(user);
   return (
     <span className='flex min-w-0 items-center gap-2'>
-      <Avatar
-        userId={user.id}
-        className='size-5 flex-shrink-0 rounded-full'
-        showActiveStatus={false}
-      />
+      <Avatar userId={user.id} className='size-5 shrink-0 rounded-full' showActiveStatus={false} />
       <TruncatedTooltip content={name}>
         <span className={mutedText}>{name}</span>
       </TruncatedTooltip>
@@ -240,7 +236,7 @@ const TicketColumnsRowBase: React.FC<TicketColumnsRowProps> = ({
                         key={tag.id}
                         className='flex min-w-0 max-w-[110px] items-center gap-1.5 rounded-full border border-border px-2 py-0.5 text-xs text-muted-foreground'
                       >
-                        <span className='h-1.5 w-1.5 flex-shrink-0 rounded-full bg-xyne-purple-400' />
+                        <span className='h-1.5 w-1.5 shrink-0 rounded-full bg-xyne-purple-400' />
                         <span className='truncate'>{tag.name}</span>
                       </span>
                     )),
@@ -248,7 +244,7 @@ const TicketColumnsRowBase: React.FC<TicketColumnsRowProps> = ({
                       ? [
                           <span
                             key='more'
-                            className='flex-shrink-0 rounded-full border border-border px-2 py-0.5 text-xs text-muted-foreground'
+                            className='shrink-0 rounded-full border border-border px-2 py-0.5 text-xs text-muted-foreground'
                           >
                             +{tags.length - 2}
                           </span>,
@@ -294,7 +290,7 @@ const TicketColumnsRowBase: React.FC<TicketColumnsRowProps> = ({
     >
       <span
         style={{ width: SELECT_COLUMN_WIDTH }}
-        className={`flex flex-shrink-0 items-center justify-center transition-opacity ${
+        className={`flex shrink-0 items-center justify-center transition-opacity ${
           isSelected ? '' : 'opacity-0 group-hover/listrow:opacity-100'
         }`}
       >
@@ -340,13 +336,13 @@ const TicketColumnsRowBase: React.FC<TicketColumnsRowProps> = ({
             <Tooltip
               content={`${subProgress.done} of ${subProgress.total} sub-${noun.plural} completed`}
             >
-              <span className='flex flex-shrink-0 items-center gap-1 text-xs text-muted-foreground'>
+              <span className='flex shrink-0 items-center gap-1 text-xs text-muted-foreground'>
                 <Subtask className='h-3.5 w-3.5' />
                 {subProgress.done}/{subProgress.total}
               </span>
             </Tooltip>
           ))}
-        {extras && <span className='ml-auto flex flex-shrink-0 items-center gap-2'>{extras}</span>}
+        {extras && <span className='ml-auto flex shrink-0 items-center gap-2'>{extras}</span>}
       </span>
       {columns.map(column => (
         <span key={column.key} style={{ width: column.width }} className={cellClass}>
@@ -364,7 +360,7 @@ export const TicketColumnsLine: React.FC<{
   children: React.ReactNode;
 }> = ({ connector, children }) => (
   <div className='flex h-full items-center'>
-    <span style={{ width: SELECT_COLUMN_WIDTH + ID_COLUMN_WIDTH }} className='flex-shrink-0' />
+    <span style={{ width: SELECT_COLUMN_WIDTH + ID_COLUMN_WIDTH }} className='shrink-0' />
     <span className='flex min-w-0 flex-1 items-center gap-2 px-2'>
       {connector}
       {children}

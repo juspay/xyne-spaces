@@ -98,7 +98,7 @@ export const ThreadTagMenuItems = ({ applied, onToggle }: ThreadTagMenuItemsProp
         data-track-category='Tags'
         data-track-name='ThreadTagSearch'
         aria-label='Search or add a thread tag'
-        className='w-full px-2 py-1.5 mb-1 text-sm bg-transparent border-b border-border outline-none placeholder:text-muted-foreground'
+        className='w-full px-2 py-1.5 mb-1 text-sm bg-transparent border-b border-border outline-hidden placeholder:text-muted-foreground'
       />
 
       {vocabulary.map(entry => row(entry.name, entry.label, entry.color))}

@@ -291,7 +291,7 @@ export const ActivityItemCard = ({
   );
 
   const channelChipClass =
-    'inline-flex min-w-0 max-w-[55%] flex-shrink-0 items-center gap-1 rounded-[6px] bg-activity-chip px-1.5 py-[1px] text-xs font-medium leading-[18px] text-foreground/90 transition-colors';
+    'inline-flex min-w-0 max-w-[55%] shrink-0 items-center gap-1 rounded-[6px] bg-activity-chip px-1.5 py-px text-xs font-medium leading-[18px] text-foreground/90 transition-colors';
 
   return (
     <Button
@@ -301,8 +301,8 @@ export const ActivityItemCard = ({
       className={cn(
         'group flex w-full font-normal items-start gap-3 px-3 py-2.5 text-left transition-colors duration-150 h-auto rounded-[14px] border border-transparent',
         activity.isRead ? 'bg-transparent' : 'bg-activity-sidebar-primary',
-        'hover:!bg-sidebar-accent',
-        'data-[selected]:!bg-sidebar-accent data-[selected]:border-sidebar-border',
+        'hover:bg-sidebar-accent!',
+        'data-selected:bg-sidebar-accent! data-selected:border-sidebar-border',
         className,
       )}
       data-activity-id={activity.id}
@@ -314,7 +314,7 @@ export const ActivityItemCard = ({
         isRead: activity.isRead,
       })}
     >
-      <div className='relative flex-shrink-0 pt-px'>
+      <div className='relative shrink-0 pt-px'>
         <UserHoverWrapper userId={actorId}>
           <button
             onClick={e => e.stopPropagation()}
@@ -342,7 +342,7 @@ export const ActivityItemCard = ({
       <div className='flex flex-1 flex-col min-w-0 overflow-hidden'>
         <div className='flex w-full items-center gap-2'>
           <div className='flex min-w-0 flex-1 items-center gap-1.5 [&>span]:min-w-0'>
-            {titlePrefix && <span className='inline-flex flex-shrink-0'>{titlePrefix}</span>}
+            {titlePrefix && <span className='inline-flex shrink-0'>{titlePrefix}</span>}
             {isMobile ? (
               <span
                 className={cn(
@@ -370,7 +370,7 @@ export const ActivityItemCard = ({
             )}
           </div>
 
-          <span className='flex-shrink-0 flex items-center gap-1.5 whitespace-nowrap text-xs tabular-nums text-muted-foreground'>
+          <span className='shrink-0 flex items-center gap-1.5 whitespace-nowrap text-xs tabular-nums text-muted-foreground'>
             {!isMobile &&
               !['reacted', 'removed'].includes(activity.actorAction) &&
               !isDeskChannel &&
@@ -414,7 +414,7 @@ export const ActivityItemCard = ({
                 </Tooltip>
               ))}
             {showUnreadDot && !activity.isRead && (
-              <span className='h-2 w-2 rounded-full bg-primary flex-shrink-0' />
+              <span className='h-2 w-2 rounded-full bg-primary shrink-0' />
             )}
             {getTimestampDisplay(activityTimestamp)}
           </span>

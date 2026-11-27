@@ -355,7 +355,7 @@ export function SearchQueryInput({
         placeholder={tokens.length > 0 ? 'Search' : 'Search messages, files, tickets…'}
         aria-label='Search query'
         className={cn(
-          'flex-1 min-w-0 bg-transparent text-sm text-foreground placeholder:text-muted-foreground outline-none',
+          'flex-1 min-w-0 bg-transparent text-sm text-foreground placeholder:text-muted-foreground outline-hidden',
         )}
         data-track-category='SEARCH_RESULTS'
         data-track-name='EDIT_QUERY'

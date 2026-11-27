@@ -45,14 +45,14 @@ export const Funnel: React.FC<FunnelProps> = ({
   return (
     <div
       className={cn(
-        'rounded-xl border border-border/40 bg-gradient-to-br from-background via-background/90 to-background/80 p-6',
-        'shadow-lg hover:shadow-xl transition-all duration-300 backdrop-blur-sm',
+        'rounded-xl border border-border/40 bg-linear-to-br from-background via-background/90 to-background/80 p-6',
+        'shadow-lg hover:shadow-xl transition-all duration-300 backdrop-blur-xs',
         className,
       )}
     >
       {/* Header */}
       <div className='mb-6 pb-4 border-b border-border/30'>
-        <h3 className='text-base font-bold bg-gradient-to-r from-foreground to-foreground/80 bg-clip-text text-transparent'>
+        <h3 className='text-base font-bold bg-linear-to-r from-foreground to-foreground/80 bg-clip-text text-transparent'>
           {title}
         </h3>
         {queryLabel && (
@@ -99,7 +99,7 @@ export const Funnel: React.FC<FunnelProps> = ({
                       {item.label}
                     </span>
                     {showDropoff && index > 0 && (
-                      <span className='text-red-500 font-semibold flex-shrink-0'>
+                      <span className='text-red-500 font-semibold shrink-0'>
                         -{dropoff?.toFixed(0)}%
                       </span>
                     )}

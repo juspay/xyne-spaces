@@ -200,9 +200,9 @@ export const DataTable: React.FC<DataTableProps> = ({
   return (
     <div
       className={cn(
-        'rounded-xl border border-border/40 bg-gradient-to-br from-background via-background/90 to-background/80',
+        'rounded-xl border border-border/40 bg-linear-to-br from-background via-background/90 to-background/80',
         compact ? 'p-3' : 'p-6',
-        'flex flex-col shadow-lg hover:shadow-xl transition-all duration-300 backdrop-blur-sm',
+        'flex flex-col shadow-lg hover:shadow-xl transition-all duration-300 backdrop-blur-xs',
         fillHeight && 'h-full min-h-0',
         className,
       )}
@@ -212,7 +212,7 @@ export const DataTable: React.FC<DataTableProps> = ({
         {title && (
           <h3
             className={cn(
-              'text-base font-bold bg-gradient-to-r from-foreground to-foreground/80 bg-clip-text text-transparent',
+              'text-base font-bold bg-linear-to-r from-foreground to-foreground/80 bg-clip-text text-transparent',
               compact ? 'mb-1' : 'mb-3',
             )}
           >

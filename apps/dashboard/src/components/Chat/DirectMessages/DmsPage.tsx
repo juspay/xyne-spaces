@@ -543,8 +543,8 @@ const DmsPage = (): ReactElement => {
                             data-track-name='TAB_CHANGE'
                             data-track-metadata={JSON.stringify({ tab: tab.value })}
                             className={cn(
-                              'group px-2 py-2 flex items-center transition-all duration-300 ease-in-out cursor-pointer select-none sm:px-3 justify-start rounded-lg hover:bg-foreground/[6%] focus-visible:bg-foreground/[6%] focus-visible:outline-none',
-                              isActive ? 'bg-foreground/[6%]' : 'bg-transparent',
+                              'group px-2 py-2 flex items-center transition-all duration-300 ease-in-out cursor-pointer select-none sm:px-3 justify-start rounded-lg hover:bg-foreground/6 focus-visible:bg-foreground/6 focus-visible:outline-hidden',
+                              isActive ? 'bg-foreground/6' : 'bg-transparent',
                             )}
                           >
                             {IconComponent && (
@@ -576,7 +576,7 @@ const DmsPage = (): ReactElement => {
                                   'ml-1.5 shrink-0 text-[0.625rem] px-1 rounded-md font-bold tabular-nums transition-colors',
                                   isActive
                                     ? 'bg-sidebar-primary text-sidebar-primary-foreground'
-                                    : 'bg-foreground/[6%] text-muted-foreground',
+                                    : 'bg-foreground/6 text-muted-foreground',
                                 )}
                               >
                                 {count > 99 ? '99+' : count}
@@ -591,7 +591,7 @@ const DmsPage = (): ReactElement => {
 
                 <Tabs.Content
                   value={activeTab}
-                  className='relative flex flex-1 min-h-0 flex-col mt-4 focus-visible:outline-none'
+                  className='relative flex flex-1 min-h-0 flex-col mt-4 focus-visible:outline-hidden'
                 >
                   {filteredDirectMessages.length === 0 ? (
                     <div className='flex-1 flex flex-col items-center justify-center text-muted-foreground px-4 py-8'>

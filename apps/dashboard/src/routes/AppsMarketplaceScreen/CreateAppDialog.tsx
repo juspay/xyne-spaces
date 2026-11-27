@@ -87,9 +87,7 @@ export const CreateAppDialog = ({
           ? 'Paste this in your terminal to set up the project with the Spaces CLI.'
           : "Build your own front end on your workspace's data."
       }
-      className={
-        created ? 'w-[min(92vw,44rem)] max-w-[44rem]' : 'w-[min(92vw,30rem)] max-w-[30rem]'
-      }
+      className={created ? 'w-[min(92vw,44rem)] max-w-176' : 'w-[min(92vw,30rem)] max-w-120'}
     >
       {created ? (
         <div className='flex flex-col'>
@@ -189,7 +187,7 @@ export const CreateAppDialog = ({
                 placeholder='Monitor Tickets'
                 data-track-category='Apps'
                 data-track-name='CreateAppName'
-                className='h-12 w-full rounded-xl border border-border bg-background px-3.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring'
+                className='h-12 w-full rounded-xl border border-border bg-background px-3.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-hidden focus:ring-1 focus:ring-ring'
               />
             </label>
           </div>
@@ -207,7 +205,7 @@ export const CreateAppDialog = ({
               placeholder="What it shows, and who it's for."
               data-track-category='Apps'
               data-track-name='CreateAppDescription'
-              className='w-full resize-none rounded-xl border border-border bg-background px-3.5 py-2.5 text-sm leading-6 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring'
+              className='w-full resize-none rounded-xl border border-border bg-background px-3.5 py-2.5 text-sm leading-6 text-foreground placeholder:text-muted-foreground focus:outline-hidden focus:ring-1 focus:ring-ring'
             />
             {description.length > 0 && descriptionTooShort && (
               <span className='text-xs text-muted-foreground'>

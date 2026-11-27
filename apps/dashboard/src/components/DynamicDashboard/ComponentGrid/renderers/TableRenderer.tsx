@@ -140,7 +140,7 @@ const TableRenderer = ({ data }: TableRendererProps): ReactElement => {
           value={globalFilterValue}
           onChange={e => table.setGlobalFilter(e.target.value || undefined)}
           placeholder='Search all columns…'
-          className='flex-1 text-xs bg-transparent focus:outline-none placeholder:text-muted-foreground'
+          className='flex-1 text-xs bg-transparent focus:outline-hidden placeholder:text-muted-foreground'
           data-track-category='DASHBOARD_TABLE'
           data-track-name='Global_Search_Change'
         />
@@ -161,7 +161,7 @@ const TableRenderer = ({ data }: TableRendererProps): ReactElement => {
                   return (
                     <th
                       key={header.id}
-                      className={`group px-3 py-2.5 font-semibold text-muted-foreground text-[10px] uppercase tracking-[0.1em] whitespace-nowrap ${
+                      className={`group px-3 py-2.5 font-semibold text-muted-foreground text-[10px] uppercase tracking-widest whitespace-nowrap ${
                         type === 'number' ? 'text-right' : 'text-left'
                       }`}
                     >
@@ -249,7 +249,7 @@ const TableRenderer = ({ data }: TableRendererProps): ReactElement => {
             id='table-page-size'
             value={pageSize}
             onChange={e => table.setPageSize(Number(e.target.value))}
-            className='bg-background border border-border rounded px-1 py-0.5 text-[11px] focus:outline-none focus:ring-1 focus:ring-ring'
+            className='bg-background border border-border rounded px-1 py-0.5 text-[11px] focus:outline-hidden focus:ring-1 focus:ring-ring'
             data-track-category='DASHBOARD_TABLE'
             data-track-name='Change_Page_Size'
           >
@@ -453,7 +453,7 @@ const FilterEditor = ({ column, kind }: FilterEditorProps): ReactElement => {
           column.setFilterValue(e.target.value.trim() === '' ? undefined : e.target.value)
         }
         placeholder='Contains…'
-        className='w-full text-sm px-2 py-1.5 bg-background border border-border rounded focus:outline-none focus:ring-2 focus:ring-ring'
+        className='w-full text-sm px-2 py-1.5 bg-background border border-border rounded focus:outline-hidden focus:ring-2 focus:ring-ring'
         data-track-category='DASHBOARD_TABLE'
         data-track-name='Filter_Contains_Change'
       />
@@ -477,7 +477,7 @@ const FilterEditor = ({ column, kind }: FilterEditorProps): ReactElement => {
           value={min ?? ''}
           onChange={e => commit(e.target.value === '' ? undefined : Number(e.target.value), max)}
           placeholder={placeholder(dataMin) || 'Min'}
-          className='w-full text-sm px-2 py-1.5 bg-background border border-border rounded tabular-nums focus:outline-none focus:ring-2 focus:ring-ring'
+          className='w-full text-sm px-2 py-1.5 bg-background border border-border rounded tabular-nums focus:outline-hidden focus:ring-2 focus:ring-ring'
           data-track-category='DASHBOARD_TABLE'
           data-track-name='Filter_Range_Min_Change'
         />
@@ -487,7 +487,7 @@ const FilterEditor = ({ column, kind }: FilterEditorProps): ReactElement => {
           value={max ?? ''}
           onChange={e => commit(min, e.target.value === '' ? undefined : Number(e.target.value))}
           placeholder={placeholder(dataMax) || 'Max'}
-          className='w-full text-sm px-2 py-1.5 bg-background border border-border rounded tabular-nums focus:outline-none focus:ring-2 focus:ring-ring'
+          className='w-full text-sm px-2 py-1.5 bg-background border border-border rounded tabular-nums focus:outline-hidden focus:ring-2 focus:ring-ring'
           data-track-category='DASHBOARD_TABLE'
           data-track-name='Filter_Range_Max_Change'
         />

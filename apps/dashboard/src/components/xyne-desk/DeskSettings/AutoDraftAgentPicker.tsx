@@ -53,7 +53,7 @@ export const AutoDraftAgentPicker: React.FC<AutoDraftAgentPickerProps> = ({
     >
       <SelectTrigger
         id='desk-auto-draft-agent'
-        className='w-full rounded-[10px] border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-desk-accent disabled:cursor-not-allowed disabled:opacity-50'
+        className='w-full rounded-[10px] border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-hidden focus:ring-1 focus:ring-desk-accent disabled:cursor-not-allowed disabled:opacity-50'
         data-track-category='DeskSettings'
         data-track-name='SelectAutoDraftAgent'
       >

@@ -105,7 +105,7 @@ export const CanvasParticipantsTray: React.FC<CanvasParticipantsTrayProps> = ({
           <h2 className='text-lg font-semibold text-foreground'>{title}</h2>
           <button
             onClick={onClose}
-            className='rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2'
+            className='rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-hidden focus:ring-2 focus:ring-ring focus:ring-offset-2'
             data-track-category='CANVAS'
             data-track-name='Close_Participants_Tray'
             data-track-metadata={JSON.stringify({ canvasId })}
@@ -140,7 +140,7 @@ export const CanvasParticipantsTray: React.FC<CanvasParticipantsTrayProps> = ({
               >
                 <span
                   aria-hidden='true'
-                  className='absolute top-1 w-4 h-4 bg-background rounded-full shadow transition-all duration-200 left-1'
+                  className='absolute top-1 w-4 h-4 bg-background rounded-full shadow-sm transition-all duration-200 left-1'
                 />
               </Button>
             </div>
@@ -221,7 +221,7 @@ export const CanvasParticipantsTray: React.FC<CanvasParticipantsTrayProps> = ({
         >
           <div className='p-6'>
             <div className='flex items-start gap-3 mb-4'>
-              <AlertTriangle className='w-6 h-6 text-amber-500 flex-shrink-0 mt-0.5' />
+              <AlertTriangle className='w-6 h-6 text-amber-500 shrink-0 mt-0.5' />
               <div>
                 <p className='text-foreground font-medium mb-2'>
                   Before enabling collaborative mode

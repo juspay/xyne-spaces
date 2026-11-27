@@ -51,7 +51,7 @@ const ANSWER_MAX_HEIGHT = 'max-h-36';
 // barely shows on the palette, so the bars are darkened (`!` beats Skeleton's bg class),
 // and widths vary so it reads as a paragraph coming, not stripes.
 const ANSWER_LINE_WIDTHS = ['w-full', 'w-[92%]', 'w-[58%]'];
-const SKELETON_BAR_CLASS = '!bg-muted-foreground/30';
+const SKELETON_BAR_CLASS = 'bg-muted-foreground/30!';
 
 const AnswerSkeleton = (): ReactElement => (
   <div aria-hidden='true' className='flex flex-col gap-2.5 py-1'>

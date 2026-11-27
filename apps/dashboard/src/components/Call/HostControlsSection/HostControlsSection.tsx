@@ -99,11 +99,11 @@ export function HostControlsSection({ callId }: HostControlsSectionProps): React
             data-testid={`host-control-row-${key}`}
           >
             <span className='flex min-w-0 items-center gap-3'>
-              <MediaIcon size={18} className='flex-shrink-0 text-muted-foreground' />
+              <MediaIcon size={18} className='shrink-0 text-muted-foreground' />
               <span className='text-sm'>{title}</span>
             </span>
             <span
-              className='flex-shrink-0'
+              className='shrink-0'
               data-testid={`host-control-toggle-${key}`}
               data-track-category='CALLS'
               data-track-name={track}

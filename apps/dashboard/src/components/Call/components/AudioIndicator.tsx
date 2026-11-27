@@ -40,7 +40,7 @@ export function AudioIndicator({
     return (
       <span
         className={cn(
-          'flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-black/55 text-white backdrop-blur-md',
+          'flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-black/55 text-white backdrop-blur-md',
           className,
         )}
         title='Muted'
@@ -54,7 +54,7 @@ export function AudioIndicator({
   return (
     <span
       className={cn(
-        'flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full bg-[#1a73e8] text-white',
+        'flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#1a73e8] text-white',
         className,
       )}
       title='Speaking'

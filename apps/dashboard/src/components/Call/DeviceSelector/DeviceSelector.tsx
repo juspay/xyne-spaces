@@ -63,7 +63,7 @@ export function DeviceSelector({
           <div className='flex items-center px-3 py-2 gap-3 hover:bg-gray-700 rounded-lg'>
             {icon &&
               React.createElement(icon, {
-                className: 'w-4 h-4 flex-shrink-0 text-muted-foreground',
+                className: 'w-4 h-4 shrink-0 text-muted-foreground',
               })}
             <div className='flex-1 min-w-0'>
               <div className='text-xs text-muted-foreground mb-0.5'>{label}</div>
@@ -106,7 +106,7 @@ export function DeviceSelector({
                   >
                     <span className='truncate pr-2 text-white'>{device.label || label}</span>
                     {device.deviceId === currentDeviceId && (
-                      <Check className='w-4 h-4 text-blue-500 flex-shrink-0' />
+                      <Check className='w-4 h-4 text-blue-500 shrink-0' />
                     )}
                   </button>
                 ))
@@ -133,7 +133,7 @@ export function DeviceSelector({
         data-track-name='Toggle_Device_Dropdown'
         data-track-metadata={JSON.stringify({ deviceType: label })}
       >
-        {icon && React.createElement(icon, { className: 'w-4 h-4 flex-shrink-0 text-white' })}
+        {icon && React.createElement(icon, { className: 'w-4 h-4 shrink-0 text-white' })}
         <div className='flex-1  min-w-0'>
           <div className='truncate text-xs font-medium text-white'>
             {currentDevice?.label || `No ${label.toLowerCase()} selected`}
@@ -141,7 +141,7 @@ export function DeviceSelector({
         </div>
         <ChevronDown
           className={cn(
-            'w-3.5 h-3.5 flex-shrink-0 transition-transform text-white',
+            'w-3.5 h-3.5 shrink-0 transition-transform text-white',
             isOpen && 'rotate-180',
           )}
         />
@@ -168,7 +168,7 @@ export function DeviceSelector({
                 >
                   <span className='truncate pr-2 text-white'>{device.label || label}</span>
                   {device.deviceId === currentDeviceId && (
-                    <Check className='w-4 h-4 text-blue-500 flex-shrink-0' />
+                    <Check className='w-4 h-4 text-blue-500 shrink-0' />
                   )}
                 </button>
               ))

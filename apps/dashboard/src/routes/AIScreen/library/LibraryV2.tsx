@@ -270,7 +270,7 @@ const LibraryV2 = ({
                 data-track-category='Claw Agents'
                 data-track-name='Search library'
                 placeholder={activeTab.searchPlaceholder}
-                className='h-9 w-full rounded-[10px] border border-border bg-background pl-9 pr-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring'
+                className='h-9 w-full rounded-[10px] border border-border bg-background pl-9 pr-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-hidden focus:ring-1 focus:ring-ring'
               />
             </div>
           )}
@@ -334,7 +334,7 @@ const LibraryV2 = ({
               onClick={() => setImportSkillOpen(false)}
               data-track-category='Claw Agents'
               data-track-name='Import skill closed'
-              className='grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+              className='grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring'
             >
               <X size={15} />
             </button>

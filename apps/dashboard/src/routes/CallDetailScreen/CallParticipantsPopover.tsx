@@ -138,11 +138,11 @@ type PillTone = 'pending' | 'success' | 'muted';
 // cannot do that here — `darkMode` is `class`, and no `.dark` class is ever set.
 const pillToneClasses: Record<PillTone, { pill: string; dot: string }> = {
   pending: {
-    pill: 'border-status-pending/30 bg-status-pending/10 text-status-pending',
+    pill: 'text-status-pending',
     dot: 'bg-status-pending',
   },
   success: {
-    pill: 'border-status-success/30 bg-status-success/10 text-status-success',
+    pill: 'text-status-success',
     dot: 'bg-status-success',
   },
   muted: {

@@ -65,7 +65,7 @@ const SECTIONS: SectionSpec[] = [
   { field: 'todays_schedule', label: "Today's schedule", checkable: false, itemGap: 'gap-3' },
 ];
 
-const BODY_TEXT_CLASS = 'text-[15px] font-normal leading-[1.5] tracking-[-0.1px] text-foreground';
+const BODY_TEXT_CLASS = 'text-[15px] font-normal leading-normal tracking-[-0.1px] text-foreground';
 
 interface SelectedBrief {
   date: string | undefined;
@@ -83,7 +83,7 @@ function formatBriefTitle(date: string | undefined): string {
 }
 
 const SECTION_LABEL_CLASS =
-  'text-[15px] font-semibold leading-[1.5] tracking-[-0.1px] text-foreground';
+  'text-[15px] font-semibold leading-normal tracking-[-0.1px] text-foreground';
 
 function SectionLabel({ label }: { label: string }): ReactElement {
   return (
@@ -507,7 +507,7 @@ const DailyBriefScreen = (): ReactElement => {
               disabled={briefEnabling}
               data-track-category='DailyBrief'
               data-track-name='daily-brief-empty-enable'
-              className='flex h-7 items-center rounded-[8px] bg-foreground px-2.5 text-[14px] font-semibold leading-[20px] text-background shadow-sm transition-opacity hover:opacity-90 disabled:opacity-50'
+              className='flex h-7 items-center rounded-[8px] bg-foreground px-2.5 text-[14px] font-semibold leading-[20px] text-background shadow-xs transition-opacity hover:opacity-90 disabled:opacity-50'
             >
               {briefEnabling ? 'Turning on…' : 'Turn on morning brief'}
             </button>

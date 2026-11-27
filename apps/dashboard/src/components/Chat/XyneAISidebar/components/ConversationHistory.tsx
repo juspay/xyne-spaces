@@ -69,7 +69,7 @@ export const ConversationHistory = ({
   return (
     <div className='flex-1 overflow-hidden flex flex-col h-full'>
       {/* Header */}
-      <div className='p-4 flex items-center justify-between gap-2 self-stretch border-border flex-shrink-0'>
+      <div className='p-4 flex items-center justify-between gap-2 self-stretch border-border shrink-0'>
         {isSearchExpanded ? (
           <>
             <button
@@ -80,8 +80,8 @@ export const ConversationHistory = ({
               }}
               className={
                 isMobile
-                  ? 'flex w-8 h-8 justify-center items-center rounded-full border border-[#FFF] bg-[linear-gradient(180deg,_#FFF_0%,_#FAFAFA_100%)] shadow-[inset_0_4px_6px_0_#F5F5F5,0_0_12px_0_#E5E5E5] shrink-0'
-                  : 'p-1 hover:bg-accent rounded transition-colors flex-shrink-0'
+                  ? 'flex w-8 h-8 justify-center items-center rounded-full border border-white bg-[linear-gradient(180deg,#FFF_0%,#FAFAFA_100%)] shadow-[inset_0_4px_6px_0_#F5F5F5,0_0_12px_0_#E5E5E5] shrink-0'
+                  : 'p-1 hover:bg-accent rounded transition-colors shrink-0'
               }
               data-track-category='XyneAI'
               data-track-name='CloseSearch'
@@ -97,7 +97,7 @@ export const ConversationHistory = ({
                 placeholder='Search chats...'
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
-                className="flex-1 bg-transparent outline-none text-foreground placeholder:text-muted-foreground text-sm font-['Inter']"
+                className="flex-1 bg-transparent outline-hidden text-foreground placeholder:text-muted-foreground text-sm font-['Inter']"
                 data-track-category='XyneAI'
                 data-track-name='SearchChatsInput'
                 autoFocus={!isMobile}
@@ -108,7 +108,7 @@ export const ConversationHistory = ({
               <button
                 aria-label='Close chat history'
                 onClick={handleClose}
-                className='p-2 rounded-lg outline outline-1 outline-offset-[-1px] outline-border flex justify-center items-center gap-2.5 overflow-hidden hover:bg-accent transition-colors'
+                className='p-2 rounded-lg outline-solid outline-1 -outline-offset-1 outline-border flex justify-center items-center gap-2.5 overflow-hidden hover:bg-accent transition-colors'
                 data-track-category='XyneAI'
                 data-track-name='CloseHistory'
               >
@@ -124,7 +124,7 @@ export const ConversationHistory = ({
                 onClick={onBack}
                 className={
                   isMobile
-                    ? 'flex w-8 h-8 justify-center items-center rounded-full border border-[#FFF] bg-[linear-gradient(180deg,_#FFF_0%,_#FAFAFA_100%)] shadow-[inset_0_4px_6px_0_#F5F5F5,0_0_12px_0_#E5E5E5] shrink-0'
+                    ? 'flex w-8 h-8 justify-center items-center rounded-full border border-white bg-[linear-gradient(180deg,#FFF_0%,#FAFAFA_100%)] shadow-[inset_0_4px_6px_0_#F5F5F5,0_0_12px_0_#E5E5E5] shrink-0'
                     : 'p-1 hover:bg-accent rounded transition-colors'
                 }
                 data-track-category='XyneAI'
@@ -147,8 +147,8 @@ export const ConversationHistory = ({
                 onClick={() => setIsSearchExpanded(true)}
                 className={
                   isMobile
-                    ? 'flex w-8 h-8 justify-center items-center rounded-full border border-[#FFF] bg-[linear-gradient(180deg,_#FFF_0%,_#FAFAFA_100%)] shadow-[inset_0_4px_6px_0_#F5F5F5,0_0_12px_0_#E5E5E5] shrink-0'
-                    : 'p-2 rounded-lg outline outline-1 outline-offset-[-1px] outline-border flex justify-center items-center gap-2.5 overflow-hidden hover:bg-accent transition-colors'
+                    ? 'flex w-8 h-8 justify-center items-center rounded-full border border-white bg-[linear-gradient(180deg,#FFF_0%,#FAFAFA_100%)] shadow-[inset_0_4px_6px_0_#F5F5F5,0_0_12px_0_#E5E5E5] shrink-0'
+                    : 'p-2 rounded-lg outline-solid outline-1 -outline-offset-1 outline-border flex justify-center items-center gap-2.5 overflow-hidden hover:bg-accent transition-colors'
                 }
                 data-track-category='XyneAI'
                 data-track-name='OpenSearch'
@@ -163,7 +163,7 @@ export const ConversationHistory = ({
                 <button
                   aria-label='Close chat history'
                   onClick={handleClose}
-                  className='p-2 rounded-lg outline outline-1 outline-offset-[-1px] outline-border flex justify-center items-center gap-2.5 overflow-hidden hover:bg-accent transition-colors'
+                  className='p-2 rounded-lg outline-solid outline-1 -outline-offset-1 outline-border flex justify-center items-center gap-2.5 overflow-hidden hover:bg-accent transition-colors'
                   data-track-category='XyneAI'
                   data-track-name='CloseHistory'
                 >
@@ -447,7 +447,7 @@ const ConversationItem = ({
               {visible.map(ch => (
                 <span
                   key={ch.id}
-                  className={`inline-flex items-center gap-0.5 px-2 py-0.5 rounded-md text-[10px] font-semibold leading-none shadow-sm cursor-default select-none transition-colors ${getColor(ch.id)}`}
+                  className={`inline-flex items-center gap-0.5 px-2 py-0.5 rounded-md text-[10px] font-semibold leading-none shadow-xs cursor-default select-none transition-colors ${getColor(ch.id)}`}
                 >
                   # {ch.name}
                 </span>
@@ -466,7 +466,7 @@ const ConversationItem = ({
           height='4'
           viewBox='0 0 4 4'
           fill='none'
-          className='flex-shrink-0'
+          className='shrink-0'
         >
           <circle cx='2' cy='2' r='2' fill='hsl(var(--destructive))' />
         </svg>

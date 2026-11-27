@@ -355,7 +355,7 @@ const AuthScreen = (): ReactElement | null => {
   const googleSignInButton = (
     <div className='relative rounded-md overflow-hidden max-w-[280px]'>
       <button
-        className="w-full gap-3 text-base h-9 font-medium inline-flex items-center justify-center whitespace-nowrap transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-none focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive cursor-pointer border bg-background shadow-xs hover:bg-accent hover:text-accent-foreground dark:bg-input/30 dark:border-input dark:hover:bg-input/50 rounded-md px-6 has-[>svg]:px-4"
+        className="w-full gap-3 text-base h-9 font-medium inline-flex items-center justify-center whitespace-nowrap transition-all disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 shrink-0 [&_svg]:shrink-0 outline-hidden focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] cursor-pointer border bg-background hover:bg-accent hover:text-accent-foreground dark:bg-input/30 dark:border-input dark:hover:bg-input/50 rounded-md px-6 has-[>svg]:px-4"
         onClick={handleGoogleSignIn}
         disabled={isLoading}
         data-track-category='Auth'
@@ -372,7 +372,7 @@ const AuthScreen = (): ReactElement | null => {
 
   return (
     <ThemeProvider>
-      <div className='h-[100dvh] w-full overflow-y-auto bg-background'>
+      <div className='h-dvh w-full overflow-y-auto bg-background'>
         <div
           className='min-h-full w-full grid grid-rows-[1fr_auto]'
           role='main'
@@ -413,7 +413,7 @@ const AuthScreen = (): ReactElement | null => {
                     role='alert'
                     aria-live='assertive'
                   >
-                    <p className='text-sm sm:text-base text-red-600 break-words'>{error}</p>
+                    <p className='text-sm sm:text-base text-red-600 wrap-break-word'>{error}</p>
                   </div>
                 )}
 
@@ -555,7 +555,7 @@ const AuthScreen = (): ReactElement | null => {
                         value={newEnterpriseWorkspaceName}
                         onChange={e => setNewEnterpriseWorkspaceName(e.target.value)}
                         placeholder='Workspace name'
-                        className='flex-1 px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-foreground text-sm'
+                        className='flex-1 px-3 py-2 border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500 bg-background text-foreground text-sm'
                         data-track-category='Auth'
                         data-track-name='NewEnterpriseWorkspaceNameInput'
                       />
@@ -653,7 +653,7 @@ const AuthScreen = (): ReactElement | null => {
                           }
                         }}
                         placeholder='Juspay Inc'
-                        className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 bg-background text-foreground ${
+                        className={`w-full px-3 py-2 border rounded-lg focus:outline-hidden focus:ring-2 bg-background text-foreground ${
                           isOrganizationNameTakenError
                             ? 'border-amber-400 focus:ring-amber-500'
                             : 'border-border focus:ring-blue-500'
@@ -682,7 +682,7 @@ const AuthScreen = (): ReactElement | null => {
                         value={workspaceName}
                         onChange={e => setWorkspaceName(e.target.value)}
                         placeholder='Engineering'
-                        className='w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-foreground'
+                        className='w-full px-3 py-2 border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500 bg-background text-foreground'
                         required
                         data-track-category='Auth'
                         data-track-name='WorkspaceNameInput'
@@ -723,7 +723,7 @@ const AuthScreen = (): ReactElement | null => {
                         <button
                           disabled={isLoading}
                           onClick={handleGoogleSignIn}
-                          className='appearance-none outline-none font-inherit cursor-pointer opacity-100 flex items-center justify-center gap-4 px-4 py-[9px] w-full relative bg-[#2F2F2F] text-white border border-white/10 rounded-[10px] overflow-hidden h-12'
+                          className='appearance-none outline-hidden font-inherit cursor-pointer opacity-100 flex items-center justify-center gap-4 px-4 py-[9px] w-full relative bg-[#2F2F2F] text-white border border-white/10 rounded-[10px] overflow-hidden h-12'
                           data-track-category='Auth'
                           data-track-name='GoogleSignIn'
                         >
@@ -744,7 +744,7 @@ const AuthScreen = (): ReactElement | null => {
                           <button
                             disabled={isLoading}
                             onClick={handleMicrosoftSignIn}
-                            className='appearance-none outline-none font-inherit cursor-pointer opacity-100 flex items-center justify-center gap-4 px-4 py-[9px] w-full relative bg-[#2F2F2F] text-white border border-white/10 rounded-[10px] overflow-hidden h-12'
+                            className='appearance-none outline-hidden font-inherit cursor-pointer opacity-100 flex items-center justify-center gap-4 px-4 py-[9px] w-full relative bg-[#2F2F2F] text-white border border-white/10 rounded-[10px] overflow-hidden h-12'
                             data-track-category='Auth'
                             data-track-name='MicrosoftSignIn'
                           >
@@ -788,7 +788,7 @@ const AuthScreen = (): ReactElement | null => {
                                 onChange={e => setFpEmail(e.target.value)}
                                 placeholder='Email address'
                                 required
-                                className='w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-foreground text-sm'
+                                className='w-full px-3 py-2 border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500 bg-background text-foreground text-sm'
                                 data-track-category='Auth'
                                 data-track-name='ForgotPasswordEmailInput'
                               />
@@ -828,7 +828,7 @@ const AuthScreen = (): ReactElement | null => {
                                 pattern='[0-9]{6}'
                                 inputMode='numeric'
                                 required
-                                className='w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-foreground text-sm tracking-widest text-center'
+                                className='w-full px-3 py-2 border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500 bg-background text-foreground text-sm tracking-widest text-center'
                                 data-track-category='Auth'
                                 data-track-name='ResetCodeInput'
                               />
@@ -838,7 +838,7 @@ const AuthScreen = (): ReactElement | null => {
                                 onChange={e => setFpNewPassword(e.target.value)}
                                 placeholder='New password (min 8 chars)'
                                 required
-                                className='w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-foreground text-sm'
+                                className='w-full px-3 py-2 border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500 bg-background text-foreground text-sm'
                                 data-track-category='Auth'
                                 data-track-name='ResetNewPasswordInput'
                               />
@@ -848,7 +848,7 @@ const AuthScreen = (): ReactElement | null => {
                                 onChange={e => setFpConfirmPassword(e.target.value)}
                                 placeholder='Confirm new password'
                                 required
-                                className='w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-foreground text-sm'
+                                className='w-full px-3 py-2 border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500 bg-background text-foreground text-sm'
                                 data-track-category='Auth'
                                 data-track-name='ResetConfirmPasswordInput'
                               />
@@ -909,7 +909,7 @@ const AuthScreen = (): ReactElement | null => {
                             placeholder='Email address'
                             required
                             autoComplete='off'
-                            className='w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-foreground text-sm'
+                            className='w-full px-3 py-2 border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500 bg-background text-foreground text-sm'
                             data-track-category='Auth'
                             data-track-name='EmailInput'
                           />
@@ -919,7 +919,7 @@ const AuthScreen = (): ReactElement | null => {
                             onChange={e => setPassword(e.target.value)}
                             placeholder='Password'
                             required
-                            className='w-full px-3 py-2 border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-foreground text-sm'
+                            className='w-full px-3 py-2 border border-border rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500 bg-background text-foreground text-sm'
                             data-track-category='Auth'
                             data-track-name='PasswordInput'
                           />

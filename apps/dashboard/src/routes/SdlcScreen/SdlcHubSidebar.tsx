@@ -28,12 +28,12 @@ export interface SdlcHubOption {
 /** Chat's sidebar row: 36px, 14px type, 10px radius, the sidebar accent for hover and active. */
 export const sdlcSidebarRowClass = (active: boolean, muted = false): string =>
   cn(
-    'flex h-9 w-full items-center gap-3 rounded-[10px] border border-transparent px-3 text-sm outline-none transition-colors',
+    'flex h-9 w-full items-center gap-3 rounded-[10px] border border-transparent px-3 text-sm outline-hidden transition-colors',
     active
       ? 'border-sidebar-border bg-sidebar-accent font-medium text-sidebar-accent-foreground'
       : cn(
           'hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:bg-sidebar-accent focus-visible:text-sidebar-accent-foreground',
-          muted ? 'text-sidebar-foreground/60' : 'text-sidebar-foreground',
+          muted ? '' : 'text-sidebar-foreground',
         ),
   );
 
@@ -93,9 +93,7 @@ export function SdlcSidebarRow(props: SdlcSidebarRowProps): ReactElement {
       <span className='min-w-0 flex-1 truncate text-left'>{props.label}</span>
       <ActivityPill live={props.liveCalls} rollUp place={props.label} size='sm' />
       {props.count !== undefined && props.count > 0 && (
-        <span className='shrink-0 text-xs tabular-nums text-sidebar-foreground/50'>
-          {props.count}
-        </span>
+        <span className='shrink-0 text-xs tabular-nums'>{props.count}</span>
       )}
     </button>
   );
@@ -111,7 +109,7 @@ export function SdlcSidebarAddRow(props: {
     <button
       type='button'
       onClick={props.onClick}
-      className='outline-none flex h-9 w-full items-center gap-3 rounded-[10px] border border-dashed border-transparent px-3 text-sm text-sidebar-foreground/60 transition-colors hover:border-sidebar-border focus-visible:border-sidebar-border hover:bg-sidebar-accent focus-visible:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:text-sidebar-accent-foreground'
+      className='outline-hidden flex h-9 w-full items-center gap-3 rounded-[10px] border border-dashed border-transparent px-3 text-sm transition-colors hover:border-sidebar-border focus-visible:border-sidebar-border hover:bg-sidebar-accent focus-visible:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:text-sidebar-accent-foreground'
       data-track-category='SdlcHub'
       data-track-name={props.trackName}
     >
@@ -188,7 +186,7 @@ export function SdlcSidebarGroup(props: {
           type='button'
           onClick={() => toggleSection(collapsedSections, props.id)}
           aria-expanded={!collapsed}
-          className='flex h-full min-w-0 flex-1 items-center gap-1.5 text-[13px] font-semibold text-sidebar-foreground/70 transition-colors hover:text-sidebar-accent-foreground focus:outline-none focus-visible:text-sidebar-accent-foreground'
+          className='flex h-full min-w-0 flex-1 items-center gap-1.5 text-[13px] font-semibold transition-colors hover:text-sidebar-accent-foreground focus:outline-hidden focus-visible:text-sidebar-accent-foreground'
           data-track-category='SdlcHub'
           data-track-name='SidebarSectionToggled'
           data-track-metadata={JSON.stringify({ section: props.id })}
@@ -200,7 +198,7 @@ export function SdlcSidebarGroup(props: {
           />
           <span className='truncate text-left'>{props.title}</span>
           {props.count !== undefined && props.count > 0 && (
-            <span className='shrink-0 rounded-md bg-sidebar-accent px-1.5 py-px text-[11px] font-medium tabular-nums text-sidebar-foreground/70'>
+            <span className='shrink-0 rounded-md bg-sidebar-accent px-1.5 py-px text-[11px] font-medium tabular-nums'>
               {props.count}
             </span>
           )}
@@ -211,7 +209,7 @@ export function SdlcSidebarGroup(props: {
             onClick={props.action.onClick}
             title={props.action.label}
             aria-label={props.action.label}
-            className='flex shrink-0 items-center justify-center rounded-md p-1 text-sidebar-foreground opacity-0 transition-opacity duration-150 hover:bg-sidebar-accent focus-visible:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:text-sidebar-accent-foreground focus:outline-none focus-visible:opacity-100 group-hover:opacity-100'
+            className='flex shrink-0 items-center justify-center rounded-md p-1 text-sidebar-foreground opacity-0 transition-opacity duration-150 hover:bg-sidebar-accent focus-visible:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:text-sidebar-accent-foreground focus:outline-hidden focus-visible:opacity-100 group-hover:opacity-100'
             data-track-category='SdlcHub'
             data-track-name={props.action.trackName}
           >
@@ -225,7 +223,7 @@ export function SdlcSidebarGroup(props: {
 }
 
 const HEADER_ICON_BUTTON =
-  'flex size-7 shrink-0 items-center justify-center rounded-md text-sidebar-foreground transition-colors hover:bg-sidebar-accent focus-visible:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:text-sidebar-accent-foreground focus:outline-none';
+  'flex size-7 shrink-0 items-center justify-center rounded-md text-sidebar-foreground transition-colors hover:bg-sidebar-accent focus-visible:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:text-sidebar-accent-foreground focus:outline-hidden';
 
 /**
  * The sidebar's title row, in the place of Chat's "Inbox": the hub's name, which opens
@@ -247,7 +245,7 @@ export function SdlcHubHeader(props: {
       onClick={props.onToggleRail}
       title={props.collapsed ? 'Pin the sidebar open' : 'Collapse to icons'}
       aria-label={props.collapsed ? 'Pin the sidebar open' : 'Collapse to icons'}
-      className={cn(HEADER_ICON_BUTTON, 'text-sidebar-foreground/60')}
+      className={HEADER_ICON_BUTTON}
       data-track-category='SdlcHub'
       data-track-name='SidebarRailToggled'
     >
@@ -267,7 +265,7 @@ export function SdlcHubHeader(props: {
         type='button'
         onClick={props.onOpenSwitcher}
         title={`${props.hubName} · Switch hub (⌘J)`}
-        className='flex h-8 min-w-0 flex-1 items-center gap-1 rounded-lg px-1.5 text-left transition-colors hover:bg-sidebar-accent focus-visible:bg-sidebar-accent focus:outline-none'
+        className='flex h-8 min-w-0 flex-1 items-center gap-1 rounded-lg px-1.5 text-left transition-colors hover:bg-sidebar-accent focus-visible:bg-sidebar-accent focus:outline-hidden'
         data-track-category='SdlcHub'
         data-track-name='HubSwitcherOpened'
         data-track-metadata={JSON.stringify({ via: 'title' })}
@@ -275,7 +273,7 @@ export function SdlcHubHeader(props: {
         <span className='min-w-0 truncate text-base font-semibold leading-normal text-sidebar-accent-foreground'>
           {props.hubName}
         </span>
-        <ChevronDown className='size-3.5 shrink-0 text-sidebar-foreground/60' />
+        <ChevronDown className='size-3.5 shrink-0' />
       </button>
       <button
         type='button'
@@ -311,7 +309,7 @@ export function SdlcExplorerHeader(props: {
       onClick={props.onToggleRail}
       title={props.collapsed ? 'Pin the sidebar open' : 'Collapse to icons'}
       aria-label={props.collapsed ? 'Pin the sidebar open' : 'Collapse to icons'}
-      className={cn(HEADER_ICON_BUTTON, 'text-sidebar-foreground/60')}
+      className={HEADER_ICON_BUTTON}
       data-track-category='SdlcHub'
       data-track-name='SidebarRailToggled'
     >
@@ -331,11 +329,11 @@ export function SdlcExplorerHeader(props: {
         onClick={props.onBack}
         title={`Back to ${props.trackName}`}
         aria-label={`Back to ${props.trackName}`}
-        className='flex h-8 min-w-0 flex-1 items-center gap-1 rounded-lg px-1.5 text-left transition-colors hover:bg-sidebar-accent focus-visible:bg-sidebar-accent focus:outline-none'
+        className='flex h-8 min-w-0 flex-1 items-center gap-1 rounded-lg px-1.5 text-left transition-colors hover:bg-sidebar-accent focus-visible:bg-sidebar-accent focus:outline-hidden'
         data-track-category='SdlcHub'
         data-track-name='ExplorerBack'
       >
-        <ChevronLeft className='size-4 shrink-0 text-sidebar-foreground/60' />
+        <ChevronLeft className='size-4 shrink-0' />
         <span className='min-w-0 truncate text-base font-semibold leading-normal text-sidebar-accent-foreground'>
           {props.trackName}
         </span>

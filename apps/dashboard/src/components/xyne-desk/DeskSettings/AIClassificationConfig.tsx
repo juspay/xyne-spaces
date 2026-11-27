@@ -172,7 +172,7 @@ export const AIClassificationConfig: React.FC<AIClassificationConfigProps> = ({
           placeholder='eg. Query Type'
           readOnly={fieldDisabled}
           disabled={fieldDisabled}
-          className='w-full max-w-[300px] rounded-[10px] border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-desk-helper focus:outline-none focus:ring-1 focus:ring-desk-accent disabled:opacity-50 read-only:bg-muted/40 read-only:cursor-default read-only:focus:ring-0'
+          className='w-full max-w-[300px] rounded-[10px] border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-desk-helper focus:outline-hidden focus:ring-1 focus:ring-desk-accent disabled:opacity-50 read-only:bg-muted/40 read-only:cursor-default read-only:focus:ring-0'
           data-track-category='DeskSettings'
           data-track-name='CategoryFieldName'
         />
@@ -190,7 +190,7 @@ export const AIClassificationConfig: React.FC<AIClassificationConfigProps> = ({
           placeholder='eg. Feature Request Type'
           readOnly={fieldDisabled}
           disabled={fieldDisabled}
-          className='w-full max-w-[300px] rounded-[10px] border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-desk-helper focus:outline-none focus:ring-1 focus:ring-desk-accent disabled:opacity-50 read-only:bg-muted/40 read-only:cursor-default read-only:focus:ring-0'
+          className='w-full max-w-[300px] rounded-[10px] border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-desk-helper focus:outline-hidden focus:ring-1 focus:ring-desk-accent disabled:opacity-50 read-only:bg-muted/40 read-only:cursor-default read-only:focus:ring-0'
           data-track-category='DeskSettings'
           data-track-name='SubCategoryFieldName'
         />
@@ -258,7 +258,7 @@ export const AIClassificationConfig: React.FC<AIClassificationConfigProps> = ({
           spellCheck={false}
           readOnly={fieldDisabled}
           disabled={fieldDisabled}
-          className='h-[150px] w-full rounded-[10px] border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-desk-helper focus:outline-none focus:ring-1 focus:ring-desk-accent disabled:opacity-50 read-only:cursor-default read-only:bg-muted/40 read-only:focus:ring-0'
+          className='h-[150px] w-full rounded-[10px] border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-desk-helper focus:outline-hidden focus:ring-1 focus:ring-desk-accent disabled:opacity-50 read-only:cursor-default read-only:bg-muted/40 read-only:focus:ring-0'
           data-track-category='DeskSettings'
           data-track-name='ClassificationPrompt'
         />
@@ -340,7 +340,7 @@ export const AIClassificationConfig: React.FC<AIClassificationConfigProps> = ({
         </div>
 
         <div className='overflow-x-auto -mx-1 px-1'>
-          <div className='grid grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(72px,100px)] gap-x-4 min-w-[32rem] px-4 pb-[8px]'>
+          <div className='grid grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(72px,100px)] gap-x-4 min-w-lg px-4 pb-[8px]'>
             <div className='text-desk-helper pb-2'>Category</div>
             <div className='text-desk-helper pb-2'>Sub-category</div>
             <div className='text-desk-helper pb-2'>User group</div>
@@ -354,14 +354,14 @@ export const AIClassificationConfig: React.FC<AIClassificationConfigProps> = ({
               return (
                 <div
                   key={mapping.id}
-                  className='grid grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(72px,100px)] gap-x-4 min-w-[32rem] px-4 py-2 rounded-[10px] bg-muted/30 dark:bg-muted/20 items-center'
+                  className='grid grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(72px,100px)] gap-x-4 min-w-lg px-4 py-2 rounded-[10px] bg-muted/30 dark:bg-muted/20 items-center'
                 >
                   <input
                     type='text'
                     value={editCategory}
                     onChange={e => setEditCategory(e.target.value)}
                     placeholder='eg. Feature Request'
-                    className='w-full rounded-[10px] border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-desk-accent'
+                    className='w-full rounded-[10px] border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-hidden focus:ring-1 focus:ring-desk-accent'
                     data-track-category='DeskSettings'
                     data-track-name='EditRuleCategory'
                   />
@@ -370,12 +370,12 @@ export const AIClassificationConfig: React.FC<AIClassificationConfigProps> = ({
                     value={editSubCategory}
                     onChange={e => setEditSubCategory(e.target.value)}
                     placeholder='eg. UPI (empty = catch all)'
-                    className='w-full rounded-[10px] border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-desk-accent'
+                    className='w-full rounded-[10px] border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-hidden focus:ring-1 focus:ring-desk-accent'
                     data-track-category='DeskSettings'
                     data-track-name='EditRuleSubCategory'
                   />
                   <Select value={editUserGroup} onValueChange={setEditUserGroup}>
-                    <SelectTrigger className='w-full rounded-[10px] border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-desk-accent'>
+                    <SelectTrigger className='w-full rounded-[10px] border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-hidden focus:ring-1 focus:ring-desk-accent'>
                       <SelectValue placeholder='Choose user group' />
                     </SelectTrigger>
                     <SelectContent className='rounded-[10px]'>
@@ -416,7 +416,7 @@ export const AIClassificationConfig: React.FC<AIClassificationConfigProps> = ({
             return (
               <div
                 key={mapping.id}
-                className='grid grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(72px,100px)] gap-x-4 min-w-[32rem] items-center rounded-[10px] hover:bg-muted/60 transition-colors group px-4 py-2 mt-0 hover:cursor-pointer'
+                className='grid grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(72px,100px)] gap-x-4 min-w-lg items-center rounded-[10px] hover:bg-muted/60 transition-colors group px-4 py-2 mt-0 hover:cursor-pointer'
               >
                 <div className='text-sm text-foreground min-w-0'>{mapping.category}</div>
                 <div className='text-sm text-foreground min-w-0'>
@@ -475,7 +475,7 @@ export const AIClassificationConfig: React.FC<AIClassificationConfigProps> = ({
                   value={newCategory}
                   onChange={e => setNewCategory(e.target.value)}
                   placeholder='eg. Feature Request'
-                  className='w-full rounded-[10px] border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-desk-accent'
+                  className='w-full rounded-[10px] border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-hidden focus:ring-1 focus:ring-desk-accent'
                   data-track-category='DeskSettings'
                   data-track-name='NewRuleCategory'
                 />
@@ -488,7 +488,7 @@ export const AIClassificationConfig: React.FC<AIClassificationConfigProps> = ({
                 <Select value={newUserGroup} onValueChange={setNewUserGroup}>
                   <SelectTrigger
                     id='new-rule-user-group'
-                    className='w-full rounded-[10px] border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-desk-accent'
+                    className='w-full rounded-[10px] border border-border bg-background px-3 py-2 text-sm text-foreground focus:outline-hidden focus:ring-1 focus:ring-desk-accent'
                   >
                     <SelectValue placeholder='Choose user group' />
                   </SelectTrigger>
@@ -514,7 +514,7 @@ export const AIClassificationConfig: React.FC<AIClassificationConfigProps> = ({
                 value={newSubCategory}
                 onChange={e => setNewSubCategory(e.target.value)}
                 placeholder='eg. UPI, mWeb Intent, UPI QR'
-                className='w-full rounded-[10px] border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-desk-accent'
+                className='w-full rounded-[10px] border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-hidden focus:ring-1 focus:ring-desk-accent'
                 data-track-category='DeskSettings'
                 data-track-name='NewRuleSubCategory'
               />

@@ -67,7 +67,7 @@ export function VersionHistory({
 
       {versions.length > 0 && (
         <div className='flex items-start gap-2 border-b border-border bg-muted/30 px-6 py-2.5 text-xs text-muted-foreground'>
-          <Info className='mt-0.5 size-3.5 flex-shrink-0' aria-hidden='true' />
+          <Info className='mt-0.5 size-3.5 shrink-0' aria-hidden='true' />
           <span>
             To bring back an older version, open it below and use <strong>Clone</strong> — that
             starts a new proposal seeded with that version&apos;s config.
@@ -96,7 +96,7 @@ export function VersionHistory({
           <div className='flex flex-col'>
             {Array.from({ length: SKELETON_ROWS }).map((_, i) => (
               <div key={i} className='flex items-center gap-3 border-b border-border px-6 py-3'>
-                <Skeleton className='h-4 w-4 rounded-full flex-shrink-0' />
+                <Skeleton className='h-4 w-4 rounded-full shrink-0' />
                 <Skeleton className='h-3.5 w-40' />
                 <Skeleton className='h-3.5 w-14 ml-2' />
                 <div className='flex-1' />

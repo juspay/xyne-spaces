@@ -37,7 +37,7 @@ const DigitalTwinRecallTab = (): ReactElement => {
             data-track-name='Digital Twin recall query'
             placeholder='Ask a question your Twin might answer…'
             rows={3}
-            className='w-full resize-none rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-ring focus:outline-none'
+            className='w-full resize-none rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-ring focus:outline-hidden'
           />
           <div className='flex justify-end'>
             <Button

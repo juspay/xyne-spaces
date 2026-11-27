@@ -108,8 +108,8 @@ export function MinimizedTranscriptView({
       <div
         className={`relative px-6 pt-2 pb-4 pointer-events-auto ${
           showScrim
-            ? 'bg-gradient-to-b from-background/95 to-card/95 backdrop-blur-md'
-            : 'bg-card/95 backdrop-blur-sm border-t border-border/60'
+            ? 'bg-linear-to-b from-background/95 to-card/95 backdrop-blur-md'
+            : 'bg-card/95 backdrop-blur-xs border-t border-border/60'
         }`}
       >
         {/* REC + elapsed — bottom left */}
@@ -153,7 +153,7 @@ export function MinimizedTranscriptView({
         </Button>
 
         {/* Transcript content - centered, extends to bottom row */}
-        <div className='max-w-3xl mx-auto h-24 overflow-y-auto flex flex-col [&::-webkit-scrollbar]:hidden [scrollbar-width:none]'>
+        <div className='max-w-3xl mx-auto h-24 overflow-y-auto flex flex-col [&::-webkit-scrollbar]:hidden scrollbar-none'>
           <AnimatePresence mode='popLayout'>
             {visibleLines.length > 0 ? (
               <motion.div
@@ -175,7 +175,7 @@ export function MinimizedTranscriptView({
                   >
                     {/* Timestamp */}
                     <span
-                      className='flex-none w-10 text-right font-mono text-[11px] leading-[1.5] font-medium tabular-nums'
+                      className='flex-none w-10 text-right font-mono text-[11px] leading-normal font-medium tabular-nums'
                       style={{
                         color: `hsl(var(--muted-foreground) / ${line.opacity})`,
                       }}
@@ -184,7 +184,7 @@ export function MinimizedTranscriptView({
                     </span>
                     {/* Transcript text */}
                     <div
-                      className='flex-1 min-w-0 leading-[1.5]'
+                      className='flex-1 min-w-0 leading-normal'
                       style={{
                         fontSize: line.isLast ? '14px' : '13px',
                         fontWeight: line.isLast ? 600 : 400,

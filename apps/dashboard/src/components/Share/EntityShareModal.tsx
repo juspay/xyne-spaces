@@ -468,7 +468,10 @@ const ShareMessageInput: React.FC<ShareMessageInputProps> = ({
         }
       }}
     >
-      <label htmlFor={`share-${subject}-message`} className='text-muted-foreground text-[13px]'>
+      <label
+        htmlFor={`share-${subject}-message`}
+        className='block text-muted-foreground text-[13px]'
+      >
         Add a message (optional)
       </label>
       <InputBox
@@ -522,7 +525,7 @@ const ShareRoleSelect: React.FC<ShareRoleSelectProps> = ({
   <Select.Root value={value} onValueChange={onChange}>
     <Select.Trigger
       className={cn(
-        'inline-flex items-center gap-1 shrink-0 text-sm text-foreground border outline-none',
+        'inline-flex items-center gap-1 shrink-0 text-sm text-foreground border outline-hidden',
         bordered
           ? 'h-10 px-3 rounded-lg border-border bg-background duration-300 ease-in-out data-[state=open]:border-foreground focus-visible:border-foreground'
           : 'h-8 px-2 rounded-md border-transparent hover:border-input hover:bg-background data-[state=open]:border-input focus-visible:border-ring',
@@ -539,14 +542,14 @@ const ShareRoleSelect: React.FC<ShareRoleSelectProps> = ({
         position='popper'
         sideOffset={4}
         align='end'
-        className='z-[70] min-w-[160px] overflow-hidden rounded-lg border border-border bg-popover shadow-md'
+        className='z-70 min-w-[160px] overflow-hidden rounded-lg border border-border bg-popover shadow-md'
       >
         <Select.Viewport className='p-1'>
           {[EntityUserAccess.VIEW, EntityUserAccess.EDIT].map(level => (
             <Select.Item
               key={level}
               value={level}
-              className='relative flex items-center pl-7 pr-2 py-1.5 text-sm rounded-md cursor-pointer outline-none select-none data-[highlighted]:bg-accent'
+              className='relative flex items-center pl-7 pr-2 py-1.5 text-sm rounded-md cursor-pointer outline-hidden select-none data-highlighted:bg-accent'
             >
               <Select.ItemIndicator className='absolute left-1.5'>
                 <Check className='size-3.5' />
@@ -559,7 +562,7 @@ const ShareRoleSelect: React.FC<ShareRoleSelectProps> = ({
               <div className='h-px bg-border my-1' role='separator' aria-hidden='true' />
               <Select.Item
                 value={REMOVE_ACCESS_VALUE}
-                className='relative flex items-center pl-7 pr-2 py-1.5 text-sm rounded-md cursor-pointer text-red-600 outline-none select-none data-[highlighted]:bg-red-50 dark:data-[highlighted]:bg-red-950/40'
+                className='relative flex items-center pl-7 pr-2 py-1.5 text-sm rounded-md cursor-pointer text-red-600 outline-hidden select-none data-highlighted:bg-red-50 dark:data-highlighted:bg-red-950/40'
               >
                 <Select.ItemText>{removeLabel}</Select.ItemText>
               </Select.Item>

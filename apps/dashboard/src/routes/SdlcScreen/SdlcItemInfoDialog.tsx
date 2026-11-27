@@ -60,7 +60,7 @@ export function SdlcItemInfoDialog(props: {
             <span className='flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted'>
               {props.icon}
             </span>
-            <h2 className='min-w-0 break-words text-base font-semibold tracking-tight'>
+            <h2 className='min-w-0 wrap-break-word text-base font-semibold tracking-tight'>
               {sdlcItemName(item)}
             </h2>
           </div>
@@ -88,11 +88,11 @@ export function SdlcItemInfoDialog(props: {
             )}
             {item.kind === 'LINK' && item.description?.trim() && (
               <Detail label='Description'>
-                <span className='break-words'>{item.description}</span>
+                <span className='wrap-break-word'>{item.description}</span>
               </Detail>
             )}
             <Detail label='Location'>
-              <span className='break-words'>
+              <span className='wrap-break-word'>
                 {props.location.map(step => step.name).join(' / ')}
               </span>
             </Detail>

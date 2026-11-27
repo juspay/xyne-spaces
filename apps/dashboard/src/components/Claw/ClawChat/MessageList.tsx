@@ -51,7 +51,7 @@ export function MessageList({ messages, onRetry }: MessageListProps): ReactEleme
           data-track-name='SCROLL_TO_BOTTOM'
           className={cn(
             'absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full border border-border',
-            'bg-popover text-popover-foreground shadow-sm p-1.5 hover:bg-accent transition-colors',
+            'bg-popover text-popover-foreground shadow-xs p-1.5 hover:bg-accent transition-colors',
           )}
         >
           <ArrowDown className='size-3.5' />

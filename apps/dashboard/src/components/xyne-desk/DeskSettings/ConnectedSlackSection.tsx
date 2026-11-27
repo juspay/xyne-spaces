@@ -116,7 +116,7 @@ export const ConnectedSlackSection: React.FC<ConnectedSlackSectionProps> = ({
           No Slack channels connected to this desk yet.
         </p>
       ) : (
-        <div className='flex w-full max-w-[480px] max-h-[240px] overflow-y-auto flex-col gap-[6px] rounded-[14px] border border-border bg-background p-[6px] shadow-sm'>
+        <div className='flex w-full max-w-[480px] max-h-[240px] overflow-y-auto flex-col gap-[6px] rounded-[14px] border border-border bg-background p-[6px] shadow-xs'>
           {connected.map(slack => (
             <div
               key={slack.sourceId}
@@ -145,7 +145,7 @@ export const ConnectedSlackSection: React.FC<ConnectedSlackSectionProps> = ({
       )}
 
       {!isLoading && !isError && !!connected?.length && (
-        <div className='flex w-full max-w-[480px] items-start justify-between gap-3 rounded-[14px] border border-border bg-background p-[12px] shadow-sm'>
+        <div className='flex w-full max-w-[480px] items-start justify-between gap-3 rounded-[14px] border border-border bg-background p-[12px] shadow-xs'>
           <div className='flex flex-col gap-[2px]'>
             <div className='text-desk-label'>Only create tickets when @-mentioned</div>
             <div className='text-[12px] leading-[16px] text-desk-helper'>
@@ -191,7 +191,7 @@ export const ConnectedSlackSection: React.FC<ConnectedSlackSectionProps> = ({
             type='button'
             onClick={() => selected && connectMutation.mutate(selected)}
             disabled={!selected || connectMutation.isPending}
-            className='inline-flex h-[32px] shrink-0 items-center gap-1.5 rounded-[10px] border border-border bg-background px-3 py-1.5 text-desk-label text-foreground shadow-sm transition-colors hover:bg-muted/40 disabled:cursor-not-allowed disabled:opacity-50'
+            className='inline-flex h-[32px] shrink-0 items-center gap-1.5 rounded-[10px] border border-border bg-background px-3 py-1.5 text-desk-label text-foreground shadow-xs transition-colors hover:bg-muted/40 disabled:cursor-not-allowed disabled:opacity-50'
             data-track-category='DeskSettings'
             data-track-name='ConnectDeskSlackChannel'
           >

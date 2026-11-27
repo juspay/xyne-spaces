@@ -338,7 +338,7 @@ const QuestionnaireScreen = (): ReactElement | null => {
   );
 
   return (
-    <div className='h-[100dvh] w-full bg-white grid grid-cols-1 md:grid-cols-2 overflow-hidden'>
+    <div className='h-dvh w-full bg-white grid grid-cols-1 md:grid-cols-2 overflow-hidden'>
       {/* Left panel */}
       <div className='relative flex flex-col px-6 py-8 md:p-0 overflow-y-auto overflow-x-hidden'>
         <img
@@ -348,7 +348,7 @@ const QuestionnaireScreen = (): ReactElement | null => {
         />
 
         {step === 'name' && (
-          <div className='flex-1 flex flex-col justify-center max-w-[520px] w-full md:absolute md:left-12 lg:left-16 md:top-[329px] md:bottom-[38px] md:w-[calc(100%_-_96px)] md:max-w-[600px] md:justify-start'>
+          <div className='flex-1 flex flex-col justify-center max-w-[520px] w-full md:absolute md:left-12 lg:left-16 md:top-[329px] md:bottom-[38px] md:w-[calc(100%-96px)] md:max-w-[600px] md:justify-start'>
             <h1 className='text-[30px] leading-[36px] md:text-[30px] md:leading-[36px] font-bold text-[#1f2430]'>
               Whats your name?
             </h1>
@@ -363,7 +363,7 @@ const QuestionnaireScreen = (): ReactElement | null => {
               onChange={e => setDisplayName(e.target.value)}
               placeholder='Enter your full name'
               autoComplete='off'
-              className='mt-[24px] h-[44px] w-full px-[13px] border border-[#DDE3EC] rounded-[9px] bg-white text-[#272B35] text-[14px] placeholder:text-[#B2B6BE] focus:outline-none focus:border-[#AEB7C5] transition-colors'
+              className='mt-[24px] h-[44px] w-full px-[13px] border border-[#DDE3EC] rounded-[9px] bg-white text-[#272B35] text-[14px] placeholder:text-[#B2B6BE] focus:outline-hidden focus:border-[#AEB7C5] transition-colors'
               data-track-category='Questionnaire'
               data-track-name='DisplayNameInput'
             />
@@ -380,7 +380,7 @@ const QuestionnaireScreen = (): ReactElement | null => {
                 onChange={e => setRole(e.target.value)}
                 placeholder='Ex: Product Manager'
                 autoComplete='off'
-                className='mt-[10px] h-[44px] w-full px-[13px] border border-[#DDE3EC] rounded-[9px] bg-white text-[#272B35] text-[14px] placeholder:text-[#B2B6BE] focus:outline-none focus:border-[#AEB7C5] transition-colors'
+                className='mt-[10px] h-[44px] w-full px-[13px] border border-[#DDE3EC] rounded-[9px] bg-white text-[#272B35] text-[14px] placeholder:text-[#B2B6BE] focus:outline-hidden focus:border-[#AEB7C5] transition-colors'
                 data-track-category='Questionnaire'
                 data-track-name='RoleInput'
               />
@@ -431,7 +431,7 @@ const QuestionnaireScreen = (): ReactElement | null => {
         )}
 
         {step === 'company' && (
-          <div className='flex-1 flex flex-col justify-center max-w-[520px] w-full md:absolute md:left-12 lg:left-[100px] md:top-[276px] md:bottom-[38px] md:w-[calc(100%_-_96px)] lg:w-[calc(100%_-_200px)] md:max-w-[776px] md:justify-start'>
+          <div className='flex-1 flex flex-col justify-center max-w-[520px] w-full md:absolute md:left-12 lg:left-[100px] md:top-[276px] md:bottom-[38px] md:w-[calc(100%-96px)] lg:w-[calc(100%-200px)] md:max-w-[776px] md:justify-start'>
             <h1 className='text-[28px] leading-[34px] font-bold text-[#242936]'>
               Tell us about your company
             </h1>
@@ -571,8 +571,8 @@ const QuestionnaireScreen = (): ReactElement | null => {
         {step === 'company' && (
           <div className='relative h-full w-full overflow-hidden bg-[#F8F9FB]'>
             <div className='absolute left-0 right-0 top-[164px] h-[calc(100%-164px)] bg-[#F5F8FC]' />
-            <div className='absolute left-[16.5%] right-0 top-[164px] z-[3] h-[18px] border-t border-[#DDE5F0] bg-white' />
-            <div className='absolute bottom-0 left-[calc(16.5%+416px)] right-0 top-[182px] z-[4] rounded-tl-[42px] border-l border-t border-[#DDE5F0] bg-white' />
+            <div className='absolute left-[16.5%] right-0 top-[164px] z-3 h-[18px] border-t border-[#DDE5F0] bg-white' />
+            <div className='absolute bottom-0 left-[calc(16.5%+416px)] right-0 top-[182px] z-4 rounded-tl-[42px] border-l border-t border-[#DDE5F0] bg-white' />
 
             <div className='absolute left-[11%] top-[164px] z-10 flex h-[84px] w-[468px] max-w-[68%] -translate-y-1/2 items-center rounded-[16px] border border-[#DDE3EC] bg-white px-[22px] shadow-[0_16px_34px_rgba(25,35,55,0.16)]'>
               <span className='max-w-[350px] truncate text-[22px] leading-none font-bold text-[#172032]'>
@@ -584,9 +584,9 @@ const QuestionnaireScreen = (): ReactElement | null => {
               </span>
             </div>
 
-            <div className='absolute bottom-0 left-[16.5%] top-[164px] z-[2] w-[416px] overflow-hidden bg-[#F5F8FC] pt-[116px] shadow-[inset_0_0_36px_rgba(136,153,180,0.12)]'>
+            <div className='absolute bottom-0 left-[16.5%] top-[164px] z-2 w-[416px] overflow-hidden bg-[#F5F8FC] pt-[116px] shadow-[inset_0_0_36px_rgba(136,153,180,0.12)]'>
               <div className='absolute inset-y-0 left-0 w-[28px] bg-white/80' />
-              <div className='absolute inset-y-0 left-[28px] w-[1px] bg-[#EDF2F8]' />
+              <div className='absolute inset-y-0 left-[28px] w-px bg-[#EDF2F8]' />
               <div className='px-[18px] pl-[74px]'>
                 <div className='h-[45px] w-full rounded-[14px] bg-[#E2E8F1]' />
 

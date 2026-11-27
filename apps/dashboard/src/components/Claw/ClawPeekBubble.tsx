@@ -57,7 +57,7 @@ export function ClawPeekBubble({ isOpen }: ClawPeekBubbleProps): ReactElement {
             className='relative'
           >
             <div className='rounded-2xl rounded-br-sm border border-border bg-popover/95 px-3 py-2 text-popover-foreground shadow-lg'>
-              <p className='line-clamp-3 whitespace-pre-wrap break-words text-sm leading-snug'>
+              <p className='line-clamp-3 whitespace-pre-wrap wrap-break-word text-sm leading-snug'>
                 {text}
               </p>
             </div>

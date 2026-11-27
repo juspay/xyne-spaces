@@ -10,7 +10,7 @@ import { useChannelDisplayName } from '../../../hooks/useChannelDisplayName';
 import type { DmPersonResult } from '../../../hooks/useDmsSearch';
 
 const DM_SEARCH_ROW_CLASS =
-  'flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left text-sm text-foreground transition-colors hover:bg-foreground/[6%]';
+  'flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-left text-sm text-foreground transition-colors hover:bg-foreground/6';
 
 const GROUPS_HEADER_ID = '__group-dms-header__';
 
@@ -151,7 +151,7 @@ const DmSearchDropdownComponent = ({
       return (
         <button
           type='button'
-          className={cn(DM_SEARCH_ROW_CLASS, visualIndex === selectedIndex && 'bg-foreground/[6%]')}
+          className={cn(DM_SEARCH_ROW_CLASS, visualIndex === selectedIndex && 'bg-foreground/6')}
           onClick={() =>
             personChannelId ? void onSelectChannel(personChannelId) : onSelectUser(person.user.id)
           }
@@ -176,7 +176,7 @@ const DmSearchDropdownComponent = ({
     return (
       <button
         type='button'
-        className={cn(DM_SEARCH_ROW_CLASS, keyboardIndex === selectedIndex && 'bg-foreground/[6%]')}
+        className={cn(DM_SEARCH_ROW_CLASS, keyboardIndex === selectedIndex && 'bg-foreground/6')}
         onClick={() => void onSelectChannel(item.channel.id)}
         data-track-category='DM'
         data-track-name='SELECT_DM_SEARCH_RESULT'

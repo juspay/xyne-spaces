@@ -7,7 +7,7 @@ interface MockFrameProps {
 
 export const MockFrame = ({ title, children }: MockFrameProps): ReactElement => {
   return (
-    <div className='rounded-xl border border-border bg-background shadow-sm overflow-hidden'>
+    <div className='rounded-xl border border-border bg-background shadow-xs overflow-hidden'>
       <div className='h-8 border-b border-border bg-muted/50 px-3 flex items-center justify-between'>
         <div className='flex items-center gap-1.5'>
           <span className='h-2 w-2 rounded-full bg-[#ff5f57]' />

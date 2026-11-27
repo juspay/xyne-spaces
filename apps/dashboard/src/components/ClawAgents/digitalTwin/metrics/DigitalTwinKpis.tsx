@@ -40,7 +40,7 @@ const Hero = ({
   help: string;
   delta: { label: string; tone: Tone };
 }): ReactElement => (
-  <div className='rounded-xl border border-border bg-card px-5 py-4 shadow-sm'>
+  <div className='rounded-xl border border-border bg-card px-5 py-4 shadow-xs'>
     <p className='text-xs font-medium uppercase tracking-wide text-muted-foreground'>{label}</p>
     <div className='mt-1 flex items-baseline gap-3'>
       <span className='text-3xl font-semibold tabular-nums text-foreground'>{value}</span>
@@ -59,7 +59,7 @@ const Tile = ({
   value: string;
   detail?: string;
 }): ReactElement => (
-  <div className='rounded-xl border border-border bg-card px-4 py-3 shadow-sm'>
+  <div className='rounded-xl border border-border bg-card px-4 py-3 shadow-xs'>
     <p className='text-[11px] font-medium uppercase tracking-wide text-muted-foreground'>{label}</p>
     <p className='mt-1 text-xl font-semibold tabular-nums text-foreground'>{value}</p>
     {detail && <p className='mt-0.5 text-[11px] text-muted-foreground'>{detail}</p>}

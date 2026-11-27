@@ -140,7 +140,7 @@ function RowAvatar({ item }: { item: RelatedItem }): ReactElement {
   const Icon = KINDS[item.kind].icon;
   const senderId = item.kind === 'thread' ? item.result.searchContext?.senderId : undefined;
   return (
-    <div className='relative flex-shrink-0 pt-px'>
+    <div className='relative shrink-0 pt-px'>
       {senderId ? (
         <UserAvatar userId={senderId} size={AvatarSize.REGULAR} showActiveStatus={false} />
       ) : (
@@ -186,8 +186,8 @@ function Row({ item, selected, onSelect, onJump }: RowProps): ReactElement {
         }
       }}
       className={cn(
-        'group relative flex w-full cursor-pointer items-start gap-3 rounded-[14px] border border-transparent px-3 py-2.5 text-left transition-colors duration-150 focus-visible:outline-none',
-        'hover:bg-sidebar-accent data-[selected]:border-sidebar-border data-[selected]:bg-sidebar-accent',
+        'group relative flex w-full cursor-pointer items-start gap-3 rounded-[14px] border border-transparent px-3 py-2.5 text-left transition-colors duration-150 focus-visible:outline-hidden',
+        'hover:bg-sidebar-accent data-selected:border-sidebar-border data-selected:bg-sidebar-accent',
       )}
       data-track-category='CHAT_INPUT'
       data-track-name='RELATED_CONTEXT_SELECT'
@@ -201,7 +201,7 @@ function Row({ item, selected, onSelect, onJump }: RowProps): ReactElement {
             {title}
           </span>
           {when && (
-            <span className='shrink-0 text-xs tabular-nums text-muted-foreground group-hover:hidden group-data-[selected]:hidden'>
+            <span className='shrink-0 text-xs tabular-nums text-muted-foreground group-hover:hidden group-data-selected:hidden'>
               {when}
             </span>
           )}
@@ -212,7 +212,7 @@ function Row({ item, selected, onSelect, onJump }: RowProps): ReactElement {
                 event.stopPropagation();
                 onJump(event);
               }}
-              className='-my-1 hidden size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-activity-chip-hover hover:text-foreground focus-visible:flex focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring group-hover:flex group-data-[selected]:flex'
+              className='-my-1 hidden size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-activity-chip-hover hover:text-foreground focus-visible:flex focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring group-hover:flex group-data-selected:flex'
               aria-label={`Open ${title} where it is`}
               data-track-category='CHAT_INPUT'
               data-track-name='RELATED_CONTEXT_JUMP'
@@ -254,7 +254,7 @@ function NoPreview({
       <button
         type='button'
         onClick={onJump}
-        className='flex items-center gap-1.5 rounded-[6px] bg-activity-chip px-3 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-activity-chip-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+        className='flex items-center gap-1.5 rounded-[6px] bg-activity-chip px-3 py-1.5 text-sm font-medium text-foreground transition-colors hover:bg-activity-chip-hover focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring'
         data-track-category='CHAT_INPUT'
         data-track-name='RELATED_CONTEXT_JUMP'
         data-track-label={item.label}
@@ -286,8 +286,8 @@ function FilterPill({ label, count, active, dot, onClick }: FilterPillProps): Re
       onClick={onClick}
       className={cn(
         'flex h-7 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg px-2 text-xs font-medium transition-colors duration-150',
-        'hover:bg-foreground/[6%] focus-visible:bg-foreground/[6%] focus-visible:outline-none',
-        active ? 'bg-foreground/[6%] text-sidebar-accent-foreground' : 'text-muted-foreground',
+        'hover:bg-foreground/6 focus-visible:bg-foreground/6 focus-visible:outline-hidden',
+        active ? 'bg-foreground/6 text-sidebar-accent-foreground' : 'text-muted-foreground',
       )}
       data-track-category='CHAT_INPUT'
       data-track-name='RELATED_CONTEXT_FILTER'
@@ -300,7 +300,7 @@ function FilterPill({ label, count, active, dot, onClick }: FilterPillProps): Re
           'shrink-0 rounded-md px-1 text-[0.625rem] font-bold tabular-nums transition-colors',
           active
             ? 'bg-sidebar-primary text-sidebar-primary-foreground'
-            : 'bg-foreground/[6%] text-muted-foreground',
+            : 'bg-foreground/6 text-muted-foreground',
         )}
       >
         {count}
@@ -496,7 +496,7 @@ export function RelatedContextDialog({
             aria-activedescendant={selected ? rowId(selected) : undefined}
             tabIndex={0}
             onKeyDown={onListKeyDown}
-            className='min-h-0 flex-1 space-y-3 overflow-y-auto px-2 pb-3 focus-visible:outline-none'
+            className='min-h-0 flex-1 space-y-3 overflow-y-auto px-2 pb-3 focus-visible:outline-hidden'
           >
             {visibleGroups.map(group => (
               <div key={group.label} role='group' aria-label={LABELS[group.label].group}>

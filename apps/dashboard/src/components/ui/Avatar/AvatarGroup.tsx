@@ -38,7 +38,7 @@ export function AvatarStackItem({
       data-slot='avatar-stack-item'
       className={cn(
         'size-full shrink-0 overflow-hidden rounded-full flex items-center justify-center',
-        '[&_[data-slot="avatar"]]:size-full',
+        '**:data-[slot="avatar"]:size-full',
         className,
       )}
       style={{
@@ -150,11 +150,11 @@ const AvatarGroup = ({
     return (
       <div
         data-slot='avatar-group'
-        className={cn('relative w-10 h-10 flex-shrink-0', className)}
+        className={cn('relative w-10 h-10 shrink-0', className)}
         {...props}
       >
         {backUserId && (
-          <div className='absolute bottom-0 right-0 w-6 h-6 rounded-md ring-1 ring-background overflow-hidden z-10 [&_[data-slot="avatar"]]:rounded-md'>
+          <div className='absolute bottom-0 right-0 w-6 h-6 rounded-md ring-1 ring-background overflow-hidden z-10 **:data-[slot="avatar"]:rounded-md'>
             <Avatar
               userId={backUserId}
               size='sm'
@@ -164,7 +164,7 @@ const AvatarGroup = ({
           </div>
         )}
         {frontUserId && (
-          <div className='absolute top-0 left-0 w-6 h-6 rounded-md ring-1 ring-background overflow-hidden z-0 [&_[data-slot="avatar"]]:rounded-md'>
+          <div className='absolute top-0 left-0 w-6 h-6 rounded-md ring-1 ring-background overflow-hidden z-0 **:data-[slot="avatar"]:rounded-md'>
             <Avatar
               userId={frontUserId}
               size='sm'

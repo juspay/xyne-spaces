@@ -362,10 +362,10 @@ export const TextNode: React.FC<TextNodeProps> = ({ node, children, inline = fal
   const variantClasses: Record<string, string> = {
     default: 'text-foreground',
     muted: 'text-muted-foreground',
-    success: 'text-[var(--status-success)]',
-    warning: 'text-[var(--status-pending)]',
+    success: 'text-(--status-success)',
+    warning: 'text-(--status-pending)',
     danger: 'text-destructive',
-    accent: 'text-[var(--action-primary)]',
+    accent: 'text-(--action-primary)',
   };
 
   if (!props?.content) return null;
@@ -422,7 +422,7 @@ export const TextNode: React.FC<TextNodeProps> = ({ node, children, inline = fal
             href={part.href}
             target='_blank'
             rel='noopener noreferrer'
-            className='text-[var(--link-color)] underline hover:text-[var(--link-hover-color)] break-all'
+            className='text-(--link-color) underline hover:text-(--link-hover-color) break-all'
           >
             {part.label}
           </a>
@@ -437,7 +437,7 @@ export const TextNode: React.FC<TextNodeProps> = ({ node, children, inline = fal
               alt={`:${part.name}:`}
               title={part.name}
               data-emoji='true'
-              className='inline-emoji inline-block w-5 h-5 object-contain align-middle'
+              className='inline-emoji inline-block object-contain align-middle'
             />
           );
         }

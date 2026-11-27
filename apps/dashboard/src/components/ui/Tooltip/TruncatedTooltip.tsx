@@ -96,7 +96,7 @@ export const TruncatedTooltip = ({
       {...tooltipProps}
       content={content}
       delayDuration={delayDuration}
-      className={cn('max-w-sm whitespace-normal break-words', className)}
+      className={cn('max-w-sm whitespace-normal wrap-break-word', className)}
       onOpenChange={handleOpenChange}
     >
       {child}

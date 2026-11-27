@@ -450,7 +450,7 @@ const ProjectDetailScreen = (): ReactElement => {
           </button>
 
           {/* Project Details Section */}
-          <div className='bg-background rounded-lg shadow-sm border border-border p-6 mb-8'>
+          <div className='bg-background rounded-lg shadow-xs border border-border p-6 mb-8'>
             <div className='flex items-start justify-between'>
               <div className='flex-1'>
                 <h1 className='text-3xl font-bold text-foreground mb-2'>{project.name}</h1>
@@ -497,7 +497,7 @@ const ProjectDetailScreen = (): ReactElement => {
           </div>
 
           {/* Tab Content */}
-          <div className='bg-background rounded-b-lg shadow-sm border border-t-0 border-border p-6'>
+          <div className='bg-background rounded-b-lg shadow-xs border border-t-0 border-border p-6'>
             <Tabs.Root value={activeTab} onValueChange={value => setActiveTab(value as TabValue)}>
               <div className='mb-6 flex items-center justify-between'>
                 <h2 className='text-2xl font-bold text-foreground'>
@@ -554,7 +554,7 @@ const ProjectDetailScreen = (): ReactElement => {
               </div>
 
               {/* Boards Tab Content */}
-              <Tabs.Content value='boards' className='outline-none'>
+              <Tabs.Content value='boards' className='outline-hidden'>
                 <BoardsTable
                   boards={visibleBoards}
                   showTypeColumn={!fromReleaseManager}
@@ -577,7 +577,7 @@ const ProjectDetailScreen = (): ReactElement => {
 
               {fromReleaseManager ? (
                 <>
-                  <Tabs.Content value='release' className='outline-none'>
+                  <Tabs.Content value='release' className='outline-hidden'>
                     {repositories.length === 0 ? (
                       <div className='rounded-lg border border-dashed border-border bg-muted/40 px-4 py-10 text-center text-sm text-muted-foreground'>
                         No repositories yet. Connect a repository to ship releases from this
@@ -723,13 +723,13 @@ const ProjectDetailScreen = (): ReactElement => {
                     )}
                   </Tabs.Content>
 
-                  <Tabs.Content value='releases' className='outline-none'>
+                  <Tabs.Content value='releases' className='outline-hidden'>
                     {projectId ? <ReleasesSection projectId={projectId} /> : null}
                   </Tabs.Content>
                 </>
               ) : (
                 <>
-                  <Tabs.Content value='repos' className='outline-none'>
+                  <Tabs.Content value='repos' className='outline-hidden'>
                     <ProjectRepositoriesSection
                       projectId={projectId}
                       refreshKey={repositoryRefreshKey}
@@ -737,7 +737,7 @@ const ProjectDetailScreen = (): ReactElement => {
                     />
                   </Tabs.Content>
 
-                  <Tabs.Content value='release' className='outline-none'>
+                  <Tabs.Content value='release' className='outline-hidden'>
                     {projectId ? <ReleasesSection projectId={projectId} /> : null}
                   </Tabs.Content>
                 </>
@@ -1151,7 +1151,7 @@ const TabTrigger = ({
         'flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors border-b-2 -mb-px',
         'text-muted-foreground border-transparent hover:text-foreground hover:border-muted',
         'data-[state=active]:text-primary data-[state=active]:border-primary',
-        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
+        'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
       )}
     >
       <Icon size={16} />

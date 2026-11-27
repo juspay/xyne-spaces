@@ -403,7 +403,7 @@ function ClawCitationChip({
   // the full text shows on hover (tooltip).
   const chipClass =
     'claw-citation-chip inline-flex items-center gap-1 align-middle ' +
-    'px-1.5 h-[1.25rem] max-w-[180px] mx-[2px] rounded ' +
+    'px-1.5 h-5 max-w-[180px] mx-[2px] rounded ' +
     'text-[10px] font-medium leading-none ' +
     'bg-muted/60 border border-border/50 hover:bg-accent hover:border-border transition-colors';
 
@@ -551,7 +551,7 @@ function BranchNavigator({
       >
         <ChevronLeft size={14} />
       </button>
-      <span className='min-w-[2rem] text-center tabular-nums'>
+      <span className='min-w-8 text-center tabular-nums'>
         {index + 1}/{total}
       </span>
       <button
@@ -626,7 +626,7 @@ function PlanCard({
               <PlanStatusIcon status={todo.status} />
             </span>
             <span
-              className={`min-w-0 break-words leading-snug ${todo.status === 'in_progress' ? 'font-medium' : ''}`}
+              className={`min-w-0 wrap-break-word leading-snug ${todo.status === 'in_progress' ? 'font-medium' : ''}`}
             >
               {todo.title}
             </span>
@@ -1092,7 +1092,7 @@ function ChatMessageBubble({
           <div className='flex w-full items-start justify-end gap-1'>
             <div
               className={cn(
-                'ai-user-bubble rounded-3xl bg-[#ececec] px-4 py-2.5 text-sm leading-relaxed text-gray-900',
+                'rounded-3xl bg-[#ececec] px-4 py-2.5 text-sm leading-relaxed text-gray-900 in-data-[theme=midnight]:bg-[#2a2a2a] in-data-[theme=midnight]:text-foreground',
                 isEditing ? 'w-full' : 'max-w-full',
               )}
             >
@@ -1119,7 +1119,7 @@ function ChatMessageBubble({
                         setIsEditing(false);
                       }
                     }}
-                    className='min-h-[60px] w-full resize-none bg-transparent text-sm leading-relaxed text-gray-900 outline-none'
+                    className='min-h-[60px] w-full resize-none bg-transparent text-sm leading-relaxed text-gray-900 outline-hidden'
                     rows={Math.max(2, editText.split('\n').length)}
                     data-track-category='XyneAI'
                     data-track-name='EDIT_TEXTAREA'
@@ -1176,7 +1176,7 @@ function ChatMessageBubble({
           {passage && !isEditing && (
             <div className='mt-1 flex justify-end'>
               <div
-                className='flex max-w-[28rem] items-center gap-1.5 rounded-md border border-border bg-secondary/40 px-2 py-1 text-[11px] text-muted-foreground'
+                className='flex max-w-md items-center gap-1.5 rounded-md border border-border bg-secondary/40 px-2 py-1 text-[11px] text-muted-foreground'
                 title={`From ${passage.title}:\n\n${passage.text.slice(0, 600)}`}
               >
                 <Quote className='h-3 w-3 shrink-0' aria-hidden='true' />
@@ -2650,7 +2650,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
     <div className='flex h-full min-w-0 flex-1'>
       <div ref={dropZoneRef} className='relative flex h-full min-w-0 flex-1 flex-col'>
         {isDragging && (
-          <div className='pointer-events-none absolute inset-0 z-50 flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-primary/50 bg-background/95 backdrop-blur-sm'>
+          <div className='pointer-events-none absolute inset-0 z-50 flex flex-col items-center justify-center rounded-xl border-2 border-dashed border-primary/50 bg-background/95 backdrop-blur-xs'>
             <div className='flex flex-col items-center gap-3'>
               <div className='rounded-full bg-primary/10 p-4'>
                 <Upload className='h-8 w-8 text-primary' />
@@ -2709,7 +2709,7 @@ export const AIChatThread = forwardRef<AIChatThreadHandle, AIChatThreadProps>(fu
             // Applied on BOTH sides so the centred column stays centred; at
             // wide sizes max-w-3xl already leaves far more margin than this, so
             // the padding only bites when it is actually needed.
-            className='relative h-full overflow-y-auto px-2 py-6 focus:outline-none sm:px-4 md:px-10'
+            className='relative h-full overflow-y-auto px-2 py-6 focus:outline-hidden sm:px-4 md:px-10'
             role='log'
             aria-live='polite'
             aria-label='Chat messages'

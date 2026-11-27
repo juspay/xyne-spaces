@@ -121,7 +121,7 @@ export function CallRow({
             <MoreVertical className='size-3.5' />
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align='end' className='rounded-xl p-1.5 w-44 shadow-sm'>
+        <DropdownMenuContent align='end' className='rounded-xl p-1.5 w-44 shadow-xs'>
           <UpcomingCallActionsMenuItems
             call={call}
             isOwner={isOwner}

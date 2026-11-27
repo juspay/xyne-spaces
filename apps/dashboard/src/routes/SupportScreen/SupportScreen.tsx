@@ -624,7 +624,7 @@ const EmailAttachmentsRow = ({
               className='group relative block rounded-lg overflow-hidden border border-border bg-muted hover:border-foreground/40 transition-colors'
             >
               <EmailImageThumbnail attachmentId={att.id} filename={att.originalFilename} />
-              <div className='absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/70 via-black/30 to-transparent px-2 py-1 text-[10px] text-white opacity-0 group-hover:opacity-100 transition-opacity truncate text-left'>
+              <div className='absolute inset-x-0 bottom-0 bg-linear-to-t from-black/70 via-black/30 to-transparent px-2 py-1 text-[10px] text-white opacity-0 group-hover:opacity-100 transition-opacity truncate text-left'>
                 {att.originalFilename}
               </div>
             </button>
@@ -3253,7 +3253,7 @@ const SupportScreen = (): ReactElement => {
           <span
             className={cn(
               'text-sm flex-1 truncate min-w-0',
-              shouldShowBold && '!font-semibold text-sidebar-unread-foreground',
+              shouldShowBold && 'font-semibold! text-sidebar-unread-foreground',
             )}
             style={shouldShowBold ? { fontWeight: 700 } : undefined}
           >
@@ -3262,7 +3262,7 @@ const SupportScreen = (): ReactElement => {
           <Badge
             variant='secondary'
             className={cn(
-              'flex-shrink-0 border-transparent px-1.5 py-0 text-[10px] font-medium leading-tight',
+              'shrink-0 border-transparent px-1.5 py-0 text-[10px] font-medium leading-tight',
               deskSource.className,
             )}
           >
@@ -3349,7 +3349,10 @@ const SupportScreen = (): ReactElement => {
               groupResizeBehavior='preserve-pixel-size'
             >
               <div
-                className={cn('h-full w-full flex flex-col outline-none', isMobile && 'bg-sidebar')}
+                className={cn(
+                  'h-full w-full flex flex-col outline-hidden',
+                  isMobile && 'bg-sidebar',
+                )}
               >
                 <div className='w-full h-[52px] shrink-0'>
                   <AppNavigator />
@@ -3414,7 +3417,7 @@ const SupportScreen = (): ReactElement => {
                   )}
                   <div className='py-3 w-full' />
                   {/* Scrollable channel list */}
-                  <div className='flex-1 min-h-0 overflow-y-scroll no-scrollbar pb-[calc(2.5rem+env(safe-area-inset-bottom))] px-0.5 pt-1 outline-none'>
+                  <div className='flex-1 min-h-0 overflow-y-scroll no-scrollbar pb-[calc(2.5rem+env(safe-area-inset-bottom))] px-0.5 pt-1 outline-hidden'>
                     {sortedEmailChannels.length === 0 ? (
                       <div className='flex flex-col items-center justify-center h-32 text-sidebar-foreground text-sm px-4 text-center'>
                         No channels available
@@ -3462,7 +3465,7 @@ const SupportScreen = (): ReactElement => {
         {!ticketId && (
           <Panel id='main'>
             <div className='h-full flex flex-col relative bg-background'>
-              <div className='flex-shrink-0 relative border-b border-border'>
+              <div className='shrink-0 relative border-b border-border'>
                 <div
                   className={cn(
                     'flex flex-col w-full transition-opacity duration-150',
@@ -3967,7 +3970,7 @@ const SupportScreen = (): ReactElement => {
                                 side='bottom'
                                 align='start'
                                 sideOffset={6}
-                                className='z-[60] min-w-[200px] bg-background border border-border rounded-lg shadow-lg'
+                                className='z-60 min-w-[200px] bg-background border border-border rounded-lg shadow-lg'
                               >
                                 <UserSubmenu
                                   key='assignee-popover-submenu'
@@ -3995,7 +3998,7 @@ const SupportScreen = (): ReactElement => {
                                 side='bottom'
                                 align='start'
                                 sideOffset={6}
-                                className='z-[60]'
+                                className='z-60'
                               >
                                 <PrioritySubmenu
                                   selectedPriorities={filters.priority || []}
@@ -4021,7 +4024,7 @@ const SupportScreen = (): ReactElement => {
                                 side='bottom'
                                 align='start'
                                 sideOffset={6}
-                                className='z-[60]'
+                                className='z-60'
                               >
                                 <StagesSubmenu
                                   selectedStages={filters.stages || []}
@@ -4233,7 +4236,7 @@ const SupportScreen = (): ReactElement => {
                                 onPointerDownCapture={e => {
                                   submenuPointerDownTargetRef.current = e.target;
                                 }}
-                                className='fixed z-[60]'
+                                className='fixed z-60'
                                 style={{
                                   left:
                                     (menuItemRefs.current[activeSubmenu]?.getBoundingClientRect()
@@ -4299,7 +4302,7 @@ const SupportScreen = (): ReactElement => {
                             side='bottom'
                             align='end'
                             sideOffset={6}
-                            className='z-[60] w-56 bg-background border border-border rounded-lg shadow-lg py-1 max-h-[400px] overflow-y-auto'
+                            className='z-60 w-56 bg-background border border-border rounded-lg shadow-lg py-1 max-h-[400px] overflow-y-auto'
                           >
                             {viewMode === 'table' ? (
                               <>
@@ -4736,7 +4739,7 @@ const SupportScreen = (): ReactElement => {
                     <>
                       {/* Drafts banner — visible when there are saved-but-closed drafts */}
                       {savedDrafts.length > 0 && userID && (
-                        <div className='flex-shrink-0 border-b border-border'>
+                        <div className='shrink-0 border-b border-border'>
                           <div className='px-4 py-2 flex items-center gap-1.5'>
                             <span className='text-xs font-semibold text-muted-foreground uppercase tracking-wide mr-1'>
                               Drafts
@@ -6053,7 +6056,7 @@ export const SupportTicketDetail = ({
           maxSize={isRightPanelOpen ? '70%' : '100%'}
         >
           <div className='h-full flex flex-col overflow-hidden relative'>
-            <div className='w-full px-6 py-4 flex flex-col gap-2.5 flex-shrink-0 sticky top-0 bg-background z-10 border-b border-border'>
+            <div className='w-full px-6 py-4 flex flex-col gap-2.5 shrink-0 sticky top-0 bg-background z-10 border-b border-border'>
               <div className='flex flex-wrap items-center gap-2 min-w-0 overflow-hidden'>
                 {/* Hidden in the search-results pane (showAdjacentNav=false): it hosts the ticket
                     with its own close header and has no ticket list to return to. */}
@@ -6087,10 +6090,10 @@ export const SupportTicketDetail = ({
                     mailboxOverlay={mailboxOverlay}
                   />
                 )}
-                {/* `min-w-[8rem]` (rem, so it tracks font scaling) is what makes the
+                {/* `min-w-32` (rem, so it tracks font scaling) is what makes the
                     row break its flex line instead of crushing the title to nothing. */}
                 <TruncatedTooltip content={title || 'Untitled Ticket'} side='bottom'>
-                  <span className='font-medium text-foreground flex-1 min-w-[8rem] truncate'>
+                  <span className='font-medium text-foreground flex-1 min-w-32 truncate'>
                     {title || 'Untitled Ticket'}
                   </span>
                 </TruncatedTooltip>
@@ -6428,7 +6431,7 @@ export const SupportTicketDetail = ({
                   </DropdownMenu>
                 </div>
               </div>
-              <div className='flex flex-col gap-1 flex-shrink-0'>
+              <div className='flex flex-col gap-1 shrink-0'>
                 <div className='pl-9 flex items-center gap-0 flex-wrap'>
                   <TicketMetaRow ticket={ticket} />
                   {initiator && (
@@ -6521,7 +6524,7 @@ export const SupportTicketDetail = ({
                   emailSummaryState === 'done' ||
                   emailSummaryState === 'error') && (
                   <div
-                    className='absolute right-6 z-10 w-[26rem] max-w-[calc(100%-3rem)] rounded-2xl p-px shadow-xl'
+                    className='absolute right-6 z-10 w-104 max-w-[calc(100%-3rem)] rounded-2xl p-px shadow-xl'
                     style={{
                       bottom: composerOverlayHeight + 68,
                       background:
@@ -6950,7 +6953,7 @@ export const SupportTicketDetail = ({
           <>
             {' '}
             <Separator className='w-1 hover:bg-blue-50 active:bg-blue-100 transition-colors duration-200 cursor-col-resize flex items-center justify-center group'>
-              <div className='w-[1px] h-full bg-border'></div>
+              <div className='w-px h-full bg-border'></div>
             </Separator>
             <Panel id='ticket-side-panel' defaultSize='35%' minSize='30%' maxSize='70%'>
               <div
@@ -7500,7 +7503,7 @@ const EmailThreadItem = ({
                   data-track-name='ReplyToSpecificEmail'
                   data-track-metadata={JSON.stringify({ emailId: email.id })}
                 >
-                  <ArrowUp size={12} className='rotate-[-90deg]' />
+                  <ArrowUp size={12} className='-rotate-90' />
                   Reply
                 </button>
                 <button

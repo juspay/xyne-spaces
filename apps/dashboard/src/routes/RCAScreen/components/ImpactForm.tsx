@@ -5,7 +5,6 @@ import { useZero } from '../../../hooks/useZero';
 import { X, Plus, Trash2 } from 'lucide-react';
 import { Button } from '../../../components/ui/Button';
 import Textarea from '../../../components/ui/Textarea';
-import { cn } from '../../../utils/classNames';
 import { toast } from 'sonner';
 import { RCAStatus } from '@xyne/shared';
 import { impactSchema } from '../schemas';
@@ -553,7 +552,10 @@ export const ImpactForm = ({
 
         <div className='space-y-4'>
           <div className='space-y-1.5'>
-            <label htmlFor={impactTypeFieldId} className='text-sm font-medium text-foreground'>
+            <label
+              htmlFor={impactTypeFieldId}
+              className='block text-sm font-medium text-foreground'
+            >
               Impact Type *
             </label>
             <select
@@ -568,7 +570,7 @@ export const ImpactForm = ({
               }}
               data-track-category='RCA'
               data-track-name='ImpactTypeSelect'
-              className='w-full px-3 py-2 border border-input rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-foreground'
+              className='w-full px-3 py-2 border border-input rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500 bg-background text-foreground'
             >
               <option value=''>Select impact type</option>
               {impactTypeOptions.map(option => (
@@ -581,7 +583,10 @@ export const ImpactForm = ({
           </div>
 
           <div className='space-y-1.5'>
-            <label htmlFor={impactSummaryFieldId} className='text-sm font-medium text-foreground'>
+            <label
+              htmlFor={impactSummaryFieldId}
+              className='block text-sm font-medium text-foreground'
+            >
               Impact Summary *
             </label>
             <Textarea
@@ -598,11 +603,6 @@ export const ImpactForm = ({
               placeholder='Describe the impact...'
               rows={4}
               aria-invalid={showErrors && !data.impact.trim()}
-              className={cn(
-                showErrors &&
-                  !data.impact.trim() &&
-                  'aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive',
-              )}
             />
             {renderFieldError(errors.impact ?? null, showErrors)}
           </div>
@@ -699,7 +699,7 @@ export const ImpactForm = ({
   if (!isImpactEnabled) {
     return (
       <div className='max-w-4xl mx-auto'>
-        <div className='bg-background shadow-sm border border-border rounded-xl overflow-hidden p-8'>
+        <div className='bg-background shadow-xs border border-border rounded-xl overflow-hidden p-8'>
           <div className='flex items-center gap-4 mb-4'>
             <div className='h-12 w-12 rounded-xl bg-muted flex items-center justify-center'>
               <svg
@@ -739,8 +739,8 @@ export const ImpactForm = ({
 
   return (
     <div className='h-full overflow-y-auto'>
-      <div className='bg-background shadow-sm border border-border rounded-xl'>
-        <div className='px-8 py-6 border-b border-border bg-gradient-to-r from-muted/40 to-background'>
+      <div className='bg-background shadow-xs border border-border rounded-xl'>
+        <div className='px-8 py-6 border-b border-border bg-linear-to-r from-muted/40 to-background'>
           <div className='flex items-center gap-3'>
             <div className='h-10 w-10 rounded-lg bg-orange-600 flex items-center justify-center'>
               <svg
@@ -833,7 +833,7 @@ export const ImpactForm = ({
           )}
 
           {!isLocked && (
-            <div className='sticky bottom-0 -mx-8 -mb-8 p-4 bg-background/95 backdrop-blur border-t border-border flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3'>
+            <div className='sticky bottom-0 -mx-8 -mb-8 p-4 bg-background/95 backdrop-blur-sm border-t border-border flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3'>
               <div className='text-xs text-muted-foreground'>
                 {(pendingImpactValues?.length ?? 0) > 0
                   ? `${pendingImpactValues?.length ?? 0} pending impact(s)`

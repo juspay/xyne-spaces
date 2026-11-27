@@ -35,7 +35,7 @@ export function SubagentToolGroupPanel({
     <div className='flex min-h-0 flex-1 flex-col gap-8 overflow-y-auto px-[22px] pb-9 pt-2'>
       <div className='flex w-full items-start gap-12'>
         <div className='flex min-w-0 flex-1 items-center gap-2.5'>
-          <span className='flex size-11 shrink-0 items-center justify-center rounded-xl border border-border bg-card text-muted-foreground shadow-sm'>
+          <span className='flex size-11 shrink-0 items-center justify-center rounded-xl border border-border bg-card text-muted-foreground shadow-xs'>
             <Grid01 className='size-5' aria-hidden />
           </span>
           <div className='flex min-w-0 flex-col gap-2.5 py-px'>

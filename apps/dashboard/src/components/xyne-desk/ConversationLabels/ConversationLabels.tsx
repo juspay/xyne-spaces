@@ -186,7 +186,7 @@ export const ConversationLabels = ({
           }
         }}
         placeholder='Search or create label…'
-        className='w-full bg-transparent border-b border-border text-sm px-2 py-1.5 outline-none mb-1'
+        className='w-full bg-transparent border-b border-border text-sm px-2 py-1.5 outline-hidden mb-1'
         data-track-category='Support'
         data-track-name='LabelSearchInput'
       />

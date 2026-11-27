@@ -119,9 +119,9 @@ const ClawSubagentCreateV2 = ({ subagent }: ClawSubagentCreateV2Props = {}): Rea
                 {nameError ?? 'Permanent kebab-case identifier.'}
               </p>
 
-              <p className='flex items-center gap-1.5 text-sm leading-[1.5] text-foreground'>
+              <p className='flex items-center gap-1.5 text-sm leading-normal text-foreground'>
                 Built by
-                <span className='text-[color:var(--mention-color)]'>@{builtBy}</span>
+                <span className='text-(--mention-color)'>@{builtBy}</span>
               </p>
             </div>
           </div>
@@ -138,7 +138,7 @@ const ClawSubagentCreateV2 = ({ subagent }: ClawSubagentCreateV2Props = {}): Rea
                 placeholder='What this specialist does and when agents should call it.'
                 data-track-category='Claw Agents'
                 data-track-name='Create subagent v2: description'
-                className='h-[86px] w-full resize-y rounded-2xl border border-border bg-card p-4 text-sm leading-5 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring'
+                className='h-[86px] w-full resize-y rounded-2xl border border-border bg-card p-4 text-sm leading-5 text-foreground placeholder:text-muted-foreground focus:outline-hidden focus:ring-1 focus:ring-ring'
               />
             </div>
 
@@ -155,7 +155,7 @@ const ClawSubagentCreateV2 = ({ subagent }: ClawSubagentCreateV2Props = {}): Rea
                   aria-label='Parameter name'
                   data-track-category='Claw Agents'
                   data-track-name='Create subagent v2: parameter name'
-                  className='h-11 w-full rounded-2xl border border-border bg-card px-4 text-sm leading-5 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring'
+                  className='h-11 w-full rounded-2xl border border-border bg-card px-4 text-sm leading-5 text-foreground placeholder:text-muted-foreground focus:outline-hidden focus:ring-1 focus:ring-ring'
                 />
                 <input
                   value={state.paramDescription}
@@ -164,7 +164,7 @@ const ClawSubagentCreateV2 = ({ subagent }: ClawSubagentCreateV2Props = {}): Rea
                   aria-label='Parameter description'
                   data-track-category='Claw Agents'
                   data-track-name='Create subagent v2: parameter description'
-                  className='h-11 w-full rounded-2xl border border-border bg-card px-4 text-sm leading-5 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring sm:col-span-2'
+                  className='h-11 w-full rounded-2xl border border-border bg-card px-4 text-sm leading-5 text-foreground placeholder:text-muted-foreground focus:outline-hidden focus:ring-1 focus:ring-ring sm:col-span-2'
                 />
               </div>
             </div>
@@ -179,7 +179,7 @@ const ClawSubagentCreateV2 = ({ subagent }: ClawSubagentCreateV2Props = {}): Rea
                 placeholder='You are a focused specialist that…'
                 data-track-category='Claw Agents'
                 data-track-name='Create subagent v2: prompt'
-                className='h-[250px] w-full resize-y rounded-2xl border border-border bg-card p-4 text-sm leading-5 text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring'
+                className='h-[250px] w-full resize-y rounded-2xl border border-border bg-card p-4 text-sm leading-5 text-foreground placeholder:text-muted-foreground focus:outline-hidden focus:ring-1 focus:ring-ring'
               />
               <span className='self-end text-xs leading-4 text-muted-foreground'>
                 {state.systemPrompt.length} characters

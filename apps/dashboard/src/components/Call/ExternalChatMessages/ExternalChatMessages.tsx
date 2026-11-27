@@ -59,7 +59,7 @@ function MessageItem({ msg, showHeader }: { msg: CallChatMessage; showHeader: bo
         showHeader && 'mt-3 first:mt-0',
       )}
     >
-      <div className='w-8 flex-shrink-0 flex items-start justify-center pt-0.5'>
+      <div className='w-8 shrink-0 flex items-start justify-center pt-0.5'>
         {showHeader ? (
           <div
             className={cn(
@@ -88,7 +88,7 @@ function MessageItem({ msg, showHeader }: { msg: CallChatMessage; showHeader: bo
             <span className='text-[10px] text-muted-foreground'>{formatTime(msg.createdAt)}</span>
           </div>
         )}
-        <div className='text-sm text-foreground prose prose-sm dark:prose-invert max-w-none break-words [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_p]:my-0.5 [&_pre]:my-1 [&_ul]:my-0.5 [&_ol]:my-0.5 [&_code]:px-1 [&_code]:py-0.5 [&_code]:rounded [&_code]:bg-muted [&_code]:text-xs [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre]:bg-muted [&_pre]:rounded-md [&_pre]:p-3 [&_blockquote]:border-l-2 [&_blockquote]:border-muted-foreground/30 [&_blockquote]:pl-3 [&_blockquote]:text-muted-foreground'>
+        <div className='text-sm text-foreground prose prose-sm dark:prose-invert max-w-none wrap-break-word [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_p]:my-0.5 [&_pre]:my-1 [&_ul]:my-0.5 [&_ol]:my-0.5 [&_code]:px-1 [&_code]:py-0.5 [&_code]:rounded [&_code]:bg-muted [&_code]:text-xs [&_pre_code]:bg-transparent [&_pre_code]:p-0 [&_pre]:bg-muted [&_pre]:rounded-md [&_pre]:p-3 [&_blockquote]:border-l-2 [&_blockquote]:border-muted-foreground/30 [&_blockquote]:pl-3 [&_blockquote]:text-muted-foreground'>
           <Markdown remarkPlugins={[remarkGfm]}>{msg.message}</Markdown>
         </div>
       </div>

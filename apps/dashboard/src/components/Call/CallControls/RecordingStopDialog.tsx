@@ -39,7 +39,7 @@ export function RecordingStopDialog({
   };
 
   return (
-    <div className='fixed inset-0 z-[1000] flex items-center justify-center'>
+    <div className='fixed inset-0 z-1000 flex items-center justify-center'>
       {/* Backdrop — a native button so click-to-dismiss is keyboard/screen-reader accessible */}
       <button
         type='button'
@@ -67,7 +67,7 @@ export function RecordingStopDialog({
             if (e.key === 'Enter') void handleConfirm();
             if (e.key === 'Escape') onDismiss();
           }}
-          className='mt-3 w-full rounded-lg bg-gray-900 px-3 py-2 text-sm text-white outline-none ring-1 ring-gray-700 focus:ring-blue-500'
+          className='mt-3 w-full rounded-lg bg-gray-900 px-3 py-2 text-sm text-white outline-hidden ring-1 ring-gray-700 focus:ring-blue-500'
           placeholder={defaultName}
           data-track-category='CALLS'
           data-track-name='RECORDING_RENAME_INPUT'

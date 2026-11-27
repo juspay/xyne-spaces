@@ -95,7 +95,7 @@ export const ReleaseDevTicketFilterBar = ({
           onChange={e => setSearch(e.target.value)}
           placeholder='Search dev tickets…'
           data-testid='release-dev-tickets-search'
-          className='w-56 rounded border border-border bg-background py-1.5 pl-8 pr-3 text-sm outline-none focus:border-input'
+          className='w-56 rounded border border-border bg-background py-1.5 pl-8 pr-3 text-sm outline-hidden focus:border-input'
         />
       </div>
       <Facet

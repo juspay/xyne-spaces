@@ -50,11 +50,11 @@ export function artifactInlineActions(artifact: ConversationArtifact): ReactElem
   const linkable = artifact.kind === 'PREVIEW' || artifact.kind === 'DIFF';
 
   if (linkable && artifact.status === 'STALE') {
-    return <span className='flex-shrink-0 text-xs text-muted-foreground'>Ended</span>;
+    return <span className='shrink-0 text-xs text-muted-foreground'>Ended</span>;
   }
 
   if (linkable && !url) {
-    return <span className='flex-shrink-0 text-xs text-muted-foreground'>Link unavailable</span>;
+    return <span className='shrink-0 text-xs text-muted-foreground'>Link unavailable</span>;
   }
 
   if (url && linkable) {

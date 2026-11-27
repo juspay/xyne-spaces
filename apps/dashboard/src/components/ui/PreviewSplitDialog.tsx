@@ -101,14 +101,14 @@ export const PreviewSplitDialog: React.FC<PreviewSplitDialogProps> = ({
       <Dialog.Portal>
         <Dialog.Overlay
           className={cn(
-            'fixed inset-0 z-[50] data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
+            'fixed inset-0 z-50 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
             overlayClassName,
           )}
         />
         <Dialog.Content
           {...(preventDrawer ? { 'data-prevent-drawer': 'true' } : {})}
           className={cn(
-            'fixed z-[50] overflow-hidden focus:outline-none',
+            'fixed z-50 overflow-hidden focus:outline-hidden',
             isMobile ? 'inset-0 w-screen h-screen' : 'inset-0 m-auto w-[95vw] h-[95vh] rounded-2xl',
             contentClassName,
           )}
@@ -197,7 +197,7 @@ export const PreviewThreadPanel: React.FC<{
 }> = ({ onClose, channelId, conversationId, threadMessages, loading }) => (
   <div className='flex flex-col h-full w-full border-l border-border bg-background z-10 min-w-0'>
     {/* Thread header with close button */}
-    <div className='flex items-center justify-between p-4 border-b border-border h-14 flex-shrink-0'>
+    <div className='flex items-center justify-between p-4 border-b border-border h-14 shrink-0'>
       <h3 className='font-semibold text-foreground'>Threads</h3>
       <button
         onClick={onClose}

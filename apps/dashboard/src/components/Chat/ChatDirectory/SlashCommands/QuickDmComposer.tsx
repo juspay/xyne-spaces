@@ -140,7 +140,7 @@ export const QuickDmComposer: React.FC<QuickDmComposerProps> = ({ target, onSent
         <button
           type='button'
           onClick={onBack}
-          className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors focus-visible:outline-none focus-visible:ring-0'
+          className='p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors focus-visible:outline-hidden focus-visible:ring-0'
           aria-label='Change target'
           data-track-category='CHANNEL_SEARCH'
           data-track-name='QUICK_DM_CHANGE_RECIPIENT'
@@ -153,7 +153,7 @@ export const QuickDmComposer: React.FC<QuickDmComposerProps> = ({ target, onSent
           emoji popovers portal to <body> — raise them above the dialog so they're not
           hidden behind it. Scoped via context so no other InputBox is affected. */}
       <div className='px-3 py-3'>
-        <OverlayZIndexContext.Provider value='z-[10000]'>
+        <OverlayZIndexContext.Provider value='z-10000'>
           <InputBox
             id={`quick-dm-${targetId}`}
             autoFocus='end'

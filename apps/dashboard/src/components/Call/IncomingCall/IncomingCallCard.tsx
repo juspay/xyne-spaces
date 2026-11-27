@@ -60,7 +60,7 @@ export function IncomingCallCard({
       <DialogPrimitive.Portal container={container}>
         <DialogPrimitive.Overlay
           className={cn(
-            'fixed inset-0 z-50 bg-[var(--call-modal-overlay)]',
+            'fixed inset-0 z-50 bg-(--call-modal-overlay)',
             !prefersReducedMotion && 'animate-call-overlay-in',
           )}
         />
@@ -85,7 +85,7 @@ export function IncomingCallCard({
             // must still fit a short viewport rather than run off the screen.
             'min-h-[520px] max-h-[calc(100vh-32px)] overflow-y-auto px-7 pb-6 pt-[26px]',
             'bg-popover text-popover-foreground ring-1 ring-border',
-            'shadow-[var(--call-modal-shadow)] outline-none focus:outline-none',
+            'shadow-(--call-modal-shadow) outline-hidden focus:outline-hidden',
           )}
         >
           <DialogPrimitive.Title className='hidden'>Incoming call</DialogPrimitive.Title>
@@ -118,7 +118,7 @@ export function IncomingCallCard({
             </div>
 
             {vm.subtitle && (
-              <div className='mt-[5px] line-clamp-2 max-h-10 max-w-[340px] text-center text-sm leading-[1.4] text-muted-foreground [text-wrap:pretty]'>
+              <div className='mt-[5px] line-clamp-2 max-h-10 max-w-[340px] text-center text-sm leading-[1.4] text-muted-foreground text-pretty'>
                 {vm.subtitle}
               </div>
             )}
@@ -130,7 +130,7 @@ export function IncomingCallCard({
 
           {vm.isInActiveCall && (
             <div className='mb-4 flex items-start gap-2 rounded-[9px] bg-muted px-3 py-[9px] ring-1 ring-border'>
-              <AlertTriangle className='mt-px h-3.5 w-3.5 shrink-0 text-[var(--call-notice-icon)]' />
+              <AlertTriangle className='mt-px h-3.5 w-3.5 shrink-0 text-(--call-notice-icon)' />
               <span className='text-[12.5px] leading-[1.45] text-muted-foreground'>
                 Accepting will end your current call
               </span>

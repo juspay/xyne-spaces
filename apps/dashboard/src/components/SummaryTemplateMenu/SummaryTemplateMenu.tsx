@@ -108,7 +108,7 @@ export function SummaryTemplateMenu({
         >
           <span
             className={cn(
-              'flex size-6 shrink-0 items-center justify-center rounded-md border border-border bg-background text-xs font-semibold shadow-sm',
+              'flex size-6 shrink-0 items-center justify-center rounded-md border border-border bg-background text-xs font-semibold shadow-xs',
               isDisabledDuringRegeneration && !isSelectedTemplateRegenerating && 'opacity-50',
             )}
           >
@@ -192,7 +192,7 @@ export function SummaryTemplateMenu({
                 >
                   <span
                     className={cn(
-                      'flex size-6 shrink-0 items-center justify-center rounded-md border border-border bg-background text-xs font-semibold shadow-sm',
+                      'flex size-6 shrink-0 items-center justify-center rounded-md border border-border bg-background text-xs font-semibold shadow-xs',
                       isDisabledDuringRegeneration && !isTemplateRegenerating && 'opacity-45',
                     )}
                   >

@@ -436,11 +436,11 @@ export const LEGACY_VIEWPORT = 1440;
  * to `:enabled` and matches only form elements — several of these are divs.
  */
 export const STREAM_PRESS =
-  '[transition-property:transform,color,background-color,border-color,opacity,box-shadow] [transition-duration:140ms] [transition-timing-function:cubic-bezier(0.23,1,0.32,1)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[hsl(var(--ring))] [&:active:not(:disabled)]:scale-[0.97] motion-reduce:[&:active:not(:disabled)]:transform-none';
+  '[transition-property:transform,color,background-color,border-color,opacity,box-shadow] [transition-duration:140ms] [transition-timing-function:cubic-bezier(0.23,1,0.32,1)] focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[hsl(var(--ring))] [&:active:not(:disabled)]:scale-[0.97] motion-reduce:[&:active:not(:disabled)]:transform-none';
 
 /** The same, at the gentler scale a full-width row wants. */
 export const STREAM_PRESS_ROW =
-  '[transition-property:transform,color,background-color,border-color,opacity,box-shadow] [transition-duration:140ms] [transition-timing-function:cubic-bezier(0.23,1,0.32,1)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[hsl(var(--ring))] [&:active:not(:disabled)]:scale-[0.99] motion-reduce:[&:active:not(:disabled)]:transform-none';
+  '[transition-property:transform,color,background-color,border-color,opacity,box-shadow] [transition-duration:140ms] [transition-timing-function:cubic-bezier(0.23,1,0.32,1)] focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-[hsl(var(--ring))] [&:active:not(:disabled)]:scale-[0.99] motion-reduce:[&:active:not(:disabled)]:transform-none';
 
 export const STREAM_ACTION = 'h-7 w-7 rounded-lg shrink-0';
 /**
@@ -457,4 +457,4 @@ export const STREAM_ACTION = 'h-7 w-7 rounded-lg shrink-0';
  * `ConversationHeader` overrides its text colours.
  */
 export const STREAM_ACTION_IDLE =
-  'text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground';
+  'text-muted-foreground hover:bg-foreground/6 hover:text-foreground';

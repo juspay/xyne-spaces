@@ -66,7 +66,7 @@ export function SignInImportBar({ onImported }: { onImported: () => void }): Rea
             new CustomEvent('xyne-open-preferences', { detail: { section: 'browser' } }),
           )
         }
-        className='flex-shrink-0 rounded-md bg-primary px-2.5 py-1 font-medium text-primary-foreground transition-opacity hover:opacity-90'
+        className='shrink-0 rounded-md bg-primary px-2.5 py-1 font-medium text-primary-foreground transition-opacity hover:opacity-90'
         data-track-category='AskAI'
         data-track-name='workspace-import-chrome-sessions'
       >
@@ -77,7 +77,7 @@ export function SignInImportBar({ onImported }: { onImported: () => void }): Rea
         onClick={() => setDismissed(true)}
         data-track-category='AskAI'
         data-track-name='workspace-import-dismiss'
-        className='flex-shrink-0 rounded-md px-2 py-1 text-muted-foreground hover:bg-secondary/60 hover:text-foreground'
+        className='shrink-0 rounded-md px-2 py-1 text-muted-foreground hover:bg-secondary/60 hover:text-foreground'
       >
         Not now
       </button>

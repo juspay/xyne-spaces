@@ -150,7 +150,7 @@ export const RoleSubmenu = ({
                   <button
                     type='button'
                     onClick={() => handleRoleToggle(role.id)}
-                    className='w-full flex items-center justify-between px-3 py-2 bg-muted/40 hover:bg-muted transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-md'
+                    className='w-full flex items-center justify-between px-3 py-2 bg-muted/40 hover:bg-muted transition-colors outline-hidden focus-visible:ring-2 focus-visible:ring-ring rounded-md'
                     data-track-category='Tickets'
                     data-track-name='ToggleRoleFilterSection'
                     data-track-metadata={JSON.stringify({
@@ -204,7 +204,7 @@ export const RoleSubmenu = ({
                                 key={user.id}
                                 type='button'
                                 onClick={() => handleUserToggle(role.id, user.id)}
-                                className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-md transition-all outline-none ${isSelected ? 'bg-accent text-accent-foreground' : 'hover:bg-muted text-foreground'} focus-visible:ring-2 focus-visible:ring-ring`}
+                                className={`w-full flex items-center gap-2 px-2 py-1.5 rounded-md transition-all outline-hidden ${isSelected ? 'bg-accent text-accent-foreground' : 'hover:bg-muted text-foreground'} focus-visible:ring-2 focus-visible:ring-ring`}
                                 data-track-category='Tickets'
                                 data-track-name='ToggleRoleUserFilter'
                                 data-track-metadata={JSON.stringify({

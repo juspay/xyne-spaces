@@ -529,7 +529,7 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
             channelMembersOptions &&
             channelMembersOptions.length > 0 &&
             toggleExcludedChannelMember && (
-              <div className='mt-2 w-full max-h-60 overflow-y-auto rounded-xl border border-border bg-background shadow-sm'>
+              <div className='mt-2 w-full max-h-60 overflow-y-auto rounded-xl border border-border bg-background shadow-xs'>
                 <div className='flex items-center px-3 py-2.5 border-b border-border sticky top-0 bg-background z-10'>
                   <Search className='w-4 h-4 text-muted-foreground mr-2 shrink-0' />
                   <input
@@ -541,7 +541,7 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
                     onKeyDown={e => e.stopPropagation()}
                     data-track-category='CALLS'
                     data-track-name='channel-member-search'
-                    className='flex-1 bg-transparent border-none focus:outline-none text-sm text-foreground placeholder:text-muted-foreground'
+                    className='flex-1 bg-transparent border-none focus:outline-hidden text-sm text-foreground placeholder:text-muted-foreground'
                   />
                 </div>
                 <div className='p-2'>
@@ -601,7 +601,7 @@ export const SearchParticipants: React.FC<SearchParticipantsProps> = ({
                 e.stopPropagation();
               }}
               className={cn(
-                'z-[100] w-[var(--radix-popover-trigger-width)] max-h-48 overflow-y-auto no-scrollbar rounded-xl border border-border bg-background shadow-lg',
+                'z-100 w-(--radix-popover-trigger-width) max-h-48 overflow-y-auto no-scrollbar rounded-xl border border-border bg-background shadow-lg',
               )}
             >
               <>

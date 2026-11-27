@@ -2784,7 +2784,7 @@ const StreamsScreen = (): ReactElement => {
       ref={panelRef}
       tabIndex={-1}
       className={cn(
-        'relative flex h-full flex-col overflow-hidden outline-none',
+        'relative flex h-full flex-col overflow-hidden outline-hidden',
         // `bleed` paints nothing, so the fixed wallpaper layer behind the whole
         // app carries through the stream instead of stopping at its edge.
         dev.ground === 'theme' && 'bg-background',
@@ -2973,7 +2973,7 @@ const StreamsScreen = (): ReactElement => {
                 // computed, and the spacers hold the width of the ones that are
                 // absent, so the layout never actually moves for it to correct.
                 '[overflow-anchor:none]',
-                '[scrollbar-width:auto] [scrollbar-color:hsl(var(--muted-foreground)/0.5)_hsl(var(--muted)/0.6)] [&::-webkit-scrollbar]:h-3 [&::-webkit-scrollbar-track]:rounded-full [&::-webkit-scrollbar-track]:bg-[hsl(var(--muted)/0.6)] [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:border-[3px] [&::-webkit-scrollbar-thumb]:border-transparent [&::-webkit-scrollbar-thumb]:bg-[hsl(var(--muted-foreground)/0.5)] [&::-webkit-scrollbar-thumb]:bg-clip-content [&::-webkit-scrollbar-thumb:hover]:bg-[hsl(var(--muted-foreground)/0.8)] motion-reduce:scroll-auto',
+                'scrollbar-auto [scrollbar-color:hsl(var(--muted-foreground)/0.5)_hsl(var(--muted)/0.6)] [&::-webkit-scrollbar]:h-3 [&::-webkit-scrollbar-track]:rounded-full [&::-webkit-scrollbar-track]:bg-[hsl(var(--muted)/0.6)] [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:border-[3px] [&::-webkit-scrollbar-thumb]:border-transparent [&::-webkit-scrollbar-thumb]:bg-[hsl(var(--muted-foreground)/0.5)] [&::-webkit-scrollbar-thumb]:bg-clip-content [&::-webkit-scrollbar-thumb:hover]:bg-[hsl(var(--muted-foreground)/0.8)] motion-reduce:scroll-auto',
                 'scroll-smooth',
                 // Fades, not gutters. A column that ends at a hard edge
                 // reads as broken; a fade says "this continues". Each side
@@ -3115,7 +3115,7 @@ const StreamsScreen = (): ReactElement => {
                   <PlusDefault size={20} />
                   <span className='text-xs'>Add a column</span>
                   {columns.length === 0 && (
-                    <span className='max-w-[15rem] px-6 text-center text-[11px] leading-relaxed text-muted-foreground/70'>
+                    <span className='max-w-60 px-6 text-center text-[11px] leading-relaxed text-muted-foreground/70'>
                       A stream is the handful of things you want to watch at once: channels, a
                       board, threads, a topic feed.
                     </span>

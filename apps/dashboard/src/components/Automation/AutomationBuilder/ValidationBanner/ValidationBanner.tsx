@@ -19,7 +19,7 @@ export function ValidationBanner({
           'border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-400 dark:border-red-500/40',
         )}
       >
-        <AlertTriangle className='size-4 flex-shrink-0' />
+        <AlertTriangle className='size-4 shrink-0' />
         <span className='flex-1'>{errorMessage}</span>
       </div>
     );
@@ -55,7 +55,7 @@ export function ValidationBanner({
           'text-muted-foreground',
         )}
       >
-        <CheckCircle2 className='size-4 flex-shrink-0 text-green-600' />
+        <CheckCircle2 className='size-4 shrink-0 text-green-600' />
         <span>No issues — ready to activate.</span>
         {isSaving && <Loader2 className='ml-auto size-4 animate-spin opacity-60' />}
       </div>
@@ -76,7 +76,7 @@ export function ValidationBanner({
         data-track-category='automation-builder'
         data-track-name='validation-banner-toggle'
       >
-        <AlertTriangle className='size-4 flex-shrink-0' />
+        <AlertTriangle className='size-4 shrink-0' />
         <span className='flex-1 font-medium'>
           {result.issues.length} issue{result.issues.length === 1 ? '' : 's'} to resolve
         </span>

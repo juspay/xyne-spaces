@@ -267,19 +267,19 @@ const DmListItemComponent = ({
                 // Make RenderMessageWithHTML output inline and preserve link styles
                 '[&_.message-html-root]:inline',
                 '[&_.message-html-root_*]:inline',
-                '[&_.message-html-root_pre]:!inline [&_.message-html-root_pre]:!whitespace-nowrap',
+                '[&_.message-html-root_pre]:inline! [&_.message-html-root_pre]:whitespace-nowrap!',
                 '[&_.message-html-root_br]:hidden',
-                '[&_.message-html-root_a]:!text-[var(--link-color)]',
-                '[&_.message-html-root_a]:!no-underline',
-                '[&_.message-html-root_a:hover]:!underline',
-                '[&_.message-html-root_a:hover]:!text-[var(--link-hover-color)]',
+                '[&_.message-html-root_a]:text-(--link-color)!',
+                '[&_.message-html-root_a]:no-underline!',
+                '[&_.message-html-root_a:hover]:underline!',
+                '[&_.message-html-root_a:hover]:text-(--link-hover-color)!',
                 // Hide internal link semantic labels (icons, borders, etc.) in preview
                 '[&_.message-html-root_span.group\\/internal-link]:contents',
-                '[&_.message-html-root_.group\\/internal-link_a]:!border-0',
-                '[&_.message-html-root_.group\\/internal-link_a]:!bg-transparent',
-                '[&_.message-html-root_.group\\/internal-link_a]:!p-0',
-                '[&_.message-html-root_.group\\/internal-link_a_.shrink-0]:!hidden',
-                '[&_.message-html-root_.group\\/internal-link_button]:!hidden',
+                '[&_.message-html-root_.group\\/internal-link_a]:border-0!',
+                '[&_.message-html-root_.group\\/internal-link_a]:bg-transparent!',
+                '[&_.message-html-root_.group\\/internal-link_a]:p-0!',
+                '[&_.message-html-root_.group\\/internal-link_a_.shrink-0]:hidden!',
+                '[&_.message-html-root_.group\\/internal-link_button]:hidden!',
               )}
             >
               {renderMessagePreview()}
@@ -308,8 +308,8 @@ const DmListItemComponent = ({
       className={cn(
         'group flex w-full font-normal items-center gap-3 px-3 py-2 text-left cursor-pointer transition-colors duration-150 h-auto rounded-[14px] border border-transparent',
         showUnread ? 'bg-activity-sidebar-primary' : 'bg-transparent',
-        'hover:!bg-sidebar-accent',
-        isSelected && '!bg-sidebar-accent border-sidebar-border',
+        'hover:bg-sidebar-accent!',
+        isSelected && 'bg-sidebar-accent! border-sidebar-border',
       )}
       role='button'
       tabIndex={0}
@@ -323,7 +323,7 @@ const DmListItemComponent = ({
         isUnread,
       })}
     >
-      <div className='relative flex-shrink-0'>
+      <div className='relative shrink-0'>
         {isGroupDMChannel(channel.scopeType) ? (
           <AvatarGroup userIds={otherParticipantIds} size='sm' isGroupDMAvatar className='size-9' />
         ) : (
@@ -352,12 +352,12 @@ const DmListItemComponent = ({
                 statusExpiryAt={targetUser?.statusExpiryAt}
                 activityStatus={targetUser?.activityStatus}
                 size='sm'
-                className='flex-shrink-0 text-[14px]'
+                className='shrink-0 text-[14px]'
               />
             )}
           </div>
 
-          <span className='flex-shrink-0 flex items-center gap-1.5 whitespace-nowrap text-xs text-muted-foreground ml-auto sm:ml-2'>
+          <span className='shrink-0 flex items-center gap-1.5 whitespace-nowrap text-xs text-muted-foreground ml-auto sm:ml-2'>
             {lastMessage ? formatTime(lastMessage.createdAt) : null}
           </span>
         </div>
@@ -383,24 +383,24 @@ const DmListItemComponent = ({
             className={cn(
               'w-full min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-sm break-normal',
               showUnread
-                ? 'text-foreground [&_.message-html-root]:!text-foreground'
-                : 'text-muted-foreground [&_.message-html-root]:!text-muted-foreground',
+                ? 'text-foreground [&_.message-html-root]:text-foreground!'
+                : 'text-muted-foreground [&_.message-html-root]:text-muted-foreground!',
               // Make RenderMessageWithHTML output inline and preserve link styles
               '[&_.message-html-root]:inline',
               '[&_.message-html-root_*]:inline',
-              '[&_.message-html-root_pre]:!inline [&_.message-html-root_pre]:!whitespace-nowrap',
+              '[&_.message-html-root_pre]:inline! [&_.message-html-root_pre]:whitespace-nowrap!',
               '[&_.message-html-root_br]:hidden',
-              '[&_.message-html-root_a]:!text-[var(--link-color)]',
-              '[&_.message-html-root_a]:!no-underline',
-              '[&_.message-html-root_a:hover]:!underline',
-              '[&_.message-html-root_a:hover]:!text-[var(--link-hover-color)]',
+              '[&_.message-html-root_a]:text-(--link-color)!',
+              '[&_.message-html-root_a]:no-underline!',
+              '[&_.message-html-root_a:hover]:underline!',
+              '[&_.message-html-root_a:hover]:text-(--link-hover-color)!',
               // Hide internal link semantic labels (icons, borders, etc.) in preview
               '[&_.message-html-root_span.group\\/internal-link]:contents',
-              '[&_.message-html-root_.group\\/internal-link_a]:!border-0',
-              '[&_.message-html-root_.group\\/internal-link_a]:!bg-transparent',
-              '[&_.message-html-root_.group\\/internal-link_a]:!p-0',
-              '[&_.message-html-root_.group\\/internal-link_a_.shrink-0]:!hidden',
-              '[&_.message-html-root_.group\\/internal-link_button]:!hidden',
+              '[&_.message-html-root_.group\\/internal-link_a]:border-0!',
+              '[&_.message-html-root_.group\\/internal-link_a]:bg-transparent!',
+              '[&_.message-html-root_.group\\/internal-link_a]:p-0!',
+              '[&_.message-html-root_.group\\/internal-link_a_.shrink-0]:hidden!',
+              '[&_.message-html-root_.group\\/internal-link_button]:hidden!',
             )}
           >
             {renderMessagePreview()}

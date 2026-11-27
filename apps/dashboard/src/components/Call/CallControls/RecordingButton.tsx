@@ -114,7 +114,7 @@ export function RecordingButton({
               recordingType: RecordingType.AUDIO_ONLY,
             })}
           >
-            <Mic className='w-4 h-4 text-blue-400 flex-shrink-0' />
+            <Mic className='w-4 h-4 text-blue-400 shrink-0' />
             <div>
               <div className='font-medium'>Voice only</div>
               <div className='text-xs text-[#9aa0a6]'>Record participant audio and transcript</div>
@@ -131,7 +131,7 @@ export function RecordingButton({
               recordingType: RecordingType.AUDIO_SCREEN,
             })}
           >
-            <Monitor className='w-4 h-4 text-purple-400 flex-shrink-0' />
+            <Monitor className='w-4 h-4 text-purple-400 shrink-0' />
             <div>
               <div className='font-medium'>Screen + voice</div>
               <div className='text-xs text-[#9aa0a6]'>

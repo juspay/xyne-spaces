@@ -316,16 +316,16 @@ const AttachmentCitationPreviewInner: React.FC = () => {
     >
       <Dialog.Portal>
         {isOpen && (
-          <div className='fixed inset-0 z-[70] pointer-events-none backdrop-blur-[2px] bg-black/10' />
+          <div className='fixed inset-0 z-70 pointer-events-none backdrop-blur-[2px] bg-black/10' />
         )}
         <Dialog.Content
-          className='fixed z-[71] flex flex-col bg-white dark:bg-[#1E1E1E] shadow-2xl rounded-2xl overflow-hidden border border-gray-200 dark:border-gray-700 left-14 right-[35vw] mx-auto top-1/2 -translate-y-1/2 w-[min(700px,48vw)] h-[85vh] data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95'
+          className='fixed z-71 flex flex-col bg-white dark:bg-[#1E1E1E] shadow-2xl rounded-2xl overflow-hidden border border-gray-200 dark:border-gray-700 left-14 right-[35vw] mx-auto top-1/2 -translate-y-1/2 w-[min(700px,48vw)] h-[85vh] data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95'
           aria-label='Citation file preview'
           onInteractOutside={e => e.preventDefault()}
           onEscapeKeyDown={e => e.preventDefault()}
         >
           {/* Header */}
-          <div className='flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-700 flex-shrink-0'>
+          <div className='flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-700 shrink-0'>
             <div className='flex flex-col min-w-0'>
               <Dialog.Title className='text-sm font-semibold text-gray-900 dark:text-gray-100 truncate'>
                 {ref?.fileName ?? 'File Preview'}
@@ -336,7 +336,7 @@ const AttachmentCitationPreviewInner: React.FC = () => {
                 </span>
               )}
             </div>
-            <div className='flex items-center gap-2 flex-shrink-0'>
+            <div className='flex items-center gap-2 shrink-0'>
               <button
                 onClick={handleDownload}
                 className='p-1.5 rounded-md text-gray-500 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors'
