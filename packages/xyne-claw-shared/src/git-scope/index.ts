@@ -11,8 +11,7 @@
  *            and builds the upstream address from the `host` and `repo` that
  *            were checked, never from the request path it received.
  *
- * TOKEN FORMAT. Test vectors: ./__tests__/git-scope-vectors.json (made by
- * ./__tests__/make-vectors.mjs, which uses node:crypto only and none of this code).
+ * TOKEN FORMAT.
  *
  *   token = B64(header) "." B64(payload) "." B64(signature)     a compact JWS, RFC 7515
  *

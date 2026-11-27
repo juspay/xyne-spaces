@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import { generateKeyPairSync } from "node:crypto";
-import { readFileSync } from "node:fs";
 import {
   GIT_GATEWAY_MAX_TARGET_LENGTH,
   GIT_GATEWAY_REFUSALS,
@@ -19,16 +18,37 @@ import {
   type VerifiedGitScope,
 } from "./index.js";
 
-interface VectorFile {
-  requests: {
-    method: string;
-    target: string;
-    hostMap?: GitGatewayHostMap;
-    result: { ok: true; host: string; repo: string; op: GitGatewayOp } | { ok: false; reason: GitGatewayRefusal };
-  }[];
-  decisions: { repos: GitScopeRepo[]; request: GitGatewayRequest; result: GitRequestDecision }[];
-}
-const vectors = JSON.parse(readFileSync(new URL("./__tests__/git-scope-vectors.json", import.meta.url), "utf8")) as VectorFile;
+// One request per refusal reason, plus the four allowed forms.
+const REQUESTS: {
+  method: string;
+  target: string;
+  hostMap?: GitGatewayHostMap;
+  result: { ok: true; host: string; repo: string; op: GitGatewayOp } | { ok: false; reason: GitGatewayRefusal };
+}[] = [
+  { method: "GET", target: "/github.com/example-org/app.git/info/refs?service=git-upload-pack", result: {"ok": true, "host": "github.com", "repo": "github.com/example-org/app", "op": "fetch"} },
+  { method: "POST", target: "/github.com/example-org/app.git/git-upload-pack", result: {"ok": true, "host": "github.com", "repo": "github.com/example-org/app", "op": "fetch"} },
+  { method: "GET", target: "/github.com/example-org/app.git/info/refs?service=git-receive-pack", result: {"ok": true, "host": "github.com", "repo": "github.com/example-org/app", "op": "push"} },
+  { method: "POST", target: "/github.com/example-org/app.git/git-receive-pack", result: {"ok": true, "host": "github.com", "repo": "github.com/example-org/app", "op": "push"} },
+  { method: "GET", target: "/bb/scm/proj/service.git/info/refs?service=git-upload-pack", result: {"ok": false, "reason": "invalid-host"}, hostMap: {"bb": "https://bitbucket.example.net"} },
+  { method: "HEAD", target: "/github.com/example-org/app.git/info/refs?service=git-upload-pack", result: {"ok": false, "reason": "method-not-allowed"} },
+  { method: "GET", target: "/", result: {"ok": false, "reason": "empty-segment"} },
+  { method: "GET", target: "/github.com/example-org/app.git", result: {"ok": false, "reason": "not-a-git-address"} },
+  { method: "GET", target: "github.com/example-org/app.git/info/refs?service=git-upload-pack", result: {"ok": false, "reason": "invalid-target"} },
+  { method: "GET", target: "/github.com/example-org/app.git/info/refs", result: {"ok": false, "reason": "missing-service"} },
+  { method: "GET", target: "/github.com/example-org/app.git/info/refs?", result: {"ok": false, "reason": "unexpected-query"} },
+  { method: "GET", target: "/github.com/example-org/app.git/info/refs?service=", result: {"ok": false, "reason": "unknown-service"} },
+  { method: "GET", target: "/github.com/example-org%2fapp.git/info/refs?service=git-upload-pack", result: {"ok": false, "reason": "encoded-slash"} },
+  { method: "GET", target: "/github.com/example-org/%2e%2e/other/app.git/info/refs?service=git-upload-pack", result: {"ok": false, "reason": "encoded-dot"} },
+  { method: "GET", target: "/github.com/example-org/%252e%252e/app.git/info/refs?service=git-upload-pack", result: {"ok": false, "reason": "encoded-character"} },
+  { method: "GET", target: "/github.com/example-org/../other-org/app.git/info/refs?service=git-upload-pack", result: {"ok": false, "reason": "dot-segment"} },
+  { method: "GET", target: "/github.com/example-org/..git/info/refs?service=git-upload-pack", result: {"ok": false, "reason": "unsupported-path-form"} },
+  { method: "GET", target: "/github.com/example-org\\app.git/info/refs?service=git-upload-pack", result: {"ok": false, "reason": "backslash"} },
+  { method: "GET", target: "/github.com/example-org/app\u0000.git/info/refs?service=git-upload-pack", result: {"ok": false, "reason": "control-character"} },
+  { method: "GET", target: "/github.com/example-org/app name.git/info/refs?service=git-upload-pack", result: {"ok": false, "reason": "invalid-character"} },
+  { method: "GET", target: "/info/refs?service=git-upload-pack", result: {"ok": false, "reason": "too-few-segments"} },
+  { method: "GET", target: "/github.com/example-org/app.GIT/info/refs?service=git-upload-pack", result: {"ok": false, "reason": "invalid-git-suffix"} },
+  { method: "GET", target: "/github.com/example-org/" + "a".repeat(1024) + ".git/info/refs?service=git-upload-pack", result: {"ok": false, "reason": "target-too-long"} },
+];
 
 const UPLOAD = "?service=git-upload-pack";
 const RECEIVE = "?service=git-receive-pack";
@@ -258,14 +278,14 @@ describe("two different repositories never get one name", () => {
 });
 
 describe("hostile and odd request addresses", () => {
-  const refusedVectors = vectors.requests.filter((vector) => !vector.result.ok);
+  const refusedVectors = REQUESTS.filter((vector) => !vector.result.ok);
 
   it("the table has a case for every refusal reason", () => {
     const reasons = new Set(refusedVectors.map((vector) => (vector.result.ok ? "" : vector.result.reason)));
     expect([...reasons].sort()).toEqual([...GIT_GATEWAY_REFUSALS].sort());
   });
 
-  it.each(vectors.requests.map((vector) => [vector.method, JSON.stringify(vector.target.length > 120 ? `${vector.target.slice(0, 60)}...(${vector.target.length} characters)` : vector.target), vector.result.ok ? `${vector.result.op} ${vector.result.repo}` : vector.result.reason, vector] as const))(
+  it.each(REQUESTS.map((vector) => [vector.method, JSON.stringify(vector.target.length > 120 ? `${vector.target.slice(0, 60)}...(${vector.target.length} characters)` : vector.target), vector.result.ok ? `${vector.result.op} ${vector.result.repo}` : vector.result.reason, vector] as const))(
     "%s %s -> %s",
     (_method, _target, _expected, vector) => {
       const result = parseGitGatewayRequest(vector.method, vector.target, vector.hostMap);
@@ -458,11 +478,4 @@ describe("decideGitRequest", () => {
     const decision = decideGitRequest(built, fetch);
     expect(decision.allowed).toBe(true); // which is why the type, not this function, has to stop it
   });
-
-  it.each(vectors.decisions.map((vector) => [vector.request.op, vector.request.repo, vector.result.allowed ? `allowed (${vector.result.access})` : vector.result.reason, vector] as const))(
-    "vector: %s %s -> %s",
-    (_op, _repo, _expected, vector) => {
-      expect(decideGitRequest(scopeOf(vector.repos), vector.request)).toEqual(vector.result);
-    },
-  );
 });

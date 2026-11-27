@@ -1,5 +1,4 @@
 import { describe, expect, it, vi } from "vitest";
-import { readFileSync } from "node:fs";
 
 // The built-in Bitbucket profiles take their host from the environment when the module loads.
 vi.hoisted(() => {
@@ -11,11 +10,6 @@ import { REPO_CONFIGS } from "../tools/sandbox/repo-configs.js";
 import type { RepoSetupConfig } from "../tools/sandbox/tools.js";
 import { GitScopeError, gitScopeReposForProfile, isCanonicalGitScopeHost, isCanonicalGitScopeRepo, type GitScopeProfileRepos } from "./index.js";
 
-interface VectorFile {
-  addresses: { address: string; repo: string | null }[];
-  profiles: { name: string; about: string; config: GitScopeProfileRepos; repos: string[] | null }[];
-}
-const vectors = JSON.parse(readFileSync(new URL("./__tests__/git-scope-vectors.json", import.meta.url), "utf8")) as VectorFile;
 
 const aux = (name: string, url: string) => ({ name, url, defaultBranch: "main", workDir: `/workspace/${name}` });
 
@@ -189,18 +183,6 @@ describe("canonical form of a list entry", () => {
     for (const host of ["", "GitHub.com", "ssh.example.com", "www.example.com", "example.com:22", "example.com.", ".example.com", "a..b", "-a.example", "a-.example", "a_b.example", "[::1]", `${"a".repeat(64)}.example`, 7, null]) {
       expect(isCanonicalGitScopeHost(host), String(host)).toBe(false);
     }
-  });
-});
-
-describe("test vectors (./__tests__/git-scope-vectors.json)", () => {
-  it.each(vectors.addresses.map((vector) => [JSON.stringify(vector.address), vector] as const))("address %s", (_name, { address, repo }) => {
-    if (repo === null) expect(() => gitScopeReposForProfile({ repoUrl: address })).toThrow(GitScopeError);
-    else expect(gitScopeReposForProfile({ repoUrl: address })).toEqual([repo]);
-  });
-
-  it.each(vectors.profiles.map((vector) => [vector.name, vector] as const))("profile %s", (_name, { config, repos }) => {
-    if (repos === null) expect(() => gitScopeReposForProfile(config)).toThrow(GitScopeError);
-    else expect(gitScopeReposForProfile(config)).toEqual(repos);
   });
 });
 

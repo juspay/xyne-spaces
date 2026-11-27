@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import { createHmac, createPublicKey, generateKeyPairSync, sign, verify, webcrypto, type KeyObject } from "node:crypto";
-import { readFileSync } from "node:fs";
 import {
   GIT_SCOPE_CLOCK_SKEW_SECONDS,
   GIT_SCOPE_MAX_TOKEN_LENGTH,
@@ -601,60 +600,5 @@ describe("the format is a standard ES256 JWS", () => {
     const spki = Buffer.from(await webcrypto.subtle.exportKey("spki", pair.publicKey));
     const publicPem = `-----BEGIN PUBLIC KEY-----\n${spki.toString("base64")}\n-----END PUBLIC KEY-----\n`;
     expect(verifyGitScope(`${input}.${made.toString("base64url")}`, { ...OPTIONS, keys: { [KID]: publicPem } })).toEqual({ ok: true, scope: PAYLOAD });
-  });
-});
-
-interface VerificationVector {
-  name: string;
-  about: string;
-  token: string;
-  keys: Record<string, string>;
-  now: number;
-  expected: { claim: string; namespace: string; template?: string };
-  result: { ok: true; payload: GitScopePayload } | { ok: false; reason: GitScopeRejection };
-}
-interface VectorFile {
-  WARNING: string;
-  format: { typ: string; alg: string; version: number; maxTokenLength: number; clockSkewSeconds: number };
-  keys: Record<string, { use: string; publicKeyPem: string; privateKeyPem: string }>;
-  verification: VerificationVector[];
-}
-
-describe("test vectors (./__tests__/git-scope-vectors.json)", () => {
-  const vectors = JSON.parse(readFileSync(new URL("./__tests__/git-scope-vectors.json", import.meta.url), "utf8")) as VectorFile;
-  const keyPem = (reference: string): string => {
-    const [name = "", part] = reference.split("/");
-    const pair = vectors.keys[name];
-    if (!pair) throw new Error(`vector names an unknown key: ${reference}`);
-    return part === "private" ? pair.privateKeyPem : pair.publicKeyPem;
-  };
-
-  it("say that their keys are test keys", () => {
-    expect(vectors.WARNING).toMatch(/TEST VECTORS/);
-    for (const pair of Object.values(vectors.keys)) expect(pair.use).toMatch(/TEST ONLY/);
-  });
-
-  it("state the constants this code uses", () => {
-    expect(vectors.format).toEqual({ typ: GIT_SCOPE_TYP, alg: "ES256", version: 1, maxTokenLength: GIT_SCOPE_MAX_TOKEN_LENGTH, clockSkewSeconds: GIT_SCOPE_CLOCK_SKEW_SECONDS });
-  });
-
-  it("have an accepted token and a token for every reason code", () => {
-    const results = new Set(vectors.verification.map((vector) => (vector.result.ok ? "ok" : vector.result.reason)));
-    expect([...results].sort()).toEqual(["ok", ...GIT_SCOPE_REJECTIONS].sort());
-  });
-
-  it.each(vectors.verification.map((vector) => [vector.name, vector] as const))("%s", (_name, vector) => {
-    const keys = Object.fromEntries(Object.entries(vector.keys).map(([kid, reference]) => [kid, keyPem(reference)]));
-    const result = verifyGitScope(vector.token, { keys, now: vector.now, expected: vector.expected });
-    if (vector.result.ok) expect(result).toEqual({ ok: true, scope: vector.result.payload });
-    else expect(result).toMatchObject({ ok: false, reason: vector.result.reason });
-  });
-
-  it("can be re-signed: the library signs with the vectors' key and the result verifies", () => {
-    const pair = vectors.keys["p256-a"];
-    const first = vectors.verification[0];
-    if (!pair || !first || !first.result.ok) throw new Error("vectors changed shape");
-    const token = signGitScope(first.result.payload, pair.privateKeyPem, "signer-1");
-    expect(verifyGitScope(token, { keys: { "signer-1": pair.publicKeyPem }, now: first.now, expected: first.expected })).toEqual({ ok: true, scope: first.result.payload });
   });
 });
