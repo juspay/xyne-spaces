@@ -158,7 +158,11 @@ const typedRouter = express.Router(ROUTER_OPTIONS);
 /** Body parsing as app.ts does it for its routes (same limits), on typed routes only. */
 const parseBody: RequestHandler[] = [express.json({ limit: '10mb' }), express.urlencoded({ extended: true, limit: '10mb' })];
 
-type Checked = { params: unknown; query: unknown; access: Record<string, unknown> };
+/**
+ * The checked request parts. `body` is the checked body the access checks read; the handler reads
+ * `req.body` (for a contract with encrypted fields, the encryption service's checked answer).
+ */
+type Checked = { params: unknown; query: unknown; body: unknown; access: Record<string, unknown> };
 const checked = new WeakMap<Request, Checked>();
 
 function appCaller(req: Request): AppCaller | undefined {
@@ -191,19 +195,30 @@ function checkRequest(contract: AnyRouteContract, raw: RequestParts, invalidRequ
   if (query && !query.success) throw refusal(query.error.issues, invalidRequest);
   let body: unknown = raw.body;
   if (contract.body) {
-    const rawBody = (raw.body ?? {}) as Record<string, unknown>;
-    const parsed = (contract.body as z.ZodType).safeParse(rawBody);
-    if (!parsed.success) throw refusal(parsed.error.issues, invalidRequest);
-    // The parsed body, except the encrypted fields: their value as sent (plaintext, or the
-    // client's ciphertext), which the encryption service transforms and the facts step reads.
-    // They are wrapped in UnreadableString after the encryption steps (makeUnreadable).
-    const data = parsed.data as Record<string, unknown>;
-    for (const field of requestContractOf(contract)?.unreadableFields ?? []) {
-      if (field in rawBody) data[field] = rawBody[field];
-    }
-    body = data;
+    const parsed = checkBody(contract, raw.body);
+    if (!parsed.success) throw refusal(parsed.issues, invalidRequest);
+    body = parsed.body;
   }
   return { params: params?.data, query: query?.data, body };
+}
+
+/**
+ * The body checked against the contract: the parsed body, except the encrypted fields, which keep
+ * their value as sent (plaintext, or ciphertext) for the encryption service and the facts step;
+ * they are wrapped in UnreadableString after the encryption steps (makeUnreadable).
+ */
+function checkBody(
+  contract: AnyRouteContract,
+  rawBody: unknown,
+): { success: true; body: Record<string, unknown> } | { success: false; issues: z.core.$ZodIssue[] } {
+  const sent = (rawBody ?? {}) as Record<string, unknown>;
+  const parsed = (contract.body as z.ZodType).safeParse(sent);
+  if (!parsed.success) return { success: false, issues: parsed.error.issues };
+  const data = parsed.data as Record<string, unknown>;
+  for (const field of requestContractOf(contract)?.unreadableFields ?? []) {
+    if (field in sent) data[field] = sent[field];
+  }
+  return { success: true, body: data };
 }
 
 /** Runs the access checks in order; their results by name, or the first refusal thrown. */
@@ -240,8 +255,11 @@ function validate(contract: AnyRouteContract, invalidRequest?: () => ContractErr
       res.status(error.status).json(error.body);
       return;
     }
-    if (contract.body) req.body = parts.body;
-    checked.set(req, { params: parts.params, query: parts.query, access: {} });
+    // A body with encrypted fields goes to the encryption service as sent: the service's answer,
+    // not the client's body, is what the contract finally holds (contractFieldsAndFacts).
+    // Every other body is the checked copy from here on.
+    if (contract.body && !requestContractOf(contract)) req.body = parts.body;
+    checked.set(req, { params: parts.params, query: parts.query, body: parts.body, access: {} });
     next();
   };
 }
@@ -251,7 +269,7 @@ function checkInput(req: Request): CheckInput<AnyRouteContract> {
   return {
     params: state?.params as never,
     query: state?.query as never,
-    body: req.body as never,
+    body: (state ? state.body : req.body) as never,
     user: req.user,
     app: appCaller(req),
     route: { method: req.method, path: req.originalUrl.split('?')[0] },
@@ -291,11 +309,15 @@ function shapeAnswer(contract: AnyRouteContract, answer: unknown): unknown {
 }
 
 /**
- * The encrypted fields' form, then their facts, as for contracted mutators
- * (assertArgsMatchContract, deriveLocally): runs after the encryption service transformed the
+ * The encryption service's answer against the contract, then the encrypted fields' form, then
+ * their facts, as for contracted mutators (the Zero validator on the transformed args,
+ * assertArgsMatchContract, deriveLocally): runs after the encryption service transformed the
  * body and before the unreadable fields are wrapped.
  *
- * - Form: a field the contract keeps plain must not arrive as ciphertext; an
+ * - Contract: the body the service answered is checked as the request was (checkBody) and is
+ *   the body from here on. It cannot fail for a valid request unless the service changed it.
+ *
+ * - Form: a field the contract keeps plain must not hold ciphertext, at any depth; an
  *   `unreadableString()` field must be ciphertext once the encryption service transformed the
  *   body (DEK passthrough). Without the transform (no gateway, encryption off) everything is
  *   plaintext and is encrypted at rest on write.
@@ -303,18 +325,27 @@ function shapeAnswer(contract: AnyRouteContract, answer: unknown): unknown {
  *   they are computed here from the plaintext with the same shared extractors, so a handler
  *   always decides on `derived` and never reads the text.
  */
-function contractFieldsAndFacts(encryption: RequestContract): RequestHandler {
+function contractFieldsAndFacts(contract: AnyRouteContract, encryption: RequestContract): RequestHandler {
   const factNames = derivedNames(encryption);
   return function contractFieldsAndFactsMiddleware(req, res, next) {
-    const body = (req.body ?? {}) as Record<string, unknown>;
+    // The encryption service's answer (or, where it did not run, the body as sent) against the
+    // contract. The body as sent already passed the same check (validate), so an answer that
+    // does not fit is the service's doing: a server error, logged with the issues.
+    const checkedBody = checkBody(contract, req.body);
+    if (!checkedBody.success) {
+      logger.error('[api] the encryption service\'s request body does not match the contract', { route: contract.key, issues: checkedBody.issues });
+      res.status(500).json({ error: 'Internal server error', code: 'ENC_TRANSFORM_CONTRACT_VIOLATION' });
+      return;
+    }
+    const body = checkedBody.body;
+    req.body = body;
     const transformed = isDekPassthrough();
     for (const [field, value] of Object.entries(body)) {
-      if (typeof value !== 'string' || value.length === 0) continue;
       const unreadable = encryption.unreadableFields.includes(field);
       const problem =
-        !unreadable && isCiphertextValue(value)
+        !unreadable && containsCiphertext(value)
           ? 'is plaintext in the contract but arrived encrypted'
-          : unreadable && transformed && !isCiphertextValue(value)
+          : unreadable && transformed && typeof value === 'string' && value.length > 0 && !isCiphertextValue(value)
             ? 'is encrypted in the contract but arrived as plaintext'
             : undefined;
       if (problem) {
@@ -331,6 +362,14 @@ function contractFieldsAndFacts(encryption: RequestContract): RequestHandler {
   };
 }
 
+/** Whether `value` is, or holds at any depth, a ciphertext string. */
+function containsCiphertext(value: unknown): boolean {
+  if (typeof value === 'string') return isCiphertextValue(value);
+  if (Array.isArray(value)) return value.some(containsCiphertext);
+  if (value && typeof value === 'object') return Object.values(value).some(containsCiphertext);
+  return false;
+}
+
 /**
  * The encryption pipeline (encryptedRoute) with the field check and facts step after its
  * transform; where the pipeline does not run (an `app` route without the ingress proxy), the
@@ -343,7 +382,7 @@ function encryptionSteps(
 ): RequestHandler[] {
   const requestContract = requestContractOf(contract);
   if (!requestContract || !encryption) return [];
-  const fieldsAndFacts = contractFieldsAndFacts(requestContract);
+  const fieldsAndFacts = contractFieldsAndFacts(contract, requestContract);
   const steps = encryptedRoute(requestContract, {
     resolveWorkspaceId: encryption.resolveWorkspaceId,
     transitProxyIngress: auth === 'app' || auth === 'slack-app',

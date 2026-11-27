@@ -71,17 +71,24 @@ jest.mock('@/apps/platform-adapters/slack/middleware', () => ({
     next();
   },
 }));
-// Stand-in for the encryption pipeline: records that it ran and hands over derived facts.
+// Stand-in for the encryption pipeline: records that it ran and the body it was given, hands over
+// derived facts, then runs the framework's afterTransform step as encryptedRoute does. A test sets
+// `serviceAnswer` to stand in for a service that changes the body.
 const encryptionRuns: string[] = [];
+const serviceSaw: unknown[] = [];
+let serviceAnswer: ((body: Record<string, unknown>) => Record<string, unknown>) | undefined;
 jest.mock('@/middleware/encryptedRoute', () => ({
   // Keeps the real rule: no steps for proxy routes where the proxy is not deployed.
-  encryptedRoute: (_contract: unknown, options: { transitProxyIngress?: boolean }) =>
+  encryptedRoute: (_contract: unknown, options: { transitProxyIngress?: boolean; afterTransform?: (req: Request, res: Response, next: NextFunction) => void }) =>
     options.transitProxyIngress && !mockConfig.internal.transitProxyIngressEnabled ? [] : [
     (req: Request, _res: Response, next: NextFunction) => {
       encryptionRuns.push(req.path);
+      serviceSaw.push(req.body);
+      if (serviceAnswer) req.body = serviceAnswer({ ...(req.body as Record<string, unknown>) });
       req.derived = { version: 2, fields: { note: { userIds: ['u-9'] } } } as Request['derived'];
       next();
     },
+    ...(options.afterTransform ? [options.afterTransform] : []),
   ],
 }));
 
@@ -168,6 +175,19 @@ route(sessionEncrypted, {
   controller: async () => ({ ok: true }),
 });
 
+/** An encrypted field next to plain ones, one of them nested: the handler echoes the plain ones. */
+const sessionEncryptedPlain = defineRoute({
+  method: 'POST',
+  path: '/test/session/titled',
+  body: z.object({ note: unreadableString(), title: z.string().trim().min(1), meta: z.object({ tag: z.string() }).optional() }),
+  facts: { note: {} },
+  response: z.object({ title: z.string(), keys: z.array(z.string()) }),
+});
+route(sessionEncryptedPlain, {
+  encryption: { resolveWorkspaceId: async () => 'ws-1' },
+  controller: async ({ body }) => ({ title: body.title, keys: Object.keys(body).sort() }),
+});
+
 route(defineRoute({ method: 'GET', path: '/test/boom', response: z.object({}) }), {
   auth: 'public',
   controller: async () => {
@@ -194,6 +214,8 @@ route(slackStyle, {
 
 beforeEach(() => {
   encryptionRuns.length = 0;
+  serviceSaw.length = 0;
+  serviceAnswer = undefined;
   seen.length = 0;
   mockConfig.internal.transitProxyIngressEnabled = false;
 });
@@ -306,6 +328,40 @@ describe('encryption pipeline', () => {
   });
 
   // The flag is read when the route is mounted, like the branch's whenTransitProxyIngress.
+  it('gives the service the body as sent, and the handler the service\'s answer checked against the contract', async () => {
+    serviceAnswer = (body) => ({ ...body, title: '  From the service  ', added: 'by the service' });
+    const res = await request(makeApp())
+      .post('/api/test/session/titled')
+      .set('x-test-user', 'u-1')
+      .send({ note: 'secret', title: '  Ada  ', junk: true });
+    expect(res.status).toBe(200);
+    // The service got the client's body untouched (not trimmed, unknown keys kept)...
+    expect(serviceSaw).toEqual([{ note: 'secret', title: '  Ada  ', junk: true }]);
+    // ...and the handler its answer as the contract describes it (trimmed, unknown keys dropped).
+    expect(res.body).toEqual({ title: 'From the service', keys: ['note', 'title'] });
+  });
+
+  it('answers 500 when the service\'s answer does not fit the contract', async () => {
+    serviceAnswer = (body) => ({ ...body, title: 42 });
+    const res = await request(makeApp()).post('/api/test/session/titled').set('x-test-user', 'u-1').send({ note: 'secret', title: 'Ada' });
+    expect(res.status).toBe(500);
+    expect(res.body).toEqual({ error: 'Internal server error', code: 'ENC_TRANSFORM_CONTRACT_VIOLATION' });
+  });
+
+  it('refuses ciphertext in a plain field, at any depth, after the service', async () => {
+    const cipher = `ENC:v1|tk-abc|${'A'.repeat(44)}`;
+    serviceAnswer = (body) => ({ ...body, meta: { tag: cipher } });
+    const res = await request(makeApp()).post('/api/test/session/titled').set('x-test-user', 'u-1').send({ note: 'secret', title: 'Ada' });
+    expect(res.status).toBe(400);
+    expect(res.body).toMatchObject({ code: 'ENC_CONTRACT_VIOLATION', field: 'meta' });
+  });
+
+  it('still refuses a client body that breaks the contract before calling the service', async () => {
+    const res = await request(makeApp()).post('/api/test/session/titled').set('x-test-user', 'u-1').send({ note: 'secret', title: '' });
+    expect(res.status).toBe(400);
+    expect(serviceSaw).toEqual([]);
+  });
+
   it('skips app routes when the ingress transit proxy is not deployed', async () => {
     const res = await request(makeApp()).post('/api/test/apps/post').send({ channelId: 'c1' });
     expect(res.status).toBe(201);
@@ -317,7 +373,7 @@ describe('with the ingress transit proxy deployed', () => {
   it('/apps routes refuse calls that did not come through the proxy, and run the encryption pipeline', async () => {
     jest.resetModules();
     mockConfig.internal.transitProxyIngressEnabled = true;
-    const { api: freshApi } = await import('../api');
+    const { route: freshRoute } = await import('../api');
     const { createApp: freshCreateApp } = await import('../createApp');
     const shared = await import('@xyne/shared');
     const contract = shared.defineRoute({
@@ -327,7 +383,7 @@ describe('with the ingress transit proxy deployed', () => {
       facts: { note: {} },
       response: z.object({ facts: z.array(z.string()) }),
     });
-    freshApi.route(contract, {
+    freshRoute(contract, {
       auth: 'app',
       encryption: { resolveWorkspaceId: async () => 'ws-1' },
       controller: async ({ derived }) => ({
