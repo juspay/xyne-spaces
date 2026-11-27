@@ -1,25 +1,24 @@
 {
   "appId": "com.xyne.spaces.sandbox",
   "extraMetadata": {
-    "APP_ENV": "sandbox"
+    "APP_ENV": "sandbox",
+    "XYNE_BACKEND_URL": "https://app.sandbox.spaces.xyne.ai",
+    "XYNE_FRONTEND_URL": "https://app.sandbox.spaces.xyne.ai",
+    "XYNE_CLAW_AUTH_URL": "https://app.sandbox.spaces.xyne.ai",
+    "XYNE_MTLS_BACKEND_URL": "https://auth.sandbox.spaces.xyne.ai",
+    "XYNE_MTLS_FRONTEND_URL": "https://auth.sandbox.spaces.xyne.ai"
   },
   "electronFuses": {
     "runAsNode": false,
     "enableNodeOptionsEnvironmentVariable": false,
     "enableNodeCliInspectArguments": false,
     "onlyLoadAppFromAsar": true,
-    "enableEmbeddedAsarIntegrityValidation": true
+    "enableEmbeddedAsarIntegrityValidation": true,
+    "resetAdHocDarwinSignature": true
   },
   "productName": "Xyne Spaces Sandbox",
   "directories": {
     "output": "release/sandbox"
-  },
-  "electronFuses": {
-    "runAsNode": false,
-    "enableNodeOptionsEnvironmentVariable": false,
-    "enableNodeCliInspectArguments": false,
-    "onlyLoadAppFromAsar": true,
-    "enableEmbeddedAsarIntegrityValidation": true
   },
   "protocols": [
     {

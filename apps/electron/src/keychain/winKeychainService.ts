@@ -10,6 +10,8 @@ import { EnrollmentEvent } from '../services/logger/enrollment-events';
 import { devicePasswordPopup } from '../services/enrollmentMetrics';
 import { safeRecordMetric } from '../services/telemetry';
 import { IKeychain } from './IKeychain';
+import { config } from '../app/config';
+import { deviceCaCommonName } from './deviceCa';
 
 const writeFileAsync = promisify(fs.writeFile);
 const unlinkAsync = promisify(fs.unlink);
@@ -22,7 +24,15 @@ const readFileAsync = promisify(fs.readFile);
 class WinKeychainService implements IKeychain {
 
 
-    private label: string = "SimulationClient";
+    private label: string = config.MTLS_IDENTITY_LABEL;
+
+    /**
+     * PowerShell filter matching Cert:\CurrentUser\My certificates issued by the device CA.
+     */
+    private issuedByDeviceCaFilter(issuer: string): string {
+        const quoted = issuer.replace(/'/g, "''");
+        return `$_.GetNameInfo([System.Security.Cryptography.X509Certificates.X509NameType]::SimpleName, $true) -eq '${quoted}'`;
+    }
 
     /**
      * Executes a PowerShell command securely via Stdin.
@@ -189,7 +199,7 @@ class WinKeychainService implements IKeychain {
             if (!thumbprint) {
                 const findCertCmd = `
                     $cert = Get-ChildItem Cert:\\CurrentUser\\My | 
-                    Where-Object { $_.FriendlyName -eq "${this.label}" -or $_.Subject -match "CN=${this.label}" } | 
+                    Where-Object { ${this.issuedByDeviceCaFilter(deviceCaCommonName())} } | 
                     Sort-Object NotBefore -Descending | 
                     Select-Object -First 1;
                     
@@ -290,36 +300,39 @@ class WinKeychainService implements IKeychain {
     }
 
     /**
-     * Deletes a certificate identity from Windows Certificate Store
+     * Deletes the device CA's certificates from the Windows Certificate Store
      */
-    async deleteIdentity(commonName: string): Promise<void> {
-        log.info(`Deleting identity for "${commonName}"...`);
-
+    async deleteIdentity(): Promise<void> {
+        let issuer = '';
         try {
-            // Remove by FriendlyName OR Subject to be thorough
+            issuer = deviceCaCommonName();
+            log.info(`Deleting identities issued by "${issuer}"...`);
             const cmd = `
                 Get-ChildItem Cert:\\CurrentUser\\My | 
-                Where-Object { $_.FriendlyName -eq "${commonName}" -or $_.Subject -match "CN=${commonName}" } | 
+                Where-Object { ${this.issuedByDeviceCaFilter(issuer)} } | 
                 Remove-Item
             `;
             await this.runPowerShellCommand(cmd);
             
-            Logger.info(EnrollmentEvent.IDENTITY_DELETED, { common_name: commonName });
+            Logger.info(EnrollmentEvent.IDENTITY_DELETED, { issuer });
         } catch (e: any) {
             // PowerShell throws if it can't find items to delete; we can ignore that safely
-            Logger.info(EnrollmentEvent.IDENTITY_NOT_FOUND, { common_name: commonName });
+            Logger.info(EnrollmentEvent.IDENTITY_NOT_FOUND, { issuer });
         }
     }
 
     /**
-     * Checks if a certificate identity exists and has a private key
+     * Checks if a certificate issued by the device CA exists and has a private key
      */
-    async checkIdentity(commonName: string): Promise<boolean> {
+    async checkIdentity(): Promise<boolean> {
+        let issuer = '';
         try {
+            issuer = deviceCaCommonName();
             // Must have Private Key to be valid
             const cmd = `
                 $cert = Get-ChildItem Cert:\\CurrentUser\\My | 
-                Where-Object { ($_.FriendlyName -eq "${commonName}" -or $_.Subject -match "CN=${commonName}") -and $_.HasPrivateKey -eq $true } | 
+                Where-Object { (${this.issuedByDeviceCaFilter(issuer)}) -and $_.HasPrivateKey -eq $true } | 
+                Sort-Object NotBefore -Descending | 
                 Select-Object -First 1;
                 
                 if ($cert) { Write-Output $cert.Thumbprint }
@@ -329,7 +342,7 @@ class WinKeychainService implements IKeychain {
 
             if (thumbprint && thumbprint.length > 0) {
                 Logger.info(EnrollmentEvent.IDENTITY_CHECK, { 
-                    common_name: commonName, 
+                    issuer, 
                     found: true,
                     thumbprint: thumbprint 
                 });
@@ -337,7 +350,7 @@ class WinKeychainService implements IKeychain {
             }
 
             Logger.info(EnrollmentEvent.IDENTITY_CHECK, { 
-                common_name: commonName, 
+                issuer, 
                 found: false,
             });
 
@@ -345,6 +358,7 @@ class WinKeychainService implements IKeychain {
         } catch (e) {
             Logger.error(EnrollmentEvent.UNKNOWN_ERROR, {
                 operation: 'check_identity',
+                issuer,
                 error: e instanceof Error ? e.message : String(e),
             });
             return false;

@@ -1,6 +1,16 @@
 {
   "appId": "com.xyne.spaces",
   "productName": "Xyne Spaces",
+  "extraMetadata": {
+    "XYNE_BACKEND_URL": "https://app.juspay.spaces.xyne.ai",
+    "XYNE_FRONTEND_URL": "https://app.juspay.spaces.xyne.ai",
+    "XYNE_CLAW_AUTH_URL": "https://app.juspay.spaces.xyne.ai",
+    "XYNE_MTLS_BACKEND_URL": "https://auth.juspay.spaces.xyne.ai",
+    "XYNE_MTLS_FRONTEND_URL": "https://auth.juspay.spaces.xyne.ai",
+    "XYNE_UNPROTECTED_URL": "https://juspay.spaces.xyne.ai",
+    "RELEASE_CONFIG_URL": "https://airborne.juspay.in/release/xyne/xyne-mobile",
+    "UI_ZIP_URL": "https://app.juspay.spaces.xyne.ai/releases/dashboard.zip"
+  },
   "directories": {
     "output": "release/prod/${os}"
   },

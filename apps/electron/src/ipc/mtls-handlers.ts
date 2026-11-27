@@ -109,13 +109,13 @@ export function setupMTLSIpcHandlers(): void {
     ipcMain.handle('generate-keys', async (event) => {
         assertMainWindowSender(event);
         Logger.info(EnrollmentEvent.FIRST_TIME_SIGNUP_START);
-        return await keychain.generateKeyPair(config.MTLS_IDENTITY_NAME);
+        return await keychain.generateKeyPair(config.MTLS_IDENTITY_LABEL);
     });
 
     ipcMain.handle('generate-csr', async (event) => {
         assertMainWindowSender(event);
         try {
-            const result = await keychain.generateCSR(config.MTLS_IDENTITY_NAME);
+            const result = await keychain.generateCSR(config.MTLS_IDENTITY_LABEL);
             Logger.info(EnrollmentEvent.CSR_GENERATION_SUCCESS);
             return result;
         } catch (error) {
@@ -162,12 +162,12 @@ export function setupMTLSIpcHandlers(): void {
 
     ipcMain.handle('delete-keys', async (event) => {
         assertMainWindowSender(event);
-        return await keychain.deleteIdentity(config.MTLS_IDENTITY_NAME);
+        return await keychain.deleteIdentity();
     });
 
     ipcMain.handle('check-keys', async (event) => {
         assertMainWindowSender(event);
-        return await keychain.checkIdentity(config.MTLS_IDENTITY_NAME);
+        return await keychain.checkIdentity();
     });
 
     ipcMain.handle('get-device-info', async (event) => {

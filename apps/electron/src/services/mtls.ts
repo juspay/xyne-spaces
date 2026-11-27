@@ -1,11 +1,11 @@
 import { app } from 'electron';
-import * as path from 'path';
 import * as fs from 'fs';
 import { keychain } from '../keychain';
 import log from 'electron-log/main';
 import { Logger } from './logger/Logger';
 import { EnrollmentEvent } from './logger/enrollment-events';
 import { config } from '../app/config';
+import { deviceCaCommonName, deviceCaPath } from '../keychain/deviceCa';
 
 export function normalizeCertificateRequestHostname(target: string): string | null {
     const value = target.trim();
@@ -31,15 +31,22 @@ export function certificateRequestIsAllowed(target: string, allowedHosts: Readon
     return hostname !== null && allowedHosts.has(hostname);
 }
 
-export function selectClientCertificate<T>(
+// Only the device identity, a certificate issued by the device CA, is presented. Other
+// client certificates on the machine (e.g. an MDM identity in the System keychain) are
+// never offered: macOS would prompt for admin credentials to use their keys. When a
+// re-enrollment left more than one behind, the most recently issued wins.
+export function selectClientCertificate<T extends { issuer: { commonName: string }; validStart: number }>(
     target: string,
     allowedHosts: ReadonlySet<string>,
     certificates: readonly T[],
+    deviceCaName: string,
 ): T | undefined {
     if (!certificateRequestIsAllowed(target, allowedHosts)) {
         return undefined;
     }
-    return certificates[0];
+    return certificates
+        .filter((cert) => cert.issuer.commonName === deviceCaName)
+        .reduce<T | undefined>((newest, cert) => (!newest || cert.validStart > newest.validStart ? cert : newest), undefined);
 }
 
 // The device identity client certificate must only be presented to the Xyne backend/auth hosts —
@@ -96,8 +103,19 @@ export async function setupMTLS() {
         event.preventDefault();
 
         if (list.length > 0) {
-            const cert = selectClientCertificate(url, allowlist, list);
+            let deviceCaName = '';
+            try {
+                deviceCaName = deviceCaCommonName();
+            } catch (error) {
+                log.error('[mTLS] Could not read the device CA certificate:', error);
+            }
+            const cert = deviceCaName ? selectClientCertificate(url, allowlist, list, deviceCaName) : undefined;
             if (!cert) {
+                log.warn(`[mTLS] No client certificate issued by "${deviceCaName}" among ${list.length} candidates.`);
+                Logger.warn(EnrollmentEvent.CERTIFICATE_INVALID, {
+                    url,
+                    error: 'no_matching_identity_certificate',
+                });
                 callback(undefined);
                 return;
             }
@@ -117,8 +135,7 @@ export async function setupMTLS() {
     // Try to install Root CA if it exists
 
     try {
-        const caCertName = config.USER_DATA_SUFFIX === '-sandbox' ? 'ca.sbx.cert' : 'ca.cert';
-        const caPath = path.join(app.getAppPath(), 'certs', caCertName);
+        const caPath = deviceCaPath();
 
         if (fs.existsSync(caPath)) {
             const caContent = fs.readFileSync(caPath, 'utf8');

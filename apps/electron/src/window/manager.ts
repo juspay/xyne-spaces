@@ -23,7 +23,12 @@ import {
 import { keychain } from '../keychain';
 import { Logger } from '../services/logger/Logger';
 import { EnrollmentEvent } from '../services/logger/enrollment-events';
-import { handleCertificateError, isCertificateError } from '../services/certificate-error-handler';
+import {
+  CLIENT_CERTIFICATE_REVOKED,
+  handleCertificateError,
+  isCertificateRevokedResponse,
+  readPageText,
+} from '../services/certificate-error-handler';
 import { dashboardLoad, enrollmentSkipped, mtlsFrontendLoaded } from '../services/enrollmentMetrics';
 import { safeRecordMetric } from '../services/telemetry';
 import {
@@ -404,7 +409,7 @@ export async function loadApp(window: BrowserWindow) {
   
   // check mtls
   if (config.enableMtls) {
-    const mtls = await keychain.checkIdentity(config.MTLS_IDENTITY_NAME);
+    const mtls = await keychain.checkIdentity();
     log.info("[WindowManager] MTLS Identity Present:", mtls);
 
     if (!mtls) {
@@ -549,12 +554,31 @@ export async function createMainWindow(options?: { inactive?: boolean }): Promis
   // Setup media permission request on first focus (macOS)
   setupPermissionRequestOnFocus(mainWindow);
 
-  // Register RBAC check before loading the app
+  // Register RBAC and revoked-certificate checks before loading the app
+  let mainFrameStatusCode = 0;
+  mainWindow.webContents.on('did-navigate', (_event, _url, httpResponseCode) => {
+    mainFrameStatusCode = httpResponseCode;
+  });
   mainWindow.webContents.on('did-finish-load', async () => {
-    const bodyText = await mainWindow?.webContents.executeJavaScript('document.body.innerText').catch(() => '');
-    if (bodyText && bodyText.includes('RBAC: access denied')) {
+    if (!mainWindow) return;
+    const bodyText = await readPageText(mainWindow.webContents);
+    if (isCertificateRevokedResponse(mainFrameStatusCode, bodyText)) {
+      const url = mainWindow.webContents.getURL();
+      Logger.warn(EnrollmentEvent.CERTIFICATE_REVOKED, {
+        error_at: 'main_window_load',
+        status_code: mainFrameStatusCode,
+        url,
+      });
+      void handleCertificateError({
+        url,
+        errorCode: String(mainFrameStatusCode),
+        errorDescription: CLIENT_CERTIFICATE_REVOKED,
+      });
+      return;
+    }
+    if (bodyText.includes('RBAC: access denied')) {
       const errorPage = path.join(__dirname, '..', '..', 'assets', 'vpn-error.html');
-      void mainWindow?.loadFile(errorPage);
+      void mainWindow.loadFile(errorPage);
     }
   });
 
@@ -695,17 +719,34 @@ const MAX_HEALTH_CHECK_RETRIES = 3;
 /**
  * Validates certificate health with retry logic to handle network timeout issues
  * Retries up to MAX_HEALTH_CHECK_RETRIES times if loading fails (typically due to network timeout while user approves keychain popup)
+ * A revoked certificate is answered with HTTP 403 client_certificate_revoked and sends the user to re-enrollment at once
  * Shows error page if all retries are exhausted
  */
 async function certificateHealthCheckWithRetry(validationWindow: BrowserWindow): Promise<boolean> {
-  let certErrCount = 0;
+  const healthUrl = `${config.BACKEND_URL}/api/health`;
+  let statusCode = 0;
+  validationWindow.webContents.on('did-navigate', (_event, _url, httpResponseCode) => {
+    statusCode = httpResponseCode;
+  });
 
   for (let attempt = 0; attempt < MAX_HEALTH_CHECK_RETRIES; attempt++) {
     try {
-      const healthUrl = `${config.BACKEND_URL}/api/health`;
-      
-      // Attempt to load the URL
+      statusCode = 0;
       await validationWindow.loadURL(healthUrl);
+
+      if (isCertificateRevokedResponse(statusCode, await readPageText(validationWindow.webContents))) {
+        Logger.warn(EnrollmentEvent.CERTIFICATE_REVOKED, {
+          error_at: 'certificate_validation',
+          status_code: statusCode,
+          attempt: attempt + 1,
+        });
+        await handleCertificateError({
+          url: healthUrl,
+          errorCode: String(statusCode),
+          errorDescription: CLIENT_CERTIFICATE_REVOKED,
+        });
+        return false;
+      }
 
       Logger.info(EnrollmentEvent.HEALTH_CHECK_SUCCESS, {
         certificate_exists: true,
@@ -715,43 +756,24 @@ async function certificateHealthCheckWithRetry(validationWindow: BrowserWindow):
       return true;
 
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      const isLastAttempt = attempt === MAX_HEALTH_CHECK_RETRIES - 1;
-
-      // Track if this was a certificate error
-      if (isCertificateError(errorMessage)) {
-        Logger.logError(EnrollmentEvent.CERTIFICATE_REVOKED, error, {
-          error_at: 'certificate_validation',
-          attempt: attempt + 1,
-        });
-        certErrCount++;
-      }
-
       // If we have retries left, log it and continue the loop
-      if (!isLastAttempt) {
+      if (attempt < MAX_HEALTH_CHECK_RETRIES - 1) {
         Logger.info(EnrollmentEvent.LOAD_URL_RETRY, {
-          url: `${config.BACKEND_URL}/api/health`,
+          url: healthUrl,
           retry_attempt: attempt + 1,
         });
-        continue; // Go to next iteration
+        continue;
       }
-      
-      // --- ALL RETRIES FAILED --- (Code reaches here only on the last attempt)
 
-      if (certErrCount === MAX_HEALTH_CHECK_RETRIES) {
-        // Every single error was a certificate error
-        await handleCertificateError({ errorDescription: errorMessage });
-      } else {
-        // Generic failure (timeout, network, or mixed errors)
-        Logger.logError(EnrollmentEvent.UNKNOWN_ERROR, error, {
-          error_at: 'certificate_health_check_max_retries',
-          total_attempts: MAX_HEALTH_CHECK_RETRIES,
-        });
+      // --- ALL RETRIES FAILED --- (timeout or network error)
+      Logger.logError(EnrollmentEvent.UNKNOWN_ERROR, error, {
+        error_at: 'certificate_health_check_max_retries',
+        total_attempts: MAX_HEALTH_CHECK_RETRIES,
+      });
 
-        if (mainWindow && !mainWindow.isDestroyed()) {
-          const errorPage = path.join(__dirname, '..', '..', 'assets', 'timeout-error.html');
-          await mainWindow.loadFile(errorPage);
-        }
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        const errorPage = path.join(__dirname, '..', '..', 'assets', 'timeout-error.html');
+        await mainWindow.loadFile(errorPage);
       }
 
       return false;
