@@ -342,8 +342,9 @@ async function transformMutationArgs(
       'Client-encrypted mutations need API client encryption and DB encryption enabled',
     );
   }
-  if (!enc?.authToken && !enc?.clientKey) {
-    throw new MutationEncryptionError('TRANSIT_KEY_REQUIRED', 'Client-encrypted mutation without a transit key');
+  // The encryption service finds the client's key from the access token's session; no fallback key.
+  if (!enc?.authToken) {
+    throw new MutationEncryptionError('TRANSIT_KEY_REQUIRED', 'Client-encrypted mutation without an access token');
   }
   // The contract only names the facts to extract; a rule mutator without one is still transformed.
   const contract = MUTATION_CONTRACTS[mutatorName];
@@ -352,8 +353,7 @@ async function transformMutationArgs(
   try {
     transformed = await getEncryptionProvider().transformRequest({
       body: args,
-      ...(enc.authToken ? { authToken: enc.authToken } : {}),
-      ...(enc.clientKey ? { clientKey: enc.clientKey } : {}),
+      authToken: enc.authToken,
       mutator: mutatorName,
       // Mutator rules list their plaintext fields; the args are checked against the contract
       // here (assertArgsMatchContract), so only the facts to extract go along.
