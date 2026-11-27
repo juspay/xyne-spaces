@@ -158,7 +158,7 @@ const mintToken = (): { token: string; tokenHash: string } => {
 };
 
 /**
- * Cookie flags for the device-bound cookies (`xs`, `xk`). Native mobile cookies follow the
+ * Cookie flags for the device-bound cookie (`xs`). Native mobile cookies follow the
  * existing mobile-exchange convention (sameSite none + secure); everything else matches the
  * login-workspace cookies.
  */

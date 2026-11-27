@@ -3,7 +3,7 @@ import { AppError } from '@/middleware/errorHandler';
 import { getCryptoOperations } from '@/services/otel/cryptoMetrics';
 import { logger } from '@/utils/logger';
 import { getEncryptionProvider, isDekPassthrough } from '@/services/encryption';
-import { TRANSIT_KEY_COOKIE, type TransitCaller } from '@/services/encryption/types';
+import type { TransitCaller } from '@/services/encryption/types';
 import type { MutationEncryptionContext } from '@/zero/encryptedMutation';
 import { sdkMutatorNameFor } from '@/api/sdk/operations';
 
@@ -33,8 +33,8 @@ function hasEncryptedFields(obj: unknown): boolean {
 }
 
 /**
- * Decrypt `ENC:v1|tk-<version>|…` fields with the keys derived for the caller's transit
- * public key (header or `xk` cookie). Runs after authentication: the auth middlewares call
+ * Decrypt `ENC:v1|tk-<version>|…` fields with the keys derived for the transit public key
+ * the caller's session registered. Runs after authentication: the auth middlewares call
  * it in place of `next()` once `req.user` is set, rather than it being mounted globally.
  */
 export async function decryptRequestBodyMiddleware(
@@ -119,22 +119,15 @@ export async function decryptRequestBody(req: Request, next: NextFunction): Prom
 }
 
 /**
- * Whom the request's transit operations are for. The encryption service reads the `sid` of the
- * forwarded access token and uses the transit key the client registered for that session
- * (`POST /api/transit/register`); the backend never holds it. The `xk` cookie the register
- * route set goes along for a session the service has no key for.
+ * Whom the request's transit operations are for: the encryption service reads the `sid` of the
+ * forwarded access token and uses the transit key registered for that session.
  */
 export function transitCaller(req: Request): TransitCaller {
-  // Proxy traffic names only the proxy: never a session token or a key of its own.
+  // Proxy traffic names only the proxy: never a session token.
   if (req.proxyClient) {
     return { proxyClient: req.proxyClient };
   }
-  const cookie: unknown = req.cookies?.[TRANSIT_KEY_COOKIE];
-  const clientKey = typeof cookie === 'string' && cookie.length > 0 ? cookie : undefined;
-  return {
-    ...(req.authToken ? { authToken: req.authToken } : {}),
-    ...(clientKey ? { clientKey } : {}),
-  };
+  return req.authToken ? { authToken: req.authToken } : {};
 }
 
 /**
@@ -146,9 +139,9 @@ export function mutationEncryptionContext(req: Request): MutationEncryptionConte
   return transitCaller(req);
 }
 
-/** Whether the request names a transit key at all (an access token or a key of its own). */
+/** Whether the request names a transit key at all (the proxy or an access token). */
 export function hasTransitCaller(caller: TransitCaller): boolean {
-  return Boolean(caller.proxyClient || caller.authToken || caller.clientKey);
+  return Boolean(caller.proxyClient || caller.authToken);
 }
 
 /**

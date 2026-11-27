@@ -19,7 +19,6 @@ import { readAgentProgress, type AgentProgressEntry } from './agentProgressServi
 import {
   containsServerCiphertext,
   transformPayloadForClient,
-  TRANSIT_KEY_COOKIE,
   type TransitCaller,
 } from '@/services/encryption';
 
@@ -36,11 +35,9 @@ interface AuthenticatedSocket extends Socket {
    * its session registered, which the encryption service looks up from the token's `sid`.
    */
   authToken?: string;
-  /** The client's transit public key from its `xk` cookie, for a session that registered none. */
-  transitKey?: string | null;
 }
 
-type TransitKeyedSocket = Socket & { user?: { sid?: string }; authToken?: string; transitKey?: string | null };
+type TransitKeyedSocket = Socket & { authToken?: string };
 
 // interface JoinSessionData {
 //   sessionId: string; // This will be channelId or conversationId
@@ -218,7 +215,6 @@ class WebSocketService {
             (socket as any).userName = req.user.displayName || req.user.name;
             (socket as any).user = req.user;
             (socket as any).authToken = req.authToken;
-            (socket as any).transitKey = cookies[TRANSIT_KEY_COOKIE];
 
             logger.info(`WebSocket authenticated: ${req.user.email} (${req.user.id})`);
             logger.info(`Socket ${socket.id} assigned user: ${req.user.name} (${req.user.email})`);
@@ -1584,23 +1580,9 @@ class WebSocketService {
   }
 
   /**
-   * A transit key registered after the socket connected (`POST /api/transit/register`):
-   * this pod's sockets of that session use it at once; sockets on other pods read it from
-   * the encryption service at their next recheck.
-   */
-  setSessionTransitKey(sessionId: string, transitKey: string): void {
-    if (!this.io) return;
-    for (const socket of this.io.sockets.sockets.values()) {
-      const keyed = socket as TransitKeyedSocket;
-      if (keyed.user?.sid === sessionId) keyed.transitKey = transitKey;
-    }
-  }
-
-  /**
-   * Storage ciphertext to transit ciphertext per recipient socket, for the transit public
-   * key the socket connected with (its `xk` cookie) or, failing that, the one its session
-   * registered. One encryption-service call per recipient, run concurrently, so a busy room
-   * costs N calls per message. A socket with no key, or whose transform fails, gets
+   * Storage ciphertext to transit ciphertext per recipient socket, for the transit key its
+   * session registered. One encryption-service call per recipient, run concurrently, so a busy
+   * room costs N calls per message. A socket with no key, or whose transform fails, gets
    * nothing: sending the payload as-is would leak storage ciphertext it cannot (and must
    * not) decrypt.
    */
@@ -1620,11 +1602,8 @@ class WebSocketService {
           // The handshake token outlives its expiry on an open socket (nothing re-authenticates
           // it), so the encryption service checks its signature only: the socket keeps
           // receiving pushes as it did before, for the session it authenticated as.
-          const caller: TransitCaller = {
-            ...(socket.authToken ? { authToken: socket.authToken, allowExpiredAuthToken: true } : {}),
-            ...(socket.transitKey ? { clientKey: socket.transitKey } : {}),
-          };
-          if (!caller.authToken && !caller.clientKey) {
+          const caller: TransitCaller = socket.authToken ? { authToken: socket.authToken, allowExpiredAuthToken: true } : {};
+          if (!caller.authToken) {
             logger.warn(`[WS-ENC] Socket ${socketId} has no transit key; not sending ${event} with storage ciphertext`);
             return;
           }

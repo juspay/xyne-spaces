@@ -37,11 +37,7 @@ function parseServerKeys(data: unknown): TransitServerKeys {
   return { current: keys.current!, keys: keys.keys };
 }
 
-/**
- * Registers the client's public key with the session (the server stores it and sets the
- * `xk` cookie for websockets and the sync proxy) and returns the server's public keys,
- * the other half of every transit key derivation.
- */
+/** Registers the client's public key for the session and returns the server's public keys. */
 export async function registerTransitKey(publicKey: string): Promise<TransitServerKeys> {
   const response = await getTransitPlatform().http.request('/transit/register', {
     method: 'POST',

@@ -12,13 +12,6 @@ export type ClientEncryptionConfig = {
   apiClientEncryptionEnabled: boolean;
 };
 
-/**
- * Cookie `POST /api/transit/register` sets with the client's transit public key (base64 P-256
- * point): read by the sync proxy, and sent along as a fallback for a session the encryption
- * service has no registered key for.
- */
-export const TRANSIT_KEY_COOKIE = 'xk';
-
 export type TransitServerKey = {
   version: number;
   /** Base64 uncompressed P-256 point. */
@@ -107,19 +100,14 @@ export type SealEventInput = {
   target: SealEventTarget;
 };
 
-/**
- * Whom a transit operation is for. `authToken` (the caller's access token) names its auth
- * session, whose registered transit key the encryption service looks up and uses; `clientKey`
- * (the public key the request itself carried) applies when that session registered none.
- */
+/** Whom a transit operation is for: `authToken` names the auth session whose registered key the encryption service uses. */
 export type TransitCaller = {
   /**
    * Xyne Apps traffic relayed by the ingress or egress proxy. The encryption service then
    * uses its apps server keys and the proxy key pinned for this role and version, and
-   * refuses `clientKey` / `authToken` alongside it.
+   * refuses an `authToken` alongside it.
    */
   proxyClient?: { role: 'ingress' | 'egress'; version: number };
-  clientKey?: string;
   authToken?: string;
   /**
    * Accept `authToken` past its expiry (signature still checked): a websocket's handshake
