@@ -1,7 +1,7 @@
 """Call session fetch: the backend's go-ahead and E2EE key for one agent job.
 
 LiveKit hands the agent a job, but the key never travels through LiveKit. Before
-joining, the job asks the backend (POST /api/transcriptionAgent/:callId/session)
+joining, the job asks the backend (POST /internal/transcription-agent/:callId/session)
 and only joins once the backend answers. The call key comes back sealed to a
 one-time X25519 key generated for this job, and lives only in this process's
 memory. Never log it.
@@ -75,7 +75,7 @@ async def fetch_call_session(backend_url: str, api_key: str, room_name: str, dis
     public_key = private_key.public_key().public_bytes(
         encoding=serialization.Encoding.Raw, format=serialization.PublicFormat.Raw
     )
-    url = f"{backend_url}/api/transcriptionAgent/{room_name}/session"
+    url = f"{backend_url}/internal/transcription-agent/{room_name}/session"
     headers = {"x-api-key": api_key, "Content-Type": "application/json"}
     # The backend gives each dispatch it created exactly one session.
     body = {"publicKey": base64.b64encode(public_key).decode("ascii"), "dispatchId": dispatch_id}

@@ -3,7 +3,7 @@
  *
  * Pre-computes the STT hint-name list (bot users, then active users on our own
  * domain) once a day and caches it in Redis, so the transcription agent's
- * /api/transcriptionAgent/user-names endpoint is a fast cache read instead of
+ * /internal/transcription-agent/user-names endpoint is a fast cache read instead of
  * a live query on every transcription request.
  *
  * Schedule: WARM_USER_REGISTRY_CRON (default '0 3 * * *' = daily 03:00 UTC).

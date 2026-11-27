@@ -9,8 +9,8 @@ router.post('/:callId/transcript-ready', transcriptionAgentController.inCallWork
 // Call key + state for an agent job, before it joins the room
 router.post('/:callId/session', transcriptionAgentController.inCallWorkspace(transcriptionAgentController.callSession));
 
-// Ticket creation tool from Python agent (AI assistant)
-router.post('/:callId/ticket', transcriptionAgentController.inCallWorkspace(transcriptionAgentController.ticketTool));
+// Disabled: no caller; the agent's create_ticket tool sends a CREATE_TICKET event to the frontend instead.
+// router.post('/:callId/ticket', transcriptionAgentController.inCallWorkspace(transcriptionAgentController.ticketTool));
 
 // Get tickets assigned to user (AI assistant query tool)
 router.get('/:callId/my-tickets', transcriptionAgentController.inCallWorkspace(transcriptionAgentController.getMyTickets));

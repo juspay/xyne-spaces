@@ -4,7 +4,7 @@ import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
 
 /**
- * Authenticates calls to y-sweet-only backend routes (e.g. /api/ysweet/validate)
+ * Authenticates calls to y-sweet-only backend routes (e.g. /internal/ysweet/validate)
  * via a shared secret sent as `Authorization: Bearer <token>`. These routes
  * have no user session to check — the caller is the y-sweet server, not a
  * browser — so a bearer secret configured on both sides is how we confirm

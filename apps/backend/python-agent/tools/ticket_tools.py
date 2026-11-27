@@ -175,7 +175,7 @@ def create_get_my_tickets_tool(room_context: dict):
                     logger.warning(f"tool_user_identity_unknown | tool=get_my_tickets, reason=multiple_participants, participants={list(non_ai_participants.keys())}")
                     return f"I need to know who is asking. Are you {participant_names}?"
 
-            url = f"{backend_url}/api/transcriptionAgent/{call_id}/my-tickets"
+            url = f"{backend_url}/internal/transcription-agent/{call_id}/my-tickets"
             headers = {
                 "x-api-key": api_key,
                 "Content-Type": "application/json",
@@ -292,7 +292,7 @@ def create_invite_user_tool(room_context: dict, event_emitter):
             existing_participant_ids = list(participant_map.values())
 
             # Search for users matching the name
-            url = f"{backend_url}/api/transcriptionAgent/{call_id}/search-users"
+            url = f"{backend_url}/internal/transcription-agent/{call_id}/search-users"
             headers = {
                 "x-api-key": api_key,
                 "Content-Type": "application/json",

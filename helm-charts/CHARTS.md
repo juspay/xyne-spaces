@@ -437,7 +437,8 @@ an `s3://` URL.
 **Talks to.** The backend calls it at `Y_SWEET_URL=http://xyne-ysweet:8080` and mints client
 tokens for it (`POST /api/ysweet/auth`, rewriting the token URLs to `https://<dashboard
 host>/ysweet/...`); the browser then connects to it through that prefix. The backend's
-`/api/ysweet/validate` route exists for it, gated by `Y_SWEET_SERVER_TOKEN`.
+`/internal/ysweet/validate` and `/internal/ysweet/storage-key` routes exist for it, gated by
+`Y_SWEET_SERVER_TOKEN`.
 
 **Networking defaults.** Ingress host `collab.spaces.example.com`, path `/`; Istio VirtualService
 `timeout: 0s`.

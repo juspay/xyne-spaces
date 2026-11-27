@@ -453,7 +453,7 @@ export class App {
     // CSAT satisfaction survey — PUBLIC, no auth middleware, but requires a signed per-ticket token
     this.app.use('/api/csat', csatRoutes);
 
-    this.app.use('/api/transcriptionAgent', verifyTranscriptionAgent, transcriptionAgentRoutes);
+    this.app.use('/internal/transcription-agent', verifyTranscriptionAgent, transcriptionAgentRoutes);
 
     this.app.use('/api/admin', backfillMountGuard);
     this.app.use('/migrate/api/admin', backfillMountGuard);
@@ -815,6 +815,8 @@ export class App {
 
     // No user session here — the caller is the y-sweet server itself, gated
     // by the shared Y_SWEET_SERVER_TOKEN instead of authMiddleware.
+    this.app.use('/internal/ysweet/validate', requireYSweetServerToken, ysweetValidateRouter);
+    // Legacy path for y-sweet images older than juspay/y-sweet#11; remove once none are deployed.
     this.app.use('/api/ysweet/validate', requireYSweetServerToken, ysweetValidateRouter);
     this.app.use('/internal/ysweet/storage-key', requireYSweetServerToken, ysweetStorageKeyRouter);
     this.app.use('/api', authMiddleware.authenticate, attachmentRoutes); // Attachment routes (file streaming)
@@ -1214,7 +1216,7 @@ export class App {
       logger.warn('Continuing startup without Superposition client...');
     }
 
-    // Y_SWEET_SERVER_TOKEN gates /api/ysweet/validate and /internal/ysweet/storage-key
+    // Y_SWEET_SERVER_TOKEN gates /internal/ysweet/validate and /internal/ysweet/storage-key
     // (requireYSweetServerToken fails closed with 401 if it's empty). A missing
     // token here is silent at request time — every canvas connect, every 10s
     // revalidation poll and every doc storage-key request just 401s — so surface

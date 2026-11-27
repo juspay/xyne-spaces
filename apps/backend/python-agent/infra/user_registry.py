@@ -57,7 +57,7 @@ class UserRegistry:
             logger.warning('[UserRegistry] backend_url or api_key not configured — skipping user name fetch')
             return
 
-        url = f'{self._backend_url}/api/transcriptionAgent/user-names'
+        url = f'{self._backend_url}/internal/transcription-agent/user-names'
         headers = {'x-api-key': self._api_key}
 
         try:
