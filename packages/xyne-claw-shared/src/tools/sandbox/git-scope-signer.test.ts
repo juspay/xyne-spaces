@@ -1,7 +1,15 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { generateKeyPairSync } from "node:crypto";
 import { signGitScope, verifyGitScope } from "../../git-scope/token.js";
-import { checkGitScopeToken, gitScopeForProfile, GitScopeSignerError, requestGitScope, type GitScopeSignRequest } from "./git-scope-signer.js";
+import {
+  checkGitScopeToken,
+  gitScopeForProfile,
+  gitScopeSignerUrl,
+  GitScopeSignerError,
+  requestGitScope,
+  type GitScopeSignerTransport,
+  type GitScopeSignRequest,
+} from "./git-scope-signer.js";
 import { startFakeSigner, type FakeSigner } from "./__tests__/fakes.js";
 
 const { privateKey } = generateKeyPairSync("ec", { namedCurve: "P-256" });
@@ -62,8 +70,16 @@ describe("checkGitScopeToken", () => {
   });
 });
 
-describe("requestGitScope against a fake signer", () => {
+describe("requestGitScope against a fake claw-auth signer", () => {
   let signer: FakeSigner;
+  const proof = (method: string, url: string) => ({ "x-service-assertion": `proof ${method} ${new URL(url).pathname}` });
+  const transport = (over: Partial<GitScopeSignerTransport> = {}): GitScopeSignerTransport => ({
+    authUrl: signer.url,
+    serviceAuth: proof,
+    runSessionId: "run-1",
+    sessionToken: "session-token-1",
+    ...over,
+  });
   beforeAll(async () => {
     signer = await startFakeSigner();
   });
@@ -73,12 +89,20 @@ describe("requestGitScope against a fake signer", () => {
   beforeEach(() => {
     signer.mode = "sign";
     signer.requests.length = 0;
+    signer.calls.length = 0;
   });
 
-  it("sends the request shape and returns a list that verifies with the signer's public key", async () => {
+  it("the route is claw-auth's, for the run session", () => {
+    expect(gitScopeSignerUrl("http://auth.local:3003/", "run 1")).toBe("http://auth.local:3003/claw/api/v1/sessions/run%201/git-scope");
+  });
+
+  it("sends the request with the runtime proof and the session token; the list verifies with the signer's public key", async () => {
     signer.reposFor["proj-a"] = [{ repo: "example.test/acme/app", access: "rw" }];
-    const token = await requestGitScope({ signerUrl: `${signer.url}/`, request });
+    const token = await requestGitScope({ transport: transport({ authUrl: `${signer.url}/` }), request });
     expect(signer.requests).toEqual([request]);
+    expect(signer.calls).toEqual([
+      { sessionId: "run-1", authorization: "Bearer session-token-1", serviceAssertion: "proof POST /claw/api/v1/sessions/run-1/git-scope" },
+    ]);
     const verified = verifyGitScope(token, {
       keys: { [signer.kid]: signer.publicKeyPem },
       expected: { claim: request.claimName, namespace: request.namespace, template: request.template },
@@ -89,43 +113,44 @@ describe("requestGitScope against a fake signer", () => {
 
   it("refuses a list the signer made for another claim", async () => {
     signer.mode = "other-claim";
-    await expect(requestGitScope({ signerUrl: signer.url, request })).rejects.toThrow(
-      /git-scope signer \(GIT_SCOPE_SIGNER_URL\) returned an unusable list: token is for another claim/,
+    await expect(requestGitScope({ transport: transport(), request })).rejects.toThrow(
+      /git-scope signer \(claw-auth\) returned an unusable list: token is for another claim/,
     );
   });
 
-  it("fails naming the signer when it refuses", async () => {
+  it("fails naming the signer, with claw-auth's reason, when it refuses", async () => {
     signer.mode = 403;
-    await expect(requestGitScope({ signerUrl: signer.url, request })).rejects.toThrow(
-      /git-scope signer \(GIT_SCOPE_SIGNER_URL\) refused the request \(HTTP 403\); the sandbox for profile "proj-a" was not created/,
+    await expect(requestGitScope({ transport: transport(), request })).rejects.toThrow(
+      /git-scope signer \(claw-auth\) refused the request \(HTTP 403: refused by the fake signer\); the sandbox for profile "proj-a" was not created/,
     );
   });
 
-  it("fails naming the signer when it is not configured or cannot be reached", async () => {
-    await expect(requestGitScope({ signerUrl: "", request })).rejects.toBeInstanceOf(GitScopeSignerError);
-    await expect(requestGitScope({ signerUrl: undefined, request })).rejects.toThrow(/is not configured/);
-    const err = await requestGitScope({ signerUrl: "http://127.0.0.1:1", request }).catch((e: unknown) => e);
+  it("drops a refusal reason that would read as a dead sandbox", async () => {
+    const fetchImpl = (async () =>
+      new Response(JSON.stringify({ error: "Sandbox abc not found" }), { status: 404, headers: { "content-type": "application/json" } })) as typeof fetch;
+    const err = (await requestGitScope({ transport: transport(), request, fetchImpl }).catch((e: unknown) => e)) as Error;
+    expect(err.message).toBe('The git-scope signer (claw-auth) refused the request (HTTP 404); the sandbox for profile "proj-a" was not created.');
+  });
+
+  it("fails before any call when the run has no claw-auth URL, service signer or session", async () => {
+    for (const over of [{ authUrl: "" }, { authUrl: undefined }, { serviceAuth: undefined }, { runSessionId: undefined }, { sessionToken: "" }]) {
+      const err = await requestGitScope({ transport: transport(over), request }).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(GitScopeSignerError);
+      expect((err as Error).message).toMatch(/cannot be asked from this run/);
+    }
+    expect(signer.calls).toEqual([]);
+  });
+
+  it("fails naming the signer when it cannot be reached", async () => {
+    const err = await requestGitScope({ transport: transport({ authUrl: "http://127.0.0.1:1" }), request }).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(GitScopeSignerError);
     expect((err as Error).message).toMatch(/could not be reached/);
     // Must not look like a dead sandbox to the setup fallback (STALE_PATTERNS).
     expect((err as Error).message).not.toMatch(/ECONNREFUSED|HTTP request failed|ECONNRESET/i);
   });
 
-  it("passes auth headers from the hook when given", async () => {
-    let seen: [string, string] | undefined;
-    await requestGitScope({
-      signerUrl: signer.url,
-      request,
-      authHeaders: (method, url) => {
-        seen = [method, url];
-        return { "x-test": "1" };
-      },
-    });
-    expect(seen).toEqual(["POST", `${signer.url}/v1/git-scope`]);
-  });
-
   it("gitScopeForProfile turns a kata claim into the request, endTime in unix seconds", async () => {
-    const hook = gitScopeForProfile("proj-a", { GIT_SCOPE_SIGNER_URL: signer.url });
+    const hook = gitScopeForProfile("proj-a", transport());
     await hook({ claimName: request.claimName, namespace: request.namespace, template: request.template, endTime: new Date(request.endTime * 1000) });
     expect(signer.requests).toEqual([request]);
   });

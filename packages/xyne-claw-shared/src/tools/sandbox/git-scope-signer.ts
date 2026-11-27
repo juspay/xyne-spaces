@@ -1,11 +1,16 @@
 /**
- * Runtime side of the git scope: ask the signer for the signed list of
- * repositories one SandboxClaim may use, and check the answer before it goes on
- * the claim. The runtime has no public key, so it cannot check the signature;
- * it checks that the token is well-formed and was made for this claim. The
- * git-gateway does the real verification (verifyGitScope).
+ * Runtime side of the git scope: ask claw-auth (the signer) for the signed list
+ * of repositories one SandboxClaim may use, and check the answer before it goes
+ * on the claim. The runtime has no public key, so it cannot check the
+ * signature; it checks that the token is well-formed and was made for this
+ * claim. The git-gateway does the real verification (verifyGitScope).
  *
- *   POST <GIT_SCOPE_SIGNER_URL>/v1/git-scope
+ * The call is made like the SDLC credential bootstrap (sdlc-credential-bootstrap.ts):
+ * the runtime's service proof plus the run's session token. claw-auth decides
+ * which profiles the run may have signed from its own records for the session.
+ *
+ *   POST <claw-auth>/claw/api/v1/sessions/<runSessionId>/git-scope
+ *   headers   x-service-assertion (serviceAuth), Authorization: Bearer <sessionToken>
  *   request   { "profile": string, "claimName": string, "namespace": string,
  *               "template": string, "endTime": integer unix seconds }
  *   response  200 { "token": string }      anything else is a refusal
@@ -14,9 +19,12 @@ import type { GitScopeClaim } from "@xyne/kata-sdk";
 import { GIT_SCOPE_ALG, GIT_SCOPE_MAX_TOKEN_LENGTH, GIT_SCOPE_TYP, GIT_SCOPE_VERSION } from "../../git-scope/token.js";
 import { isCanonicalGitScopeRepo } from "../../git-scope/repos.js";
 
-export const GIT_SCOPE_SIGNER_URL_KEY = "GIT_SCOPE_SIGNER_URL";
-export const GIT_SCOPE_SIGNER_PATH = "/v1/git-scope";
+/** The claw-auth route, for one run session. */
+export function gitScopeSignerUrl(authUrl: string, runSessionId: string): string {
+  return `${authUrl.trim().replace(/\/+$/, "")}/claw/api/v1/sessions/${encodeURIComponent(runSessionId)}/git-scope`;
+}
 const SIGNER_TIMEOUT_MS = 10_000;
+const LOOKS_STALE_RE = /not found|could not connect|HTTP request failed|ECONN|socket hang up/i;
 
 export interface GitScopeSignRequest {
   profile: string;
@@ -107,39 +115,43 @@ export function checkGitScopeToken(token: unknown, expected: GitScopeSignRequest
   return null;
 }
 
+/** How the runtime reaches claw-auth; the same pieces the SDLC credential bootstrap uses. */
+export interface GitScopeSignerTransport {
+  authUrl: string | undefined;
+  /** Signs the call as the runtime (never a key). */
+  serviceAuth?: ((method: string, url: string) => Record<string, string>) | undefined;
+  runSessionId: string | undefined;
+  sessionToken: string | undefined;
+}
+
 export interface RequestGitScopeOptions {
-  /** Base address of the signer (runtime config GIT_SCOPE_SIGNER_URL). */
-  signerUrl: string | undefined;
+  transport: GitScopeSignerTransport;
   request: GitScopeSignRequest;
-  /**
-   * Headers that prove the runtime is the caller.
-   * TODO(git-scope auth): the signer (encryption service) has no service name
-   * or verifier yet, and the runtime's service proof is fixed to the claw-auth
-   * audience and carries the run's session token, so it is not sent here.
-   * Wire a signer-audience proof through this hook once the signer exists.
-   */
-  authHeaders?: (method: string, url: string) => Record<string, string>;
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
 }
 
-/** Ask the signer for one claim's list and check it. Throws GitScopeSignerError on any failure. */
+/** Ask claw-auth for one claim's list and check it. Throws GitScopeSignerError on any failure. */
 export async function requestGitScope(options: RequestGitScopeOptions): Promise<string> {
-  const { request } = options;
+  const { request, transport } = options;
   const fail = (why: string) =>
-    new GitScopeSignerError(
-      `The git-scope signer (${GIT_SCOPE_SIGNER_URL_KEY}) ${why}; the sandbox for profile "${request.profile}" was not created.`,
-    );
-  const base = options.signerUrl?.trim().replace(/\/+$/, "");
-  if (!base) throw fail("is not configured");
-  const url = `${base}${GIT_SCOPE_SIGNER_PATH}`;
+    new GitScopeSignerError(`The git-scope signer (claw-auth) ${why}; the sandbox for profile "${request.profile}" was not created.`);
+  const authUrl = transport.authUrl?.trim();
+  if (!authUrl || !transport.serviceAuth || !transport.runSessionId || !transport.sessionToken) {
+    throw fail("cannot be asked from this run (no claw-auth URL, service signer or run session token)");
+  }
+  const url = gitScopeSignerUrl(authUrl, transport.runSessionId);
   const doFetch = options.fetchImpl ?? fetch;
 
   let response: Response;
   try {
     response = await doFetch(url, {
       method: "POST",
-      headers: { "content-type": "application/json", ...(options.authHeaders?.("POST", url) ?? {}) },
+      headers: {
+        "Content-Type": "application/json",
+        ...transport.serviceAuth("POST", url),
+        Authorization: `Bearer ${transport.sessionToken}`,
+      },
       body: JSON.stringify(request),
       signal: AbortSignal.timeout(options.timeoutMs ?? SIGNER_TIMEOUT_MS),
     });
@@ -149,14 +161,21 @@ export async function requestGitScope(options: RequestGitScopeOptions): Promise<
     const timedOut = err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError");
     throw fail(`could not be reached (${timedOut ? "timed out" : "network error"})`);
   }
-  if (!response.ok) throw fail(`refused the request (HTTP ${response.status})`);
 
   let body: unknown;
   try {
     body = await response.json();
   } catch {
-    throw fail("returned a response that is not JSON");
+    body = undefined;
   }
+  if (!response.ok) {
+    // claw-auth's refusal says why (unknown or disabled profile, wrong template, ...); it never carries a token.
+    // Dropped when it reads like a dead sandbox to the setup fallback (STALE_PATTERNS in tools.ts).
+    const text = isRecord(body) && typeof body["error"] === "string" ? body["error"].slice(0, 200) : "";
+    const reason = text && !LOOKS_STALE_RE.test(text) ? `: ${text}` : "";
+    throw fail(`refused the request (HTTP ${response.status}${reason})`);
+  }
+  if (body === undefined) throw fail("returned a response that is not JSON");
   const token = isRecord(body) ? body["token"] : undefined;
   const problem = checkGitScopeToken(token, request);
   if (problem) throw fail(`returned an unusable list: ${problem}`);
@@ -166,13 +185,13 @@ export async function requestGitScope(options: RequestGitScopeOptions): Promise<
 /** The kata-sdk createSession hook that requests the list for `profile`. */
 export function gitScopeForProfile(
   profile: string,
-  config: Record<string, string>,
-  extra: Omit<RequestGitScopeOptions, "signerUrl" | "request"> = {},
+  transport: GitScopeSignerTransport,
+  extra: Omit<RequestGitScopeOptions, "transport" | "request"> = {},
 ): (claim: GitScopeClaim) => Promise<string> {
   return (claim) =>
     requestGitScope({
       ...extra,
-      signerUrl: config[GIT_SCOPE_SIGNER_URL_KEY],
+      transport,
       request: {
         profile,
         claimName: claim.claimName,

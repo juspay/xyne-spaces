@@ -18,7 +18,6 @@ export const PLATFORM_ONLY_CONFIG_KEYS: ReadonlySet<string> = new Set<string>([
   "CLAW_AUTH_URL",
   "KATA_ROUTER_URL",
   "KATA_NAMESPACE",
-  "GIT_SCOPE_SIGNER_URL",
   "SSH_KEY_PATH",
   "LITELLM_URL",
   "LITELLM_BASE_URL",

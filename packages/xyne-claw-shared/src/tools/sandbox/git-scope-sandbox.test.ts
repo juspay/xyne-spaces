@@ -63,17 +63,24 @@ beforeEach(() => {
   router.refuseFetch = null;
 });
 
-/** A fresh chat; `meta` adds to it. */
-function chat(meta: Record<string, string> = {}, signerUrl?: string): ToolExecutionContext {
+/** A fresh chat in a claw-auth run; `meta` adds to it. `authUrl` overrides claw-auth's address; `noRunSession` drops the run's session. */
+function chat(meta: Record<string, string> = {}, authUrl?: string, noRunSession = false): ToolExecutionContext {
   conversation += 1;
   return {
     config: {
       KATA_ROUTER_URL: router.url,
       KATA_NAMESPACE: "test-ns",
       KATA_TEMPLATE: "kata-workspace-template",
-      GIT_SCOPE_SIGNER_URL: signerUrl ?? signer.url,
+      XYNE_CLAW_AUTH_URL: authUrl ?? signer.url,
     },
     meta: { userId: "user-1", conversationId: `conv-${conversation}`, agentSlug: "test-agent", ...meta },
+    ...(noRunSession
+      ? {}
+      : {
+          sessionId: `run-${conversation}`,
+          sessionToken: `session-token-${conversation}`,
+          serviceAuth: (method: string, url: string) => ({ "x-service-assertion": `proof ${method} ${new URL(url).pathname}` }),
+        }),
   };
 }
 
@@ -118,12 +125,30 @@ describe("sandbox-create", () => {
 
   it("with a pinned profile: the claim carries a list that verifies for it", async () => {
     const before = k8s.claimBodies.length;
+    const calls = signer.calls.length;
     signer.reposFor["proj-a"] = [{ repo: "example.test/acme/app", access: "rw" }];
-    const out = await sandboxCreate.execute({}, chat({ sandboxRepo: "proj-a" }));
+    const ctx = chat({ sandboxRepo: "proj-a" });
+    const out = await sandboxCreate.execute({}, ctx);
     expect(JSON.parse(out).status).toBe("ready");
     const claims = claimsSince(before);
     expect(claims).toHaveLength(1);
     expectVerifiedList(claims[0]!, "proj-a");
+    // Asked claw-auth for this run's session, with the runtime proof and the run's session token.
+    expect(signer.calls.slice(calls)).toEqual([
+      {
+        sessionId: ctx.sessionId,
+        authorization: `Bearer ${ctx.sessionToken}`,
+        serviceAssertion: `proof POST /claw/api/v1/sessions/${ctx.sessionId}/git-scope`,
+      },
+    ]);
+  });
+
+  it("claw-auth refuses (e.g. unknown profile): no claim, its reason is in the error", async () => {
+    signer.mode = 403;
+    const before = k8s.claimBodies.length;
+    const out = await sandboxCreate.execute({}, chat({ sandboxRepo: "proj-a" }));
+    expect(out).toMatch(/^Error: The git-scope signer \(claw-auth\) refused the request \(HTTP 403: refused by the fake signer\)/);
+    expect(k8s.claimBodies.length).toBe(before);
   });
 
   it("with a profile matched by repoUrl + profile", async () => {
@@ -135,14 +160,14 @@ describe("sandbox-create", () => {
   it("signer down: no claim, error names the signer", async () => {
     const before = k8s.claimBodies.length;
     const out = await sandboxCreate.execute({}, chat({ sandboxRepo: "proj-a" }, "http://127.0.0.1:1"));
-    expect(out).toMatch(/^Error: The git-scope signer \(GIT_SCOPE_SIGNER_URL\) could not be reached .*profile "proj-a" was not created/);
+    expect(out).toMatch(/^Error: The git-scope signer \(claw-auth\) could not be reached .*profile "proj-a" was not created/);
     expect(k8s.claimBodies.length).toBe(before);
   });
 
-  it("signer not configured: no claim, error names the signer", async () => {
+  it("no run session (not a claw-auth run): no claim, error names the signer", async () => {
     const before = k8s.claimBodies.length;
-    const out = await sandboxCreate.execute({}, chat({ sandboxRepo: "proj-a" }, ""));
-    expect(out).toMatch(/git-scope signer \(GIT_SCOPE_SIGNER_URL\) is not configured/);
+    const out = await sandboxCreate.execute({}, chat({ sandboxRepo: "proj-a" }, undefined, true));
+    expect(out).toMatch(/git-scope signer \(claw-auth\) cannot be asked from this run \(no claw-auth URL, service signer or run session token\)/);
     expect(k8s.claimBodies.length).toBe(before);
   });
 
@@ -191,7 +216,7 @@ describe("sandbox-run one-shot", () => {
   it("pinned and signer down: no claim, error names the signer", async () => {
     const before = k8s.claimBodies.length;
     const out = await sandboxRun.execute({ cmd: "echo hi" }, chat({ sandboxRepo: "proj-a" }, "http://127.0.0.1:1"));
-    expect(out).toMatch(/git-scope signer \(GIT_SCOPE_SIGNER_URL\) could not be reached/);
+    expect(out).toMatch(/git-scope signer \(claw-auth\) could not be reached/);
     expect(k8s.claimBodies.length).toBe(before);
   });
 });
@@ -254,7 +279,7 @@ describe("sandbox-repo-setup", () => {
   it("signer down: error names the signer, no claim, no read-only fallback", async () => {
     const before = k8s.claimBodies.length;
     const out = await setup(chat({}, "http://127.0.0.1:1"), "proj-a");
-    expect(out).toMatch(/^Error: The git-scope signer \(GIT_SCOPE_SIGNER_URL\) could not be reached/);
+    expect(out).toMatch(/^Error: The git-scope signer \(claw-auth\) could not be reached/);
     expect(k8s.claimBodies.length).toBe(before);
   });
 

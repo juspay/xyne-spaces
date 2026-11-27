@@ -417,9 +417,20 @@ function sessionProfile(session: Session, storeKey?: string): string | undefined
   return (storeKey ? SESSION_PROFILE.get(storeKey) : undefined) ?? SESSION_PROFILE.get(session.id);
 }
 
-/** createSession options that request and attach the signed git scope for `profile`. */
+/**
+ * createSession options that request and attach the signed git scope for `profile`.
+ * claw-auth signs it; the call goes the way the SDLC credential bootstrap does
+ * (runtime service proof + this run's session token).
+ */
 function gitScopeOptions(context: ToolExecutionContext, profile: string) {
-  return { gitScope: gitScopeForProfile(profile, context.config) };
+  return {
+    gitScope: gitScopeForProfile(profile, {
+      authUrl: context.config["XYNE_CLAW_AUTH_URL"] ?? process.env["XYNE_CLAW_AUTH_URL"] ?? AUTH_URL_DEFAULT,
+      serviceAuth: context.serviceAuth,
+      runSessionId: context.sessionId,
+      sessionToken: context.sessionToken,
+    }),
+  };
 }
 
 function isSessionOwnedByContext(session: Session, lookupKey: string | undefined, context: { meta?: Record<string, string> } | undefined): boolean {
@@ -829,15 +840,6 @@ export const SANDBOX_CONFIG_SCHEMA = {
     default: "kata-workspace-template",
     required: false as const,
     placeholder: "kata-workspace-template",
-  },
-  GIT_SCOPE_SIGNER_URL: {
-    label: "Git Scope Signer URL",
-    // Every sandbox created for a profile needs a signed list from this
-    // service; without it those creations fail. Sandboxes with no profile
-    // never call it.
-    default: "",
-    required: false as const,
-    placeholder: "http://<signer-service>:<port>",
   },
 };
 

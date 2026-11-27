@@ -190,6 +190,8 @@ export interface FakeSigner {
   kid: string;
   publicKeyPem: string;
   requests: SignRequestSeen[];
+  /** Per request: the session id in the path and the two auth headers, as received. */
+  calls: { sessionId: string; authorization: string | undefined; serviceAssertion: string | undefined }[];
   /** "sign" signs the request; "other-claim" signs a list for a different claim; a number answers with that HTTP status. */
   mode: "sign" | "other-claim" | number;
   reposFor: Record<string, GitScopeRepo[]>;
@@ -204,21 +206,26 @@ export async function startFakeSigner(): Promise<FakeSigner> {
     kid: "test-signer-1",
     publicKeyPem: publicKey.export({ type: "spki", format: "pem" }).toString(),
     requests: [],
+    calls: [],
     mode: "sign",
     reposFor: {},
     close: async () => undefined,
   };
   const server = createServer(async (req, res) => {
     const raw = await readBody(req);
-    if (req.method !== "POST" || req.url !== "/v1/git-scope") {
+    // The claw-auth route: POST /claw/api/v1/sessions/<runSessionId>/git-scope.
+    const match = /^\/claw\/api\/v1\/sessions\/([^/]+)\/git-scope$/.exec(req.url ?? "");
+    if (req.method !== "POST" || !match) {
       res.writeHead(404);
       return res.end();
     }
+    const header = (name: string) => (typeof req.headers[name] === "string" ? (req.headers[name] as string) : undefined);
+    signer.calls.push({ sessionId: decodeURIComponent(match[1]!), authorization: header("authorization"), serviceAssertion: header("x-service-assertion") });
     const body = JSON.parse(raw) as SignRequestSeen;
     signer.requests.push(body);
     if (typeof signer.mode === "number") {
       res.writeHead(signer.mode, { "content-type": "application/json" });
-      return res.end(JSON.stringify({ error: "refused" }));
+      return res.end(JSON.stringify({ success: false, error: "refused by the fake signer" }));
     }
     const token = signGitScope(
       {
