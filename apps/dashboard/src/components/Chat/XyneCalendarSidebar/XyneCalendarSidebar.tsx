@@ -140,7 +140,13 @@ const XyneCalendarSidebarComponent = (): ReactElement => {
   useEffect(() => {
     return () => {
       if (isMaxedRef.current && preMaxWidthRef.current !== null) {
-        globalXyneCalendarPanelRef.current?.resize(`${preMaxWidthRef.current}%`);
+        // The panel group may already be unmounted (leaving the calendar), and
+        // react-resizable-panels then throws "Group … not found": nothing left to restore.
+        try {
+          globalXyneCalendarPanelRef.current?.resize(`${preMaxWidthRef.current}%`);
+        } catch {
+          // Panel group already gone.
+        }
       }
     };
   }, []);

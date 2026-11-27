@@ -554,6 +554,10 @@ const envSchema = Joi.object({
   DRIVE_IMPORT_MAX_FILES: Joi.number().integer().min(1).default(7000), // files per folder import
   DRIVE_IMPORT_MAX_TOTAL_BYTES: Joi.number().integer().min(1).default(1024 * 1024 * 1024), // 1 GB / folder
   DRIVE_IMPORT_MAX_DEPTH: Joi.number().integer().min(1).default(40), // folder nesting depth
+  // Google Meet's own transcripts, read through the Meet REST API. Turning this on adds
+  // two Meet scopes to "Connect Google Calendar": the Google Cloud project must have the
+  // Meet REST API enabled and both scopes on its OAuth consent screen first.
+  GOOGLE_MEET_TRANSCRIPTS_ENABLED: Joi.boolean().default(false),
   VESPA_QUEUE_NAMES: Joi.string().default('vespa-ingestion,vespa-files'),
   // 8083, not 8080: y-sweet owns 8080, so docker-compose.dev.yml publishes Vespa's feed port on 8083.
   VESPA_FEED_URL: Joi.string().uri().default('http://127.0.0.1:8083'),
@@ -597,13 +601,17 @@ const envSchema = Joi.object({
   ENC_S2S_KEY: Joi.string().allow(''),
   ENCRYPTION_SERVICE_URL: Joi.string().uri().default('http://localhost:3012'),
   ENCRYPTION_REQUEST_TIMEOUT_MS: Joi.number().integer().min(1).default(5000),
-  // Ingress transit proxy for the Xyne Apps API. true: bots reach /api/apps only through the
-  // proxy, so chat/postMessage and chat/updateMessage always go through their encryption
-  // contract and a bot that calls the backend directly is refused (TRANSIT_KEY_REQUIRED).
-  // false (default, no proxy deployed): those routes take plaintext as before, and a request
-  // that came through the proxy is refused (TRANSIT_PROXY_NOT_ENABLED) rather than stored as
-  // transit ciphertext the backend cannot use.
-  TRANSIT_PROXY_INGRESS_ENABLED: Joi.boolean().default(false),
+  // The transit proxies (and the encryption service) are deployed. true:
+  // - bots reach /api/apps only through the ingress proxy, so chat/postMessage and
+  //   chat/updateMessage always go through their encryption contract and a bot that calls the
+  //   backend directly is refused (TRANSIT_KEY_REQUIRED);
+  // - call AI runs on the egress proxy (TRANSIT_PROXY_EGRESS_URL), so the backend never holds
+  //   the summary or title in plaintext.
+  // false (default, e.g. open source without encryption): the apps routes take plaintext as
+  // before (a request that came through the proxy is refused, TRANSIT_PROXY_NOT_ENABLED, rather
+  // than stored as transit ciphertext the backend cannot use), and call AI calls LiteLLM
+  // directly (LITELLM_BASE_URL, CALL_LITELLM_API_KEY).
+  TRANSIT_PROXY_ENABLED: Joi.boolean().default(false),
   // Egress transit proxy for app event webhooks. Set: external deliveries are sealed by the
   // encryption service and posted by the proxy, never by the backend. Empty = direct (default).
   TRANSIT_PROXY_EGRESS_URL: Joi.string().uri().allow('').default(''),
@@ -1476,6 +1484,9 @@ export const config = {
     maxTotalBytes: envVars.DRIVE_IMPORT_MAX_TOTAL_BYTES as number,
     maxDepth: envVars.DRIVE_IMPORT_MAX_DEPTH as number,
   },
+  meetTranscripts: {
+    enabled: envVars.GOOGLE_MEET_TRANSCRIPTS_ENABLED as boolean,
+  },
   email: {
     clientId: envVars.GOOGLE_CLIENT_ID as string,
     clientSecret: envVars.GOOGLE_CLIENT_SECRET as string,
@@ -1545,7 +1556,7 @@ export const config = {
   internal: {
     encryptionS2sKey: envVars.ENC_S2S_KEY as string,
     encryptionServiceUrl: envVars.ENCRYPTION_SERVICE_URL as string,
-    transitProxyIngressEnabled: envVars.TRANSIT_PROXY_INGRESS_ENABLED as boolean,
+    transitProxyEnabled: envVars.TRANSIT_PROXY_ENABLED as boolean,
     transitProxyEgressUrl: (envVars.TRANSIT_PROXY_EGRESS_URL as string).trim().replace(/\/+$/, ''),
     transitProxyEgressKeyVersion: envVars.TRANSIT_PROXY_EGRESS_KEY_VERSION as number,
     transitProxyEgressTimeoutMs: envVars.TRANSIT_PROXY_EGRESS_TIMEOUT_MS as number,

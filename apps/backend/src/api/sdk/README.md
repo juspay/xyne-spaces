@@ -18,9 +18,12 @@ same function within a few frames of stack.
 |---|---|
 | `v1/mapper.ts` | SDK operation id → catalog operation or route |
 | `v1/parser.ts` | SDK operation id → the arguments its target expects |
-| `v1/index.ts` | The versioned router (`createSdkVersionRouter`), and v1 itself |
+| `v1/index.ts` | The versioned router (`createSdkVersionRouter`) every version builds on |
 | `v1/types.ts` | Shared types for the two above |
-| `v2/index.ts` | v2: v1's operation ids and routes, plus the Claw routes below |
+| `v3/index.ts` | v3, the live version: v1's operation ids and routes, the Claw routes below, and `GET /encryption-rules` |
+| `operations.ts` | v3's operation resolver, importable without the router (the request-body decrypt uses it) |
+| `encryption-rules.ts` | `GET /encryption-rules`: operation id → client-encrypted Zero mutator, and its mention fields |
+| `retired.ts` | v1 and v2: every request answers `503 unavailable` |
 | `claw/proxy.ts` | `/claw/api/*`: Claw's product API, forwarded as the caller |
 | `claw/allowlist.ts` | Which Claw routes the proxy forwards |
 | `claw/session.ts` | The caller's session, rebuilt as the cookie Claw reads |
@@ -53,6 +56,39 @@ second thing to keep correct.
 
 ---
 
+## Transit encryption
+
+v3 runs behind the backend's transit encryption (XYNE-67075), the same as the
+dashboard. The SDK (0.3.0 and later) does its half:
+
+- **Key.** It generates a P-256 key pair in memory, registers the public key
+  with `POST /api/transit/register` (stored against the auth session's `sid`)
+  and derives its AES-256-GCM keys from the server keys that call returns.
+- **Responses.** `encryptResponseBodyMiddleware` encrypts every JSON response
+  for the session's registered key (`ENC:v1|tk-<version>|…`); the SDK decrypts.
+  Event streams are not encrypted. A session with no registered key gets
+  `400 TRANSIT_KEY_REQUIRED` for any body that needs encrypting.
+- **Client-encrypted writes.** A Zero mutator with a manifest `MUTATOR` rule must
+  arrive with the rule's `client: true` fields encrypted. The SDK reads the rules
+  from the client manifest (`GET /api/encryption-manifest`, encrypted for its
+  key) and learns which operation runs which ruled mutator from
+  `GET /api/sdk/v3/encryption-rules`
+  (`{ ops: { [opId]: { mutator, mentionFields } } }`). It expands mention
+  shorthand in a `mentionFields` field before encrypting it, since the server
+  expands those (`MENTION_FIELDS` in `v1/parser.ts`) but leaves ciphertext alone.
+- **Server side of a write.** The request-body decrypt leaves a `/mutate` call
+  whose op runs a Zero mutator alone (`sdkMutatorNameFor` in `operations.ts`),
+  as it does a Zero push, and `/mutate` passes the caller's transit identity to
+  `runCatalogMutation`. Its `prepareEncryptedMutations` sends a ruled mutator's
+  args to the encryption service exactly as for a Zero push, and refuses
+  transit ciphertext in the args of a mutator without a rule.
+  Its verdicts surface as `validation_failed` with the service's code as
+  `reason` (`ENC_MANIFEST_STALE`: refetch the manifest and resend;
+  `TRANSIT_KEY_REQUIRED`: register again), or `503 unavailable` with
+  `reason: ENC_NOT_CONFIGURED`.
+
+---
+
 ## Endpoints
 
 ### Service
@@ -67,19 +103,25 @@ Both are mounted *before* the auth middleware on purpose, so a probe can tell
 
 ### Versions
 
-`/api/sdk/v1` and `/api/sdk/v2` are both served. **v1 is frozen**: SDK 0.1.x
-calls it, so nothing it serves changes. v2 (SDK 0.2.0 and later) is v1 plus
-the Claw routes: the same operation ids resolve to the same targets, unless
-`V2_OVERRIDES` in `v2/index.ts` says otherwise, and every direct route below is
-served under both prefixes. New routes go to v2 only. Tables below write `v1`;
-read it as either.
+`/api/sdk/v3` is the only version served. Its operation ids, parsers and direct
+routes are v1's (the code still lives in `v1/`, which every version builds on);
+`V3_OVERRIDES` in `operations.ts` is where an id would change meaning. v3 is the
+version that speaks transit encryption (see [Transit encryption](#transit-encryption)).
 
-### v1
+`/api/sdk/v1` (SDK 0.1.x) and `/api/sdk/v2` (SDK 0.2.x) are **retired**: they
+predate transit encryption, so every request to them answers `503 unavailable`
+with `reason: "api_version_retired"` and an upgrade message. `retired.ts` is
+mounted in `app.ts` before authentication and whether or not the SDK API is
+enabled, so an old client gets that answer with any session or none.
+
+Tables below write `v3`.
+
+### v3
 
 | | | |
 |---|---|---|
-| `POST` | `/api/sdk/v1/query` | `{ op, args }` → `{ data }` |
-| `POST` | `/api/sdk/v1/mutate` | `{ op, args }` → `{ success: true, generated? }` |
+| `POST` | `/api/sdk/v3/query` | `{ op, args }` → `{ data }` |
+| `POST` | `/api/sdk/v3/mutate` | `{ op, args }` → `{ success: true, generated? }` |
 
 This pair is the bulk of the API: **492 operation ids**, 9 of them retired. `op` is an
 **SDK operation id** — `tickets.listKanban`, `channels.join` — not the name of a
@@ -131,18 +173,18 @@ multipart uploads, search, and identity:
 
 | | |
 |---|---|
-| `GET /api/sdk/v1/me` | Who the session acts as |
-| `POST /api/sdk/v1/channels` | Create a channel |
-| `POST /api/sdk/v1/channels/check-duplicate` | Name availability |
-| `POST /api/sdk/v1/tickets` | Create a ticket (sequence allocator). A `stageName` must name a stage on `boardId` (which is then required), and is refused on Flow boards; the app's own route would silently use the first stage instead |
-| `POST /api/sdk/v1/channels/:channelId/conversations` | Start a thread with attachments |
-| `POST /api/sdk/v1/attachments` | Upload entity attachments |
-| `POST /api/sdk/v1/draft-attachments` | Upload draft attachments |
-| `GET /api/sdk/v1/search` | Vespa search |
-| `GET /api/sdk/v1/search/schema` | Field definitions for a search index |
-| `POST /api/sdk/v1/calls/initiate` | `{ channelId, callType, invitedUserIds?, conversationId? }` → `{ token, livekitUrl, externalId, callId, roomLink, channelId, scopeType }` or `{ pending: true }` |
-| `POST /api/sdk/v1/calls/join` | `{ callId }` (the external id) → `{ token, livekitUrl, externalId, roomLink, channelId, scopeType }` or `{ pending: true }`. Workspace-scoped, as `/api/calls/join` |
-| `POST /api/sdk/v1/calls/:callId/leave` | → `{}` (legacy no-op; the media webhook records leaving) |
+| `GET /api/sdk/v3/me` | Who the session acts as |
+| `POST /api/sdk/v3/channels` | Create a channel |
+| `POST /api/sdk/v3/channels/check-duplicate` | Name availability |
+| `POST /api/sdk/v3/tickets` | Create a ticket (sequence allocator). A `stageName` must name a stage on `boardId` (which is then required), and is refused on Flow boards; the app's own route would silently use the first stage instead |
+| `POST /api/sdk/v3/channels/:channelId/conversations` | Start a thread with attachments |
+| `POST /api/sdk/v3/attachments` | Upload entity attachments |
+| `POST /api/sdk/v3/draft-attachments` | Upload draft attachments |
+| `GET /api/sdk/v3/search` | Vespa search |
+| `GET /api/sdk/v3/search/schema` | Field definitions for a search index |
+| `POST /api/sdk/v3/calls/initiate` | `{ channelId, callType, invitedUserIds?, conversationId? }` → `{ token, livekitUrl, externalId, callId, roomLink, channelId, scopeType }` or `{ pending: true }` |
+| `POST /api/sdk/v3/calls/join` | `{ callId }` (the external id) → `{ token, livekitUrl, externalId, roomLink, channelId, scopeType }` or `{ pending: true }`. Workspace-scoped, as `/api/calls/join` |
+| `POST /api/sdk/v3/calls/:callId/leave` | → `{}` (legacy no-op; the media webhook records leaving) |
 
 Responses are the product controller's body without its `success` flag (or its
 `{ success, data }` envelope). All run as the caller; the database ACL and tenant
@@ -152,66 +194,66 @@ scope apply as they do for the dashboard.
 
 | | |
 |---|---|
-| `GET /api/sdk/v1/me/affinity` | → `{ channelWeights, userWeights }` |
-| `GET /api/sdk/v1/users/search` | `?q&limit&offset` → `{ data, pagination }`; rows omit `authProvider` and `orgMemberId` |
-| `GET /api/sdk/v1/me/dms` | → `{ channels, total }` |
-| `POST /api/sdk/v1/me/dms` | `{ participantIds, message?, forwardedMessage?, silent? }` → the DM channel |
-| `GET /api/sdk/v1/channels/search` | `?q&limit&types` → `{ results, total, query, limit, types }` (mention search) |
-| `POST /api/sdk/v1/channels/member-counts` | `{ channelIds }` → `{ counts }` |
-| `GET /api/sdk/v1/channels/:channelId/members` | → `{ members }`; members only |
-| `GET /api/sdk/v1/conversations/threads` | `?limit&cursor&sort` → `{ threads, nextCursor, hasMore }` |
-| `GET /api/sdk/v1/conversations/recent-visited` | → `{ days, channels }` |
-| `GET /api/sdk/v1/conversations/by-message/:messageId` | → the conversation row. 404 unless the caller could read that message (workspace, private-channel membership, `visibleTo`) |
+| `GET /api/sdk/v3/me/affinity` | → `{ channelWeights, userWeights }` |
+| `GET /api/sdk/v3/users/search` | `?q&limit&offset` → `{ data, pagination }`; rows omit `authProvider` and `orgMemberId` |
+| `GET /api/sdk/v3/me/dms` | → `{ channels, total }` |
+| `POST /api/sdk/v3/me/dms` | `{ participantIds, message?, forwardedMessage?, silent? }` → the DM channel |
+| `GET /api/sdk/v3/channels/search` | `?q&limit&types` → `{ results, total, query, limit, types }` (mention search) |
+| `POST /api/sdk/v3/channels/member-counts` | `{ channelIds }` → `{ counts }` |
+| `GET /api/sdk/v3/channels/:channelId/members` | → `{ members }`; members only |
+| `GET /api/sdk/v3/conversations/threads` | `?limit&cursor&sort` → `{ threads, nextCursor, hasMore }` |
+| `GET /api/sdk/v3/conversations/recent-visited` | → `{ days, channels }` |
+| `GET /api/sdk/v3/conversations/by-message/:messageId` | → the conversation row. 404 unless the caller could read that message (workspace, private-channel membership, `visibleTo`) |
 
 #### Notifications and daily brief
 
 | | |
 |---|---|
-| `GET /api/sdk/v1/notifications` | `?page&limit&status` (limit ≤ 100) → `{ notifications, pagination }` |
-| `GET /api/sdk/v1/notifications/unread-count` | → `{ count }` |
-| `GET /api/sdk/v1/notifications/workspace-counts` | → `{ counts }` |
-| `PATCH /api/sdk/v1/notifications/mark-all-read` | → `{}` |
-| `PATCH /api/sdk/v1/notifications/:id/read` | `{ channelId?, conversationId? }` → `{}` |
-| `PATCH /api/sdk/v1/notifications/:id/dismiss` | → `{}` |
-| `GET`/`PUT /api/sdk/v1/notifications/preferences` | Per-type `{ browserEnabled, emailEnabled, slackEnabled }`; `PUT` → `{}` |
-| `GET /api/sdk/v1/daily-brief/latest` | Today's (or the latest) brief |
-| `GET /api/sdk/v1/daily-brief/history` | `?limit` |
-| `GET /api/sdk/v1/daily-brief/dates` | `?limit` |
-| `GET /api/sdk/v1/daily-brief/by-date/:date` | `:date` is `YYYY-MM-DD` |
-| `GET`/`PUT /api/sdk/v1/daily-brief/config` | `{ enabled?, instructions?, instructionsEnabled? }` |
-| `GET`/`PUT /api/sdk/v1/daily-brief/settings` | `{ agentSlug }`; the write is org-admin only, enforced by claw-auth |
+| `GET /api/sdk/v3/notifications` | `?page&limit&status` (limit ≤ 100) → `{ notifications, pagination }` |
+| `GET /api/sdk/v3/notifications/unread-count` | → `{ count }` |
+| `GET /api/sdk/v3/notifications/workspace-counts` | → `{ counts }` |
+| `PATCH /api/sdk/v3/notifications/mark-all-read` | → `{}` |
+| `PATCH /api/sdk/v3/notifications/:id/read` | `{ channelId?, conversationId? }` → `{}` |
+| `PATCH /api/sdk/v3/notifications/:id/dismiss` | → `{}` |
+| `GET`/`PUT /api/sdk/v3/notifications/preferences` | Per-type `{ browserEnabled, emailEnabled, slackEnabled }`; `PUT` → `{}` |
+| `GET /api/sdk/v3/daily-brief/latest` | Today's (or the latest) brief |
+| `GET /api/sdk/v3/daily-brief/history` | `?limit` |
+| `GET /api/sdk/v3/daily-brief/dates` | `?limit` |
+| `GET /api/sdk/v3/daily-brief/by-date/:date` | `:date` is `YYYY-MM-DD` |
+| `GET`/`PUT /api/sdk/v3/daily-brief/config` | `{ enabled?, instructions?, instructionsEnabled? }` |
+| `GET`/`PUT /api/sdk/v3/daily-brief/settings` | `{ agentSlug }`; the write is org-admin only, enforced by claw-auth |
 
 #### Radar
 
 | | |
 |---|---|
-| `GET /api/sdk/v1/radar/feed/pending-me` | → `{ threads }` |
-| `GET /api/sdk/v1/radar/feed/waiting-on` | → `{ threads }` |
-| `GET /api/sdk/v1/radar/feed/pending-others` | `?page&mutedPage&pageSize&holders&channels&createdFrom&createdTo` → a page; without `page`, `{ threads }` |
-| `POST /api/sdk/v1/radar/items/:itemId/resolve` | → the action result |
-| `POST /api/sdk/v1/radar/items/:itemId/dismiss` | → the action result |
-| `GET /api/sdk/v1/radar/rules` | → `{ rules }` |
-| `POST /api/sdk/v1/radar/rules` | `{ conditions }` → `{ rule }`; at most `MAX_RULES` |
-| `PATCH /api/sdk/v1/radar/rules/:ruleId` | `{ conditions }` → `{ rule }` |
-| `DELETE /api/sdk/v1/radar/rules/:ruleId` | → `{ id }` |
+| `GET /api/sdk/v3/radar/feed/pending-me` | → `{ threads }` |
+| `GET /api/sdk/v3/radar/feed/waiting-on` | → `{ threads }` |
+| `GET /api/sdk/v3/radar/feed/pending-others` | `?page&mutedPage&pageSize&holders&channels&createdFrom&createdTo` → a page; without `page`, `{ threads }` |
+| `POST /api/sdk/v3/radar/items/:itemId/resolve` | → the action result |
+| `POST /api/sdk/v3/radar/items/:itemId/dismiss` | → the action result |
+| `GET /api/sdk/v3/radar/rules` | → `{ rules }` |
+| `POST /api/sdk/v3/radar/rules` | `{ conditions }` → `{ rule }`; at most `MAX_RULES` |
+| `PATCH /api/sdk/v3/radar/rules/:ruleId` | `{ conditions }` → `{ rule }` |
+| `DELETE /api/sdk/v3/radar/rules/:ruleId` | → `{ id }` |
 
 #### Emojis, canvases, tickets
 
 | | |
 |---|---|
-| `GET /api/sdk/v1/emojis` | → the workspace's custom emojis |
-| `GET /api/sdk/v1/emojis/:emojiId` | → one emoji |
-| `POST /api/sdk/v1/emojis` | Multipart `file` (≤ 256 KB) + `name` → the emoji |
-| `DELETE /api/sdk/v1/emojis/:emojiId` | → `{}`; creator only |
-| `POST /api/sdk/v1/canvases/create` | `{ title, markdown, visibility?, channelId? }` → `{ id, title, url, visibility, channelId }`; a `channelId` must be one the caller belongs to |
-| `POST /api/sdk/v1/canvases/upload` | Multipart `file` + `canvasId`, `width?`, `height?` → `{ attachmentId, fileName, fileSize, mimeType, thumbnailUrl }`; edit access required |
-| `GET /api/sdk/v1/canvases/labels` | `?canvasIds` (comma-separated, ≤ 200) → `{ labels: { [canvasId]: Label[] } }` |
-| `GET /api/sdk/v1/canvases/labels/suggestions` | `?query&offset&limit` → `{ labels, offset, limit }` |
-| `POST /api/sdk/v1/canvases/:canvasId/labels` | `{ names }` → `{ labels }` |
-| `POST /api/sdk/v1/canvases/:canvasId/labels/remove` | `{ labelIds }` → `{}` (POST: the product route is a DELETE with a body) |
-| `PATCH /api/sdk/v1/tickets/:ticketId` | `{ assigneeId?, stage?, groupId?, title?, description?, priority?, status?, eta?, tags?, formFields? }` → `{ updated }`. Requires the `TICKETS` write grant and a ticket the caller can read in their workspace (404 otherwise) |
-| `POST /api/sdk/v1/sub-tickets/link` | `{ ticketId, mappedTicketId, subTicketTitle? }` → `{ subTicketId, mappingId }`. Attaches the existing ticket `mappedTicketId` under `ticketId`, as the app's "Add existing sub-ticket" does: write access to the parent, read access to the child, manual boards only, no cycles, one parent per ticket (otherwise 409) |
-| `POST /api/sdk/v1/sub-tickets/unlink` | `{ mappingId }` → empty `204`. Removes the link and its sub-ticket row; the child ticket itself is kept |
+| `GET /api/sdk/v3/emojis` | → the workspace's custom emojis |
+| `GET /api/sdk/v3/emojis/:emojiId` | → one emoji |
+| `POST /api/sdk/v3/emojis` | Multipart `file` (≤ 256 KB) + `name` → the emoji |
+| `DELETE /api/sdk/v3/emojis/:emojiId` | → `{}`; creator only |
+| `POST /api/sdk/v3/canvases/create` | `{ title, markdown, visibility?, channelId? }` → `{ id, title, url, visibility, channelId }`; a `channelId` must be one the caller belongs to |
+| `POST /api/sdk/v3/canvases/upload` | Multipart `file` + `canvasId`, `width?`, `height?` → `{ attachmentId, fileName, fileSize, mimeType, thumbnailUrl }`; edit access required |
+| `GET /api/sdk/v3/canvases/labels` | `?canvasIds` (comma-separated, ≤ 200) → `{ labels: { [canvasId]: Label[] } }` |
+| `GET /api/sdk/v3/canvases/labels/suggestions` | `?query&offset&limit` → `{ labels, offset, limit }` |
+| `POST /api/sdk/v3/canvases/:canvasId/labels` | `{ names }` → `{ labels }` |
+| `POST /api/sdk/v3/canvases/:canvasId/labels/remove` | `{ labelIds }` → `{}` (POST: the product route is a DELETE with a body) |
+| `PATCH /api/sdk/v3/tickets/:ticketId` | `{ assigneeId?, stage?, groupId?, title?, description?, priority?, status?, eta?, tags?, formFields? }` → `{ updated }`. Requires the `TICKETS` write grant and a ticket the caller can read in their workspace (404 otherwise) |
+| `POST /api/sdk/v3/sub-tickets/link` | `{ ticketId, mappedTicketId, subTicketTitle? }` → `{ subTicketId, mappingId }`. Attaches the existing ticket `mappedTicketId` under `ticketId`, as the app's "Add existing sub-ticket" does: write access to the parent, read access to the child, manual boards only, no cycles, one parent per ticket (otherwise 409) |
+| `POST /api/sdk/v3/sub-tickets/unlink` | `{ mappingId }` → empty `204`. Removes the link and its sub-ticket row; the child ticket itself is kept |
 
 #### Desk metrics and desk report
 
@@ -222,37 +264,37 @@ params are JSON-encoded string arrays, as the dashboard sends them.
 
 | | |
 |---|---|
-| `GET /api/sdk/v1/channels/:channelId/metrics` | `?timeRange&dateBasis&assigneeIds&stageNames&priorities&userGroupIds&tagValues&aiCategories&customFieldKeys&customFieldPerKeyFilters` → `DeskMetricsResponse` (`timeRange` is `startMs_endMs`, ≤ 90 days, default last 7) |
-| `GET /api/sdk/v1/desk-metrics/aggregate` | The same filters + `?channelIds` (comma-separated, ≤ 20) → `DeskMetricsAggregateResponse` (`perDesk`, `skipped`) |
-| `GET /api/sdk/v1/desk-metrics/desks` | → `{ desks }`, trimmed to desks the caller manages |
-| `GET /api/sdk/v1/desk-report/:channelId/latest` | → `{ report, canGenerate }`; `report` is null if none was ever generated |
-| `GET /api/sdk/v1/desk-report/:channelId/view` | `?download=1` → the latest completed report as **`text/html`**, not JSON (passed through with the controller's `Content-Type`, `Content-Disposition` and CSP) |
-| `POST /api/sdk/v1/desk-report/:channelId/generate` | → `{ started: true }`. **Starts an agent run**; owner / channel admin only. A refusal (run already in flight, no owner, agent not installed, report disabled) is `validation_failed` |
-| `GET /api/sdk/v1/claw/desk-metrics/desks` | → `{ desks }` (the agent-facing mount) |
-| `POST /api/sdk/v1/claw/desk-metrics/query` | `{ channelIds, timeRange?, lastDays?, metrics?, includeTickets?, customFieldBreakdown?, …filters }` → `DeskMetricsQueryResponse` (`desks`, `skipped`, `perDesk?`, `notes`). No `metricsEnabled` gate |
+| `GET /api/sdk/v3/channels/:channelId/metrics` | `?timeRange&dateBasis&assigneeIds&stageNames&priorities&userGroupIds&tagValues&aiCategories&customFieldKeys&customFieldPerKeyFilters` → `DeskMetricsResponse` (`timeRange` is `startMs_endMs`, ≤ 90 days, default last 7) |
+| `GET /api/sdk/v3/desk-metrics/aggregate` | The same filters + `?channelIds` (comma-separated, ≤ 20) → `DeskMetricsAggregateResponse` (`perDesk`, `skipped`) |
+| `GET /api/sdk/v3/desk-metrics/desks` | → `{ desks }`, trimmed to desks the caller manages |
+| `GET /api/sdk/v3/desk-report/:channelId/latest` | → `{ report, canGenerate }`; `report` is null if none was ever generated |
+| `GET /api/sdk/v3/desk-report/:channelId/view` | `?download=1` → the latest completed report as **`text/html`**, not JSON (passed through with the controller's `Content-Type`, `Content-Disposition` and CSP) |
+| `POST /api/sdk/v3/desk-report/:channelId/generate` | → `{ started: true }`. **Starts an agent run**; owner / channel admin only. A refusal (run already in flight, no owner, agent not installed, report disabled) is `validation_failed` |
+| `GET /api/sdk/v3/claw/desk-metrics/desks` | → `{ desks }` (the agent-facing mount) |
+| `POST /api/sdk/v3/claw/desk-metrics/query` | `{ channelIds, timeRange?, lastDays?, metrics?, includeTickets?, customFieldBreakdown?, …filters }` → `DeskMetricsQueryResponse` (`desks`, `skipped`, `perDesk?`, `notes`). No `metricsEnabled` gate |
 
 ### Claw
 
 Xyne Claw (`apps/xyne-claw-auth`) is a separate service. Two ways in:
 
-**Relayed with the deployment's service credential** (v1 and v2):
+**Relayed with the deployment's service credential**:
 
 | | |
 |---|---|
-| `GET /api/sdk/v1/claw/agents` | Agents this caller can dispatch |
-| `POST /api/sdk/v1/claw/runs` | Dispatch a run → `{ sessionId }` |
-| `GET /api/sdk/v1/claw/runs/:sessionId` | Poll status and result |
+| `GET /api/sdk/v3/claw/agents` | Agents this caller can dispatch |
+| `POST /api/sdk/v3/claw/runs` | Dispatch a run → `{ sessionId }` |
+| `GET /api/sdk/v3/claw/runs/:sessionId` | Poll status and result |
 
 `runScopedClawAgent` takes an explicit identity that maps one-to-one onto
 `AuthData`, and returns a pollable session id.
 
-**As the caller** (v2 only):
+**As the caller**:
 
 | | |
 |---|---|
-| `POST /api/sdk/v2/claw/runs/stream` | `{ agent, task, conversationId?, channelId?, provider?, attachedContext?, thinkingLevel?, … }` → `text/event-stream` |
-| `POST /api/sdk/v2/claw/runs/stream/cancel` | `{ sessionId }` (the `traceId` of `start`) → `{ sessionId, status }` |
-| `* /api/sdk/v2/claw/api/<path>` | Claw's `/claw/api/v1/<path>`, if `claw/allowlist.ts` allows it |
+| `POST /api/sdk/v3/claw/runs/stream` | `{ agent, task, conversationId?, channelId?, provider?, attachedContext?, thinkingLevel?, … }` → `text/event-stream` |
+| `POST /api/sdk/v3/claw/runs/stream/cancel` | `{ sessionId }` (the `traceId` of `start`) → `{ sessionId, status }` |
+| `* /api/sdk/v3/claw/api/<path>` | Claw's `/claw/api/v1/<path>`, if `claw/allowlist.ts` allows it |
 
 How "as the caller" works: claw-auth never checks a Spaces JWT itself. It
 forwards the request's `Cookie` to Spaces `/api/auth/me`, which reads
@@ -297,10 +339,10 @@ Grafana, …), relayed through Spaces by `clawConnectorsService`:
 
 | | |
 |---|---|
-| `GET /api/sdk/v1/connectors` | Connectors the viewer can see → `{ connectors }` |
-| `GET /api/sdk/v1/connectors/:type/tools` | The connector's tools, write ones flagged → `{ tools }` |
-| `POST /api/sdk/v1/connectors/:type/call` | `{ tool, args? }` → `{ content }` (raw MCP text) |
-| `POST /api/sdk/v1/connectors/:type/connect` | `{ returnTo? }` → `{ kind: 'oauth', authUrl }` or `{ kind: 'manual', settingsUrl }` |
+| `GET /api/sdk/v3/connectors` | Connectors the viewer can see → `{ connectors }` |
+| `GET /api/sdk/v3/connectors/:type/tools` | The connector's tools, write ones flagged → `{ tools }` |
+| `POST /api/sdk/v3/connectors/:type/call` | `{ tool, args? }` → `{ content }` (raw MCP text) |
+| `POST /api/sdk/v3/connectors/:type/connect` | `{ returnTo? }` → `{ kind: 'oauth', authUrl }` or `{ kind: 'manual', settingsUrl }` |
 
 - **Runs as the viewer.** claw-auth resolves the viewer's personal connection, or
   the org's shared one — never credentials pinned to an agent. The token stays in
@@ -330,7 +372,7 @@ One envelope, from `handler.ts`, the only place a status code is written:
 {
   "error": {
     "code": "not_found",
-    "message": "No such endpoint: GET /api/sdk/v1/nope",
+    "message": "No such endpoint: GET /api/sdk/v3/nope",
     "request_id": "req_5f1e3610-a2f7-4d02-bd8b-4718ad9ebe8b",
     "retryable": false
   }
@@ -353,6 +395,7 @@ produce lands on exactly one of them.
 | `not_connected` | 409 | | The viewer has no usable connection for this connector |
 | `rate_limited` | 429 | ✓ | Too many connector sign-ins started; wait, then retry |
 | `internal` | 500 | ✓ | Everything else |
+| `unavailable` | 503 | | A retired API version (`reason: api_version_retired`), or encryption not configured for a client-encrypted mutation (`reason: ENC_NOT_CONFIGURED`). Unlike `internal`, its `message` is kept |
 
 This replaced a twelve-code vocabulary. Three of those codes had no producer
 anywhere in the codebase, `rate_limited` described a limiter that does not
@@ -395,7 +438,7 @@ cause). It is the only error log this API writes.
   "userId": "…", "workspaceId": "…",
   "op": "messages.send",     // SDK operation id, or "GET /search" for a path-addressed route
   "kind": "mutator",         // query | mutator | direct | unknown
-  "method": "POST", "path": "/api/sdk/v1/mutate",
+  "method": "POST", "path": "/api/sdk/v3/mutate",
   "status": 200, "code": null, "durationMs": 84
 }
 ```
@@ -494,8 +537,8 @@ partition the catalog, and every operation must be in exactly one. An entry
 carries a reason from a fixed grammar —
 `superseded-by:<name> | legacy-unused | internal | deferred:<why>` — so "not
 exposed" is always a recorded decision rather than an omission. It is
-**per-version**: it states what *this* version does not reach, so a `v2/` starts
-from a copy and shrinks as it exposes more.
+**per-version**: it states what *this* version does not reach, so a new version
+starts from a copy and shrinks as it exposes more.
 
 It lives here rather than in the SDK because it names catalog operations. Shipping
 it inside the published package would hand every consumer a list of internal
@@ -510,6 +553,6 @@ value). Never both — the type enforces it.
 and the SDK's `core/errors.ts` by hand: nothing checks that the two agree, so a
 code or a search parameter changed here needs a matching SDK change.
 
-**A breaking change to the surface** is what `v2/` is for. Retargeting an
+**A breaking change to the surface** is what a new version is for. Retargeting an
 existing id onto a different catalog operation is fine and needs no new version;
 changing what an id *means* to a caller is not.

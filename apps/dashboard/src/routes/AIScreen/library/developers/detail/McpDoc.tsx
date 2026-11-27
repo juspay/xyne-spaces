@@ -306,6 +306,12 @@ function ConnectInstructions({ option }: { option: (typeof SETUP_OPTIONS)[number
 export function McpDoc(): ReactElement {
   return (
     <>
+      <Callout>
+        <strong>A new version is coming soon.</strong> It moves the Spaces MCP to Spaces API v3,
+        which encrypts what your agents read and send between them and Spaces. The setup below runs
+        the latest release from npm, so it picks the new version up with nothing to change.
+      </Callout>
+
       <StatRow
         stats={[
           { value: String(ALL_TOOLS.length), label: 'tools' },

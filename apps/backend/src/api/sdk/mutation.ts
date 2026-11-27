@@ -12,17 +12,23 @@
  */
 
 import type { AuthData } from '@/zero/mutators';
+import type { MutationEncryptionContext } from '@/zero/encryptedMutation';
 import { CatalogQueryError, runCatalogMutation } from '@/zero/server';
 import { SdkApiError, toSdkApiError } from './errors';
 
-/** Run one catalog mutator as the authenticated caller. */
+/**
+ * Run one catalog mutator as the authenticated caller. `enc` is the caller's transit identity
+ * (mutationEncryptionContext): a mutator with a manifest rule is sent to the encryption
+ * service with it, exactly as a Zero push is.
+ */
 export async function callMutator(
   name: string,
   args: unknown,
   authData: AuthData,
+  enc?: MutationEncryptionContext,
 ): Promise<void> {
   try {
-    await runCatalogMutation(name, args, authData);
+    await runCatalogMutation(name, args, authData, enc);
   } catch (err) {
     if (err instanceof CatalogQueryError && err.phase === 'unknown') {
       throw new SdkApiError('not_found', err.message, { cause: err.cause });

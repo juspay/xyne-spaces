@@ -13,7 +13,7 @@ const chatController = new ChatController();
 // encryptedRoute: fields the transit proxy encrypted become workspace-DEK ciphertext (and the
 // reply goes back encrypted to the proxy); a no-op unless API client encryption is on.
 // transitProxyIngress: only where the ingress transit proxy is deployed
-// (TRANSIT_PROXY_INGRESS_ENABLED); without it these routes take plaintext as before and the
+// (TRANSIT_PROXY_ENABLED); without it these routes take plaintext as before and the
 // Prisma extension still encrypts it at rest.
 const encryptedPostMessage = encryptedRoute(appsChatPostMessageClient, {
   resolveWorkspaceId: async (req) => req.user!.workspaceId,

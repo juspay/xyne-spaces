@@ -1,15 +1,11 @@
 import { repositories } from '@/database/repositories';
 import { getCanvasUrl } from '@/services/canvasService';
 import { logger } from '@/utils/logger';
-// Disabled (LLM)
-// import { Prisma, type Call } from '@prisma/client';
-import { type Call } from '@prisma/client';
+import { Prisma, type Call } from '@prisma/client';
 import { config } from '@/config/env';
 // import { Agent } from '@framework'; // framework removed
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
-// Disabled (LLM)
-// import { MessageType, AttachmentEntityType, CallOrigin, CallType, TicketPriority, NotificationType } from '@xyne/shared';
-import { MessageType, AttachmentEntityType, TicketPriority, NotificationType } from '@xyne/shared';
+import { MessageType, AttachmentEntityType, CallOrigin, CallType, TicketPriority, NotificationType } from '@xyne/shared';
 import { notificationService } from '@/services/notificationService';
 import { db } from '@/database/client';
 import { randomUUID } from 'crypto';
@@ -27,23 +23,22 @@ import {
   executeStreamingLlmRequest,
   type SummaryModelType,
 } from './callLlmRetry';
-// Disabled (LLM)
-// import { callRecordingService } from '@/services/callRecordingService';
+import { isGatewayLlmEnabled } from '@/services/callAi/gatewayLlm';
+import { runWithDekPassthrough } from '@/services/encryption';
+import { callRecordingService } from '@/services/callRecordingService';
 import { callLabelService } from '@/services/callLabelService';
 import { TagMethod } from '@xyne/shared';
 import { callDocumentService } from '@/services/callDocumentService';
 import { callNotesCanvasService } from '@/services/callNotesCanvasService';
 import { callSubject } from '@/utils/callTypeUtils';
 import { isTranscriptUnlinked } from '@/utils/transcriptUnlink';
-// Disabled (LLM)
-// import { logDetailedSummaryFailed } from '@/services/detailedSummaryFailureLog';
+import { logDetailedSummaryFailed } from '@/services/detailedSummaryFailureLog';
 import { RECORDING_TITLE_PROMPT } from '@/services/recordingSummaryTemplates';
 import { acquireLock, releaseLock } from '@/utils/distributedLock';
 import { mapWithConcurrency } from '@/utils/concurrency';
 // import { orgLLMCredentialService } from '@/services/orgLLMCredentialService'; // framework removed
-// Disabled (LLM)
-// import { processCallWithSummaryTx } from '@/bypassAcl/transactions/transcriptService';
-// import { emitCallSummaryReadyToApp } from '@/services/callSummaryAppEventService';
+import { processCallWithSummaryTx } from '@/bypassAcl/transactions/transcriptService';
+import { emitCallSummaryReadyToApp } from '@/services/callSummaryAppEventService';
 
 const SPEAKER_IDENTIFICATION_CAC_KEY = 'speaker_identification_config';
 
@@ -616,6 +611,21 @@ export class TranscriptService {
   }
 
   /**
+   * Stores transcript entries as the call's raw JSONL transcript, where
+   * retrieveTranscript reads it. For transcripts that don't come from the
+   * transcription agent (e.g. Google Meet's own, services/meetTranscriptService.ts).
+   */
+  async storeRawTranscript(callId: string, entries: TranscriptEntry[]): Promise<void> {
+    const buffer = Buffer.from(entries.map((entry) => JSON.stringify(entry)).join('\n') + '\n', 'utf-8');
+    await this.transcriptStorage.uploadFileV2(buffer, {
+      path: `transcriptions/${callId}.jsonl`,
+      contentType: 'application/x-ndjson',
+      metadata: { callId, type: 'transcript' },
+    });
+    logger.info(`[${callId}] raw_transcript_stored`, { entries_count: entries.length });
+  }
+
+  /**
    * Parse JSONL content into transcript entries
    */
   parseTranscriptEntries(jsonlContent: string): TranscriptEntry[] {
@@ -1099,11 +1109,16 @@ export class TranscriptService {
   /**
    * Generate AI summary from the formatted transcript with explicit retry loop.
    */
+  /**
+   * `options.sealed`: the summary is only stored. With the transit proxy it then comes back as
+   * workspace-DEK ciphertext (store it as-is, never read it).
+   */
   async generateCallSummary(
     transcript: string,
     callId?: string,
     modelType?: SummaryModelType,
     workspaceId?: string,
+    options: { sealed?: { workspaceId: string } } = {},
   ): Promise<string | null> {
     const callCreator = await this.getCallCreatorName(callId);
     const prompt = CALL_SUMMARY_PROMPT
@@ -1115,6 +1130,8 @@ export class TranscriptService {
       () => prompt,
       'call_summary',
       callId || 'unknown',
+      undefined,
+      { modelType, sealed: options.sealed },
     );
 
     if (!extracted.ok) {
@@ -1140,11 +1157,16 @@ export class TranscriptService {
   /**
    * Generate a short AI title from transcript with explicit retry loop.
    */
+  /**
+   * `options.sealed`: as for generateCallSummary. The title is then stored as the model wrote it,
+   * since the backend gets only ciphertext.
+   */
   async generateCallTitle(
     transcript: string,
     callId?: string,
     promptTemplate = CALL_TITLE_PROMPT,
     modelType?: SummaryModelType,
+    options: { sealed?: { workspaceId: string } } = {},
   ): Promise<string | null> {
     const prompt = promptTemplate.replace('{transcript}', transcript);
 
@@ -1153,6 +1175,8 @@ export class TranscriptService {
       () => prompt,
       'call_title',
       callId || 'unknown',
+      undefined,
+      { modelType, sealed: options.sealed },
     );
 
     if (!extracted.ok) {
@@ -1167,8 +1191,13 @@ export class TranscriptService {
    * retry/extraction path as `generateCallTitle`, but using the recording-
    * specific prompt so recording and regular-call title wording can diverge.
    */
-  async generateRecordingTitle(transcript: string, callId?: string, modelType?: SummaryModelType): Promise<string | null> {
-    return this.generateCallTitle(transcript, callId, RECORDING_TITLE_PROMPT, modelType);
+  async generateRecordingTitle(
+    transcript: string,
+    callId?: string,
+    modelType?: SummaryModelType,
+    options: { sealed?: { workspaceId: string } } = {},
+  ): Promise<string | null> {
+    return this.generateCallTitle(transcript, callId, RECORDING_TITLE_PROMPT, modelType, options);
   }
 
   /**
@@ -1227,8 +1256,7 @@ export class TranscriptService {
 
     try {
       const extracted = await executeCallLlmOnce(
-        // The legacy agent keeps resolving credentials without the call, as before;
-        // `callId` only lets the Claw engine act as the call's creator.
+        // `callId` is for logs only.
         () => this.createAgent(),
         prompt,
         'ticket_suggestions',
@@ -1380,8 +1408,7 @@ export class TranscriptService {
 
     try {
       const extracted = await executeCallLlmOnce(
-        // The legacy agent keeps resolving credentials without the call, as before;
-        // `callId` only lets the Claw engine act as the call's creator.
+        // `callId` is for logs only.
         () => this.createAgent(),
         prompt,
         'pulse_data',
@@ -1429,6 +1456,93 @@ export class TranscriptService {
    * @param markdownSummary - The AI-generated Markdown summary
    * @param ticketSuggestions - Optional array of ticket suggestions to append as markdown
    */
+  /**
+   * With the transit proxy, on the egress gateway: the summary and title come back as workspace-DEK
+   * ciphertext and are stored as-is: on the call, as the summary reply in the conversation and as
+   * the call message's title (message content is an encrypted field, so the dashboard decrypts
+   * it like the call's own fields). The detailed-summary canvas runs as on the direct engine; its
+   * reply is decrypted here. The outputs that need the summary or transcript as plaintext (ticket
+   * suggestions, labels, Pulse and the recording filename) are skipped.
+   */
+  private async generateSealedCallOutputs(
+    call: Call,
+    formattedTranscript: string,
+    titleInput: string,
+    conversationId: string,
+    callMessageId: string,
+  ): Promise<void> {
+    const callId = call.externalId;
+    const sealed = { workspaceId: call.workspaceId };
+    const threw = (event: string) => (error: unknown): null => {
+      logger.error(`[${callId}] ${event}`, { path: 'live_call', error: error instanceof Error ? error.message : String(error) });
+      return null;
+    };
+    const [aiSummary, generatedTitle, detailedSummary] = await Promise.all([
+      this.generateCallSummary(formattedTranscript, callId, undefined, undefined, { sealed }).catch(threw('generate_summary_threw')),
+      call.title || call.callType === CallType.HEADLESS
+        ? null
+        : this.generateCallTitle(titleInput, callId, undefined, undefined, { sealed }).catch(threw('generate_title_threw')),
+      callDocumentService.generateAndPostDetailedSummary(callId, formattedTranscript, conversationId).catch((error) => {
+        logDetailedSummaryFailed(callId, 'unexpected_error', error);
+        return null;
+      }),
+    ]);
+
+    // A rename made while the LLM was working wins.
+    let title = generatedTitle;
+    if (title && (await repositories.calls.findByExternalId(callId))?.title) {
+      logger.info(`[${callId}] ai_title_discarded`, { reason: 'renamed_during_processing', path: 'live_call' });
+      title = null;
+    }
+    const data = { ...(aiSummary ? { aiSummary } : {}), ...(title ? { title } : {}) };
+    if (Object.keys(data).length === 0) {
+      logger.error(`[${callId}] ai_summary_skipped`, { reason: 'generation_failed', path: 'live_call' });
+    } else {
+      try {
+        await runWithDekPassthrough(() => repositories.calls.update(call.id, data));
+        logger.info(`[${callId}] call_record_updated`, {
+          fields_updated: Object.keys(data).join(','),
+          path: 'live_call',
+          engine: 'gateway',
+          // Stored as-is: each must be workspace-DEK ciphertext (ENC:v1|<dekId>|…), never plaintext.
+          stored: Object.fromEntries(
+            Object.entries(data).map(([field, value]) => [field, /^ENC:v\d+\|[^|]+\|/.exec(value)?.[0] ?? 'NOT_CIPHERTEXT']),
+          ),
+        });
+      } catch (error) {
+        logger.error(`[${callId}] call_record_update_failed`, { stage: 'sealed_summary_save', path: 'live_call', error });
+      }
+    }
+
+    // Writes keep ciphertext as it is; passthrough keeps the messages it reads back encrypted.
+    if (aiSummary) {
+      try {
+        await runWithDekPassthrough(() => this.postSummaryAsReply(conversationId, callId, aiSummary));
+      } catch (error) {
+        logger.error(`[${callId}] post_summary_reply_failed`, { stage: 'post_summary_reply', path: 'live_call', error });
+      }
+    }
+    if (title) {
+      try {
+        await processCallWithSummaryTx(callMessageId, title);
+        logger.info(`[${callId}] call_title_updated`, { path: 'live_call' });
+      } catch (error) {
+        logger.error(`[${callId}] call_title_update_failed`, { path: 'live_call', error });
+      }
+    }
+
+    const detailedOk = detailedSummary?.success === true;
+    logger.info(`[${callId}] call_ai_gateway_outputs`, {
+      path: 'live_call',
+      summary: aiSummary ? 'ok' : 'failed',
+      title: call.title ? 'kept' : title ? 'ok' : generatedTitle ? 'discarded' : 'failed',
+      detailedSummary: detailedOk ? 'ok' : 'failed',
+    });
+    if (detailedOk && detailedSummary.rawSummary) {
+      await emitCallSummaryReadyToApp(callId, detailedSummary.rawSummary);
+    }
+  }
+
   async postSummaryAsReply(
     conversationId: string,
     callId: string,
@@ -1844,10 +1958,9 @@ export class TranscriptService {
       return;
     }
 
-    // Disabled (LLM)
-    // let pendingDetailedSummary:
-    //   | ReturnType<typeof callDocumentService.generateAndPostDetailedSummary>
-    //   | null = null;
+    let pendingDetailedSummary:
+      | ReturnType<typeof callDocumentService.generateAndPostDetailedSummary>
+      | null = null;
 
     try {
       // Get call details for summary generation and notes posting.
@@ -1918,242 +2031,252 @@ export class TranscriptService {
         return;
       }
 
-      // Disabled (LLM)
-      // // Retrieve and format transcript for AI.
-      // const transcriptContent = await this.retrieveTranscript(callId);
-      // if (!transcriptContent) {
-      //   logger.warn(`[${callId}] ai_summary_skipped`, { reason: 'no_transcript_content' });
-      //   return;
-      // }
+      // With the transit proxy AI outputs are sealed on the egress gateway; without it the
+      // backend calls LiteLLM directly.
+      const engine = isGatewayLlmEnabled() ? 'gateway' : 'direct';
+      logger.info(`[${callId}] call_ai_engine_selected`, { engine, path: 'live_call' });
 
-      // const entries = this.parseTranscriptEntries(transcriptContent);
-      // if (entries.length === 0) {
-      //   logger.warn(`[${callId}] ai_summary_skipped`, { reason: 'no_transcript_entries' });
-      //   return;
-      // }
-      // const formattedTranscript = this.formatTranscript(entries, callId);
+      // Retrieve and format transcript for AI.
+      const transcriptContent = await this.retrieveTranscript(callId);
+      if (!transcriptContent) {
+        logger.warn(`[${callId}] ai_summary_skipped`, { reason: 'no_transcript_content' });
+        return;
+      }
 
-      // // For CONVERSATION origin calls, combine conversation messages with transcript for title
-      // let titleInput = formattedTranscript;
-      // if (call.callOrigin === CallOrigin.CONVERSATION && callMessage.conversationId) {
-      //   const conversationMessages = await this.formatConversationMessagesForTitle(callMessage.conversationId).catch(() => null);
-      //   if (conversationMessages) {
-      //     titleInput = `CONVERSATION CONTEXT:\n${conversationMessages}\n\nCALL TRANSCRIPT:\n${formattedTranscript}`;
-      //   }
-      // }
+      const entries = this.parseTranscriptEntries(transcriptContent);
+      if (entries.length === 0) {
+        logger.warn(`[${callId}] ai_summary_skipped`, { reason: 'no_transcript_entries' });
+        return;
+      }
+      const formattedTranscript = this.formatTranscript(entries, callId);
 
-      // const startTime = Date.now();
+      // For CONVERSATION origin calls, combine conversation messages with transcript for title
+      let titleInput = formattedTranscript;
+      if (call.callOrigin === CallOrigin.CONVERSATION && callMessage.conversationId) {
+        const conversationMessages = await this.formatConversationMessagesForTitle(callMessage.conversationId).catch(() => null);
+        if (conversationMessages) {
+          titleInput = `CONVERSATION CONTEXT:\n${conversationMessages}\n\nCALL TRANSCRIPT:\n${formattedTranscript}`;
+        }
+      }
 
-      // // Skip title generation for HEADLESS recordings - users set title manually via recordings UI
-      // const skipTitleGeneration = call.callType === CallType.HEADLESS;
-      // if (skipTitleGeneration) {
-      //   logger.info(`[${callId}] title_generation_skipped`, { reason: 'headless_recording' });
-      // }
-      // const summaryPromise = this.generateCallSummary(formattedTranscript, callId).catch((err) => {
-      //   logger.error(`[${callId}] generate_summary_threw`, { error: err, stack: err instanceof Error ? err.stack : undefined });
-      //   return null;
-      // });
-      // const callTitlePromise = skipTitleGeneration
-      //   ? Promise.resolve(null)
-      //   : this.generateCallTitle(titleInput, callId).catch((err) => {
-      //     logger.error(`[${callId}] generate_title_threw`, { error: err, stack: err instanceof Error ? err.stack : undefined });
-      //     return null;
-      //   });
-      // const ticketSuggestionsPromise = this.generateTicketSuggestions(formattedTranscript, callId).catch((err) => {
-      //   logger.error(`[${callId}] generate_ticket_suggestions_threw`, { error: err, stack: err instanceof Error ? err.stack : undefined });
-      //   return [];
-      // });
-      // // Recordings already label themselves on the note-taker path; running here
-      // // too would spend a second LLM call on the same tags.
-      // const labelsPromise =
-      //   call.callType === CallType.HEADLESS
-      //     ? Promise.resolve([] as string[])
-      //     : this.generateAndSaveLabels(call, formattedTranscript);
+      if (engine === 'gateway') {
+        await this.generateSealedCallOutputs(call, formattedTranscript, titleInput, callMessage.conversationId, messageId);
+        await this.queueTranscriptIndexing(call);
+        return;
+      }
 
-      // // Start all five post-call LLM operations immediately. Detailed-summary
-      // // streaming remains unchanged; title, summary, and tickets persist their
-      // // own result as soon as it is ready rather than waiting on one another.
-      // pendingDetailedSummary = callDocumentService.generateAndPostDetailedSummary(
-      //   callId,
-      //   formattedTranscript,
-      //   callMessage.conversationId,
-      //   undefined,
-      //   { callTitlePromise },
-      // ).catch((error) => {
-      //   // generateAndPostDetailedSummary logs its own failure exits; reaching
-      //   // here means it threw outside them, so this is the only record.
-      //   logDetailedSummaryFailed(callId, 'unexpected_error', error);
-      //   return { success: false, error: error instanceof Error ? error.message : String(error) };
-      // });
+      const startTime = Date.now();
 
-      // const summaryUiPromise = summaryPromise.then(async (summary) => {
-      //   if (!summary) return null;
-      //   try {
-      //     await repositories.calls.update(call.id, { aiSummary: summary });
-      //     logger.info(`[${callId}] call_record_updated`, { fields_updated: 'aiSummary' });
-      //   } catch (updateError) {
-      //     if (updateError instanceof Prisma.PrismaClientKnownRequestError && updateError.code === 'P2025') {
-      //       logger.warn(`[${callId}] call_deleted_before_summary_save | skipping update`);
-      //       return null;
-      //     }
-      //     logger.error(`[${callId}] call_record_update_failed`, {
-      //       stage: 'call_record_update', error: updateError,
-      //       stack: updateError instanceof Error ? updateError.stack : undefined,
-      //     });
-      //   }
+      // Skip title generation for HEADLESS recordings - users set title manually via recordings UI
+      const skipTitleGeneration = call.callType === CallType.HEADLESS;
+      if (skipTitleGeneration) {
+        logger.info(`[${callId}] title_generation_skipped`, { reason: 'headless_recording' });
+      }
+      const summaryPromise = this.generateCallSummary(formattedTranscript, callId).catch((err) => {
+        logger.error(`[${callId}] generate_summary_threw`, { error: err, stack: err instanceof Error ? err.stack : undefined });
+        return null;
+      });
+      const callTitlePromise = skipTitleGeneration
+        ? Promise.resolve(null)
+        : this.generateCallTitle(titleInput, callId).catch((err) => {
+          logger.error(`[${callId}] generate_title_threw`, { error: err, stack: err instanceof Error ? err.stack : undefined });
+          return null;
+        });
+      const ticketSuggestionsPromise = this.generateTicketSuggestions(formattedTranscript, callId).catch((err) => {
+        logger.error(`[${callId}] generate_ticket_suggestions_threw`, { error: err, stack: err instanceof Error ? err.stack : undefined });
+        return [];
+      });
+      // Recordings already label themselves on the note-taker path; running here
+      // too would spend a second LLM call on the same tags.
+      const labelsPromise =
+        call.callType === CallType.HEADLESS
+          ? Promise.resolve([] as string[])
+          : this.generateAndSaveLabels(call, formattedTranscript);
 
-      //   try {
-      //     await this.postSummaryAsReply(callMessage.conversationId, callId, summary);
-      //   } catch (replyError) {
-      //     logger.error(`[${callId}] post_summary_reply_failed`, {
-      //       stage: 'post_summary_reply', error: replyError,
-      //       stack: replyError instanceof Error ? replyError.stack : undefined,
-      //     });
-      //   }
-      //   return summary;
-      // });
+      // Start all five post-call LLM operations immediately. Detailed-summary
+      // streaming remains unchanged; title, summary, and tickets persist their
+      // own result as soon as it is ready rather than waiting on one another.
+      pendingDetailedSummary = callDocumentService.generateAndPostDetailedSummary(
+        callId,
+        formattedTranscript,
+        callMessage.conversationId,
+        undefined,
+        { callTitlePromise },
+      ).catch((error) => {
+        // generateAndPostDetailedSummary logs its own failure exits; reaching
+        // here means it threw outside them, so this is the only record.
+        logDetailedSummaryFailed(callId, 'unexpected_error', error);
+        return { success: false, error: error instanceof Error ? error.message : String(error) };
+      });
 
-      // const titleUiPromise = callTitlePromise.then(async (title) => {
-      //   if (!title) return null;
-      //   try {
-      //     if (!call.title) {
-      //       await repositories.calls.update(call.id, { title });
-      //       void callRecordingService.updateRecordingFilename(callId, title);
-      //     }
+      const summaryUiPromise = summaryPromise.then(async (summary) => {
+        if (!summary) return null;
+        try {
+          await repositories.calls.update(call.id, { aiSummary: summary });
+          logger.info(`[${callId}] call_record_updated`, { fields_updated: 'aiSummary' });
+        } catch (updateError) {
+          if (updateError instanceof Prisma.PrismaClientKnownRequestError && updateError.code === 'P2025') {
+            logger.warn(`[${callId}] call_deleted_before_summary_save | skipping update`);
+            return null;
+          }
+          logger.error(`[${callId}] call_record_update_failed`, {
+            stage: 'call_record_update', error: updateError,
+            stack: updateError instanceof Error ? updateError.stack : undefined,
+          });
+        }
 
-      //     // Serialize with first-chunk Canvas URL attachment: both merge the
-      //     // call-message metadata, so neither can discard the other's fields.
-      //     await processCallWithSummaryTx(messageId, title);
-      //     logger.info(`[${callId}] call_title_updated`);
-      //   } catch (error) {
-      //     logger.error(`[${callId}] call_title_update_failed`, { error });
-      //   }
-      //   return title;
-      // });
+        try {
+          await this.postSummaryAsReply(callMessage.conversationId, callId, summary);
+        } catch (replyError) {
+          logger.error(`[${callId}] post_summary_reply_failed`, {
+            stage: 'post_summary_reply', error: replyError,
+            stack: replyError instanceof Error ? replyError.stack : undefined,
+          });
+        }
+        return summary;
+      });
 
-      // const ticketsUiPromise = ticketSuggestionsPromise.then(async (ticketSuggestions) => {
-      //   if (ticketSuggestions.length === 0) return ticketSuggestions;
-      //   try {
-      //     await this.postSummaryAsReply(
-      //       callMessage.conversationId, callId, null, ticketSuggestions,
-      //     );
-      //   } catch (ticketError) {
-      //     logger.error(`[${callId}] post_ticket_suggestions_failed`, {
-      //       error: ticketError,
-      //       stack: ticketError instanceof Error ? ticketError.stack : undefined,
-      //     });
-      //   }
-      //   return ticketSuggestions;
-      // });
+      const titleUiPromise = callTitlePromise.then(async (title) => {
+        if (!title) return null;
+        try {
+          if (!call.title) {
+            await repositories.calls.update(call.id, { title });
+            void callRecordingService.updateRecordingFilename(callId, title);
+          }
 
-      // // appendLabels merges, so a label typed mid-processing survives this write.
-      // const labelsUiPromise = labelsPromise.then(async (labelIds) => {
-      //   if (labelIds.length === 0) return labelIds;
-      //   try {
-      //     await repositories.calls.appendLabels(call.id, labelIds);
-      //     logger.info(`[${callId}] call_record_updated`, { fields_updated: 'labels' });
-      //   } catch (error) {
-      //     logger.error(`[${callId}] labels_save_failed`, { error });
-      //   }
-      //   return labelIds;
-      // });
+          // Serialize with first-chunk Canvas URL attachment: both merge the
+          // call-message metadata, so neither can discard the other's fields.
+          await processCallWithSummaryTx(messageId, title);
+          logger.info(`[${callId}] call_title_updated`);
+        } catch (error) {
+          logger.error(`[${callId}] call_title_update_failed`, { error });
+        }
+        return title;
+      });
 
-      // const [summary, title, ticketSuggestions] = await Promise.all([
-      //   summaryUiPromise,
-      //   titleUiPromise,
-      //   ticketsUiPromise,
-      //   labelsUiPromise,
-      // ]);
+      const ticketsUiPromise = ticketSuggestionsPromise.then(async (ticketSuggestions) => {
+        if (ticketSuggestions.length === 0) return ticketSuggestions;
+        try {
+          await this.postSummaryAsReply(
+            callMessage.conversationId, callId, null, ticketSuggestions,
+          );
+        } catch (ticketError) {
+          logger.error(`[${callId}] post_ticket_suggestions_failed`, {
+            error: ticketError,
+            stack: ticketError instanceof Error ? ticketError.stack : undefined,
+          });
+        }
+        return ticketSuggestions;
+      });
 
-      // const duration = Date.now() - startTime;
-      // logger.info(
-      //   `AI generation completed in ${duration}ms. Summary: ${!!summary}, Title: ${!!title}, Tickets: ${ticketSuggestions.length}`
-      // );
+      // appendLabels merges, so a label typed mid-processing survives this write.
+      const labelsUiPromise = labelsPromise.then(async (labelIds) => {
+        if (labelIds.length === 0) return labelIds;
+        try {
+          await repositories.calls.appendLabels(call.id, labelIds);
+          logger.info(`[${callId}] call_record_updated`, { fields_updated: 'labels' });
+        } catch (error) {
+          logger.error(`[${callId}] labels_save_failed`, { error });
+        }
+        return labelIds;
+      });
 
-      // // If ALL three AI calls failed, escalate from per-call warns to a single error so
-      // // an LLM outage affecting every call is immediately visible rather than buried in warns.
-      // const aiFullyFailed = !summary && !title && ticketSuggestions.length === 0;
-      // if (aiFullyFailed) {
-      //   logger.error(`[${callId}] ai_generation_all_failed`, { summary: false, title: false, tickets: 0 });
-      // }
+      const [summary, title, ticketSuggestions] = await Promise.all([
+        summaryUiPromise,
+        titleUiPromise,
+        ticketsUiPromise,
+        labelsUiPromise,
+      ]);
 
-      // if (summary) {
-      //   // Pulse block — completely separate from Xyne tickets.
-      //   // Only activates when the call's channel is in PULSE_ENABLED_CHANNELS.
-      //   if (config.pulse.enabledChannels.length > 0) {
-      //     try {
-      //       // Check if this call's channel is in the Pulse allowlist (by channel ID)
-      //       const isPulseChannel = config.pulse.enabledChannels.includes(call.channelId ?? '');
+      const duration = Date.now() - startTime;
+      logger.info(
+        `AI generation completed in ${duration}ms. Summary: ${!!summary}, Title: ${!!title}, Tickets: ${ticketSuggestions.length}`
+      );
 
-      //       if (isPulseChannel) {
-      //         logger.info(`[Pulse] Channel ${call.channelId} is in allowlist — generating Pulse data for call ${callId}`);
-      //         const pulseGroups = await this.generatePulseData(formattedTranscript, callId);
-      //         const validatedGroups: Array<{
-      //           merchantName: string;
-      //           actionItems: PulseActionItem[];
-      //           orgContext: import('@/services/pulseService').PulseOrgContext;
-      //         }> = [];
+      // If ALL three AI calls failed, escalate from per-call warns to a single error so
+      // an LLM outage affecting every call is immediately visible rather than buried in warns.
+      const aiFullyFailed = !summary && !title && ticketSuggestions.length === 0;
+      if (aiFullyFailed) {
+        logger.error(`[${callId}] ai_generation_all_failed`, { summary: false, title: false, tickets: 0 });
+      }
 
-      //         for (const group of pulseGroups) {
-      //           if (group.actionItems.length > 0) {
-      //             // Validate the merchant exists in Pulse BEFORE showing the UI card.
-      //             const { pulseService } = await import('@/services/pulseService');
-      //             const orgContext = group.merchantName
-      //               ? await pulseService.resolveOrgForMerchant(group.merchantName)
-      //               : null;
+      if (summary) {
+        // Pulse block — completely separate from Xyne tickets.
+        // Only activates when the call's channel is in PULSE_ENABLED_CHANNELS.
+        if (config.pulse.enabledChannels.length > 0) {
+          try {
+            // Check if this call's channel is in the Pulse allowlist (by channel ID)
+            const isPulseChannel = config.pulse.enabledChannels.includes(call.channelId ?? '');
 
-      //             if (orgContext) {
-      //               validatedGroups.push({
-      //                 merchantName: group.merchantName,
-      //                 actionItems: group.actionItems,
-      //                 orgContext,
-      //               });
-      //             } else {
-      //               logger.warn(`[Pulse] Merchant "${group.merchantName}" not found in Pulse — skipping its action items`);
-      //             }
-      //           }
-      //         }
+            if (isPulseChannel) {
+              logger.info(`[Pulse] Channel ${call.channelId} is in allowlist — generating Pulse data for call ${callId}`);
+              const pulseGroups = await this.generatePulseData(formattedTranscript, callId);
+              const validatedGroups: Array<{
+                merchantName: string;
+                actionItems: PulseActionItem[];
+                orgContext: import('@/services/pulseService').PulseOrgContext;
+              }> = [];
 
-      //         if (validatedGroups.length > 0) {
-      //           await this.postPulseTicketsAsMessage(
-      //             callMessage.conversationId,
-      //             callId,
-      //             validatedGroups,
-      //           );
-      //         } else {
-      //           logger.info(`[Pulse] No valid merchant actionables for call ${callId}`);
-      //         }
-      //       } else {
-      //         logger.info(`[Pulse] Channel ${call.channelId} not in allowlist — skipping Pulse for call ${callId}`);
-      //       }
-      //     } catch (err) {
-      //       logger.error(`[Pulse] Failed to post Pulse tickets message for call ${callId}:`, err);
-      //     }
-      //   }
+              for (const group of pulseGroups) {
+                if (group.actionItems.length > 0) {
+                  // Validate the merchant exists in Pulse BEFORE showing the UI card.
+                  const { pulseService } = await import('@/services/pulseService');
+                  const orgContext = group.merchantName
+                    ? await pulseService.resolveOrgForMerchant(group.merchantName)
+                    : null;
 
-      //   if (pendingDetailedSummary) {
-      //     // Clear the fallback reference before awaiting normally. The finally
-      //     // block only drains a task when an earlier return/error bypasses here.
-      //     const detailedSummaryPromise = pendingDetailedSummary;
-      //     pendingDetailedSummary = null;
-      //     try {
-      //       const detailedSummaryResult = await detailedSummaryPromise;
-      //       if (detailedSummaryResult.success) {
-      //         logger.info(`Auto-generated detailed summary for call: ${callId}`);
-      //         // App-scheduled calls get the finished summary pushed to their
-      //         // app's webhook. No-ops for calls no app owns, and never throws.
-      //         await emitCallSummaryReadyToApp(callId, detailedSummaryResult.rawSummary);
-      //       }
-      //       // A failure here was already logged by whichever exit gave up, so
-      //       // there is no second line and the alert counts one per recording.
-      //     } catch (error) {
-      //       logDetailedSummaryFailed(callId, 'unexpected_error', error);
-      //     }
-      //   }
-      // } else {
-      //   // Use error (not warn) so LLM-down conditions generate alertable signal.
-      //   logger.error(`[${callId}] ai_summary_skipped`, { reason: 'generation_failed' });
-      // }
+                  if (orgContext) {
+                    validatedGroups.push({
+                      merchantName: group.merchantName,
+                      actionItems: group.actionItems,
+                      orgContext,
+                    });
+                  } else {
+                    logger.warn(`[Pulse] Merchant "${group.merchantName}" not found in Pulse — skipping its action items`);
+                  }
+                }
+              }
+
+              if (validatedGroups.length > 0) {
+                await this.postPulseTicketsAsMessage(
+                  callMessage.conversationId,
+                  callId,
+                  validatedGroups,
+                );
+              } else {
+                logger.info(`[Pulse] No valid merchant actionables for call ${callId}`);
+              }
+            } else {
+              logger.info(`[Pulse] Channel ${call.channelId} not in allowlist — skipping Pulse for call ${callId}`);
+            }
+          } catch (err) {
+            logger.error(`[Pulse] Failed to post Pulse tickets message for call ${callId}:`, err);
+          }
+        }
+
+        if (pendingDetailedSummary) {
+          // Clear the fallback reference before awaiting normally. The finally
+          // block only drains a task when an earlier return/error bypasses here.
+          const detailedSummaryPromise = pendingDetailedSummary;
+          pendingDetailedSummary = null;
+          try {
+            const detailedSummaryResult = await detailedSummaryPromise;
+            if (detailedSummaryResult.success) {
+              logger.info(`Auto-generated detailed summary for call: ${callId}`);
+              // App-scheduled calls get the finished summary pushed to their
+              // app's webhook. No-ops for calls no app owns, and never throws.
+              await emitCallSummaryReadyToApp(callId, detailedSummaryResult.rawSummary);
+            }
+            // A failure here was already logged by whichever exit gave up, so
+            // there is no second line and the alert counts one per recording.
+          } catch (error) {
+            logDetailedSummaryFailed(callId, 'unexpected_error', error);
+          }
+        }
+      } else {
+        // Use error (not warn) so LLM-down conditions generate alertable signal.
+        logger.error(`[${callId}] ai_summary_skipped`, { reason: 'generation_failed' });
+      }
       // Queue Vespa indexing for the transcript (using call.id as the identifier)
       await this.queueTranscriptIndexing(call);
 
@@ -2161,115 +2284,113 @@ export class TranscriptService {
       logger.error(`[${callId}] process_call_with_summary_failed`, { error: error, stack: error instanceof Error ? error.stack : undefined });
       // Don't re-throw - the transcript was already processed successfully
     } finally {
-      // Disabled (LLM)
-      // // Once started, keep the per-call lock until detailed generation settles.
-      // // This covers early returns (for example, a concurrently deleted call)
-      // // without leaving an unobserved stream racing the next reconciliation.
-      // if (pendingDetailedSummary) {
-      //   try {
-      //     await pendingDetailedSummary;
-      //   } catch (error) {
-      //     logger.error(`[${callId}] detailed_summary_background_drain_failed`, {
-      //       error,
-      //       stack: error instanceof Error ? error.stack : undefined,
-      //     });
-      //   }
-      // }
+      // Once started, keep the per-call lock until detailed generation settles.
+      // This covers early returns (for example, a concurrently deleted call)
+      // without leaving an unobserved stream racing the next reconciliation.
+      if (pendingDetailedSummary) {
+        try {
+          await pendingDetailedSummary;
+        } catch (error) {
+          logger.error(`[${callId}] detailed_summary_background_drain_failed`, {
+            error,
+            stack: error instanceof Error ? error.stack : undefined,
+          });
+        }
+      }
       await releaseLock(lockHandle);
     }
   }
 
-  // Disabled (LLM)
-  // /**
-  //  * Posts a dedicated bot message for Pulse actionables.
-  //  * Uses the same YAML frontmatter pattern as Xyne ticket suggestions so the
-  //  * frontend can parse + track which items have been sent to Pulse.
-  //  *
-  //  * Frontmatter shape:
-  //  *   pulseItems:
-  //  *     - itemId: <uuid>
-  //  *       content: <action item text>
-  //  *       assignee: <email>
-  //  *   pulseSent:    # moved here after user creates the actionable
-  //  *     - ...
-  //  */
-  // private async postPulseTicketsAsMessage(
-  //   conversationId: string,
-  //   callId: string,
-  //   validatedGroups: Array<{
-  //     merchantName: string;
-  //     actionItems: PulseActionItem[];
-  //     orgContext: import('@/services/pulseService').PulseOrgContext;
-  //   }>,
-  // ): Promise<void> {
-  //   // Get conversation to retrieve workspaceId
-  //   const conversation = await repositories.conversations.findById(conversationId);
-  //   if (!conversation) {
-  //     logger.error('[Pulse] Conversation not found — cannot post Pulse tickets message');
-  //     return;
-  //   }
+  /**
+   * Posts a dedicated bot message for Pulse actionables.
+   * Uses the same YAML frontmatter pattern as Xyne ticket suggestions so the
+   * frontend can parse + track which items have been sent to Pulse.
+   *
+   * Frontmatter shape:
+   *   pulseItems:
+   *     - itemId: <uuid>
+   *       content: <action item text>
+   *       assignee: <email>
+   *   pulseSent:    # moved here after user creates the actionable
+   *     - ...
+   */
+  private async postPulseTicketsAsMessage(
+    conversationId: string,
+    callId: string,
+    validatedGroups: Array<{
+      merchantName: string;
+      actionItems: PulseActionItem[];
+      orgContext: import('@/services/pulseService').PulseOrgContext;
+    }>,
+  ): Promise<void> {
+    // Get conversation to retrieve workspaceId
+    const conversation = await repositories.conversations.findById(conversationId);
+    if (!conversation) {
+      logger.error('[Pulse] Conversation not found — cannot post Pulse tickets message');
+      return;
+    }
 
-  //   // Get channel to retrieve workspaceId
-  //   const channel = await db.channel.findUnique({
-  //     where: { id: conversation.channelId },
-  //     select: { workspaceId: true }
-  //   });
-  //   if (!channel?.workspaceId) {
-  //     logger.error('[Pulse] Channel workspace not found — cannot post Pulse tickets message');
-  //     return;
-  //   }
+    // Get channel to retrieve workspaceId
+    const channel = await db.channel.findUnique({
+      where: { id: conversation.channelId },
+      select: { workspaceId: true }
+    });
+    if (!channel?.workspaceId) {
+      logger.error('[Pulse] Channel workspace not found — cannot post Pulse tickets message');
+      return;
+    }
 
-  //   const xyneAutomaticBot = await unifiedBotUserService.getBotByBotId('xyne-automatic', channel.workspaceId);
-  //   if (!xyneAutomaticBot) {
-  //     logger.error('[Pulse] xyne-automatic bot not found — cannot post Pulse tickets message');
-  //     return;
-  //   }
+    const xyneAutomaticBot = await unifiedBotUserService.getBotByBotId('xyne-automatic', channel.workspaceId);
+    if (!xyneAutomaticBot) {
+      logger.error('[Pulse] xyne-automatic bot not found — cannot post Pulse tickets message');
+      return;
+    }
 
-  //   const merchants = validatedGroups.map((g, idx) => ({
-  //     id: `m${idx + 1}`,
-  //     name: g.merchantName,
-  //     orgId: g.orgContext.orgId,
-  //     merchantId: g.orgContext.merchantId,
-  //     productId: g.orgContext.productId,
-  //   }));
+    const merchants = validatedGroups.map((g, idx) => ({
+      id: `m${idx + 1}`,
+      name: g.merchantName,
+      orgId: g.orgContext.orgId,
+      merchantId: g.orgContext.merchantId,
+      productId: g.orgContext.productId,
+    }));
 
-  //   const pulseItems = validatedGroups.flatMap((g, gIdx) =>
-  //     g.actionItems.map((item) => ({
-  //       itemId: randomUUID(),
-  //       merchantId: `m${gIdx + 1}`,
-  //       content: item.content,
-  //       assignee: item.assignee,
-  //     }))
-  //   );
+    const pulseItems = validatedGroups.flatMap((g, gIdx) =>
+      g.actionItems.map((item) => ({
+        itemId: randomUUID(),
+        merchantId: `m${gIdx + 1}`,
+        content: item.content,
+        assignee: item.assignee,
+      }))
+    );
 
-  //   const frontmatterData = {
-  //     merchants,
-  //     pulseItems,
-  //   };
+    const frontmatterData = {
+      merchants,
+      pulseItems,
+    };
 
-  //   const content = '---\n' + yaml.dump(frontmatterData) + '---\n\n## Suggested Pulse Actionables';
+    const content = '---\n' + yaml.dump(frontmatterData) + '---\n\n## Suggested Pulse Actionables';
 
-  //   await repositories.messages.create({
-  //     conversationId,
-  //     senderId: xyneAutomaticBot.id,
-  //     content,
-  //     msgType: MessageType.BOT,
-  //     showInChannel: false,
-  //     metadata: {
-  //       messageSubtype: 'pulse_actionables',
-  //       callId,
-  //       isAiGenerated: true,
-  //       contentFormat: 'markdown',
-  //       hasPulseItems: true,
-  //       pulseItemCount: pulseItems.length,
-  //     },
-  //   });
+    await repositories.messages.create({
+      conversationId,
+      senderId: xyneAutomaticBot.id,
+      content,
+      msgType: MessageType.BOT,
+      showInChannel: false,
+      metadata: {
+        messageSubtype: 'pulse_actionables',
+        callId,
+        isAiGenerated: true,
+        contentFormat: 'markdown',
+        hasPulseItems: true,
+        pulseItemCount: pulseItems.length,
+      },
+    });
 
-  //   await repositories.conversations.incrementReplyCount(conversationId);
-  //   logger.info(
-  //     `[Pulse] Posted consolidated Pulse actionables message for call ${callId} (${merchants.length} merchants)`
-  //   );
-  // }
+    await repositories.conversations.incrementReplyCount(conversationId);
+    logger.info(
+      `[Pulse] Posted consolidated Pulse actionables message for call ${callId} (${merchants.length} merchants)`
+    );
+  }
 }
 
 export const transcriptService = new TranscriptService();

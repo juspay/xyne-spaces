@@ -8,6 +8,7 @@ import { Prisma, type Call, type CallParticipant } from '@prisma/client';
 import { CallOrigin, CallRingNotification, CallStatus, CallType, InvitationResponse, MeetingStatus, RingStatus,  MessageArtifactStatus } from '@xyne/shared';
 import { repositories } from './index';
 import { logger } from '@/utils/logger';
+import { config } from '@/config/env';
 import { messageMetadataService } from '@/services/messageMetadataService';
 import { callEncryptionService } from '@/services/callEncryptionService';
 import type { CallParticipantMetadata } from '@xyne/shared';
@@ -199,7 +200,10 @@ export interface CallAdminListFilters {
   participantUserId?: string;
   statuses?: CallStatus[];
   callTypes?: CallType[];
-  /** Case-insensitive title match, or an exact externalId. */
+  /**
+   * Case-insensitive title match, or an exact externalId. With DB encryption on, calls.title is
+   * ciphertext (encrypted_field_configs) and cannot be filtered on: externalId only.
+   */
   search?: string;
   /** Matches Call.metadata.detailedSummaryStatus; "ready" also takes a canvas with no status. */
   summaryStatuses?: Array<'pending' | 'ready' | 'failed'>;
@@ -683,13 +687,18 @@ export class CallRepository {
     if (filters.statuses?.length) conditions.push({ status: { in: filters.statuses } });
     if (filters.callTypes?.length) conditions.push({ callType: { in: filters.callTypes } });
     if (filters.search) {
-      // Support pastes a call id as often as a title, so match either.
-      conditions.push({
-        OR: [
-          { title: { contains: filters.search, mode: 'insensitive' } },
-          { externalId: filters.search },
-        ],
-      });
+      // Support pastes a call id as often as a title, so match either. An encrypted title
+      // can't be searched in SQL (the DB extension refuses it), so then only the id matches.
+      conditions.push(
+        config.enc.enableDbEncryption
+          ? { externalId: filters.search }
+          : {
+              OR: [
+                { title: { contains: filters.search, mode: 'insensitive' } },
+                { externalId: filters.search },
+              ],
+            },
+      );
     }
     if (filters.summaryStatuses?.length) {
       conditions.push({

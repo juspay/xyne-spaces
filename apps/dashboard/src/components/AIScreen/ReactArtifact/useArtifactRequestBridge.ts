@@ -5,7 +5,9 @@ import {
   type HostRequestMessage,
 } from './artifactData.constants';
 import { API_BASE_URL } from '../../../config';
+import { refetchClientManifest } from '@xyne/shared';
 import { decryptResponseText } from '../../../services/encryptionInterceptors';
+import { encryptSdkMutation, isStaleManifestReply, SDK_MUTATE_PATH } from './sdkMutationEncryption';
 import type { PreviewClientRef } from './useArtifactDataBridge';
 
 // The backend origin the dashboard's own api client talks to. On localhost that
@@ -215,14 +217,27 @@ export function useArtifactRequestBridge({ previewRef, appId }: BridgeArgs): voi
         // Streaming needs the raw body as it arrives, which axios cannot give.
         const controller = new AbortController();
         if (stream) streams.set(requestId, controller);
-        // eslint-disable-next-line local-rules/no-fetch-use-axios
-        const res = await fetch(target, {
-          method,
-          headers: outHeaders,
-          ...(outBody !== undefined ? { body: outBody } : {}),
-          credentials: 'include',
-          signal: controller.signal,
-        });
+        const send = (sendBody: string | undefined): Promise<Response> =>
+          // eslint-disable-next-line local-rules/no-fetch-use-axios
+          fetch(target, {
+            method,
+            headers: outHeaders,
+            ...(sendBody !== undefined ? { body: sendBody } : {}),
+            credentials: 'include',
+            signal: controller.signal,
+          });
+
+        // An SDK write whose mutator has a manifest rule is sent with those fields encrypted
+        // for the viewer, as the dashboard's own writes are; a refusal for a stale manifest
+        // is sent once more after refetching it, re-encrypted from the app's plaintext.
+        const plainWrite =
+          method.toUpperCase() === 'POST' && url.pathname === SDK_MUTATE_PATH && outBody
+            ? outBody
+            : undefined;
+        let res = await send(plainWrite ? await encryptSdkMutation(plainWrite) : outBody);
+        if (plainWrite && (await isStaleManifestReply(res)) && (await refetchClientManifest())) {
+          res = await send(await encryptSdkMutation(plainWrite));
+        }
         // Only an event stream is piped; anything else (including an error answered
         // as JSON) is one `request-result`, which a streaming app also accepts.
         if (
