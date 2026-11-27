@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { logger } from '@/utils/logger';
 import * as dependencies from '@/services/dependencies/dependencyService';
 import { ticketDependenciesEnabled } from '@/services/dependencies/featureFlag';
-import { createBlocksSchema, dependencySettingsSchema, subTicketGatingSchema, DependencyError } from '@/services/dependencies/types';
+import { createBlocksSchema, dependencyChangeSchema, dependencyActionSchema, subTicketChangeSchema, DependencyError } from '@/services/dependencies/types';
 import type { SubTicketLinkActor } from '@/services/subTicketLinkService';
 
 function endpoint(fn: (req: Request, actor: SubTicketLinkActor) => Promise<unknown>) {
@@ -11,10 +11,10 @@ function endpoint(fn: (req: Request, actor: SubTicketLinkActor) => Promise<unkno
     const userId = req.user?.id;
     const workspaceId = req.user?.workspaceId;
     if (!userId || !workspaceId) { res.status(401).json({ error: 'Unauthorized' }); return; }
-    if (!(await ticketDependenciesEnabled(workspaceId))) {
-      res.status(404).json({ error: 'Ticket dependencies are not enabled' }); return;
-    }
     try {
+      if (!(await ticketDependenciesEnabled(workspaceId))) {
+        res.status(404).json({ error: 'Ticket dependencies are not enabled' }); return;
+      }
       res.json(await fn(req, { userId, workspaceId, role: '' }));
     } catch (error) {
       if (error instanceof z.ZodError) {
@@ -35,8 +35,14 @@ export const dependencyController = {
     return dependencies.readDependencies(actor, ticketIds);
   }),
   create: endpoint((req, actor) => dependencies.createBlocks(actor, createBlocksSchema.parse(req.body))),
-  update: endpoint((req, actor) => dependencies.updateBlocks(actor, req.params.dependencyId!, dependencySettingsSchema.parse(req.body))),
-  remove: endpoint((req, actor) => dependencies.deleteBlocks(actor, req.params.dependencyId!)),
-  satisfy: endpoint((req, actor) => dependencies.markSatisfied(actor, req.params.dependencyId!)),
-  updateChild: endpoint((req, actor) => dependencies.updateSubTicketGating(actor, req.params.mappingId!, { ...subTicketGatingSchema.parse(req.body), satisfiedStageId: null })),
+  update: endpoint((req, actor) => {
+    const { reason, ...settings } = dependencyChangeSchema.parse(req.body);
+    return dependencies.updateBlocks(actor, req.params.dependencyId!, settings, reason);
+  }),
+  remove: endpoint((req, actor) => dependencies.deleteBlocks(actor, req.params.dependencyId!, dependencyActionSchema.parse(req.body ?? {}).reason)),
+  satisfy: endpoint((req, actor) => dependencies.markSatisfied(actor, req.params.dependencyId!, dependencyActionSchema.parse(req.body ?? {}).reason)),
+  updateChild: endpoint((req, actor) => {
+    const { reason, ...settings } = subTicketChangeSchema.parse(req.body);
+    return dependencies.updateSubTicketGating(actor, req.params.mappingId!, { ...settings, satisfiedStageId: null }, reason);
+  }),
 };

@@ -244,9 +244,6 @@ export const ticketSubTicketMappingTable = table('ticket_sub_ticket_mappings')
     strength: enumeration<DependencyStrength>().optional(),
     gatedStageId: string().optional(),
     satisfiedAt: number().optional(),
-    overriddenAt: number().optional(),
-    overriddenBy: string().optional(),
-    overrideReason: string().optional(),
   })
   .primaryKey('id');
 

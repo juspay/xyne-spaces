@@ -128,3 +128,21 @@ test('unready enforcement cannot be enabled and does not load the native flag pr
   assert.equal(TICKET_DEPENDENCIES_ENFORCEMENT_READY, false);
   assert.equal(await ticketDependenciesEnabled('workspace'), false);
 });
+
+test('CHILD Zero schema cannot replicate override author or free text', async () => {
+  const { schema } = await import('@xyne/shared');
+  for (const column of ['overriddenAt', 'overriddenBy', 'overrideReason']) {
+    assert.equal(column in schema.tables.ticket_sub_ticket_mappings.columns, false);
+  }
+});
+
+test('flag evaluation fallback is not an explicit permission to disable enforcement', async () => {
+  const { requireBooleanFlag } = await import('../../src/services/requiredFeatureFlag');
+  assert.equal(requireBooleanFlag({ value: true, reason: 'TARGETING_MATCH' }), true);
+  assert.equal(requireBooleanFlag({ value: false, reason: 'STATIC' }), false);
+  for (const details of [
+    { value: false, reason: 'ERROR' },
+    { value: false, reason: 'DEFAULT' },
+    { value: false, reason: 'UNKNOWN', errorCode: 'PROVIDER_NOT_READY' },
+  ]) assert.throws(() => requireBooleanFlag(details), /Required feature flag/);
+});

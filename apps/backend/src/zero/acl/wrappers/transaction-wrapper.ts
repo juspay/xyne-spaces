@@ -23,6 +23,10 @@ import {
   type AuditJobsAccumulator,
   type AuditOperation,
 } from '../../audit';
+import { TICKET_DEPENDENCIES_ENFORCEMENT_READY } from '@/services/dependencies/featureFlag';
+import { dependencyTicketWrite, dependencyRequestMoveOptions, zeroDependencySql } from '@/bypassAcl/dependencyStageGate';
+import { getContextOrNull } from '@/database/tenant/context';
+import { DependencyError } from '@/services/dependencies/types';
 import { logger } from '@/utils/logger';
 
 /**
@@ -49,6 +53,7 @@ export function wrapTransactionWithACL(
   sideEffectJobs: SideEffectJobsAccumulator,
   mutatorName?: string,
   auditJobs?: AuditJobsAccumulator,
+  dependencyInput?: unknown,
 ): Transaction<Schema> {
   if (!ctx) {
     throw new Error('QueryContext is required for ACL wrapping');
@@ -62,7 +67,7 @@ export function wrapTransactionWithACL(
   return new Proxy(storageTx, {
     get(target, prop: string | symbol, receiver) {
       if (prop === 'mutate') {
-        return wrapMutateWithACL(target.mutate, ctx, storageTx, vespaJobs, sideEffectJobs, auditJobs);
+        return wrapMutateWithACL(target.mutate, ctx, storageTx, vespaJobs, sideEffectJobs, auditJobs, dependencyInput);
       }
       const value = Reflect.get(target, prop, receiver);
       if (typeof value === 'function') {
@@ -85,6 +90,7 @@ function wrapMutateWithACL(
   vespaJobs: VespaJobsAccumulator,
   sideEffectJobs: SideEffectJobsAccumulator,
   auditJobs?: AuditJobsAccumulator,
+  dependencyInput?: unknown,
 ): Transaction<Schema>['mutate'] {
   return new Proxy(mutate, {
     get(target, tableName: string | symbol, receiver) {
@@ -162,7 +168,19 @@ function wrapMutateWithACL(
             );
 
             // 5. Execute original mutation (if ACL passes)
-            const result = await (originalOp as (this: unknown, value: unknown) => Promise<unknown>).call(this, args);
+            const write = () => (originalOp as (this: unknown, value: unknown) => Promise<unknown>).call(this, args);
+            let result: unknown;
+            if (TICKET_DEPENDENCIES_ENFORCEMENT_READY && tableName === 'tickets' && ['update', 'upsert'].includes(operation)
+              && args && typeof args === 'object' && ['stageName', 'statusV2', 'boardId', 'isArchived', 'eta'].some(key => key in args)) {
+              if (operation === 'upsert') throw new DependencyError('DEPENDENCY_UNSUPPORTED_WRITER', 'Stage-changing upserts must use a ticket transition');
+              const row = args as Record<string, unknown>;
+              const input = dependencyInput as Record<string, unknown> | undefined;
+              const actor = getContextOrNull()?.actor;
+              result = await dependencyTicketWrite(zeroDependencySql(tx), String(row.id), row,
+                { ...dependencyRequestMoveOptions(ctx.userID, input?.id === row.id ? input : undefined, actor === 'system' || actor === 'service'), workspaceId: ctx.workspaceId }, write);
+            } else {
+              result = await write();
+            }
 
             // 5. Collect jobs only after the mutation succeeds.
             if (['insert', 'update', 'upsert', 'delete'].includes(vespaOperation)) {

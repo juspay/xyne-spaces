@@ -1,11 +1,12 @@
 import type { Prisma, PrismaClient } from '@prisma/client';
 import { v4 as uuidv4 } from 'uuid';
-import { ActivityType, MessageType, toEdges } from '@xyne/shared';
+import { ActivityType, MessageType, toEdges, dependencyPolicy, effectiveStrength, lockedStageIds, meetsSatisfiedWhen, type DependencyEdge } from '@xyne/shared';
 import { db } from '@/database/client';
 import { ACLFactory } from '@/database/acl';
 import { transaction } from '../base';
 import { tryAdvisoryXactLock } from '../lockServices';
-import { assertNoDependencyCycle } from '../dependencyGraph';
+import { dependencyBoardAdmin, prismaDependencySql, auditDependencyOverride } from '../dependencyStageGate';
+import { assertNoDependencyCycle, loadDependencyContext } from '../dependencyGraph';
 import {
   canReadTicket, TICKET_SCOPE_SELECT, withWorkspaceRole, type SubTicketLinkActor,
 } from '@/services/subTicketLinkService';
@@ -92,7 +93,7 @@ export async function recordDependencyChange(tx: Tx, actor: DependencyActor, tic
 
 export async function withDependencyWrite<T>(requestActor: DependencyActor, fn: (tx: Tx, actor: DependencyActor) => Promise<T>) {
   return transaction(
-    ['Ticket', 'TicketReferenceMapping', 'TicketSubTicketMapping', 'SubTicket', 'Stage', 'Board', 'User', 'TicketActivity', 'Message', 'Resource', 'ResourceAccess', 'UserGroupMapping'],
+    ['Ticket', 'TicketReferenceMapping', 'TicketSubTicketMapping', 'SubTicket', 'Stage', 'Board', 'User', 'TicketActivity', 'Message', 'Resource', 'ResourceAccess', 'UserGroupMapping', 'TicketDependencyOverride'],
     'dependency graph write: reauthorize both endpoints and serialize with sub-ticket linking', db,
     async tx => {
       const actor = await withWorkspaceRole(tx, requestActor);
@@ -119,14 +120,43 @@ export async function createBlocksTx(tx: Tx, actor: DependencyActor, input: Crea
   const result = await tx.ticketReferenceMapping.create({ data: {
     ...input, id, workspaceId: actor.workspaceId, relationType: 'BLOCKS', origin: 'MANUAL', createdBy: actor.userId,
   } });
+  const context = await loadDependencyContext(tx, actor.workspaceId, [blocker.id]);
+  const blockerTicket = context.ticketsById.get(blocker.id);
+  const board = blockerTicket && context.boardsById.get(blockerTicket.boardId);
+  const stages = board ? context.stagesByBoard.get(board.id) ?? [] : [];
+  const stage = stages.find(stage => stage.name === blockerTicket?.stageName);
+  if (board && stage && meetsSatisfiedWhen(candidate, board, stages, stage)) {
+    await tx.ticketReferenceMapping.update({ where: { id }, data: { satisfiedAt: new Date() } });
+  } else if (blockerTicket?.statusV2 === 'CANCELLED' || (await tx.ticket.findUnique({ where: { id: blocker.id }, select: { isArchived: true } }))?.isArchived) {
+    await tx.ticketReferenceMapping.update({ where: { id }, data: { reviewNeededAt: new Date() } });
+  }
   await recordDependencyChange(tx, actor, [blocker, dependent], 'added');
   return { id: result.id };
 }
 
-export async function changeBlocksTx(tx: Tx, actor: DependencyActor, id: string, operation: 'update' | 'delete' | 'satisfy', settings?: DependencySettings) {
+/** Hardness includes board policy; editing a SOFT row cannot evade a policy-enforced hard gate. */
+export async function assertDependencyChangeAllowed(tx: Tx, actor: DependencyActor, dependent: TicketScope, edge: DependencyEdge, reason?: string) {
+  const context = await loadDependencyContext(tx, actor.workspaceId, [dependent.id]);
+  const board = context.boardsById.get(dependent.boardId);
+  if (!board) throw new DependencyError('DEPENDENCY_NOT_FOUND', 'Dependency not found', 404);
+  const stages = context.stagesByBoard.get(board.id) ?? [];
+  const policy = dependencyPolicy(board.metadata);
+  const hard = edge.strength === 'HARD' || policy.defaultStrength === 'HARD'
+    || lockedStageIds(board, stages, edge.gatedStageId).some(id => effectiveStrength(edge, policy, id) === 'HARD');
+  if (hard && (!reason?.trim() || !(await dependencyBoardAdmin(prismaDependencySql(tx), actor.workspaceId, actor.userId, dependent.boardId)))) {
+    throw new DependencyError('DEPENDENCY_ADMIN_OVERRIDE_REQUIRED', 'A board administrator and reason are required to change a hard dependency', 403);
+  }
+}
+
+export async function changeBlocksTx(tx: Tx, actor: DependencyActor, id: string, operation: 'update' | 'delete' | 'satisfy', settings?: DependencySettings, reason?: string) {
   const row = await tx.ticketReferenceMapping.findFirst({ where: { id, workspaceId: actor.workspaceId, relationType: 'BLOCKS' } });
   if (!row) throw new DependencyError('DEPENDENCY_NOT_FOUND', 'Dependency not found', 404);
   const { blocker, dependent } = await endpoints(tx, actor, row.sourceTicketId, row.targetTicketId);
+  if (operation === 'satisfy' && row.satisfiedAt) return { id };
+  if (operation === 'satisfy' && !row.satisfiedAt && !row.reviewNeededAt) {
+    throw new DependencyError('DEPENDENCY_REVIEW_REQUIRED', 'Only dependencies needing review may be manually satisfied');
+  }
+  await assertDependencyChangeAllowed(tx, actor, dependent, toEdges([row], [], [])[0]!, reason);
   if (operation === 'update') {
     if (!settings) throw new DependencyError('DEPENDENCY_SETTINGS', 'Dependency settings required', 400);
     await validateSettings(tx, blocker, dependent, settings);
@@ -136,23 +166,25 @@ export async function changeBlocksTx(tx: Tx, actor: DependencyActor, id: string,
   } else if (operation === 'delete') {
     await tx.ticketReferenceMapping.delete({ where: { id } });
   } else {
-    if (row.satisfiedAt) return { id };
-    await tx.ticketReferenceMapping.update({ where: { id }, data: { satisfiedAt: new Date() } });
+    await tx.ticketReferenceMapping.update({ where: { id }, data: { satisfiedAt: new Date(), reviewNeededAt: null } });
   }
+  if (reason?.trim()) await auditDependencyOverride(prismaDependencySql(tx), actor.workspaceId, toEdges([row], [], [])[0]!, actor.userId, reason.trim(), operation.toUpperCase());
   await recordDependencyChange(tx, actor, [blocker, dependent], operation === 'satisfy' ? 'marked as satisfied' : operation === 'delete' ? 'removed' : 'updated');
   return { id };
 }
 
-export async function updateSubTicketGatingTx(tx: Tx, actor: DependencyActor, id: string, settings: DependencySettings) {
+export async function updateSubTicketGatingTx(tx: Tx, actor: DependencyActor, id: string, settings: DependencySettings, reason?: string) {
   const mapping = await tx.ticketSubTicketMapping.findFirst({ where: { id, workspaceId: actor.workspaceId } });
   const subTicket = mapping ? await tx.subTicket.findFirst({ where: { id: mapping.subTicketId, workspaceId: actor.workspaceId } }) : null;
   if (!mapping || !subTicket?.mappedTicketId) throw new DependencyError('DEPENDENCY_NOT_FOUND', 'Mapped sub-ticket not found', 404);
   const { blocker, dependent } = await endpoints(tx, actor, subTicket.mappedTicketId, mapping.ticketId);
   if (!(await canEditDependencyTicket(tx, actor, dependent))) throw new DependencyError('DEPENDENCY_FORBIDDEN', 'You must be able to edit the parent ticket', 403);
+  await assertDependencyChangeAllowed(tx, actor, dependent, toEdges([], [mapping], [subTicket])[0]!, reason);
   await validateSettings(tx, blocker, dependent, { ...settings, satisfiedStageId: null });
   const candidate = toEdges([], [{ ...mapping, ...settings }], [subTicket])[0]!;
   await assertNoDependencyCycle(tx, actor.workspaceId, candidate);
   await tx.ticketSubTicketMapping.update({ where: { id }, data: { strength: settings.strength, gatedStageId: settings.gatedStageId } });
+  if (reason?.trim()) await auditDependencyOverride(prismaDependencySql(tx), actor.workspaceId, candidate, actor.userId, reason.trim(), 'UPDATE');
   await recordDependencyChange(tx, actor, [dependent], 'sub-ticket gating updated');
   return { id };
 }

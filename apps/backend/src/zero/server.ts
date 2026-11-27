@@ -320,6 +320,7 @@ export async function handleMutate(request: Request, enc?: MutationEncryptionCon
             mutationSideEffectJobs,
             mutatorName,
             mutationAuditJobs,
+            args,
           );
           const mutator = mustGetMutator(mutators, mutatorName);
           return runEncryptedMutation(args, prepared, async (mutationArgs, derived) => {
@@ -870,7 +871,7 @@ export async function runCatalogMutation(
 
   await dbProvider.transaction(async (tx) => {
     const auditJobs = await createZeroAuditJobs(tx, ctx.userID);
-    const wrappedTx = wrapTransactionWithACL(tx, ctx, vespaJobs, sideEffectJobs, name, auditJobs);
+    const wrappedTx = wrapTransactionWithACL(tx, ctx, vespaJobs, sideEffectJobs, name, auditJobs, preparedArgs);
     // Args are validated by the mutator's own zod schema; the cast only satisfies
     // Zero's ReadonlyJSONValue parameter type.
     await runEncryptedMutation(preparedArgs, prepared, async (mutationArgs, derived) => {

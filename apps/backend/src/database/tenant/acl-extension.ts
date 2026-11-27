@@ -10,11 +10,13 @@
 import { PrismaClient, Prisma } from '@prisma/client';
 import { AsyncLocalStorage } from 'async_hooks';
 import { getContextOrNull, currentWorkspaceId, isRequestContext } from './context';
+import { guardTicketDependencyWrite } from '../middleware/ticketDependencies';
 import { ACLFactory } from '@/database/acl';
 import { logger } from '@/utils/logger';
 
 type TransactionFrame = { tx: Prisma.TransactionClient; open: boolean };
 const txStorage = new AsyncLocalStorage<TransactionFrame>();
+const dependencyConnection = new AsyncLocalStorage<Prisma.TransactionClient>();
 
 /**
  * The client of the interactive transaction the caller is running in, or undefined outside
@@ -189,14 +191,19 @@ type ModelDelegate = {
   findFirst: (args: unknown) => Promise<unknown>;
 };
 
-export function withAclExtension<T extends PrismaClient>(prisma: T): T {
+export function withAclExtension<T extends PrismaClient>(prisma: T, rawClient: PrismaClient = prisma, dependencyWrite: typeof guardTicketDependencyWrite = guardTicketDependencyWrite): T {
   // `base` = the un-filtered client, reused for ACL construction and the pre-check/redirect
   // reads so neither recurses back through this extension.
   const base = prisma as unknown as PrismaClient;
   const queryExtended = prisma.$extends({
     query: {
       $allModels: {
-        async $allOperations({ model, operation, args, query }) {
+        async $allOperations({ model, operation, args, query: originalQuery }) {
+          // Invoke enforcement ONLY through the final ACL-approved continuation, not middleware.
+          // rawClient has no query extensions: the outer encryption/audit hooks already transformed args.
+          // Erase Prisma's recursive result generic at this internal continuation boundary.
+          const execute = originalQuery as unknown as (checked: unknown) => Promise<unknown>;
+          const query = (checked: unknown) => dependencyWrite(rawClient, model, operation, checked, execute, dependencyConnection.getStore());
           if (txStorage.getStore()?.open) {
             // Interactive transactions run on the base client; record what goes through.
             notePattern('[acl] ran inside a transaction', model, operation);
@@ -421,9 +428,27 @@ export function withAclExtension<T extends PrismaClient>(prisma: T): T {
         if (typeof args[0] === 'function') {
           const fn = args[0] as (tx: Prisma.TransactionClient) => unknown;
           return runTransaction(async (tx: Prisma.TransactionClient) => {
-            const frame: TransactionFrame = { tx, open: true };
+            // Callback clients inherit the query extension. Mark delegate calls so the
+            // final continuation can distinguish this connection from a global client
+            // used inside the callback. Existing caller-authorized semantics stay intact.
+            const ticket = tx.ticket;
+            const protectedTx: Prisma.TransactionClient = new Proxy(tx, {
+              get(target, property) {
+                if (property === 'ticket') return protectedTicket;
+                return Reflect.get(target, property, target);
+              },
+            });
+            const protectedTicket = new Proxy(ticket, {
+              get(target, property) {
+                const method = Reflect.get(target, property, target);
+                if (typeof method !== 'function') return method;
+                if (!['update', 'updateMany', 'upsert'].includes(String(property))) return method.bind(target);
+                return (input: unknown) => dependencyConnection.run(protectedTx, async () => await method.call(target, input));
+              },
+            });
+            const frame: TransactionFrame = { tx: protectedTx, open: true };
             try {
-              return await txStorage.run(frame, () => fn(tx));
+              return await txStorage.run(frame, () => fn(protectedTx));
             } finally {
               frame.open = false;
             }

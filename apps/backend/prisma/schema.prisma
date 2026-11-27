@@ -10,7 +10,7 @@ generator client {
 
 generator zero {
   provider      = "prisma-generator-zero"
-  excludeTables = ["WorkspaceJoinRequest", "AiProvisioningStatus", "OrgLLMServiceAccountCredential", "OrganizationDomain", "QuestionnaireResponse", "ExternalSource", "WorkflowFolder", "WorkflowCredential", "AgentConversationShare", "OrgMemberCredential"]
+  excludeTables = ["WorkspaceJoinRequest", "AiProvisioningStatus", "OrgLLMServiceAccountCredential", "OrganizationDomain", "QuestionnaireResponse", "ExternalSource", "WorkflowFolder", "WorkflowCredential", "AgentConversationShare", "OrgMemberCredential", "TicketDependencyOverride"]
 }
 
 datasource db {
@@ -455,6 +455,24 @@ model TicketReferenceMapping {
   @@index([targetTicketId, relationType])
   @@index([sourceTicketId, relationType])
   @@schema("public")
+}
+
+// Private audit: reasons can name unreadable tickets and MUST NOT enter Zero sync.
+// No FK to the edge: removal/merge must not erase the administrative audit trail.
+model TicketDependencyOverride {
+  id          String   @id @default(cuid())
+  workspaceId String
+  ticketId    String
+  edgeId      String
+  edgeKind    String
+  actorId     String?
+  action      String
+  reason      String
+  createdAt   DateTime @default(now())
+
+  @@index([workspaceId, ticketId, createdAt])
+  @@map("ticket_dependency_overrides")
+  @@schema("non_zero")
 }
 
 model TicketStageEta {

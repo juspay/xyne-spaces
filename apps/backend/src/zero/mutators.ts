@@ -6376,6 +6376,8 @@ export function createMutators(
           statusV2: z.string().optional(),
           priority: z.string().optional(),
           stageName: z.string().optional(),
+          dependencyReason: z.string().trim().min(1).max(2000).optional(),
+          dependencyAdminOverride: z.boolean().optional(),
           assignedTo: z.string().nullable().optional(),
           ticketType: z.string().optional(),
           userGroupId: z.string().nullable().optional(),

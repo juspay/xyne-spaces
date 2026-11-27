@@ -25,6 +25,7 @@
  */
 
 import { OpenFeature, Client, EvaluationContext, JsonValue } from '@openfeature/server-sdk';
+import { requireBooleanFlag } from './requiredFeatureFlag';
 import { config } from '@/config/env';
 import { logger } from '@/utils/logger';
 import { SuperpositionProvider } from 'superposition-provider';
@@ -152,6 +153,12 @@ export class SuperpositionClient {
       logger.error(`[SuperpositionClient] Error getting boolean flag '${flagKey}':`, error);
       return defaultValue;
     }
+  }
+
+  /** Security-sensitive callers must distinguish an explicit false from SDK fallback. */
+  public async getRequiredBooleanValue(flagKey: string, context?: SuperpositionContext): Promise<boolean> {
+    await this.ensureInitialized();
+    return requireBooleanFlag(await this.client!.getBooleanDetails(flagKey, false, context));
   }
 
   /**

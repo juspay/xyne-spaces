@@ -39,3 +39,13 @@ for (const role of ['MEMBER', 'GUEST']) {
     assert.equal(whereCalls.length, 1);
   });
 }
+
+for (const role of ['ADMIN', 'MEMBER', 'GUEST']) {
+  test(`private override audit denies generic user reads and writes for ${role}`, async () => {
+    const { ACLFactory } = await import('../../src/database/acl/acl-factory');
+    const auditAcl = ACLFactory.getACL('ticketDependencyOverride', { userId: 'actor', workspaceId: 'workspace', role }, {} as never);
+    assert.deepEqual(await auditAcl.getWhereClause(), { id: { in: [] } });
+    assert.deepEqual(await auditAcl.getMutateWhere(), { id: { in: [] } });
+    assert.equal(await auditAcl.canCreate({}), false);
+  });
+}

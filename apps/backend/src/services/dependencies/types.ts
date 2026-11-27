@@ -11,6 +11,10 @@ export const createBlocksSchema = dependencySettingsSchema.extend({
 }).strict();
 export const subTicketGatingSchema = dependencySettingsSchema.omit({ satisfiedStageId: true });
 
+export const dependencyChangeSchema = dependencySettingsSchema.extend({ reason: z.string().trim().min(1).max(2000).optional() }).strict();
+export const dependencyActionSchema = z.object({ reason: z.string().trim().min(1).max(2000).optional() }).strict();
+export const subTicketChangeSchema = subTicketGatingSchema.extend({ reason: z.string().trim().min(1).max(2000).optional() }).strict();
+
 export type DependencySettings = z.infer<typeof dependencySettingsSchema>;
 export type CreateBlocksInput = z.infer<typeof createBlocksSchema>;
 
