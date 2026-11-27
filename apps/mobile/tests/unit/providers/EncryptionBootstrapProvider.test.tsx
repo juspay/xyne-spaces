@@ -6,7 +6,12 @@ import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals
 import { act, render } from '@testing-library/react-native';
 import type { ReactElement } from 'react';
 
-type State = { keyring: object | null; isReady: boolean; error: Error | null; config: null };
+type State = {
+  keyring: object | null;
+  isReady: boolean;
+  error: Error | null;
+  config: { apiClientEncryptionEnabled: boolean } | null;
+};
 
 class MockModuleMissingError extends Error {}
 
@@ -104,6 +109,27 @@ describe('EncryptionBootstrapProvider', () => {
     await act(async () => setCookie());
     expect(mockSetCookie).toHaveBeenCalledWith('BPUB');
     expect(latest?.isReady).toBe(true);
+  });
+
+  it('gives the API client the keyring only under API client encryption', async () => {
+    const { getActiveKeyring } =
+      require('@/src/services/encryption/activeKeyring') as typeof import('@/src/services/encryption/activeKeyring');
+
+    mockState = {
+      keyring: KEYRING,
+      isReady: true,
+      error: null,
+      config: { apiClientEncryptionEnabled: false },
+    };
+    const { rerender } = renderProvider();
+    await act(async () => undefined);
+    expect(mockSetCookie).toHaveBeenCalledWith('BPUB');
+    expect(getActiveKeyring()).toBeNull();
+
+    mockState = { ...mockState, config: { apiClientEncryptionEnabled: true } };
+    rerender();
+    await act(async () => undefined);
+    expect(getActiveKeyring()).toBe(KEYRING);
   });
 
   it('reports a failed cookie write as a setup error', async () => {

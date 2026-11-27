@@ -57,9 +57,12 @@ export function EncryptionBootstrapProvider({ children }: { children: ReactNode 
     null,
   );
 
-  const { keyring } = state;
+  // The API client encrypts bodies and decrypts responses only under API client encryption, as
+  // the dashboard does; the cookie is for Zero, which encrypts whenever there is a keyring.
+  const { keyring, config } = state;
+  const apiEncryption = config?.apiClientEncryptionEnabled === true;
   useEffect(() => {
-    setActiveKeyring(keyring);
+    setActiveKeyring(apiEncryption ? keyring : null);
     if (keyring) {
       let cancelled = false;
       setSyncProxyTransitKey(keyring.clientPublicKey)
@@ -85,7 +88,7 @@ export function EncryptionBootstrapProvider({ children }: { children: ReactNode 
       };
     }
     return (): void => setActiveKeyring(null);
-  }, [keyring]);
+  }, [keyring, apiEncryption]);
 
   // Ready only once the cookie is set: the sync proxy reads the key from it once, when the Zero
   // websocket connects, so a Zero opened before it would get every encrypted field withheld.

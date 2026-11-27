@@ -5,7 +5,9 @@ import { deriveTransitSharedSecret, getTransitPublicKey, isP256Point } from '../
 
 // Any app window's top-level first-party page — the main window, the call window, pop-outs —
 // gets the same key: each registers its public key on the shared session, so a window with a
-// different key would overwrite the others'. Webviews and sub-frames are refused.
+// different key would overwrite the others'. Webviews and sub-frames are refused. That does not
+// keep the browser panel's Xyne pages off the session: they have no transitKey API, so they
+// register their own IndexedDB key on the session its synced cookies share.
 function isAppPageSender(event: IpcMainInvokeEvent): boolean {
   const frame = event.senderFrame;
   const trusted =
