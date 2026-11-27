@@ -16,6 +16,8 @@ import { activityService } from '@/services/activity/activityService';
 import { notificationService } from '@/services/notificationService';
 import { logger } from '@/utils/logger';
 import { getFormFieldUserActors } from '@/utils/ticketActorUtils';
+import { TICKET_DEPENDENCIES_ENFORCEMENT_READY, ticketDependenciesEnabled } from '@/services/dependencies/featureFlag';
+import { assertNoDependencyCycle } from '@/bypassAcl/dependencyGraph';
 import { subTicketLinkClosesLoop } from '@/bypassAcl/subTicketServices';
 
 type PrismaTx = Prisma.TransactionClient;
@@ -221,6 +223,19 @@ export async function assertNoCycle(
   ticketId: string,
   mappedTicketId: string,
 ): Promise<void> {
+  if (TICKET_DEPENDENCIES_ENFORCEMENT_READY) {
+    const parent = await tx.ticket.findUnique({ where: { id: ticketId }, select: { workspaceId: true } });
+    if (!parent) throw new SubTicketLinkError('Parent ticket not found', 404);
+    if (await ticketDependenciesEnabled(parent.workspaceId)) {
+      await assertNoDependencyCycle(tx, parent.workspaceId, {
+        id: `candidate-child:${ticketId}:${mappedTicketId}`, kind: 'CHILD',
+        blockerTicketId: mappedTicketId, dependentTicketId: ticketId,
+        strength: 'SOFT', gatedStageId: null, satisfiedStageId: null,
+        satisfiedAt: null, reviewNeededAt: null, override: null,
+      });
+    }
+  }
+
   const closesLoop = await subTicketLinkClosesLoop(tx, ticketId, mappedTicketId);
 
   if (closesLoop) {

@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { dependencyController } from '@/controllers/dependencyController';
 import { AccessType } from '@xyne/shared';
 import { TicketController } from '../controllers/ticketController';
 import { AnalyticsController } from '../controllers/analyticsController';
@@ -31,6 +32,14 @@ router.post('/kanban/track-counts', kanbanTicketController.getTrackCounts);
 router.post('/flow-run-export/pdf', flowRunExportController.exportPdf);
 router.get('/my-board-ids', ticketController.getMyTicketBoardIds);
 router.get('/board-fields', ticketController.getBoardTicketFields);
+
+// Batch reads are deliberately separate from raw Zero mapping rows (restricted endpoint redaction).
+router.post('/dependencies/read', dependencyController.read);
+router.post('/dependencies', authorize('TICKETS', AccessType.WRITE), dependencyController.create);
+router.patch('/dependencies/:dependencyId', authorize('TICKETS', AccessType.WRITE), dependencyController.update);
+router.delete('/dependencies/:dependencyId', authorize('TICKETS', AccessType.WRITE), dependencyController.remove);
+router.post('/dependencies/:dependencyId/satisfy', authorize('TICKETS', AccessType.WRITE), dependencyController.satisfy);
+router.patch('/sub-ticket-gating/:mappingId', authorize('TICKETS', AccessType.WRITE), dependencyController.updateChild);
 
 // Create a new ticket
 router.post('/', uploadMultiple, ticketController.createTicket);
