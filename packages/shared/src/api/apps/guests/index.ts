@@ -1,6 +1,7 @@
 import { route } from '../../../enc-contracts/api-route.js';
 import { z } from 'zod';
-import { email } from '../people.schemas.js';
+
+const email = z.string().trim().email().max(254);
 
 const guestView = z.object({
   userId: z.string(),

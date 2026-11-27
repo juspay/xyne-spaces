@@ -1,6 +1,5 @@
 import { route } from '../../enc-contracts/api-route.js';
 import { z } from 'zod';
-import { appCommand, appId, commandTypeQuery, dateish } from './dashboard.schemas.js';
 import { CommandAccessibility, CommandType } from '../../zero/types.js';
 import { chat } from './chat/index.js';
 import { files } from './files/index.js';
@@ -14,6 +13,23 @@ import { permissions } from './permissions/index.js';
 import { calls } from './calls/index.js';
 import { ticket } from './ticket/index.js';
 import { slack } from './slack/index.js';
+
+const dateish = z.union([z.date(), z.string()]);
+const appId = z.object({ appId: z.string().min(1, 'App ID is required').trim() });
+const commandTypeQuery = z.object({ commandType: z.nativeEnum(CommandType) });
+/** An app's slash command. Also answered by /apps/commands and /apps/channel/commands: keep the copies alike. */
+const appCommand = z.object({
+  id: z.string(),
+  appId: z.string(),
+  commandName: z.string(),
+  description: z.string(),
+  commandType: z.nativeEnum(CommandType),
+  commandAccessibility: z.nativeEnum(CommandAccessibility),
+  isForThread: z.boolean().nullable().optional(),
+  isForChat: z.boolean().nullable().optional(),
+  createdAt: dateish,
+  updatedAt: dateish,
+});
 
 /** An app, as stored (its signing secret is returned to its creator on create; see `signing-secret`). */
 const appRow = z.object({

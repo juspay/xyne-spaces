@@ -1,6 +1,10 @@
 import { route } from '../../../enc-contracts/api-route.js';
 import { z } from 'zod';
-import { appId, dateish, ok, permissionStatus } from '../dashboard.schemas.js';
+
+const dateish = z.union([z.date(), z.string()]);
+const permissionStatus = z.object({ scope: z.string(), status: z.string() });
+const ok = z.object({ ok: z.literal(true) });
+const appId = z.object({ appId: z.string().min(1, 'App ID is required').trim() });
 
 // ── Permissions (the app template's) ────────────────────────────────────────
 

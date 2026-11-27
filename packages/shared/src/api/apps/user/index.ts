@@ -1,6 +1,8 @@
 import { route } from '../../../enc-contracts/api-route.js';
 import { z } from 'zod';
-import { dateish, email } from '../people.schemas.js';
+
+const dateish = z.union([z.date(), z.string()]);
+const email = z.string().trim().email().max(254);
 
 const userResponse = z.object({
   userId: z.string(),

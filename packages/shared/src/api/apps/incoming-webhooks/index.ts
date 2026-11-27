@@ -1,7 +1,9 @@
 import { route } from '../../../enc-contracts/api-route.js';
 import { z } from 'zod';
 import { AppIncomingWebhookAction, AppIncomingWebhookType } from '../../../zero/types.js';
-import { dateish, installedAppId } from '../dashboard.schemas.js';
+
+const dateish = z.union([z.date(), z.string()]);
+const installedAppId = z.object({ installedAppId: z.string().min(1).trim() });
 
 const incomingWebhook = z.object({
   id: z.string(),

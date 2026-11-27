@@ -1,6 +1,7 @@
 import { route } from '../../../enc-contracts/api-route.js';
 import { z } from 'zod';
-import { dateish } from '../people.schemas.js';
+
+const dateish = z.union([z.date(), z.string()]);
 
 const userGroupResponse = z.object({
   id: z.string(),

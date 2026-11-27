@@ -1,7 +1,21 @@
 import { route } from '../../../enc-contracts/api-route.js';
 import { z } from 'zod';
-import { CommandType } from '../../../zero/types.js';
-import { appCommand } from '../dashboard.schemas.js';
+import { CommandAccessibility, CommandType } from '../../../zero/types.js';
+
+const dateish = z.union([z.date(), z.string()]);
+/** An app's slash command. Also answered by /apps/commands and /apps/channel/commands: keep the copies alike. */
+const appCommand = z.object({
+  id: z.string(),
+  appId: z.string(),
+  commandName: z.string(),
+  description: z.string(),
+  commandType: z.nativeEnum(CommandType),
+  commandAccessibility: z.nativeEnum(CommandAccessibility),
+  isForThread: z.boolean().nullable().optional(),
+  isForChat: z.boolean().nullable().optional(),
+  createdAt: dateish,
+  updatedAt: dateish,
+});
 
 // ─── Xyne Apps channel API (/apps/channel/...), bot token ─────────────────────
 // Ids, names and settings only: nothing encrypted. Body and query rules are the controllers'

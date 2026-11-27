@@ -1,6 +1,12 @@
 import { route } from '../../../enc-contracts/api-route.js';
 import { z } from 'zod';
-import { commandTypeQuery, dateish, installedAppId, ok, permissionStatus } from '../dashboard.schemas.js';
+import { CommandType } from '../../../zero/types.js';
+
+const dateish = z.union([z.date(), z.string()]);
+const permissionStatus = z.object({ scope: z.string(), status: z.string() });
+const ok = z.object({ ok: z.literal(true) });
+const installedAppId = z.object({ installedAppId: z.string().min(1).trim() });
+const commandTypeQuery = z.object({ commandType: z.nativeEnum(CommandType) });
 
 const installedCommand = z.object({
   id: z.string(),
