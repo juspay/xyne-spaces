@@ -51,7 +51,8 @@ import { handleRunCompletion } from "../queue/run-recovery-worker.js";
 import { getWorkspaceIdForUser } from "../lib/spaces-db.js";
 import { resolveAgentSpacesAuth } from "../surfaces/spaces/user-auth.js";
 import { isAllowedExternalCallbackUrl, isInternalCallbackOrigin, type ExternalResultCallbackConfig } from "../surfaces/external-api/delivery.js";
-import type { VerifiedCliToken } from "../lib/cli-tokens.js";
+import { TOKEN_PREFIX, SERVICE_TOKEN_PREFIX, type VerifiedCliToken } from "../lib/cli-tokens.js";
+import { DELEGATION_HEADER } from "../lib/spaces-delegation.js";
 import { agentScopeAllows, canPostToChannels, sanitizeExternalRunBody } from "../lib/service-tokens.js";
 import { encryptSurfaceSecret } from "../lib/surface-resolver.js";
 import { resolveClawUserIdForSpacesIdentity } from "../lib/users-jit.js";
@@ -82,11 +83,24 @@ const router = Router();
 
 
 
+function presentsAccessToken(req: Request): boolean {
+  const header = req.headers.authorization;
+  if (typeof header !== "string") return false;
+  const raw = /^Bearer\s+(.+)$/i.exec(header.trim())?.[1]?.trim();
+  if (!raw) return false;
+  return raw.startsWith(TOKEN_PREFIX) || raw.startsWith(SERVICE_TOKEN_PREFIX);
+}
+
+function presentsDelegation(req: Request): boolean {
+  const raw = req.headers[DELEGATION_HEADER];
+  return typeof raw === "string" && raw.trim().length > 0;
+}
+
 function requireRunCaller(req: Request, res: Response, next: NextFunction): void | Promise<void> {
   if (req.originalUrl.includes("/internal/run")) {
     return requireAuth(req, res, next);
   }
-  if ((req.body as { triggerSource?: unknown } | undefined)?.triggerSource === "api") {
+  if (presentsAccessToken(req) || presentsDelegation(req)) {
     return requireAuth(req, res, next);
   }
   return requireUserAuth(req, res, next);
