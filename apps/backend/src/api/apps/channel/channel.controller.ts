@@ -1,4 +1,4 @@
-import { ChannelRole, type RouteBody, type RouteQuery, type appsChannelDeskConfig, type appsChannelInfo, type appsChannelList, type appsChannelOpenDm, type appsChannelUpdate } from '@xyne/shared';
+import { api, ChannelRole, type RouteBody, type RouteQuery } from '@xyne/shared';
 import { setAppChannelOnDesk } from '@/channelsDesk/admin';
 import { ChannelController } from '@/controllers/channelController';
 import { db } from '@/database/client';
@@ -28,7 +28,7 @@ function requireBot(user: AuthenticatedUser | undefined): AuthenticatedUser & { 
 }
 
 /** POST /apps/channel/openDm: the bot's DM with a user of its own workspace. */
-export async function openDm(input: { body: RouteBody<typeof appsChannelOpenDm>; user: AuthenticatedUser | undefined }) {
+export async function openDm(input: { body: RouteBody<typeof api.apps.channel.openDm>; user: AuthenticatedUser | undefined }) {
   const bot = input.user;
   const workspaceId = bot?.workspaceId; // tenant from the verified token, never the body
   if (!bot || !workspaceId) throw new ContractError(401, { error: 'Unauthorized' });
@@ -57,7 +57,7 @@ async function findChannel(channelId: string | undefined, channelName: string | 
 }
 
 /** POST /apps/channel/info */
-export async function channelInfo(input: { body: RouteBody<typeof appsChannelInfo> }) {
+export async function channelInfo(input: { body: RouteBody<typeof api.apps.channel.info> }) {
   try {
     const channel = await findChannel(input.body.channelId, input.body.channelName);
     return {
@@ -80,7 +80,7 @@ export async function channelInfo(input: { body: RouteBody<typeof appsChannelInf
 }
 
 /** POST /apps/channel/deskChannelConfig: the channel's EmailChannelPreference. */
-export async function deskChannelConfig(input: { body: RouteBody<typeof appsChannelDeskConfig> }) {
+export async function deskChannelConfig(input: { body: RouteBody<typeof api.apps.channel.deskChannelConfig> }) {
   try {
     const channel = await findChannel(input.body.channelId, input.body.channelName);
     const config = await new EmailChannelPreferenceRepository().findByChannelId(channel.id);
@@ -93,7 +93,7 @@ export async function deskChannelConfig(input: { body: RouteBody<typeof appsChan
 }
 
 /** GET /apps/channel/list: cursor pagination, optional exact name filter. */
-export async function listChannels(input: { query: RouteQuery<typeof appsChannelList>; user: AuthenticatedUser | undefined }) {
+export async function listChannels(input: { query: RouteQuery<typeof api.apps.channel.list>; user: AuthenticatedUser | undefined }) {
   const { limit, cursor, joined, projectId, scopeType, name } = input.query;
   // Tenant comes from the verified app token, never from the query string.
   const bot = requireBot(input.user);
@@ -185,7 +185,7 @@ async function announceAdded(bot: AuthenticatedUser, channelId: string, added: A
  * Channels desk or take it off, and add people (with updateRoles, also set existing roles).
  */
 export async function updateChannel(input: {
-  body: RouteBody<typeof appsChannelUpdate>;
+  body: RouteBody<typeof api.apps.channel.update>;
   user: AuthenticatedUser | undefined;
   app: AppCaller | undefined;
 }) {

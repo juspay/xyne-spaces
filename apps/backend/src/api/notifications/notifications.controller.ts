@@ -1,5 +1,4 @@
-import { NotificationType, type RouteBody } from '@xyne/shared';
-import type { notificationsMobileRegister, notificationsPreferencesSet, notificationsSubscribe } from '@xyne/shared';
+import { api, NotificationType, type RouteBody } from '@xyne/shared';
 import type { IncomingHttpHeaders } from 'node:http';
 import { ContractError } from '@/framework/api';
 import { deviceKeyFromHeaders } from '@/services/authSessionService';
@@ -27,7 +26,7 @@ const ok = { success: true as const };
 
 /** POST /notifications/subscribe: a browser push subscription. */
 export async function subscribe(input: {
-  body: RouteBody<typeof notificationsSubscribe>;
+  body: RouteBody<typeof api.notifications.subscribe>;
   user: AuthenticatedUser | undefined;
   userAgent: string | undefined;
 }) {
@@ -57,7 +56,7 @@ export async function unsubscribe(input: { body: { endpoint: string }; user: Aut
 
 /** POST /notifications/mobile/register: a push token, tied to this login session and device. */
 export async function registerMobilePushToken(input: {
-  body: RouteBody<typeof notificationsMobileRegister>;
+  body: RouteBody<typeof api.notifications.mobileRegister>;
   user: AuthenticatedUser | undefined;
   headers: IncomingHttpHeaders;
 }) {
@@ -192,7 +191,7 @@ export async function getPreferences(input: { user: AuthenticatedUser | undefine
 }
 
 /** PUT /notifications/preferences (unknown notification types were already dropped by the contract). */
-export async function updatePreferences(input: { body: RouteBody<typeof notificationsPreferencesSet>; user: AuthenticatedUser | undefined }) {
+export async function updatePreferences(input: { body: RouteBody<typeof api.notifications.preferencesSet>; user: AuthenticatedUser | undefined }) {
   try {
     await notificationService.updateUserPreferences(requireUserId(input.user), input.body);
     return ok;

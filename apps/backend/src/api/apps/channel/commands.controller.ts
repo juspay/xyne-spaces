@@ -1,11 +1,11 @@
-import { type RouteQuery, type appsChannelCommands } from '@xyne/shared';
+import { api, type RouteQuery } from '@xyne/shared';
 import { CommandAccessibility, CommandType } from '@/database/repositories/appCommandRepository';
 import { appCommandRepository, internal } from '../dashboard.helpers';
 
 /** GET /apps/channel/:channelId/commands: commands or shortcuts available in a channel (shortcuts carry appName). */
 export async function listChannelCommands(input: {
   params: { channelId: string };
-  query: RouteQuery<typeof appsChannelCommands>;
+  query: RouteQuery<typeof api.apps.channel.commands>;
 }) {
   const { commandType, commandAccessibility } = input.query;
   const filter: { commandType: CommandType; commandAccessibility?: CommandAccessibility } = { commandType: commandType as CommandType };

@@ -1,5 +1,4 @@
-import { type RouteBody } from '@xyne/shared';
-import type { clientEventsPost, clientEventsRemove } from '@xyne/shared';
+import { api, type RouteBody } from '@xyne/shared';
 import { DatabaseClient } from '@/database/client';
 import { withWorkspaceScope } from '@/database/tenant/context';
 import { ContractError } from '@/framework/api';
@@ -108,7 +107,7 @@ export async function allHeaderOverrides(input: { user: AuthenticatedUser | unde
 }
 
 /** POST /client-events: push a command (header_update or reload) to users' browsers. */
-export async function postClientEvent(input: { body: RouteBody<typeof clientEventsPost>; user: AuthenticatedUser | undefined }) {
+export async function postClientEvent(input: { body: RouteBody<typeof api.clientEvents.post>; user: AuthenticatedUser | undefined }) {
   try {
     const { userIds, event, payload } = input.body;
     const force = input.body.force === true;
@@ -138,7 +137,7 @@ export async function postClientEvent(input: { body: RouteBody<typeof clientEven
 }
 
 /** DELETE /client-events: remove header overrides (all, or the named ones) and tell the users' browsers. */
-export async function removeHeaderOverrides(input: { body: RouteBody<typeof clientEventsRemove>; user: AuthenticatedUser | undefined }) {
+export async function removeHeaderOverrides(input: { body: RouteBody<typeof api.clientEvents.remove>; user: AuthenticatedUser | undefined }) {
   try {
     const { userIds, headerNames } = input.body;
     const options = { force: input.body.force === true, loadingSeconds: input.body.loadingSeconds ?? DEFAULT_LOADING_SECONDS };

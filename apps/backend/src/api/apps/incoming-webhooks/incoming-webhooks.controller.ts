@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { AppIncomingWebhookAction, AppIncomingWebhookType, type RouteBody, type RouteQuery, type appsIncomingWebhooksCreate, type appsIncomingWebhooksList, type appsIncomingWebhooksUpdate } from '@xyne/shared';
+import { api, AppIncomingWebhookAction, AppIncomingWebhookType, type RouteBody, type RouteQuery } from '@xyne/shared';
 import { repositories } from '@/database/repositories';
 import { ContractError } from '@/framework/api';
 import { decrypt, encrypt } from '@/services/encryptionService';
@@ -12,7 +12,7 @@ import { incomingWebhookController } from '../../../apps/controllers/incomingWeb
 type BotUser = (Awaited<ReturnType<typeof repositories.users.findById>> & { workspaceId?: string }) | null;
 
 /** POST /apps/incoming-webhooks */
-export async function createIncomingWebhook(input: { body: RouteBody<typeof appsIncomingWebhooksCreate>; user: AuthenticatedUser | undefined }) {
+export async function createIncomingWebhook(input: { body: RouteBody<typeof api.apps.incomingWebhooks.create>; user: AuthenticatedUser | undefined }) {
   try {
     const { installedAppId, channelId, boardId, name, type, action } = input.body;
     const user = input.user;
@@ -93,7 +93,7 @@ export async function createIncomingWebhook(input: { body: RouteBody<typeof apps
 /** GET /apps/incoming-webhooks/:installedAppId */
 export async function listIncomingWebhooks(input: {
   params: { installedAppId: string };
-  query: RouteQuery<typeof appsIncomingWebhooksList>;
+  query: RouteQuery<typeof api.apps.incomingWebhooks.list>;
   user: AuthenticatedUser | undefined;
 }) {
   const { installedAppId } = input.params;
@@ -159,7 +159,7 @@ async function ownWebhook(webhookId: string, workspaceId: string | undefined) {
 /** PATCH /apps/incoming-webhooks/:webhookId: rename (not a revoked one). */
 export async function updateIncomingWebhook(input: {
   params: { webhookId: string };
-  body: RouteBody<typeof appsIncomingWebhooksUpdate>;
+  body: RouteBody<typeof api.apps.incomingWebhooks.update>;
   user: AuthenticatedUser | undefined;
 }) {
   const { webhookId } = input.params;

@@ -1,0 +1,59 @@
+import { route } from '../../enc-contracts/api-route.js';
+import { z } from 'zod';
+
+// ─── Message reactions (/messages/...): dashboard login. Emoji names and user ids only. ───
+
+const messageId = z.object({ messageId: z.string().min(1) });
+const reactionParams = z.object({ messageId: z.string().min(1), emojiName: z.string().min(1) });
+/** One emoji on a message: who reacted, and whether the caller did. */
+const messageReactions = z.object({
+  emojiName: z.string(),
+  count: z.number(),
+  userHasReacted: z.boolean(),
+  users: z.array(z.object({ userId: z.string(), name: z.string(), email: z.string().optional() })),
+});
+const reactions = z.array(messageReactions);
+const change = z.object({
+  success: z.literal(true),
+  message: z.string(),
+  added: z.boolean().optional(),
+  reactions,
+});
+
+/** `/messages`: message reactions (`/reactions/bulk` before `/:messageId/...`). Key order is the mount order. */
+export const messages = route('/messages', {
+  reactions: route('', {
+    /** Reactions of up to 100 messages at once (conversation loading). */
+    bulk: {
+      method: 'POST',
+      path: '/reactions/bulk',
+      body: z.object({ messageIds: z.array(z.string()).min(1, 'Message IDs array is required').max(100, 'Too many message IDs (max 100)') }),
+      response: z.object({ success: z.literal(true), reactions: z.record(z.string(), reactions) }),
+    },
+    add: {
+      method: 'POST',
+      path: '/:messageId/reactions',
+      params: messageId,
+      body: z.object({ emojiName: z.string().min(1) }),
+      response: change,
+    },
+    remove: {
+      method: 'DELETE',
+      path: '/:messageId/reactions/:emojiName',
+      params: reactionParams,
+      response: change,
+    },
+    toggle: {
+      method: 'POST',
+      path: '/:messageId/reactions/:emojiName/toggle',
+      params: reactionParams,
+      response: change,
+    },
+    get: {
+      method: 'GET',
+      path: '/:messageId/reactions',
+      params: messageId,
+      response: z.object({ reactions }),
+    },
+  }),
+});

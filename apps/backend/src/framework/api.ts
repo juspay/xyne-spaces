@@ -18,7 +18,9 @@ import {
   type RouteParams,
   type RouteTable,
   type RouteQuery,
-  type RouteResponse } from '@xyne/shared';
+  type RouteResponse,
+  type RouteAuth as SharedRouteAuth,
+  auth as apiAuth } from '@xyne/shared';
 import { authMiddleware } from '@/middleware/auth';
 import { encryptedRoute } from '@/middleware/encryptedRoute';
 import { isDekPassthrough } from '@/services/encryption/dekPassthrough';
@@ -55,7 +57,8 @@ export class ContractError extends Error {
  *   `{ ok: false, error }`), as Slack SDKs expect.
  * - `public`: nobody; the route checks the caller itself (webhook secret, signed state...).
  */
-export type RouteAuth = 'session' | 'app' | 'slack-app' | 'public';
+/** The login a route needs (the API's auth map gives each route its own). */
+export type RouteAuth = SharedRouteAuth;
 
 const AUTH_STEPS: Record<RouteAuth, RequestHandler[]> = {
   session: [authMiddleware.authenticate as RequestHandler],
@@ -529,112 +532,127 @@ export async function callTyped(contract: AnyRouteContract, req: Request, raw: R
   };
 }
 
-// ─── Routers: a tree of routes, as Express's routers nest ───────────────────────
+// ─── The routes file: one tree in the API's shape, a route per contract ─────────
+
+/** A route's own setup in the routes file: everything but its login, which the API's auth map gives. */
+export type RouteSetup<C extends AnyRouteContract, A extends AccessChecks = Record<never, never>> = Omit<RouteImpl<C, A>, 'auth'>;
+
+declare const pendingBrand: unique symbol;
+/** One route of the routes file, for contract `C`: its setup, built at mount time. */
+export type PendingRoute<C extends AnyRouteContract> = {
+  readonly kind: 'PENDING_ROUTE';
+  readonly impl: RouteSetup<C, AccessChecks>;
+  readonly [pendingBrand]: C;
+};
 
 /**
- * What a router sets for every route under it, at any depth. A child router or a route may
- * set its own `auth`, `responseHeaders` and `invalidRequest`; `access` checks only add up:
- * the ancestors' checks run first, then the child's, and a child cannot remove one.
+ * A route of the routes file: its controller, and its access checks, upload, encryption,
+ * success status, headers or wire format for a bad request when it has any. Its contract comes
+ * from its place in the tree, so the controller's input and answer are that contract's.
+ *
+ *   postMessage: handle({ access: { channel: botChannel() }, controller: ({ body }) => send(body) }),
  */
-export type RouterDefaults = {
-  auth?: RouteAuth;
+export function handle<C extends AnyRouteContract, A extends AccessChecks = Record<never, never>>(impl: RouteSetup<C, A>): PendingRoute<C> {
+  return { kind: 'PENDING_ROUTE', impl } as unknown as PendingRoute<C>;
+}
+
+/**
+ * What a group sets for every route in it, at any depth: access checks (they add up: the outer
+ * group's run first, and an inner one cannot replace them), headers, and the wire format for a
+ * bad request. A route's own setting wins for headers and the bad-request answer.
+ */
+export type GroupDefaults = {
   access?: AccessChecks;
   responseHeaders?: Record<string, string>;
   invalidRequest?: () => ContractError;
 };
 
-declare const pendingBrand: unique symbol;
-/** A route written for contract `C` and not built yet: `api.mount` builds it with its routers' defaults. */
-export type PendingRoute<C extends AnyRouteContract> = {
-  readonly kind: 'PENDING_ROUTE';
-  readonly contract: C;
-  readonly impl: RouteImpl<C, AccessChecks>;
-  readonly [pendingBrand]: true;
+declare const groupBrand: unique symbol;
+/** A part of the routes file with shared settings (`group`). */
+export type RouteGroupNode<T> = {
+  readonly kind: 'ROUTE_GROUP';
+  readonly defaults: GroupDefaults;
+  readonly tree: RoutesTree<T>;
+  readonly [groupBrand]: T;
 };
 
-/** The entries a router must give: one per name of its table, a route for a contract, a router for a sub-table. */
-export type RouterEntries<T> = {
-  [K in keyof T]: T[K] extends AnyRouteContract ? PendingRoute<T[K]> : T[K] extends RouteTable ? RouterNode<T[K]> : never;
+/** The routes file's shape for API table `T`: a `handle(...)` per contract, the same shape per nested route. */
+export type RoutesTree<T> = {
+  [K in keyof T]: T[K] extends AnyRouteContract ? PendingRoute<T[K]> : RoutesTree<T[K]> | RouteGroupNode<T[K]>;
 };
 
-declare const routerBrand: unique symbol;
-/** One router of the tree: its table (from the API table), its defaults, and its entries. */
-export type RouterNode<T> = {
-  readonly kind: 'ROUTER';
-  readonly table: T;
-  readonly defaults: RouterDefaults;
-  readonly entries: RouterEntries<T>;
-  readonly [routerBrand]: true;
-};
-
-type ContractNames<T> = { [K in keyof T]: T[K] extends AnyRouteContract ? K : never }[keyof T] & string;
-
-/** Writes the route for one contract of a router's table: `serve('info', { controller: ... })`. */
-export type Serve<T> = <K extends ContractNames<T>, A extends AccessChecks = Record<never, never>>(
-  name: K,
-  impl: RouteImpl<Extract<T[K], AnyRouteContract>, A>,
-) => PendingRoute<Extract<T[K], AnyRouteContract>>;
-
-/**
- * A router over one table of the API table (`api.apps.channel`): what its routes inherit, and
- * one entry per name of the table (a route via `serve`, or a child router). A missing entry,
- * an extra one, or a route served for another contract is a type error.
- *
- *   export const channelRouter = router(api.apps.channel, { access: { permission: appPermission('channels:read') } }, (serve) => ({
- *     info: serve('info', { controller: ({ query }) => channelInfo(query) }),
- *   }));
- *   export const appsRouter = router(api.apps, { auth: 'app' }, () => ({ channel: channelRouter, ... }));
- */
-export function router<T extends RouteTable>(table: T, defaults: RouterDefaults, build: (serve: Serve<T>) => RouterEntries<T>): RouterNode<T> {
-  const serve = ((name: string, impl: RouteImpl<AnyRouteContract, AccessChecks>) => ({
-    kind: 'PENDING_ROUTE',
-    contract: (table as Record<string, AnyRouteContract>)[name],
-    impl })) as unknown as Serve<T>;
-  return { kind: 'ROUTER', table, defaults, entries: build(serve) } as RouterNode<T>;
+/** Settings shared by every route of a part of the API: `analytics: group({ access: { … } }, { … })`. */
+export function group<T>(defaults: GroupDefaults, tree: RoutesTree<T>): RouteGroupNode<T> {
+  return { kind: 'ROUTE_GROUP', defaults, tree } as unknown as RouteGroupNode<T>;
 }
 
-function mergeDefaults(parent: RouterDefaults, child: RouterDefaults, where: string): RouterDefaults {
+declare const implementedBrand: unique symbol;
+/** The API and its routes file, checked against each other; `mountApi` mounts it. */
+export type ImplementedApi = { readonly api: RouteTable; readonly tree: unknown; readonly [implementedBrand]: true };
+
+/**
+ * The routes file: one entry per route of the API, in the API's shape. No paths (they are in
+ * the API), no logins (the API's auth map has them). A missing route, an extra one, or a
+ * controller that does not fit its contract is a type error.
+ */
+export function implement<T extends RouteTable>(apiTable: T, tree: RoutesTree<T>): ImplementedApi {
+  return { api: apiTable, tree } as unknown as ImplementedApi;
+}
+
+function mergeDefaults(parent: GroupDefaults, child: GroupDefaults, where: string): GroupDefaults {
   const access: AccessChecks = { ...(parent.access ?? {}) };
   for (const [name, check] of Object.entries(child.access ?? {})) {
     if (name in access) {
-      // A child must not replace an ancestor's check: the ancestor's stays, the child's is dropped.
-      logger.error('[api] access check name already set by an outer router; the outer one is kept', { where, check: name });
+      // An inner group or a route must not replace an outer check: the outer one stays, the inner one is dropped.
+      logger.error('[api] access check name already set by an outer group; the outer one is kept', { where, check: name });
       continue;
     }
     access[name] = check;
   }
   return {
-    auth: child.auth ?? parent.auth,
     access,
     responseHeaders: { ...(parent.responseHeaders ?? {}), ...(child.responseHeaders ?? {}) },
     invalidRequest: child.invalidRequest ?? parent.invalidRequest };
 }
 
-/** Builds and mounts every route under `node`, in table order, with the defaults of every router above it. */
-function mountTree(node: RouterNode<RouteTable>, inherited: RouterDefaults): void {
-  const defaults = mergeDefaults(inherited, node.defaults, 'router');
-  for (const name of Object.keys(node.table)) {
-    const entry = (node.entries as Record<string, PendingRoute<AnyRouteContract> | RouterNode<RouteTable>>)[name];
+function isGroupNode(node: unknown): node is RouteGroupNode<RouteTable> {
+  return !!node && typeof node === 'object' && (node as { kind?: unknown }).kind === 'ROUTE_GROUP';
+}
+
+/** Builds and mounts every route of `table`, in table order, with its groups' settings and its login from the auth map. */
+function mountTree(table: RouteTable, node: unknown, inherited: GroupDefaults, where: string): void {
+  let entries = node as Record<string, unknown>;
+  let defaults = inherited;
+  while (isGroupNode(entries)) {
+    defaults = mergeDefaults(defaults, (entries as unknown as RouteGroupNode<RouteTable>).defaults, where);
+    entries = (entries as unknown as RouteGroupNode<RouteTable>).tree as unknown as Record<string, unknown>;
+  }
+  for (const [name, contractOrTable] of Object.entries(table)) {
+    const entry = entries?.[name];
     if (!entry) {
-      logger.error('[api] router has no entry for a table name; not mounted', { name });
+      logger.error('[api] the routes file has no entry for an API name; not mounted', { where, name });
       continue;
     }
-    if (entry.kind === 'ROUTER') {
-      mountTree(entry, defaults);
+    if ((contractOrTable as { kind?: unknown }).kind !== 'ROUTE') {
+      mountTree(contractOrTable as RouteTable, entry, defaults, `${where}.${name}`);
       continue;
     }
-    const merged = mergeDefaults(defaults, { auth: entry.impl.auth, access: entry.impl.access as AccessChecks | undefined, responseHeaders: entry.impl.responseHeaders, invalidRequest: entry.impl.invalidRequest }, entry.contract.key);
-    mount(build(entry.contract, { ...entry.impl, ...merged } as RouteImpl<AnyRouteContract, AccessChecks>));
+    const contract = contractOrTable as AnyRouteContract;
+    const routeAuth = apiAuth.of(contract);
+    if (!routeAuth) throw new Error(`[api] ${contract.key} has no login in the API's auth map (packages/shared/src/api/index.ts)`);
+    const impl = (entry as PendingRoute<AnyRouteContract>).impl;
+    const merged = mergeDefaults(defaults, { access: impl.access as AccessChecks | undefined, responseHeaders: impl.responseHeaders, invalidRequest: impl.invalidRequest }, contract.key);
+    mount(build(contract, { ...impl, ...merged, auth: routeAuth } as RouteImpl<AnyRouteContract, AccessChecks>));
   }
 }
 
-/** Mounts the whole router tree (the root router over the API table). Called once, at startup. */
-export function mountApi(root: RouterNode<RouteTable>): void {
-  mountTree(root, {});
+/** Mounts the whole routes file. Called once, at startup. */
+export function mountApi(implemented: ImplementedApi): void {
+  mountTree(implemented.api, implemented.tree, {}, 'api');
 }
 
-/** Mount one typed route outside the tree (tests). The API table goes through `router` / `mountApi`. */
-export function route<C extends AnyRouteContract, A extends AccessChecks = Record<never, never>>(contract: C, impl: RouteImpl<C, A>): void {
+/** Mount one typed route outside the routes file (tests), with its login given here. */
+export function mountRoute<C extends AnyRouteContract, A extends AccessChecks = Record<never, never>>(contract: C, impl: RouteImpl<C, A>): void {
   mount(build(contract, impl));
 }
 

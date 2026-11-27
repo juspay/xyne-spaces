@@ -1,4 +1,4 @@
-import { MessageType, collectAllSlackGroupIds, collectAllSlackUserIds, conversationsSendClient, derivedNames, findSlackMentionIds, findSlackMentionTokens, mergeSlackMentionIds, slackChatContentTemplate, type ExtractorName, type FieldFacts, type RouteBody, type UnreadableString, type appsSlackChatPostEphemeral, type appsSlackChatPostMessage, type appsSlackChatUpdate } from '@xyne/shared';
+import { api, MessageType, collectAllSlackGroupIds, collectAllSlackUserIds, conversationsSendClient, derivedNames, findSlackMentionIds, findSlackMentionTokens, mergeSlackMentionIds, slackChatContentTemplate, type ExtractorName, type FieldFacts, type RouteBody, type UnreadableString } from '@xyne/shared';
 import { config } from '@/config/env';
 import { findOrCreateConversation, updateConversation } from '@/apps/core/conversationUtils';
 import { deliverEphemeralMessage } from '@/apps/core/ephemeralDelivery';
@@ -141,7 +141,7 @@ function requireWorkspace(user: AuthenticatedUser | undefined): string {
 }
 
 /** POST /apps/slack/chat.postMessage */
-export async function slackChatPostMessage(input: SlackWriteInput<RouteBody<typeof appsSlackChatPostMessage>>) {
+export async function slackChatPostMessage(input: SlackWriteInput<RouteBody<typeof api.apps.slack.chatPostMessage>>) {
 	const { body, user, app, channel, textFacts } = input;
 	if (isTooLong(body, textFacts)) throw slackError("msg_too_long");
 
@@ -181,7 +181,7 @@ export async function slackChatPostMessage(input: SlackWriteInput<RouteBody<type
 }
 
 /** POST /apps/slack/chat.postEphemeral */
-export async function slackChatPostEphemeral(input: SlackWriteInput<RouteBody<typeof appsSlackChatPostEphemeral>>) {
+export async function slackChatPostEphemeral(input: SlackWriteInput<RouteBody<typeof api.apps.slack.chatPostEphemeral>>) {
 	const { body, user, app, channel, textFacts } = input;
 	if (isTooLong(body, textFacts)) throw slackError("msg_too_long");
 
@@ -226,7 +226,7 @@ export async function slackChatPostEphemeral(input: SlackWriteInput<RouteBody<ty
 }
 
 /** POST /apps/slack/chat.update */
-export async function slackChatUpdate(input: SlackWriteInput<RouteBody<typeof appsSlackChatUpdate>>) {
+export async function slackChatUpdate(input: SlackWriteInput<RouteBody<typeof api.apps.slack.chatUpdate>>) {
 	const { body, user, channel, textFacts } = input;
 	if (isTooLong(body, textFacts)) throw slackError("msg_too_long");
 

@@ -1,5 +1,4 @@
-import { ChannelRole, ChannelScopeType, ChannelType } from '@xyne/shared';
-import type { channelsSearch, channelsShareAgentStatus } from '@xyne/shared';
+import { api, ChannelRole, ChannelScopeType, ChannelType } from '@xyne/shared';
 import type { z } from 'zod';
 import { db } from '@/database/client';
 import { hasProjectAdminAccess } from '@/database/acl/admin-access';
@@ -91,7 +90,7 @@ export async function publishTargets(input: { user: AuthenticatedUser | undefine
 // ─── Search for mentions ────────────────────────────────────────────────────
 
 /** GET /channels/search: users and groups to mention. */
-export async function searchForMentions(input: { query: z.infer<(typeof channelsSearch)['query']>; user: AuthenticatedUser | undefined }) {
+export async function searchForMentions(input: { query: z.infer<(typeof api.channels.search)['query']>; user: AuthenticatedUser | undefined }) {
   try {
     const userId = input.user!.id;
     const { q, limit = '10', types = 'users,groups' } = input.query;
@@ -327,7 +326,7 @@ const SHARE_ERROR_STATUS: Record<ShareErrorCode, number> = {
 /** GET /channels/:channelId/share-agent-conversation/status */
 export async function shareAgentStatus(input: {
   params: { channelId: string };
-  query: z.infer<(typeof channelsShareAgentStatus)['query']>;
+  query: z.infer<(typeof api.channels.shareAgentStatus)['query']>;
   user: AuthenticatedUser | undefined;
 }) {
   try {

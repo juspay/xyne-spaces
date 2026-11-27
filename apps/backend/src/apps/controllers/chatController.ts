@@ -6,33 +6,7 @@ import { repositories } from '@/database/repositories';
 import { SlackAttachment } from '@/integrations/adapters/slack-webhook-tickets/utils/slackBlockKitTypes';
 import { config } from '@/config/env';
 import { resolveChannelId } from '../utils/channelUtils';
-import {
-  MessageType,
-  appsChatPostMessageFields,
-  refineAppsChatPostMessage,
-  conversationsSendClient,
-  derivedNames,
-  findSlackMentionIds,
-  mergeSlackMentionIds,
-  slackMessageContentTemplate,
-  markdownContentTemplate,
-  makeUnreadable,
-  deriveFactsFromPlaintext,
-  requestContractOf,
-  type RequestContract,
-  type RouteBody,
-  appsChatPostMessage,
-  type appsChatUpdateMessage,
-  type appsChatPostEphemeral,
-  UnreadableString,
-  type ExtractorName,
-  type DerivedFacts,
-  type FieldFacts,
-  type appsChatPostEphemeralResponseSchema,
-  type appsChatDeleteMessageBodySchema,
-  type appsChatAgentProgressBodySchema,
-  type appsChatAgentProgressResponseSchema,
-} from '@xyne/shared';
+import { api, MessageType, appsChatPostMessageFields, refineAppsChatPostMessage, conversationsSendClient, derivedNames, findSlackMentionIds, mergeSlackMentionIds, slackMessageContentTemplate, markdownContentTemplate, makeUnreadable, deriveFactsFromPlaintext, requestContractOf, type RequestContract, type RouteBody, UnreadableString, type ExtractorName, type DerivedFacts, type FieldFacts, type appsChatPostEphemeralResponseSchema, type appsChatDeleteMessageBodySchema, type appsChatAgentProgressBodySchema, type appsChatAgentProgressResponseSchema } from '@xyne/shared';
 import { ContractError } from '@/framework/api';
 import { validateFlowDefinition, formatValidationErrors, flowFallbackLabel } from '@xyne/shared';
 import { deliverEphemeralMessage } from '../core/ephemeralDelivery';
@@ -64,13 +38,13 @@ const ChatActionBodySchema = z.object({
   contentFormat: z.nativeEnum(ContentFormat).optional(),
 });
 
-// The internal S2S postAsUser route's body: the bot route's (appsChatPostMessage in
+// The internal S2S postAsUser route's body: the bot route's (api.apps.chat.postMessage in
 // @xyne/shared) plus the `userId` it posts as.
 const PostMessageBodySchema = refineAppsChatPostMessage(
   z.object({ ...appsChatPostMessageFields, userId: ChatActionBodySchema.shape.userId }),
 );
 /** postMessage's encrypted fields and their facts (from the route contract's one body schema). */
-const postMessageRequest = requestContractOf(appsChatPostMessage) as RequestContract;
+const postMessageRequest = requestContractOf(api.apps.chat.postMessage) as RequestContract;
 
 const ChannelHistoryQuerySchema = z.object({
   channelId: z.string().min(1, 'Channel ID is required').trim().optional(),
@@ -100,9 +74,9 @@ const ConversationAttachmentsQuerySchema = z.object({
 /** The facts the message insert side effects read from the content (as for conversations.send). */
 const MESSAGE_CONTENT_FACTS = (derivedNames(conversationsSendClient).content ?? []) as ExtractorName[];
 
-type AppsChatPostMessageBody = RouteBody<typeof appsChatPostMessage> & { userId?: string };
-type AppsChatUpdateMessageBody = RouteBody<typeof appsChatUpdateMessage>;
-type AppsChatPostEphemeralBody = RouteBody<typeof appsChatPostEphemeral>;
+type AppsChatPostMessageBody = RouteBody<typeof api.apps.chat.postMessage> & { userId?: string };
+type AppsChatUpdateMessageBody = RouteBody<typeof api.apps.chat.updateMessage>;
+type AppsChatPostEphemeralBody = RouteBody<typeof api.apps.chat.postEphemeral>;
 type AppsChatPostEphemeralResponse = z.output<typeof appsChatPostEphemeralResponseSchema>;
 type AppsChatDeleteMessageBody = z.output<typeof appsChatDeleteMessageBodySchema>;
 type AppsChatAgentProgressBody = z.output<typeof appsChatAgentProgressBodySchema>;

@@ -1,4 +1,4 @@
-import { AccessType, type RouteBody, type appsConfigureWebhook, type appsCreate, type appsOrgNames } from '@xyne/shared';
+import { api, AccessType, type RouteBody } from '@xyne/shared';
 import { db } from '@/database/client';
 import { repositories } from '@/database/repositories';
 import { CreateAppInput } from '@/database/repositories/appsRepository';
@@ -29,7 +29,7 @@ async function isAclAdmin(userId: string): Promise<boolean> {
 // ─── App setup ──────────────────────────────────────────────────────────────
 
 /** POST /apps/create */
-export async function createApp(input: { body: RouteBody<typeof appsCreate>; user: AuthenticatedUser | undefined }) {
+export async function createApp(input: { body: RouteBody<typeof api.apps.create>; user: AuthenticatedUser | undefined }) {
   const user = requireUser(input.user);
   try {
     const { name, description } = input.body;
@@ -124,7 +124,7 @@ export async function promoteApp(input: { params: { appId: string }; user: Authe
 /** POST /apps/configureWebhook/:appId */
 export async function configureAppWebhook(input: {
   params: { appId: string };
-  body: RouteBody<typeof appsConfigureWebhook>;
+  body: RouteBody<typeof api.apps.configureWebhook>;
   user: AuthenticatedUser | undefined;
 }) {
   try {
@@ -215,7 +215,7 @@ export async function projectBoards(input: { params: { projectId: string }; user
 }
 
 /** POST /apps/org-names: org ids to names, only for the ids asked about. */
-export async function orgNames(input: { body: RouteBody<typeof appsOrgNames> }) {
+export async function orgNames(input: { body: RouteBody<typeof api.apps.orgNames> }) {
   try {
     const ids = Array.from(new Set(input.body.orgIds)).filter(Boolean);
     if (ids.length === 0) return { orgNames: {} };

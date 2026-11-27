@@ -17,7 +17,7 @@ declare const routeBrand: unique symbol;
  * derived from each of them.
  *
  * The body is ONE schema: a field marked `unreadableString()` is encrypted (the handler gets it
- * as `UnreadableString`), every other field is plain. `facts` names, per encrypted field, the
+ * as `UnreadableString`), every other field is plain. `sourceToDerived` names, per encrypted field, the
  * facts the handler reads instead of its text.
  *
  * `path` is the address without the `/api` prefix, exactly as the manifest rules name it
@@ -47,7 +47,7 @@ export interface RouteContract<
   /** The success response. Checked in non-prod only, and a mismatch is only logged. */
   readonly response: Res;
   /** Per encrypted (`unreadableString()`) body field, the facts derived from it; undefined when none is encrypted. */
-  readonly facts: F;
+  readonly sourceToDerived: F;
   readonly [routeBrand]: true;
 }
 
@@ -92,14 +92,14 @@ type RouteSpec<
 } & FactsSpec<Body, F>;
 
 /**
- * `facts` is required when the body has `unreadableString()` fields: one entry per encrypted field
+ * `sourceToDerived` is required when the body has `unreadableString()` fields: one entry per encrypted field
  * (`{}` when nothing is derived from it), and no other key (a key that is not an encrypted field
  * of the body is a type error). Leaving it out would also leave the route without its encryption
  * steps, so it is a type error too. A body without encrypted fields may leave it out.
  */
 type FactsSpec<Body extends z.ZodType | undefined, F> = [UnreadableKeys<Body>] extends [never]
-  ? { facts?: F & { readonly [K in Exclude<keyof F, UnreadableKeys<Body>>]: never } }
-  : { facts: F & { readonly [K in Exclude<keyof F, UnreadableKeys<Body>>]: never } };
+  ? { sourceToDerived?: F & { readonly [K in Exclude<keyof F, UnreadableKeys<Body>>]: never } }
+  : { sourceToDerived: F & { readonly [K in Exclude<keyof F, UnreadableKeys<Body>>]: never } };
 
 /** The shape of an object body schema (also when refined), else undefined. */
 function bodyShape(body: unknown): Record<string, unknown> | undefined {
@@ -114,7 +114,7 @@ function unreadableFieldsOf(body: unknown): string[] {
 }
 
 /** Problems with a route spec; empty when it is fine. Shared by `defineRoute` and the tests. */
-export function routeSpecProblems(spec: { method: string; path: string; body?: unknown; facts?: unknown }): string[] {
+export function routeSpecProblems(spec: { method: string; path: string; body?: unknown; sourceToDerived?: unknown }): string[] {
   const problems: string[] = [];
   if (!(ROUTE_METHODS as readonly string[]).includes(spec.method)) {
     problems.push(`method ${spec.method} is not one of ${ROUTE_METHODS.join(', ')}`);
@@ -124,11 +124,11 @@ export function routeSpecProblems(spec: { method: string; path: string; body?: u
   if (/^\/api(\/|$)/.test(spec.path)) problems.push(`path ${spec.path} must not start with /api (the mount adds it)`);
   if (/[*?+()]/.test(spec.path)) problems.push(`path ${spec.path} may use only plain segments and :params`);
   const encrypted = unreadableFieldsOf(spec.body);
-  const factKeys = Object.keys((spec.facts as object | undefined) ?? {});
+  const factKeys = Object.keys((spec.sourceToDerived as object | undefined) ?? {});
   const withoutFacts = encrypted.filter((field) => !factKeys.includes(field));
-  if (withoutFacts.length > 0) problems.push(`encrypted fields without a facts entry: ${withoutFacts.join(', ')}`);
+  if (withoutFacts.length > 0) problems.push(`encrypted fields without a sourceToDerived entry: ${withoutFacts.join(', ')}`);
   const notEncrypted = factKeys.filter((field) => !encrypted.includes(field));
-  if (notEncrypted.length > 0) problems.push(`facts for fields that are not unreadableString() in the body: ${notEncrypted.join(', ')}`);
+  if (notEncrypted.length > 0) problems.push(`sourceToDerived for fields that are not unreadableString() in the body: ${notEncrypted.join(', ')}`);
   return problems;
 }
 
@@ -140,7 +140,7 @@ export function routeSpecProblems(spec: { method: string; path: string; body?: u
  *     method: 'POST',
  *     path: '/postMessage',
  *     body: z.object({ channelId: z.string(), text: unreadableString().optional() }),
- *     facts: { text: { userIds: derive.userIds } },
+ *     sourceToDerived: { text: { userIds: derive.userIds } },
  *     response: chatActionResponseSchema,
  *   });
  */
@@ -164,7 +164,7 @@ export function defineRoute<
     query: spec.query as Query,
     body: spec.body as Body,
     response: spec.response,
-    facts: spec.facts as F,
+    sourceToDerived: spec.sourceToDerived as F,
   } as RouteContract<M, P, Params, Query, Body, Res, F>;
 }
 
@@ -204,13 +204,109 @@ export function defineRouter<const Pre extends string, const T extends RouteTabl
   return prefixed as Prefixed<Pre, T>;
 }
 
+// ─── route(): a prefix over contracts written inline, and nested routes ───────────
+
+/** A contract written inline in a `route()` table: what `defineRoute` takes. */
+type InlineSpec = {
+  readonly method: RouteMethod;
+  readonly path: string;
+  readonly response: z.ZodType;
+  readonly params?: z.ZodType;
+  readonly query?: z.ZodType;
+  readonly body?: z.ZodType;
+  readonly sourceToDerived?: unknown;
+};
+
+/** What a `route()` table holds, by name: contracts (inline, or built by a helper) and nested routes. */
+export type RouteEntries = { readonly [name: string]: InlineSpec | AnyRouteContract | RouteTable };
+
+type SpecSchema<S, K extends string> = S extends { readonly [P in K]: infer V } ? (V extends z.ZodType ? V : undefined) : undefined;
+
+/** The contract an inline spec makes, with its exact types (as `defineRoute` makes it). */
+type ContractOf<S> = S extends { readonly method: infer M extends RouteMethod; readonly path: infer P extends string; readonly response: infer R extends z.ZodType }
+  ? RouteContract<M, P, SpecSchema<S, 'params'>, SpecSchema<S, 'query'>, SpecSchema<S, 'body'>, R, S extends { readonly sourceToDerived: infer F extends SourceToDerived } ? F : undefined>
+  : never;
+
+/** A table's entries as contracts: inline specs built, built contracts and nested routes as they are. */
+export type RouteEntriesBuilt<T> = {
+  readonly [K in keyof T]: T[K] extends AnyRouteContract ? T[K] : T[K] extends InlineSpec ? ContractOf<T[K]> : T[K];
+};
+
+/** An inline spec whose body has `unreadableString()` fields must give their `sourceToDerived` (as `defineRoute` requires). */
+type FactsCheck<S> = [UnreadableKeys<SpecSchema<S, 'body'>>] extends [never] ? unknown : { readonly sourceToDerived: FactsFor<SpecSchema<S, 'body'>> };
+type EntriesCheck<T> = { readonly [K in keyof T]: T[K] extends AnyRouteContract ? unknown : T[K] extends InlineSpec ? FactsCheck<T[K]> : unknown };
+
+function isInlineSpec(entry: unknown): entry is InlineSpec {
+  return !!entry && typeof entry === 'object' && !isRouteContract(entry) && typeof (entry as { method?: unknown }).method === 'string' && 'response' in entry;
+}
+
+/**
+ * A route: `prefix` in front of every API in `table`, at any depth. Each entry is a contract,
+ * written inline in front of its name, or a nested route:
+ *
+ *   export const emojis = route('/emojis', {
+ *     list: { method: 'GET', path: '', response: listAnswer },            // GET /emojis
+ *     get:  { method: 'GET', path: '/:emojiId', params: emojiId, response: emojiAnswer },
+ *   });
+ *   export const apps = route('/apps', { chat, calls });                  // nested: /apps/chat/…
+ *
+ * A contract a helper builds (`analytics('active-users', …)`) is an entry too. The table's key
+ * order is the mount order: a literal path before a `:param` one that could capture it.
+ */
+export function route<const Pre extends string, const T extends RouteEntries>(
+  prefix: Pre,
+  table: T & EntriesCheck<T>,
+): Prefixed<Pre, RouteEntriesBuilt<T>> {
+  const built: Record<string, unknown> = {};
+  for (const [name, entry] of Object.entries(table)) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    built[name] = isInlineSpec(entry) ? defineRoute(entry as any) : entry;
+  }
+  return defineRouter(prefix, built as RouteTable) as unknown as Prefixed<Pre, RouteEntriesBuilt<T>>;
+}
+
+// ─── The login each route needs (the API's auth map) ────────────────────────────
+
+/** The login a route needs: a session, a Xyne App's bot token, a Slack-compatible bot token, or none. */
+export type RouteAuth = 'session' | 'app' | 'slack-app' | 'public';
+
+/**
+ * One login per route of `T`, in the shape of the API tree: a route's own login, or one login for
+ * a whole route (any but `public`, so a route added to it later is never public by accident).
+ * Every route must be covered: a missing one is a type error.
+ */
+export type AuthMap<T> = {
+  readonly [K in keyof T]: T[K] extends AnyRouteContract ? RouteAuth : Exclude<RouteAuth, 'public'> | AuthMap<T[K]>;
+};
+
+/** The login of each route, by contract. */
+export type RouteAuths = { readonly of: (contract: AnyRouteContract) => RouteAuth | undefined };
+
+/** The API's auth map: `defineAuth(api, { emojis: 'session', health: { health: 'public', details: 'session' } })`. */
+export function defineAuth<const T extends RouteTable>(api: T, map: AuthMap<T>): RouteAuths {
+  const byContract = new Map<AnyRouteContract, RouteAuth>();
+  const walk = (table: object, entry: unknown, inherited: RouteAuth | undefined): void => {
+    for (const [name, value] of Object.entries(table)) {
+      const own = typeof entry === 'string' ? undefined : (entry as Record<string, unknown> | undefined)?.[name];
+      if (isRouteContract(value)) {
+        const authFor = (typeof own === 'string' ? own : undefined) ?? inherited;
+        if (authFor) byContract.set(value, authFor as RouteAuth);
+      } else if (value && typeof value === 'object') {
+        walk(value, own, typeof own === 'string' ? (own as RouteAuth) : inherited);
+      }
+    }
+  };
+  walk(api, map, typeof map === 'string' ? (map as RouteAuth) : undefined);
+  return { of: (contract) => byContract.get(contract) };
+}
+
 // ─── The encryption side of a contract ─────────────────────────────────────────
 
 const requestContracts = new WeakMap<object, RequestContract | null>();
 
 /**
  * The request contract the encryption pipeline works with (`{ schema, sourceToDerived,
- * unreadableFields }`), built from the route's one body schema and its `facts`; undefined when
+ * unreadableFields }`), built from the route's one body schema and its `sourceToDerived`; undefined when
  * the body has no encrypted field. Built once per contract.
  */
 export function requestContractOf(contract: AnyRouteContract): RequestContract | undefined {
@@ -223,7 +319,7 @@ export function requestContractOf(contract: AnyRouteContract): RequestContract |
       : {
           kind: 'REQUEST',
           schema: contract.body as z.ZodObject,
-          sourceToDerived: (contract.facts ?? {}) as SourceToDerived,
+          sourceToDerived: (contract.sourceToDerived ?? {}) as SourceToDerived,
           unreadableFields,
         };
   requestContracts.set(contract, built);

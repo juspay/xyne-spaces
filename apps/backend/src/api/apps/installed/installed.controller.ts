@@ -1,4 +1,4 @@
-import { AppPermissionStatus, type RouteBody, type RouteQuery, type appsInstalledCommands, type appsInstalledPermissionsSet, type appsInstalledResourcesSet, type appsInstalledUpdate } from '@xyne/shared';
+import { api, AppPermissionStatus, type RouteBody, type RouteQuery } from '@xyne/shared';
 import { repositories } from '@/database/repositories';
 import { CommandType } from '@/database/repositories/appCommandRepository';
 import { ContractError } from '@/framework/api';
@@ -27,7 +27,7 @@ function requireWorkspaceId(user: AuthenticatedUser | undefined, message: string
 /** PATCH /apps/installed/:installedAppId: the outbound webhook URL of the caller's install. */
 export async function updateInstalledApp(input: {
   params: { installedAppId: string };
-  body: RouteBody<typeof appsInstalledUpdate>;
+  body: RouteBody<typeof api.apps.installed.update>;
   user: AuthenticatedUser | undefined;
 }) {
   try {
@@ -91,7 +91,7 @@ export async function getInstalledPermissions(input: { params: { installedAppId:
 /** POST /apps/installed/:installedAppId/permissions: replace the INSTALL's permissions (no version bump). */
 export async function setInstalledPermissions(input: {
   params: { installedAppId: string };
-  body: RouteBody<typeof appsInstalledPermissionsSet>;
+  body: RouteBody<typeof api.apps.installed.permissionsSet>;
   user: AuthenticatedUser | undefined;
 }) {
   try {
@@ -122,7 +122,7 @@ export async function activateInstalledPermissions(input: { params: { installedA
 /** GET /apps/installed/:installedAppId/commands?commandType=: the INSTALL's snapshot, scoped to the caller's workspace. */
 export async function listInstalledCommands(input: {
   params: { installedAppId: string };
-  query: RouteQuery<typeof appsInstalledCommands>;
+  query: RouteQuery<typeof api.apps.installed.commands>;
   user: AuthenticatedUser | undefined;
 }) {
   try {
@@ -174,7 +174,7 @@ export async function listAttachedResources(input: {
  */
 export async function setAttachedResources(input: {
   params: { installedAppId: string; resourceType: string };
-  body: RouteBody<typeof appsInstalledResourcesSet>;
+  body: RouteBody<typeof api.apps.installed.resourcesSet>;
   user: AuthenticatedUser | undefined;
 }) {
   try {

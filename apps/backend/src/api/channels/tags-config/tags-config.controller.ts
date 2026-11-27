@@ -1,5 +1,4 @@
-import { ChannelRole, type RouteBody } from '@xyne/shared';
-import type { channelTagsConfigUpdate } from '@xyne/shared';
+import { api, ChannelRole, type RouteBody } from '@xyne/shared';
 import { ChannelParticipantRepository } from '@/database/repositories/channelParticipantRepository';
 import { ChannelRepository } from '@/database/repositories/channelRepository';
 import { EmailClassificationRepository } from '@/database/repositories/emailClassificationRepository';
@@ -62,7 +61,7 @@ export async function getChannelTagsConfig(input: { params: { channelId: string 
 /** PATCH /channels/:channelId/tags-config: replace the categories. */
 export async function updateChannelTagsConfig(input: {
   params: { channelId: string };
-  body: RouteBody<typeof channelTagsConfigUpdate>;
+  body: RouteBody<typeof api.channels.tagsConfig.update>;
   caller: { userId: string; workspaceId: string };
 }) {
   const { channelId } = input.params;

@@ -1,5 +1,4 @@
-import { type RouteBody } from '@xyne/shared';
-import type { activityAliasesCreate, activityAliasesUpdate } from '@xyne/shared';
+import { api, type RouteBody } from '@xyne/shared';
 import { db } from '@/database/client';
 import { ContractError } from '@/framework/api';
 import { logger } from '@/utils/logger';
@@ -17,7 +16,7 @@ export async function listAliases() {
 }
 
 /** POST /activity-aliases */
-export async function createAlias(input: { body: RouteBody<typeof activityAliasesCreate> }) {
+export async function createAlias(input: { body: RouteBody<typeof api.activityAliases.create> }) {
   try {
     const { eventName, eventCategory, aliasEventName, aliasEventCategory, isBlacklisted } = input.body;
     const existingAlias = await db.activityAlias.findUnique({ where: { eventName_eventCategory: { eventName, eventCategory } } });
@@ -42,7 +41,7 @@ export async function createAlias(input: { body: RouteBody<typeof activityAliase
 }
 
 /** PUT /activity-aliases/:id */
-export async function updateAlias(input: { params: { id: string }; body: RouteBody<typeof activityAliasesUpdate> }) {
+export async function updateAlias(input: { params: { id: string }; body: RouteBody<typeof api.activityAliases.update> }) {
   try {
     const { id } = input.params;
     const { aliasEventName, aliasEventCategory, isBlacklisted } = input.body;

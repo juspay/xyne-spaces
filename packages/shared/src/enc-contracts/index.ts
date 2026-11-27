@@ -26,36 +26,10 @@ export { sdlcCreateTrackClient, sdlcUpdateTrackClient, sdlcAddSdlcFolderItemClie
 export { draftCreateAttachmentsClient, markThreadActivitiesAsReadV2Client, markChannelAsViewedClient } from './contracts/drafts.js';
 export { recapSetCustomRecapPromptClient, userPresenceUpsertClient } from './contracts/presence.js';
 export { ticketUpdateClient } from './contracts/tickets.js';
-export { ROUTE_METHODS, defineRoute, defineRouter, requestContractOf, routeContracts, routeSpecProblems } from './api-route.js';
-export type { AnyRouteContract, FactsFor, Prefixed, RouteBody, RouteBodyInput, RouteContract, RouteDerived, RouteGroup, RouteMethod, RouteParams, RouteQuery, RouteResponse, RouteTable, UnreadableKeys } from './api-route.js';
-export { api } from '../api/index.js';
+export { ROUTE_METHODS, defineAuth, defineRoute, defineRouter, requestContractOf, route, routeContracts, routeSpecProblems } from './api-route.js';
+export type { AnyRouteContract, AuthMap, FactsFor, Prefixed, RouteBody, RouteBodyInput, RouteContract, RouteDerived, RouteGroup, RouteMethod, RouteParams, RouteQuery, RouteAuth, RouteAuths, RouteEntries, RouteResponse, RouteTable, UnreadableKeys } from './api-route.js';
+export { api, auth } from '../api/index.js';
 
-// The route contracts, by folder (packages/shared/src/api mirrors the URL).
-export * from '../api/activity-aliases/activity-aliases.contracts.js';
-export * from '../api/analytics/analytics.contracts.js';
-export * from '../api/apps/apps.contracts.js';
-export * from '../api/apps/calls/calls.contracts.js';
-export * from '../api/apps/channel/channel.contracts.js';
-export * from '../api/apps/channel/commands.contracts.js';
-export * from '../api/apps/chat/chat.contracts.js';
-export * from '../api/apps/commands.contracts.js';
-export * from '../api/apps/files/files.contracts.js';
-export * from '../api/apps/guests/guests.contracts.js';
-export * from '../api/apps/incoming-webhooks/incoming-webhooks.contracts.js';
-export * from '../api/apps/installed/installed.contracts.js';
-export * from '../api/apps/permissions/permissions.contracts.js';
-export * from '../api/apps/slack/slack.contracts.js';
-export * from '../api/apps/ticket/ticket.contracts.js';
-export * from '../api/apps/user/user.contracts.js';
-export * from '../api/apps/usergroups/usergroups.contracts.js';
-export * from '../api/cac-config/cac-config.contracts.js';
-export * from '../api/channels/channels.contracts.js';
-export * from '../api/channels/tags-config/tags-config.contracts.js';
-export * from '../api/client-events/client-events.contracts.js';
-export * from '../api/conversation-labels/conversation-labels.contracts.js';
-export * from '../api/daily-brief/daily-brief.contracts.js';
-export * from '../api/emojis/emojis.contracts.js';
-export * from '../api/messages/reactions.contracts.js';
-export * from '../api/notifications/notifications.contracts.js';
-export * from '../api/organizations/organizations.contracts.js';
-export * from '../api/sub-tickets/sub-tickets.contracts.js';
+// The API folders' schemas and types (packages/shared/src/api: one folder per hop; the routes reach clients through `api`).
+export { appsContentFormatSchema, appsFlowInputSchema, appsChatPostMessageFields, refineAppsChatPostMessage, appsChatPostMessageBodySchema, appsChatPostEphemeralBodySchema, appsChatPostEphemeralResponseSchema, appsChatUpdateMessageBodySchema, appsChatActionResponseSchema, appsChatDeleteMessageBodySchema, appsChatAgentProgressBodySchema, appsChatAgentProgressResponseSchema } from '../api/apps/chat/index.js';
+export { appsSlackChatDeleteBodySchema, appsSlackChatDeleteResponseSchema, appsSlackChatPostMessageBodySchema, appsSlackChatPostEphemeralBodySchema, appsSlackChatUpdateBodySchema } from '../api/apps/slack/index.js';

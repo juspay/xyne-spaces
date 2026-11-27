@@ -1,4 +1,4 @@
-import { type RouteBody, type RouteParams, type RouteQuery, type appsCommands, type appsCommandsCreate, type appsCommandsDelete, type appsCommandsUpdate } from '@xyne/shared';
+import { api, type RouteBody, type RouteParams, type RouteQuery } from '@xyne/shared';
 import { repositories } from '@/database/repositories';
 import { CommandNameConflictError, CommandNotFoundError, CommandType } from '@/database/repositories/appCommandRepository';
 import { ContractError } from '@/framework/api';
@@ -8,7 +8,7 @@ import { appCommandRepository, internal } from './dashboard.helpers';
 // ─── Commands and shortcuts ─────────────────────────────────────────────────
 
 /** GET /apps/:appId/commands?commandType=: an app's commands or shortcuts (admin UI). */
-export async function listAppCommands(input: { params: RouteParams<typeof appsCommands>; query: RouteQuery<typeof appsCommands> }) {
+export async function listAppCommands(input: { params: RouteParams<typeof api.apps.commands>; query: RouteQuery<typeof api.apps.commands> }) {
   try {
     return await appCommandRepository.findByAppId(input.params.appId, input.query.commandType as CommandType);
   } catch (error) {
@@ -29,7 +29,7 @@ async function ownAppForEdit(appId: string, user: AuthenticatedUser | undefined)
 /** POST /apps/:appId/commands: a NEW command or shortcut; 409 if the name is taken. */
 export async function createAppCommand(input: {
   params: { appId: string };
-  body: RouteBody<typeof appsCommandsCreate>;
+  body: RouteBody<typeof api.apps.commandsCreate>;
   user: AuthenticatedUser | undefined;
 }) {
   try {
@@ -47,7 +47,7 @@ export async function createAppCommand(input: {
 /** PUT /apps/:appId/commands: an EXISTING command or shortcut (by name and type): 404 if missing, 409 if the name is the other type's. */
 export async function updateAppCommand(input: {
   params: { appId: string };
-  body: RouteBody<typeof appsCommandsUpdate>;
+  body: RouteBody<typeof api.apps.commandsUpdate>;
   user: AuthenticatedUser | undefined;
 }) {
   try {
@@ -64,8 +64,8 @@ export async function updateAppCommand(input: {
 
 /** DELETE /apps/:appId/commands/:commandName?commandType= */
 export async function deleteAppCommand(input: {
-  params: RouteParams<typeof appsCommandsDelete>;
-  query: RouteQuery<typeof appsCommandsDelete>;
+  params: RouteParams<typeof api.apps.commandsDelete>;
+  query: RouteQuery<typeof api.apps.commandsDelete>;
   user: AuthenticatedUser | undefined;
 }) {
   try {

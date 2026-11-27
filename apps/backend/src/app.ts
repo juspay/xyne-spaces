@@ -210,7 +210,7 @@ import { appRoutes } from '@/apps';
 import { requireTransitProxyIngress } from '@/apps/middelware/requireTransitProxy';
 import { createApp } from '@/framework/createApp';
 import { mountApi } from '@/framework/api';
-import { apiRouter } from '@/api/api.router';
+import { routes } from '@/api/routes';
 import transitProxyInternalRoutes from '@/routes/transitProxyInternal';
 import { ChatController } from '@/apps/controllers/chatController';
 import { ReactionController } from '@/controllers/reactionController';
@@ -252,7 +252,7 @@ export class App {
     // logging, tenant scope...) and the typed routes; this file only adds the untyped routes.
     this.app = createApp();
     // Every typed route, once: the router tree of src/api over the API table (@xyne/shared).
-    mountApi(apiRouter);
+    mountApi(routes);
     this.httpServer = createServer(this.app);
     this.initializeRoutes();
     this.initializeErrorHandling();

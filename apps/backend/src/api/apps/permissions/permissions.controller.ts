@@ -1,4 +1,4 @@
-import { type RouteBody, type appsPermissionsSet } from '@xyne/shared';
+import { api, type RouteBody } from '@xyne/shared';
 import { repositories } from '@/database/repositories';
 import { ContractError } from '@/framework/api';
 import type { AuthenticatedUser } from '@/types/express';
@@ -36,7 +36,7 @@ export async function getAppPermissions(input: { params: { appId: string } }) {
 /** POST /apps/permissions/:appId: replace the TEMPLATE permissions (creator only); bumps the version. */
 export async function setAppPermissions(input: {
   params: { appId: string };
-  body: RouteBody<typeof appsPermissionsSet>;
+  body: RouteBody<typeof api.apps.permissions.set>;
   user: AuthenticatedUser | undefined;
 }) {
   try {

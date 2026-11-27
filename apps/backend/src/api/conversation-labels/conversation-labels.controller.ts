@@ -1,5 +1,5 @@
+import { api } from '@xyne/shared';
 import type { z } from 'zod';
-import type { conversationLabelsUnreadCount } from '@xyne/shared';
 import { ConversationLabelLifecycleError, conversationLabelLifecycleService } from '@/automations/services/conversation-label-lifecycle.service';
 import { ContractError } from '@/framework/api';
 import { getLabelUnreadCount, getLabelUnreadCounts } from '@/services/conversationLabelUnreadService';
@@ -47,7 +47,7 @@ export async function labelUnreadCounts(input: { query: { channelId: string }; u
 }
 
 /** POST /conversation-labels/unread-counts: one label's count, with filters. */
-export async function labelUnreadCount(input: { body: z.infer<(typeof conversationLabelsUnreadCount)['body']>; user: AuthenticatedUser | undefined }) {
+export async function labelUnreadCount(input: { body: z.infer<(typeof api.conversationLabels.unreadCount)['body']>; user: AuthenticatedUser | undefined }) {
   try {
     const auth = labelAuth(input.user);
     const { channelId, labelId, filters } = input.body;
