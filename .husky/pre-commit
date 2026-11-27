@@ -135,6 +135,12 @@ npm run test:enum || exit 1
 echo "Running raw SQL guard..."
 bash scripts/validate-no-raw-sql.sh || exit 1
 
+# Unreadable boundary guard: reveal() and the encryption-service conversions (transformRequest,
+# deriveFacts, compose) stay in their files, in apps/backend and packages/shared. The backend
+# build runs it too (prebuild); this covers a commit that touches only packages/shared.
+echo "Running unreadable boundary guard..."
+bash scripts/validate-unreadable-boundaries.sh || exit 1
+
 # Exact-version guard: dependencies in package.json must be pinned, no ^ ~ ranges
 # or "latest". Checks the staged package.json files only.
 PACKAGE_JSON_CHANGED=$(echo "$CHANGED_FILES" | grep -E '(^|/)package\.json$' || true)

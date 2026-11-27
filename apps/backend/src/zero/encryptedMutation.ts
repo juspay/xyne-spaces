@@ -93,8 +93,8 @@ type MutatorFn<N extends MutatorName> = (options: {
 /**
  * The mutator `name` of mutatorContracts: Zero validates its args with the contract's schema, and
  * the mutator gets them with its `facts`. Its reads are unreadable too: `tx.run` returns the
- * columns in UNREADABLE_COLUMNS as `UnreadableString` (see unreadableTransaction). The body reads
- * an unreadable value only through reveal().
+ * columns in UNREADABLE_COLUMNS as `UnreadableString` (see unreadableTransaction). The body never
+ * reads an unreadable value: it decides on `facts` and on the facts `tx.read` returns.
  */
 export function defineContractMutator<N extends MutatorName>(
   name: N,

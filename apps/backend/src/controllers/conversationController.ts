@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import type { replyToConversationClient } from '@xyne/shared';
 import type { ContractRequest } from '@/types/express';
-import { isEncryptedField, reveal } from '@xyne/shared';
+import { isEncryptedField } from '@xyne/shared';
 import type { FieldFacts } from '@xyne/shared';
 import { keepMentionsWithin } from '@/utils/mentionParser';
 import {
@@ -1002,7 +1002,7 @@ export class ConversationController {
       }
 
       // Validate required fields - either content or files must be present
-      if ((!content || reveal(content).trim() === '') && files.length === 0) {
+      if ((!content || content.trim() === '') && files.length === 0) {
         res.status(400).json({ error: 'Message content or files are required' });
         return;
       }
@@ -1066,7 +1066,7 @@ export class ConversationController {
       // Encrypted content is stored only with the visible length the encryption service measured;
       // a rule whose extraction policy leaves out `text` cannot be accepted (policy lives in the
       // encryption service's database, so this is a configuration error, not a client one).
-      if (content && isEncryptedField(reveal(content)) && facts?.textLength === undefined) {
+      if (content && isEncryptedField(content) && facts?.textLength === undefined) {
         res.status(400).json({
           error: 'Encrypted content arrived without its derived length',
           code: 'ENC_DERIVED_INVALID',
@@ -1075,14 +1075,14 @@ export class ConversationController {
       }
       const isBotCommand = facts?.isBotCommand !== undefined
         ? facts.isBotCommand
-        : Boolean(content && reveal(content).trim() && BotCommandParser.isBotCommand(reveal(content).trim()));
+        : Boolean(content && content.trim() && BotCommandParser.isBotCommand(content.trim()));
       if (isBotCommand) {
         const commandText = facts?.isBotCommand !== undefined
           ? facts.commandName
             ? `/${facts.commandName} ${facts.commandArgs ?? ''}`
             : '/'
           : undefined;
-        await this.handleBotCommand(content ? reveal(content).trim() : '', conversationId, userId, res, { commandText });
+        await this.handleBotCommand(content ? content.trim() : '', conversationId, userId, res, { commandText });
         return;
       }
 
@@ -1093,7 +1093,7 @@ export class ConversationController {
       const messageData: CreateMessageInput = {
         conversationId,
         senderId: userId,
-        content: content ? reveal(content).trim() : '',
+        content: content ? content.trim() : '',
         msgType: msgType || MessageType.USER,
         hasAttachment: files.length > 0,
         showInChannel: showInChannel,

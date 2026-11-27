@@ -224,7 +224,7 @@ import { ensureFlowSkippedStage } from '@/services/flowStageTransitionRecovery';
 import { assertTicketUpdateAccess } from './acl/tables/tickets-acl';
 import { validateFlowDecisionFields } from '@/zero/utils/flowPlanValidation';
 import { getEncryptionProvider } from '@/services/encryption';
-import { compose } from '@/services/encryption/compose';
+import { composeSafe } from '@/services/encryption/compose';
 import { escapeHtml } from '@/utils/htmlEscape';
 
 function sortCallParticipantsForPreview<T extends {
@@ -3189,7 +3189,7 @@ export function createMutators(
           // returns it encrypted: the server never reads the text it stores, and no part of the
           // original can come from the client.
           const originalSender = await tx.run(zql.users.where('id', originalMessage.senderId).one());
-          const forward = await compose(
+          const forward = await composeSafe(
             {
               template: forwardedMessageTemplate,
               inputs: {
@@ -3725,7 +3725,7 @@ export function createMutators(
           }
 
           // replies_md is unreadable: the encryption service adds the replier (repliesMdAddReplierTemplate).
-          const replies = await compose(
+          const replies = await composeSafe(
             {
               template: repliesMdAddReplierTemplate,
               inputs: { repliesMd: conversation.replies_md ?? null, replierId: authData.sub },
@@ -4126,7 +4126,7 @@ export function createMutators(
           if (content !== undefined && isForwardedMessage) {
             // The stored forward with only its optional text replaced, built by the encryption
             // service (forwardedMessageEditTemplate) and stored encrypted as it comes back.
-            const edit = await compose(
+            const edit = await composeSafe(
               {
                 template: forwardedMessageEditTemplate,
                 inputs: { storedContent: message.content, optionalText: content },

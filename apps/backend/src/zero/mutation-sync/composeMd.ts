@@ -7,7 +7,7 @@ import {
   updateParentSubTicketsMdFromZero,
 } from '@xyne/shared';
 import type { Schema } from '@xyne/shared';
-import { compose } from '@/services/encryption/compose';
+import { composeSafe } from '@/services/encryption/compose';
 import { zql } from '../queries';
 import { type UnreadableTransaction, unreadableTransaction } from '../unreadableTransaction';
 
@@ -48,7 +48,7 @@ export async function composeInitialMessageMd(
   message: StoredMessage,
   conversation: TargetConversation & { initial_message_md: string | null },
 ): Promise<void> {
-  const result = await compose(
+  const result = await composeSafe(
     {
       template: initialMessageMdTemplate,
       inputs: {
@@ -89,7 +89,7 @@ export async function composeParentMessageMd(
   message: Pick<StoredMessage, 'messageId' | 'conversationId' | 'senderId' | 'content' | 'msgType' | 'createdAt'>,
   conversation: TargetConversation & { parent_message_md: string | null },
 ): Promise<void> {
-  const result = await compose(
+  const result = await composeSafe(
     {
       template: parentMessageMdTemplate,
       inputs: {
@@ -139,7 +139,7 @@ export async function composeSubTicketAnchorMd(
   // A thread's anchor is kept (writeConversationAnchorFromZero).
   if (read.facts.parent_message_md?.parentAnchorType === 'THREAD_REPLY') return;
 
-  const result = await compose(
+  const result = await composeSafe(
     {
       template: parentMessageMdTemplate,
       inputs: {
