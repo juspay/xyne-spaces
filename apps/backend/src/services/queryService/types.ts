@@ -213,7 +213,11 @@ export interface QueryResult {
 // ----------------------------------------------------------------------------
 
 export const MAX_QUERY_LIMIT = 10000;
-const MAX_OFFSET = 100000;
+/** Postgres reads and discards every skipped row, so deep pages cost as much as big ones. */
+const MAX_OFFSET = MAX_QUERY_LIMIT;
+/** contains / startsWith / endsWith scan text on every ticket in scope; a few per query at most. */
+const MAX_TEXT_MATCH_CONDITIONS = 3;
+const TEXT_MATCH_OPERATORS = new Set(['contains', 'startsWith', 'endsWith']);
 const MAX_FIELD_NAME_LENGTH = 128;
 const MAX_FILTER_DEPTH = 5;
 const MAX_FILTER_CONDITIONS = 100;
@@ -323,7 +327,34 @@ const GenericQuerySchema = z
     limit: z.number().int().positive().max(MAX_QUERY_LIMIT).optional(),
     offset: z.number().int().nonnegative().max(MAX_OFFSET).optional(),
     dateGranularity: z.enum(['hour', 'day', 'week', 'month']).optional(),
+  })
+  .superRefine((q, ctx) => {
+    // A grouped result row holds each groupBy column and each aggregation under its alias, so an
+    // alias equal to a column (or another alias) would overwrite it with a different number.
+    const taken = new Set<string>(['id', ...(q.groupBy ?? [])]);
+    for (const agg of q.aggregations ?? []) {
+      const key = agg.alias ?? `${agg.function.toLowerCase()}_${agg.field}`;
+      if (taken.has(key)) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, message: `Alias '${key}' is already a column of the result` });
+      }
+      taken.add(key);
+    }
+    if (q.filters && countTextMatches(q.filters) > MAX_TEXT_MATCH_CONDITIONS) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `Use at most ${MAX_TEXT_MATCH_CONDITIONS} "contains", "starts with" or "ends with" conditions`,
+      });
+    }
   });
+
+function countTextMatches(filter: LogicalFilter): number {
+  let n = 0;
+  for (const c of filter.conditions) {
+    if ('conditions' in c) n += countTextMatches(c as LogicalFilter);
+    else if (TEXT_MATCH_OPERATORS.has((c as FieldCondition).operator)) n += 1;
+  }
+  return n;
+}
 
 /**
  * Parse and validate a generic query

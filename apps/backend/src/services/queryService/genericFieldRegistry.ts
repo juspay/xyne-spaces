@@ -29,6 +29,25 @@ export interface FieldMetadata {
 }
 
 
+/**
+ * The columns analytics may read, per model. Anything else (ids of internal records, routing
+ * handles, deprecated columns, the full description) is not selectable, filterable or groupable.
+ * A model missing here exposes none of its columns.
+ */
+const QUERYABLE_COLUMNS: Record<string, ReadonlySet<string>> = {
+  Ticket: new Set([
+    'id', 'xyneId', 'title', 'status', 'statusV2', 'priority', 'stageName', 'ticketType',
+    'assignedTo', 'createdBy', 'updatedBy', 'closedBy',
+    'projectId', 'boardId', 'channelId', 'userGroupId',
+    'createdAt', 'updatedAt', 'statusUpdatedAt', 'closedAt', 'eta', 'firstRespondedAt', 'lastEmailAt',
+    'isStageOverdue', 'isArchived', 'emailCount',
+    'aiCategory', 'aiSubCategory', 'aiPriority',
+  ]),
+  UserWorkloadMapping: new Set([
+    'id', 'userId', 'userGroupId', 'boardId', 'activeTasks', 'totalTasks', 'createdAt', 'updatedAt', 'createdBy',
+  ]),
+};
+
 const SCHEMA_CACHE = new Map<string, Map<string, FieldMetadata>>();
 
 async function initSchemaCache(): Promise<void> {
@@ -38,9 +57,13 @@ async function initSchemaCache(): Promise<void> {
 
   for (const model of dmmf.datamodel.models) {
     const fields = new Map<string, FieldMetadata>();
+    const queryable = QUERYABLE_COLUMNS[model.name];
 
     for (const field of model.fields) {
       if (field.kind === 'object') {
+        continue;
+      }
+      if (!queryable?.has(field.name)) {
         continue;
       }
       const fieldType = field.type as PrismaFieldType;
