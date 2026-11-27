@@ -1,13 +1,16 @@
 import type { Transaction } from '@rocicorp/zero';
 import {
   UnreadableString,
+  buildInitialMessageMd,
   initialMessageMdTemplate,
+  isCiphertextValue,
+  reveal,
   parentMessageMdTemplate,
   parseParentMessageMd,
   resolveConversationAnchorType,
   updateParentSubTicketsMdFromZero,
 } from '@xyne/shared';
-import type { Schema } from '@xyne/shared';
+import type { ComposeResult, MessageType, Schema } from '@xyne/shared';
 import { compose } from '@/services/encryption/compose';
 import { zql } from '../queries';
 import { unreadableTransaction } from '../unreadableTransaction';
@@ -49,7 +52,26 @@ export async function composeInitialMessageMd(
   message: StoredMessage,
   conversation: TargetConversation & { initial_message_md: string | null },
 ): Promise<void> {
-  const result = await compose(
+  const result = await composeInitialMessageMdValue(message, conversation.initial_message_md, conversation.workspaceId);
+  if (result.unchanged) return;
+  // Written sealed: unreadableTransaction unwraps it for the database.
+  await unreadableTransaction(tx, conversation.workspaceId).mutate.conversations.update({
+    conversationId: conversation.conversationId,
+    initial_message_md: result.value,
+  });
+}
+
+/**
+ * `initial_message_md` for `message`, composed (initialMessageMdTemplate): encrypted, or
+ * `unchanged` when it equals `current`. Writes nothing: composeInitialMessageMd writes it through
+ * Zero; the Prisma paths (conversationService, messageMetadataService) write it through Prisma.
+ */
+export async function composeInitialMessageMdValue(
+  message: StoredMessage,
+  current: string | null | undefined,
+  workspaceId: string,
+): Promise<ComposeResult> {
+  return compose(
     {
       template: initialMessageMdTemplate,
       inputs: {
@@ -72,16 +94,31 @@ export async function composeInitialMessageMd(
         link_preview_md: seal(message.link_preview_md),
         childConversationId: message.childConversationId,
       },
-      current: seal(conversation.initial_message_md),
+      current: seal(current),
     },
-    { workspaceId: conversation.workspaceId },
+    { workspaceId },
   );
-  if (result.unchanged) return;
-  // Written sealed: unreadableTransaction unwraps it for the database.
-  await unreadableTransaction(tx, conversation.workspaceId).mutate.conversations.update({
-    conversationId: conversation.conversationId,
-    initial_message_md: result.value,
-  });
+}
+
+/**
+ * `initial_message_md` to store through Prisma (conversationService, messageMetadataService) for a
+ * conversation's first message. Content held as plaintext (reads decrypt): built as before. Content
+ * held as ciphertext (DEK passthrough, e.g. a bot's post through the ingress transit proxy): composed,
+ * as the sync handlers do, so the stored block isn't that ciphertext encrypted again. With `current`,
+ * an unchanged rebuild returns it, so callers comparing before writing skip the write.
+ */
+export async function initialMessageMdForPrisma(
+  message: StoredMessage,
+  current?: string | null,
+): Promise<string | null> {
+  if (!isCiphertextValue(message.content)) {
+    return buildInitialMessageMd({ ...message, msgType: message.msgType as MessageType });
+  }
+  if (!message.workspaceId) {
+    throw new Error('initial_message_md: the message content is encrypted, but its workspace is unknown');
+  }
+  const result = await composeInitialMessageMdValue(message, current, message.workspaceId);
+  return result.unchanged ? (current ?? null) : reveal(result.value);
 }
 
 /** Rebuilds `conversation.parent_message_md` from its parent `message`; writes it only when it changed. */

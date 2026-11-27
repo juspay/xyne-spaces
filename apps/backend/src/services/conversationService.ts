@@ -20,7 +20,8 @@ import { keepMentionsWithin } from '@/utils/mentionParser';
 import { ConversationParticipantRepository } from '@/database/repositories/conversationParticipantRepository';
 import { UserRepository } from '@/database/repositories/users';
 import { Conversation, Message } from '@prisma/client';
-import { ConversationParticipation, MessageType, AttachmentEntityType, ChannelScopeType, ChannelRole, VespaInsertionStatus, VespaOperationType, WorkspaceRole, buildInitialMessageMd } from '@xyne/shared';
+import { ConversationParticipation, MessageType, AttachmentEntityType, ChannelScopeType, ChannelRole, VespaInsertionStatus, VespaOperationType, WorkspaceRole } from '@xyne/shared';
+import { initialMessageMdForPrisma } from '@/zero/mutation-sync/composeMd';
 import { uploadFiles, UploadedFileResult } from '@/services/fileUploadService';
 import { websocketService } from './websocketService';
 import { redisService } from './redisService';
@@ -456,7 +457,8 @@ export class ConversationService {
       channelId,
       createdBy: userId,
       initialMessageId: messageId,
-      initial_message_md: buildInitialMessageMd({
+      // Composed when the content is held encrypted (a bot's post through the transit proxy).
+      initial_message_md: await initialMessageMdForPrisma({
         messageId,
         conversationId,
         workspaceId: channel.workspaceId,
@@ -825,7 +827,7 @@ export class ConversationService {
         createdBy: userId,
         createdAt: message.createdAt,
         initialMessageId: message.messageId,
-        initial_message_md: buildInitialMessageMd({
+        initial_message_md: await initialMessageMdForPrisma({
           ...message,
           msgType: message.msgType as MessageType,
           createdAt: message.createdAt.getTime(),

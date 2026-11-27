@@ -9,10 +9,10 @@ import {
   parseRepliesMd,
   serializeRepliesMd,
   addReplyToData,
-  buildInitialMessageMd,
   serializeParentMessageMd,
 } from '@xyne/shared';
 import type { InitialMessageSummary, ParentMessageSummary } from '@xyne/shared';
+import { initialMessageMdForPrisma } from '@/zero/mutation-sync/composeMd';
 
 export class MessageMetadataService {
   constructor(private prisma: PrismaClient) {}
@@ -147,11 +147,16 @@ export class MessageMetadataService {
 
     if (!message) return;
 
-    const md = buildInitialMessageMd({
-      ...message,
-      msgType: message.msgType as InitialMessageSummary['msgType'],
-      createdAt: message.createdAt.getTime(),
-    });
+    // Composed when the content is held encrypted; given the stored value, an unchanged rebuild
+    // returns it, so the write below is skipped.
+    const md = await initialMessageMdForPrisma(
+      {
+        ...message,
+        msgType: message.msgType as InitialMessageSummary['msgType'],
+        createdAt: message.createdAt.getTime(),
+      },
+      conversation.initial_message_md,
+    );
     if (conversation.initial_message_md === md) return;
 
     await this.prisma.conversation.update({
