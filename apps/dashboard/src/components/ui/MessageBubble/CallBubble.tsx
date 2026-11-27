@@ -257,7 +257,9 @@ export const CallBubble: React.FC<CallBubbleProps> = ({
         <>
           {/* AI description shown as message body once generated (callEndedText signals the swap happened) */}
           {metadata?.['callEndedText'] && message.content && (
-            <div className='jp-message-html text-sm whitespace-pre-wrap'>{message.content}</div>
+            <div className='jp-message-html text-sm leading-6 whitespace-pre-wrap'>
+              {message.content}
+            </div>
           )}
 
           {/* Detailed summary canvas preview */}

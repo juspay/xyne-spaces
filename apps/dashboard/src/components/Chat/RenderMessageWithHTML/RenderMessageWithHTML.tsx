@@ -220,7 +220,7 @@ export const InternalXyneLink = ({
   }
 
   const linkClassName = cn(
-    'inline-flex max-w-full items-center gap-1.5 rounded-md border border-border/80 bg-muted/40 px-2 py-0.5 text-primary no-underline transition-colors hover:bg-muted hover:no-underline',
+    'inline-flex max-w-full items-center gap-1.5 rounded-md border border-border/80 bg-muted/40 px-2 py-0.5 text-primary no-underline transition-colors hover:bg-muted hover:no-underline in-message:text-(--link-color) in-message:hover:text-(--link-hover-color) in-message:underline',
     className,
   );
 

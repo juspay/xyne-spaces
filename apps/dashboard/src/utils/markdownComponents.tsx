@@ -314,7 +314,10 @@ export const createMarkdownComponents = (
           href={href}
           {...props}
           {...getAnchorTargetProps(href)}
-          className={props.className ?? 'text-primary'}
+          className={
+            props.className ??
+            'text-primary in-message:text-(--link-color) in-message:hover:text-(--link-hover-color)'
+          }
         >
           {children}
         </InternalXyneLink>
@@ -346,7 +349,10 @@ export const createMarkdownComponents = (
           data-track-category='MESSAGE'
           data-track-name='OPEN_EXTERNAL_LINK'
           {...props}
-          className={props.className ?? 'text-primary hover:underline'}
+          className={
+            props.className ??
+            'text-primary hover:underline in-message:text-(--link-color) in-message:hover:text-(--link-hover-color)'
+          }
         >
           {children}
         </a>

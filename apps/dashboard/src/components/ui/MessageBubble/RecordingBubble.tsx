@@ -75,7 +75,7 @@ export const RecordingBubble: React.FC<RecordingBubbleProps> = ({ message, callI
     return (
       <div className='flex w-full max-w-lg flex-col gap-1'>
         {messageContent && (
-          <div className='jp-message-html whitespace-pre-wrap wrap-break-word text-sm text-foreground'>
+          <div className='jp-message-html whitespace-pre-wrap wrap-break-word text-sm leading-6 text-foreground'>
             <RenderMessageWithHTML message={messageContent} />
           </div>
         )}

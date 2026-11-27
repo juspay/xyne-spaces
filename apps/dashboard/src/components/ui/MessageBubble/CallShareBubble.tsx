@@ -35,7 +35,7 @@ export const CallShareBubble: React.FC<CallShareBubbleProps> = ({ message }) => 
   return (
     <div className='flex w-full max-w-lg flex-col gap-1'>
       {noteHtml && (
-        <div className='jp-message-html whitespace-pre-wrap wrap-break-word text-sm text-foreground'>
+        <div className='jp-message-html whitespace-pre-wrap wrap-break-word text-sm leading-6 text-foreground'>
           <RenderMessageWithHTML message={noteHtml} />
         </div>
       )}

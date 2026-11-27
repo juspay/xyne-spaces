@@ -277,7 +277,7 @@ export const MobileMessageMyBubble: React.FC<MobileMessageMyBubbleProps> = ({
                       renderNote={noteHtml => (
                         <div
                           className={cn(
-                            'jp-message-html whitespace-pre-wrap inline-block text-muted-foreground',
+                            'jp-message-html whitespace-pre-wrap inline-block',
                             getEmojiFontSizeClass(noteHtml),
                           )}
                         >
@@ -292,7 +292,7 @@ export const MobileMessageMyBubble: React.FC<MobileMessageMyBubbleProps> = ({
                   ) : (
                     <div
                       className={cn(
-                        'jp-message-html whitespace-pre-wrap inline-block text-muted-foreground',
+                        'jp-message-html whitespace-pre-wrap inline-block',
                         getEmojiFontSizeClass(forwardedMessageData.content),
                       )}
                     >

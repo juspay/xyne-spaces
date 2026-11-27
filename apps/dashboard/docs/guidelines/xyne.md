@@ -114,6 +114,7 @@ Components should not "know everything". Break down components when they:
 | Custom utilities | Declare with `@utility name { ... }` in `global.css`, never as classes inside `@layer utilities` |
 | Cascade layers | Order is `workflow-ui, theme, base, vendor, components, utilities` (declared in each HTML entry). Stylesheets from `node_modules` land in `vendor` through PostCSS, except their `@font-face` rules, which stay unlayered so font precedence is unchanged; put our own non-utility CSS in `@layer components`. Utilities always win over both |
 | `dark:` is inert | Themes switch with `data-theme`; target them with `in-data-[theme=midnight]:`, not `dark:` |
+| Message content | Rules for `.jp-message-html` / `.bot-markdown-content` live in `components`, so a utility on the same element wins. To style something only inside message content, use `in-message:` (e.g. `in-message:text-(--link-color)`) |
 
 ```typescript
 // Bad - inline styles
