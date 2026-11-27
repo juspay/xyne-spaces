@@ -599,35 +599,52 @@ const getFilteredCanvasItems = ({
   return filtered;
 };
 
+type CanvasListOptions = {
+  locallyDeletedCanvasIds: ReadonlySet<string>;
+  selectedCanvasLabelSnapshot: Canvas | null;
+  labelsByCanvasId: CanvasLabelMap;
+  includeArchived: boolean;
+  onlyArchived: boolean;
+  isLabelFilterLoading: boolean;
+  filters: Omit<Parameters<typeof getFilteredCanvasItems>[0], 'canvases' | 'labelsByCanvasId'>;
+};
+
+// Both the main list and pinned stars pass through the same preparation and filters.
+const prepareCanvasListItems = (canvases: Canvas[], options: CanvasListOptions) => {
+  const rawItems = canvases
+    .filter(canvas => !options.locallyDeletedCanvasIds.has(canvas.id))
+    .map(canvas =>
+      mergeCanvasRestLabels(
+        mergeCanvasLabelSnapshot(canvas, options.selectedCanvasLabelSnapshot),
+        options.labelsByCanvasId,
+      ),
+    );
+  const itemsWithStarState = withStarredCanvasState(filterArchivedCanvases(rawItems, options));
+  const filteredItems = options.isLabelFilterLoading
+    ? []
+    : getFilteredCanvasItems({
+        ...options.filters,
+        canvases: itemsWithStarState,
+        labelsByCanvasId: options.labelsByCanvasId,
+      });
+  return { rawItems, itemsWithStarState, filteredItems };
+};
+
 const updateOptimisticStarState = (
   canvas: Canvas,
   canvasId: string,
   userId: string | undefined,
   isStarred: boolean,
 ): Canvas => {
-  if (canvas.id !== canvasId) {
-    return canvas;
-  }
-
-  if (!userId) {
-    return {
-      ...canvas,
-      isStarred,
-    };
-  }
+  if (canvas.id !== canvasId) return canvas;
+  if (!userId) return { ...canvas, isStarred };
 
   const now = Date.now();
   const userStatuses = canvas.userStatuses ?? [];
   const existingStatus = userStatuses.find(status => status.userId === userId);
   const nextUserStatuses = existingStatus
     ? userStatuses.map(status =>
-        status.userId === userId
-          ? {
-              ...status,
-              isStarred,
-              updatedAt: now,
-            }
-          : status,
+        status.userId === userId ? { ...status, isStarred, updatedAt: now } : status,
       )
     : [
         ...userStatuses,
@@ -641,11 +658,7 @@ const updateOptimisticStarState = (
         },
       ];
 
-  return {
-    ...canvas,
-    isStarred,
-    userStatuses: nextUserStatuses,
-  };
+  return { ...canvas, isStarred, userStatuses: nextUserStatuses };
 };
 
 const ChannelScopeFolderGroupSection: React.FC<{
@@ -1043,13 +1056,29 @@ export const CanvasList: React.FC<CanvasListProps> = ({
       ),
     [locallyDeletedCanvasIds, selectedChannelRootCanvasesResult],
   );
+  // Starred canvases are loaded independently of pagination (driven from canvas_user_status)
+  // so a starred canvas whose page hasn't been fetched yet still shows in the pinned section.
+  const isDedicatedStarredQueryEnabled = !channelId && !isSpecificChannelScope;
+  const [starredStatusRows] = useCachedQuery(queries.starredCanvases({}), {
+    enabled: isDedicatedStarredQueryEnabled,
+  });
+  const dedicatedStarredCanvases = useMemo(() => {
+    const rows = (starredStatusRows ?? []) as Array<{ canvas?: Canvas | null }>;
+    return rows.map(row => row.canvas).filter((canvas): canvas is Canvas => Boolean(canvas));
+  }, [starredStatusRows]);
   const canvasLabelIds = useMemo(
     () => [
       ...rawMergedCanvasItems.map(canvas => canvas.id),
+      ...dedicatedStarredCanvases.map(canvas => canvas.id),
       ...selectedChannelRootCanvasItems.map(canvas => canvas.id),
       ...(selectedCanvasId && selectedCanvasId !== 'new' ? [selectedCanvasId] : []),
     ],
-    [rawMergedCanvasItems, selectedCanvasId, selectedChannelRootCanvasItems],
+    [
+      dedicatedStarredCanvases,
+      rawMergedCanvasItems,
+      selectedCanvasId,
+      selectedChannelRootCanvasItems,
+    ],
   );
   const {
     labelsByCanvasId,
@@ -1090,25 +1119,58 @@ export const CanvasList: React.FC<CanvasListProps> = ({
         ? 'others'
         : undefined;
 
-  const rawItems = useMemo(
-    () =>
-      rawMergedCanvasItems
-        .filter(canvas => !locallyDeletedCanvasIds.has(canvas.id))
-        .map(canvas =>
-          mergeCanvasRestLabels(
-            mergeCanvasLabelSnapshot(canvas, selectedCanvasLabelSnapshot),
-            labelsByCanvasId,
-          ),
-        ),
-    [labelsByCanvasId, locallyDeletedCanvasIds, rawMergedCanvasItems, selectedCanvasLabelSnapshot],
+  const isLabelFilterLoading = Boolean(selectedLabel && isCanvasLabelsLoading);
+  const canvasListOptions = useMemo<CanvasListOptions>(
+    () => ({
+      locallyDeletedCanvasIds,
+      selectedCanvasLabelSnapshot,
+      labelsByCanvasId,
+      includeArchived,
+      onlyArchived,
+      isLabelFilterLoading,
+      filters: {
+        onlyCallGeneratedCanvases,
+        excludeCallGeneratedCanvases,
+        excludeRecordingGeneratedCanvases,
+        onlyRecordingGeneratedCanvases,
+        showStarredOnly,
+        activeFilter,
+        currentUserId,
+        searchScope: effectiveSearchScope,
+        selectedScopeChannelId: effectiveSelectedScopeChannelId,
+        selectedSharedByUserId,
+        selectedLabel,
+        searchQuery: debouncedSearchQuery,
+      },
+    }),
+    [
+      locallyDeletedCanvasIds,
+      selectedCanvasLabelSnapshot,
+      labelsByCanvasId,
+      includeArchived,
+      onlyArchived,
+      isLabelFilterLoading,
+      onlyCallGeneratedCanvases,
+      excludeCallGeneratedCanvases,
+      excludeRecordingGeneratedCanvases,
+      onlyRecordingGeneratedCanvases,
+      showStarredOnly,
+      activeFilter,
+      currentUserId,
+      effectiveSearchScope,
+      effectiveSelectedScopeChannelId,
+      selectedSharedByUserId,
+      selectedLabel,
+      debouncedSearchQuery,
+    ],
   );
-  const archiveFilteredRawItems = useMemo(
-    () => filterArchivedCanvases(rawItems, { includeArchived, onlyArchived }),
-    [includeArchived, onlyArchived, rawItems],
-  );
-  const itemsWithStarState = useMemo(
-    () => withStarredCanvasState(archiveFilteredRawItems),
-    [archiveFilteredRawItems],
+  const {
+    rawItems,
+    itemsWithStarState,
+    filteredItems: filteredMainItems,
+  } = useMemo(
+    () => prepareCanvasListItems(rawMergedCanvasItems, canvasListOptions),
+    [rawMergedCanvasItems, canvasListOptions],
   );
   const isChannelSourceLoading = useMemo(
     () =>
@@ -1377,14 +1439,22 @@ export const CanvasList: React.FC<CanvasListProps> = ({
     return (): void => cancelAnimationFrame(rafId);
   }, [activeFilter, isMobile]);
 
-  const isLabelFilterLoading = Boolean(selectedLabel && isCanvasLabelsLoading);
   const STARRED_SECTION_PAGE_SIZE = 3;
   const [isStarredSectionExpanded, setIsStarredSectionExpanded] = useState(false);
 
-  const starredCanvases = useMemo(
-    () => itemsWithStarState.filter(canvas => canvas.isStarred),
-    [itemsWithStarState],
-  );
+  const starredCanvases = useMemo(() => {
+    const source = isDedicatedStarredQueryEnabled ? dedicatedStarredCanvases : rawMergedCanvasItems;
+    const { filteredItems } = prepareCanvasListItems(source, {
+      ...canvasListOptions,
+      filters: { ...canvasListOptions.filters, showStarredOnly: true },
+    });
+    return sortCanvasItems(filteredItems);
+  }, [
+    canvasListOptions,
+    dedicatedStarredCanvases,
+    isDedicatedStarredQueryEnabled,
+    rawMergedCanvasItems,
+  ]);
 
   const visibleStarredCanvases = isStarredSectionExpanded
     ? starredCanvases
@@ -1402,48 +1472,11 @@ export const CanvasList: React.FC<CanvasListProps> = ({
     !isSpecificChannelScope &&
     !selectedLabel &&
     !debouncedSearchQuery.trim();
-  const itemsForMainList = useMemo(() => {
-    if (!isStarredSectionVisible) return itemsWithStarState;
-    const starredIds = new Set(starredCanvases.map(canvas => canvas.id));
-    return itemsWithStarState.filter(canvas => !starredIds.has(canvas.id));
-  }, [isStarredSectionVisible, itemsWithStarState, starredCanvases]);
-
   const filteredCanvases = useMemo(() => {
-    if (isLabelFilterLoading) return [];
-
-    return getFilteredCanvasItems({
-      canvases: itemsForMainList,
-      onlyCallGeneratedCanvases,
-      excludeCallGeneratedCanvases,
-      excludeRecordingGeneratedCanvases,
-      onlyRecordingGeneratedCanvases,
-      showStarredOnly,
-      activeFilter,
-      currentUserId,
-      searchScope: effectiveSearchScope,
-      selectedScopeChannelId: effectiveSelectedScopeChannelId,
-      selectedSharedByUserId,
-      selectedLabel,
-      searchQuery: debouncedSearchQuery,
-      labelsByCanvasId,
-    });
-  }, [
-    activeFilter,
-    currentUserId,
-    effectiveSearchScope,
-    effectiveSelectedScopeChannelId,
-    excludeCallGeneratedCanvases,
-    excludeRecordingGeneratedCanvases,
-    isLabelFilterLoading,
-    itemsForMainList,
-    labelsByCanvasId,
-    onlyCallGeneratedCanvases,
-    onlyRecordingGeneratedCanvases,
-    debouncedSearchQuery,
-    selectedLabel,
-    selectedSharedByUserId,
-    showStarredOnly,
-  ]);
+    if (!isStarredSectionVisible) return filteredMainItems;
+    const starredIds = new Set(starredCanvases.map(canvas => canvas.id));
+    return filteredMainItems.filter(canvas => !starredIds.has(canvas.id));
+  }, [isStarredSectionVisible, filteredMainItems, starredCanvases]);
 
   const hasPrimaryCanvasFilters =
     onlyCallGeneratedCanvases ||
@@ -1818,6 +1851,8 @@ export const CanvasList: React.FC<CanvasListProps> = ({
     (canvas: Canvas): void => {
       if (!onToggleStar) return;
       const nextIsStarred = !canvas.isStarred;
+      // Older accumulated pages no longer have a live subscription. Keep their
+      // stored rows in sync even when the toggle comes from the starred section.
       setCanvasItems(items =>
         items.map(item => updateOptimisticStarState(item, canvas.id, currentUserId, nextIsStarred)),
       );

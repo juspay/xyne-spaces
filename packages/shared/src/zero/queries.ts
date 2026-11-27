@@ -4017,6 +4017,21 @@ export const queries = defineQueries({
       return includeCurrentUserCanvasStatus(query.limit(args.limit).related('participants'), ctx.userID);
     },
   ),
+  
+  starredCanvases: defineQuery(z.object({}), ({ ctx }) => {
+    return zql.canvas_user_status
+      .where('userId', ctx.userID)
+      .where('isStarred', true)
+      .whereExists('canvas', canvas =>
+        applyUserAndPublicChannelCanvasFilter(canvas.where('docType', DocType.Canvas), ctx.userID),
+      )
+      .related('canvas', canvas =>
+        includeCurrentUserCanvasStatus(canvas.related('participants'), ctx.userID),
+      )
+      // Most recently starred first; id is the tie-breaker so the order is stable.
+      .orderBy('updatedAt', 'desc')
+      .orderBy('id', 'desc');
+  }),
   // Query for user's Quarto docs
   userQuartoDocsPaginated: defineQuery(
     z.object({
