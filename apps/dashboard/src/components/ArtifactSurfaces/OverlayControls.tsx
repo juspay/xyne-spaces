@@ -9,6 +9,7 @@ import {
   DropdownMenuTrigger,
 } from '../ui/dropdown-menu';
 import { ShortcutHint } from '../ui/ShortcutHint';
+import { APP_NO_DRAG_STYLE } from '../../utils/electronApp';
 import {
   OVERLAY_CONFIRM_SECONDS,
   OVERLAY_PAUSE_MS,
@@ -58,6 +59,7 @@ export const OverlayConfirm = ({ appId }: { appId: string }): ReactElement => {
       role='alertdialog'
       aria-labelledby='overlay-confirm-title'
       aria-describedby='overlay-confirm-description'
+      style={APP_NO_DRAG_STYLE}
       className={`fixed left-1/2 top-4 ${CONTROL_Z} flex w-[min(420px,calc(100vw-32px))] -translate-x-1/2 items-center gap-3 rounded-xl border border-border bg-popover p-3 text-popover-foreground shadow-2xl`}
     >
       <div className='min-w-0 flex-1'>
@@ -110,7 +112,7 @@ export const OverlayControl = ({
   const title = app?.title ?? 'Overlay';
 
   return (
-    <div className={`fixed bottom-4 left-4 ${CONTROL_Z}`}>
+    <div className={`fixed bottom-4 left-4 ${CONTROL_Z}`} style={APP_NO_DRAG_STYLE}>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <button

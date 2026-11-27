@@ -22,6 +22,7 @@ import {
   DropdownMenuTrigger,
 } from '../ui/dropdown-menu';
 import { cn } from '../../utils/classNames';
+import { APP_NO_DRAG_STYLE } from '../../utils/electronApp';
 import {
   removeWidget,
   reportSurfaceFailure,
@@ -201,7 +202,7 @@ export const FloatingWidget = ({
         'opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100',
         drag && 'opacity-100',
       )}
-      style={{ top: -TOOLBAR_HEIGHT - 4, height: TOOLBAR_HEIGHT }}
+      style={{ ...APP_NO_DRAG_STYLE, top: -TOOLBAR_HEIGHT - 4, height: TOOLBAR_HEIGHT }}
     >
       <button
         type='button'
@@ -335,7 +336,7 @@ export const FloatingWidget = ({
     <div
       ref={frameRef}
       className='group fixed z-[44]'
-      style={{ ...position, width: size.width, height: size.height }}
+      style={{ ...APP_NO_DRAG_STYLE, ...position, width: size.width, height: size.height }}
       data-testid='artifact-widget'
     >
       {toolbar}
