@@ -90,7 +90,7 @@ export const CONFIG = {
   /**
    * EC P-256 private key (PKCS#8 PEM) that signs sandbox git scopes (routes/git-scope.ts).
    * Its own key, never the service-assertion key: the git-gateway holds only its public
-   * half (print it with scripts/git-scope-public-key.ts). Empty: the route answers 503.
+   * half (openssl ec -in <key>.pem -pubout), in its git-gateway-scope-keys config. Empty: the route answers 503.
    */
   clawGitScopePrivateKey: (process.env["CLAW_GIT_SCOPE_PRIVATE_KEY"] ?? "").replace(/\\n/g, "\n").trim(),
   /** `kid` of the git-scope key; the gateway keys its public-key set by it. Empty: the route answers 503. */
