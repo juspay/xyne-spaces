@@ -40,7 +40,8 @@
     "test:push": "./tools/xyne-automation/scripts/push-report-branch.sh",
     "test:enum": "bash scripts/validate-no-new-enums.sh",
     "test:raw-sql": "bash scripts/validate-no-raw-sql.sh",
-    "test:exact-versions": "node scripts/validate-exact-dependency-versions.mjs --ci"
+    "test:exact-versions": "node scripts/validate-exact-dependency-versions.mjs --ci",
+    "check:tailwind-v4": "node scripts/check-tailwind-v4-classes.mjs"
   },
   "devDependencies": {
     "@clack/prompts": "1.7.0",

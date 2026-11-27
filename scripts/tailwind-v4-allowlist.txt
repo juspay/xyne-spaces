@@ -1,0 +1,1 @@
+apps/dashboard/src/components/AIScreen/ReactArtifact/shadcnPreamble.generated.ts

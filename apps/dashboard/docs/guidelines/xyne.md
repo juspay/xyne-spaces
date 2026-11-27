@@ -111,6 +111,7 @@ Components should not "know everything". Break down components when they:
 | Responsive design | Use Tailwind responsive prefixes (`sm:`, `md:`, `lg:`) |
 | Theme lives in CSS | Colours, fonts, radius and animations are `@theme` blocks in `src/global.css`; there is no `tailwind.config.js` |
 | v4 class names | `shadow-xs` / `shadow-sm` (was `shadow-sm` / `shadow`), same shift for `rounded`, `blur`, `drop-shadow`; `outline-hidden`; `ring-3`; `shrink-0`; `bg-linear-to-*`; `bg-black/30` instead of `bg-opacity-*`; `!` goes last (`p-2!`) |
+| CI check | `pnpm check:tailwind-v4` fails on v3-only class names; run it before pushing |
 | Custom utilities | Declare with `@utility name { ... }` in `global.css`, never as classes inside `@layer utilities` |
 | Cascade layers | Order is `workflow-ui, theme, base, vendor, components, utilities` (declared in each HTML entry). Stylesheets from `node_modules` land in `vendor` through PostCSS, except their `@font-face` rules, which stay unlayered so font precedence is unchanged; put our own non-utility CSS in `@layer components`. Utilities always win over both |
 | `dark:` is inert | Themes switch with `data-theme`; target them with `in-data-[theme=midnight]:`, not `dark:` |

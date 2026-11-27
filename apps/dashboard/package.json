@@ -27,7 +27,8 @@
     "format:check": "prettier --check \"src/**/*.{ts,tsx,js,jsx,json,css,md}\"",
     "clean": "rm -rf dist build coverage",
     "validate": "node ../../scripts/xyne-doctor.mjs dashboard-validate",
-    "validate:raw": "pnpm run typecheck && (pnpm run format:check || (pnpm run format && exit 1)) && pnpm run lint",
+    "validate:raw": "pnpm run typecheck && (pnpm run format:check || (pnpm run format && exit 1)) && pnpm run lint && pnpm run check:tailwind-v4",
+    "check:tailwind-v4": "node ../../scripts/check-tailwind-v4-classes.mjs",
     "prepare": "husky"
   },
   "keywords": [
