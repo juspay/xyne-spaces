@@ -1,10 +1,11 @@
-import { memo, useEffect, useRef, type ReactElement } from 'react';
+import { memo, useEffect, useRef, type ReactElement, type ReactNode } from 'react';
 import { StyleSheet, View } from 'react-native';
 import Animated, { LayoutAnimationConfig } from 'react-native-reanimated';
 
 import { useChatInputPanelState } from '@/src/components/input-composer';
 
 import {
+  TYPING_BAR_TOOL_GAP,
   TYPING_BAR_TOOL_GLYPH_INSET,
   TYPING_BAR_TOOLS_SWAP_MS,
   TYPING_BAR_TOOLS_SWAP_SCALE,
@@ -31,7 +32,14 @@ const { entering: rowIn } = fadeScaleTransition({
 
 const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', gap: TYPING_BAR_TRAILING_GUTTER },
-  leading: { flex: 1, minWidth: 0, marginLeft: -TYPING_BAR_TOOL_GLYPH_INSET },
+  leading: {
+    flex: 1,
+    minWidth: 0,
+    marginLeft: -TYPING_BAR_TOOL_GLYPH_INSET,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: TYPING_BAR_TOOL_GAP,
+  },
   swap: { flex: 1, flexDirection: 'row', alignItems: 'center' },
 });
 
@@ -40,8 +48,15 @@ const styles = StyleSheet.create({
  * left, mic / Send on the right. Aa and the strip's close cross-fade the two;
  * the row fades in as the field takes focus. Dictation takes the row at once:
  * the tools leave without fading, so they never sit under its controls.
+ * `leadingTool` ("+") stays first, beside the tools and the strip alike.
  */
-function RoomToolRowComponent({ disabled }: { disabled: boolean }): ReactElement {
+function RoomToolRowComponent({
+  disabled,
+  leadingTool,
+}: {
+  disabled: boolean;
+  leadingTool?: ReactNode;
+}): ReactElement {
   const { isFormattingVisible } = useChatInputPanelState();
   const status = useRoomDictationStatus();
   const leading = toolRowLeading({
@@ -57,6 +72,7 @@ function RoomToolRowComponent({ disabled }: { disabled: boolean }): ReactElement
   return (
     <Animated.View entering={rowIn} style={styles.row}>
       <View style={styles.leading}>
+        {leading === 'none' ? null : leadingTool}
         {/* Keyed on whether anything shows, so going to dictation unmounts this config and skips the swap's exit. */}
         <LayoutAnimationConfig key={leading === 'none' ? 'none' : 'some'} skipEntering skipExiting>
           {leading === 'none' ? null : (

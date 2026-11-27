@@ -3,7 +3,7 @@ import { getChatComposerBottomPadding } from '@/src/features/chat/v2/chatKeyboar
 
 import {
   TYPING_BAR_DICTATING_WIDTH,
-  TYPING_BAR_FIELD_HEIGHT,
+  TYPING_BAR_CARD_HEIGHT,
   TYPING_BAR_FIELD_PADDING_LEFT,
   TYPING_BAR_FIELD_PADDING_RIGHT,
   TYPING_BAR_MIC_SIZE,
@@ -65,13 +65,13 @@ export function getRoomTypingBarMinimumHeight(
   return Math.ceil(
     getChatComposerBottomPadding(safeAreaBottom, includeBottomSafeArea) +
       TYPING_BAR_PADDING_TOP +
-      TYPING_BAR_FIELD_HEIGHT,
+      TYPING_BAR_CARD_HEIGHT,
   );
 }
 
 /** Figma "Typing bar · Reply": the thread card's bar has its own padding and no safe area. */
 export function getThreadTypingBarMinimumHeight(): number {
-  return TYPING_BAR_REPLY_PADDING_Y * 2 + TYPING_BAR_FIELD_HEIGHT;
+  return TYPING_BAR_REPLY_PADDING_Y * 2 + TYPING_BAR_CARD_HEIGHT;
 }
 
 /** The screen's placeholder wins; a thread without one reads "Reply…". */

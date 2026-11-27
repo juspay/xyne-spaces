@@ -251,10 +251,11 @@ export const ROW_SHADOW =
   '0px 1px 2px 0px rgba(18, 20, 28, 0.06), 0px 2px 6px 0px rgba(18, 20, 28, 0.035)';
 
 /**
- * Typing bar (Figma "Room / Typing bar"): a 42 "+" plate and a 42 field, 8
- * apart and 16 from the sides, with 8 above (a thread's reply bar has 16 above
- * and below). The field pads 16 left, 3 right and 10 above and below a 16 / 22
- * line, and grows to six lines while focused.
+ * Typing bar: one card 16 from the sides, so its edges line up with the
+ * messages', with 8 above (a thread's reply bar has 16 above and below).
+ * Unfocused it is one line: "+", the field and mic / Send. The field pads 10
+ * above and below a 16 / 22 line; focused it pads 16 left, 3 right and grows
+ * to six lines over the tool row.
  */
 export const TYPING_BAR_PADDING_TOP = 8;
 export const TYPING_BAR_REPLY_PADDING_Y = 16;
@@ -265,8 +266,23 @@ export const TYPING_BAR_FIELD_PADDING_LEFT = 16;
 export const TYPING_BAR_FIELD_PADDING_RIGHT = 3;
 export const TYPING_BAR_FIELD_HEIGHT = TYPING_BAR_FIELD_PADDING_Y * 2 + TYPING_BAR_LINE_HEIGHT;
 export const TYPING_BAR_FIELD_RADIUS = TYPING_BAR_FIELD_HEIGHT / 2;
-export const TYPING_BAR_PLUS_SIZE = TYPING_BAR_FIELD_HEIGHT;
 export const TYPING_BAR_ICON_SIZE = 20;
+/** The card's hairline edge, drawn inside its frame: the card is the field plus this on each side. */
+export const TYPING_BAR_CARD_BORDER = 1;
+export const TYPING_BAR_CARD_HEIGHT = TYPING_BAR_FIELD_HEIGHT + TYPING_BAR_CARD_BORDER * 2;
+export const TYPING_BAR_CARD_RADIUS = 20;
+/** A soft lift off the room, as Slack's bar: barely there in light, the edge carries it in dark. */
+export const TYPING_BAR_CARD_SHADOW = {
+  shadowColor: '#12141c',
+  shadowOpacity: 0.08,
+  shadowRadius: 8,
+  shadowOffset: { width: 0, height: 2 },
+  elevation: 2,
+} as const;
+/** The card opens and closes on focus with a linear layout transition. */
+export const TYPING_BAR_CARD_MORPH_MS = 180;
+/** Unfocused, "+" is a 36 tool sitting 3 inside the card's left edge, as mic / Send on the right. */
+export const TYPING_BAR_PLUS_INSET = TYPING_BAR_FIELD_PADDING_RIGHT;
 /** The mic and Send are 36 circles, 3 inside the field's right edge. */
 export const TYPING_BAR_MIC_SIZE = 36;
 export const TYPING_BAR_SEND_SIZE = 36;
