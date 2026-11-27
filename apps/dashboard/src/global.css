@@ -8,6 +8,7 @@
 @source not './components/AIScreen/ReactArtifact/shadcnPreamble.generated.ts';
 
 @custom-variant dark (&:is(.dark *));
+@custom-variant hover (&:hover);
 @custom-variant in-message (:where(.jp-message-html, .bot-markdown-content, .bot-markdown-content-call-summary) &);
 
 @theme {
