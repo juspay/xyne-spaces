@@ -98,6 +98,42 @@ export const EXTERNAL_RUN_BODY_FIELDS = [
   "userId",
 ] as const;
 
+/**
+ * Fields the PUBLIC browser-cookie `POST /run` mount must never accept.
+ *
+ * These are not merely unused by the dashboard — each one changes server-side
+ * trust decisions, so a caller-supplied value would let a browser pick its own
+ * security behaviour:
+ *
+ *   eventType                  "automation"/"scheduled_job" disables the
+ *                              conversation-ownership backstop in prepareRun
+ *                              (isScheduledOrAutomationEvent).
+ *   providerConfigs            short-circuits server-side provider resolution,
+ *                              so the run uses caller-supplied provider config
+ *                              instead of the agent's.
+ *   __persistedByCaller        suppresses the user-message / AgentRun writes.
+ *   __skipUserMessagePersist   suppresses the user-message write.
+ *
+ * REJECTED, not stripped: the only public caller is our own dashboard, which
+ * never sends these, so a silent strip would hide a real client bug. Internal
+ * and service-token callers are unaffected — this list is applied on the public
+ * mount only.
+ */
+export const PRIVILEGED_PUBLIC_RUN_FIELDS = [
+  "eventType",
+  "providerConfigs",
+  "__persistedByCaller",
+  "__skipUserMessagePersist",
+] as const;
+
+export function rejectPrivilegedRunFields(
+  body: Record<string, unknown> | undefined,
+): { ok: true } | { ok: false; fields: string[] } {
+  if (!body) return { ok: true };
+  const fields = PRIVILEGED_PUBLIC_RUN_FIELDS.filter((key) => body[key] !== undefined);
+  return fields.length > 0 ? { ok: false, fields: [...fields] } : { ok: true };
+}
+
 export function sanitizeExternalRunBody(
   body: Record<string, unknown>,
   opts: { allowChannelDelivery?: boolean } = {},

@@ -54,7 +54,7 @@ import { resolveAgentSpacesAuth } from "../surfaces/spaces/user-auth.js";
 import { isAllowedExternalCallbackUrl, isInternalCallbackOrigin, type ExternalResultCallbackConfig } from "../surfaces/external-api/delivery.js";
 import { TOKEN_PREFIX, SERVICE_TOKEN_PREFIX, type VerifiedCliToken } from "../lib/cli-tokens.js";
 import { DELEGATION_HEADER } from "../lib/spaces-delegation.js";
-import { agentScopeAllows, canPostToChannels, sanitizeExternalRunBody } from "../lib/service-tokens.js";
+import { agentScopeAllows, canPostToChannels, rejectPrivilegedRunFields, sanitizeExternalRunBody } from "../lib/service-tokens.js";
 import { encryptSurfaceSecret } from "../lib/surface-resolver.js";
 import { resolveClawUserIdForSpacesIdentity } from "../lib/users-jit.js";
 
@@ -457,6 +457,22 @@ router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
   // masquerade as internal traffic.
   const serviceToken = (res.locals ?? {})["accessToken"] as VerifiedCliToken | undefined;
   const isServiceTokenCaller = serviceToken?.client === "service";
+
+  // Public mount only. `/internal/run` keeps the full contract (its callers are
+  // verified services), and service tokens are handled by the strip below.
+  const onInternalMount = req.baseUrl.includes("/internal");
+  if (!onInternalMount && !isServiceTokenCaller) {
+    const privileged = rejectPrivilegedRunFields(req.body as Record<string, unknown> | undefined);
+    if (!privileged.ok) {
+      log.warn(`[run] public caller sent privileged fields: ${privileged.fields.join(", ")}`);
+      res.status(400).json({
+        success: false,
+        error: `these fields are not accepted on this endpoint: ${privileged.fields.join(", ")}`,
+      });
+      return;
+    }
+  }
+
   if (isServiceTokenCaller) {
     // Channel-delivery fields (channelId/deliverTo) survive the strip ONLY
     // when the token carries CHANNELS_POST_SCOPE; otherwise external callers

@@ -190,7 +190,7 @@ vi.mock("./webhook.js", () => ({
 
 async function postRun(
   body: Record<string, unknown>,
-  options: { s2s?: boolean; serviceToken?: boolean } = {},
+  options: { s2s?: boolean; serviceToken?: boolean; cookie?: boolean; internal?: boolean } = {},
 ): Promise<{ status: number; body: Record<string, unknown> }> {
   const { runRouter } = await import("./run.js");
   return await new Promise((resolve, reject) => {
@@ -198,10 +198,14 @@ async function postRun(
     const req = {
       method: "POST",
       url: "/run",
-      originalUrl: "/run",
-      baseUrl: "",
+      originalUrl: options.internal ? "/claw/api/v1/internal/run" : "/run",
+      baseUrl: options.internal ? "/claw/api/v1/internal" : "",
       headers: {
-        authorization: options.serviceToken ? "Bearer xyne_svc_real" : "Bearer xyne_cli_real",
+        // A browser-cookie caller presents no Bearer token, so requireRunCaller
+        // routes it to requireUserAuth.
+        ...(options.cookie
+          ? { cookie: "user_session_id=sess-1" }
+          : { authorization: options.serviceToken ? "Bearer xyne_svc_real" : "Bearer xyne_cli_real" }),
         ...(options.s2s ? { "x-service-assertion": "valid" } : {}),
       },
       body,
@@ -462,5 +466,77 @@ describe("/run CLI bearer path", () => {
 
     expect(response.status).toBe(200);
     expect(state.fetchBodies).toHaveLength(1);
+  });
+});
+
+describe("/run privileged public fields (B2)", () => {
+  const PRIVILEGED: Array<[string, unknown]> = [
+    ["eventType", "automation"],
+    ["providerConfigs", { openai: { apiKey: "sk-attacker" } }],
+    ["__persistedByCaller", true],
+    ["__skipUserMessagePersist", true],
+  ];
+
+  for (const [field, value] of PRIVILEGED) {
+    it(`rejects ${field} from a browser-cookie caller with 400`, async () => {
+      const response = await postRun(
+        { agentSlug: "agent-a", task: "do work", [field]: value },
+        { cookie: true },
+      );
+
+      expect(response.status).toBe(400);
+      expect(String(response.body["error"])).toContain(field);
+      expect(state.fetchBodies).toHaveLength(0);
+    });
+  }
+
+  it("refuses eventType: automation so it cannot bypass conversation-ownership validation", async () => {
+    const response = await postRun(
+      { agentSlug: "agent-a", task: "do work", eventType: "automation", conversationId: "someone-elses-conv" },
+      { cookie: true },
+    );
+
+    expect(response.status).toBe(400);
+    expect(String(response.body["error"])).toContain("eventType");
+    expect(state.fetchBodies).toHaveLength(0);
+  });
+
+  it("refuses eventType: scheduled_job from a browser-cookie caller", async () => {
+    const response = await postRun(
+      { agentSlug: "agent-a", task: "do work", eventType: "scheduled_job" },
+      { cookie: true },
+    );
+
+    expect(response.status).toBe(400);
+    expect(String(response.body["error"])).toContain("eventType");
+    expect(state.fetchBodies).toHaveLength(0);
+  });
+
+  // These two assert only that the B2 guard does NOT fire. They deliberately
+  // stop short of asserting a successful dispatch: this harness does not wire
+  // the dispatch transport, which is why the pre-existing cases in the suite
+  // above cannot observe it either.
+  it("leaves an ordinary browser request alone", async () => {
+    const response = await postRun(
+      { agentSlug: "agent-a", task: "do work", fastMode: true, providerOverride: { provider: "claude" } },
+      { cookie: true },
+    );
+
+    expect(response.status).not.toBe(400);
+  });
+
+  it("still lets an internal-mount caller supply eventType and providerConfigs", async () => {
+    const response = await postRun(
+      {
+        agentSlug: "agent-a",
+        task: "do work",
+        eventType: "automation",
+        providerConfigs: { openai: { apiKey: "sk-internal" } },
+      },
+      { internal: true },
+    );
+
+    expect(response.status).not.toBe(400);
+    expect(String(response.body["error"] ?? "")).not.toContain("not accepted on this endpoint");
   });
 });
