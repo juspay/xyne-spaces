@@ -22,13 +22,38 @@ export type SyncKeyring = TransitKeyring | null | 'disabled';
 type KeyringSource = () => SyncKeyring;
 
 /**
- * Tables decrypted as they sync: those the client filters on, and `conversations`, whose
- * `initial_message_md` client mutators read through `resolveMessage` (a channel's root
- * messages are not in the local `messages` table, so with ciphertext there every mutator on
- * one fails with "not found"). Other tables keep the decrypt that `useQuery` runs on results,
- * so a large table (messages) isn't decrypted row by row on first sync.
+ * `encrypted_field_configs` as the transit config serves it. A table's `fields` are decrypted
+ * as they sync when `enforceClientEncryption` is set: those are the fields the proxy
+ * re-encrypts for this client.
  */
-export const SYNC_DECRYPTED_TABLES: readonly string[] = ['form_entity_values', 'conversations'];
+export type SyncEncryptedFields = Readonly<
+  Record<string, { readonly fields: readonly string[]; readonly enforceClientEncryption: boolean }>
+>;
+type EncryptedFieldsSource = () => SyncEncryptedFields;
+
+/** Set by the proxy on every row it rewrote; not a column. */
+const TABLE_NAME_KEY = '__tableName';
+
+interface DecryptPlan {
+  /** Fields to decrypt, by table. */
+  fields: ReadonlyMap<string, ReadonlySet<string>>;
+  /** `"tableName":"<table>"`: a frame with rows of the table contains this text (Zero's frames are compact JSON). */
+  markers: readonly string[];
+}
+
+const plans = new WeakMap<SyncEncryptedFields, DecryptPlan>();
+
+function decryptPlan(encryptedFields: SyncEncryptedFields): DecryptPlan {
+  const cached = plans.get(encryptedFields);
+  if (cached) return cached;
+  const fields = new Map<string, ReadonlySet<string>>();
+  for (const [table, config] of Object.entries(encryptedFields)) {
+    if (config?.enforceClientEncryption && config.fields?.length) fields.set(table, new Set(config.fields));
+  }
+  const plan = { fields, markers: [...fields.keys()].map(table => `"tableName":${JSON.stringify(table)}`) };
+  plans.set(encryptedFields, plan);
+  return plan;
+}
 
 /** How many times in a row an undecryptable message closes the socket for a resync before it is let through. */
 const MAX_RESYNC_ATTEMPTS = 3;
@@ -59,7 +84,7 @@ interface PokeDecryption {
   failed: number;
 }
 
-async function decryptPoke(message: unknown, keyring: TransitKeyring | null, tables: readonly string[]): Promise<PokeDecryption> {
+async function decryptPoke(message: unknown, keyring: TransitKeyring | null, plan: DecryptPlan): Promise<PokeDecryption> {
   if (!Array.isArray(message) || message[0] !== 'pokePart') return { message: null, failed: 0 };
   const body = message[1] as { rowsPatch?: unknown } | undefined;
   if (!body || !Array.isArray(body.rowsPatch)) return { message: null, failed: 0 };
@@ -70,18 +95,25 @@ async function decryptPoke(message: unknown, keyring: TransitKeyring | null, tab
     body.rowsPatch.map(async (patch: unknown) => {
       if (!patch || typeof patch !== 'object') return patch;
       const op = patch as Record<string, unknown>;
-      if (typeof op.tableName !== 'string' || !tables.includes(op.tableName)) return patch;
       const key = op.value && typeof op.value === 'object' ? 'value' : op.merge && typeof op.merge === 'object' ? 'merge' : null;
       if (!key) return patch;
       const row = op[key] as Record<string, unknown>;
-      const fields = Object.entries(row).filter(([, value]) => isTransitCiphertext(value));
-      if (fields.length === 0) return patch;
-      if (!keyring) {
-        failed += fields.length;
-        return patch;
-      }
+      const tagged = TABLE_NAME_KEY in row;
+      const tableFields = typeof op.tableName === 'string' ? plan.fields.get(op.tableName) : undefined;
+      const fields = tableFields
+        ? Object.entries(row).filter(([field, value]) => tableFields.has(field) && isTransitCiphertext(value))
+        : [];
+      if (fields.length === 0 && !tagged) return patch;
 
       const decrypted = { ...row };
+      if (tagged) {
+        delete decrypted[TABLE_NAME_KEY];
+        changed = true;
+      }
+      if (!keyring) {
+        failed += fields.length;
+        return { ...op, [key]: decrypted };
+      }
       await Promise.all(
         fields.map(async ([field, value]) => {
           try {
@@ -106,15 +138,16 @@ async function decryptPoke(message: unknown, keyring: TransitKeyring | null, tab
 }
 
 /**
- * Returns the message with every encrypted field of its `pokePart` rows in `tables` decrypted,
- * or null when it carries none. A field that fails to decrypt is left as ciphertext.
+ * Returns the message with the encrypted fields of its `pokePart` rows decrypted, per
+ * `encryptedFields`, and the proxy's `__tableName` tag dropped; null when it carries neither.
+ * A field that fails to decrypt is left as ciphertext.
  */
 export async function decryptPokeMessage(
   message: unknown,
   keyring: TransitKeyring,
-  tables: readonly string[] = SYNC_DECRYPTED_TABLES,
+  encryptedFields: SyncEncryptedFields,
 ): Promise<unknown | null> {
-  return (await decryptPoke(message, keyring, tables)).message;
+  return (await decryptPoke(message, keyring, decryptPlan(encryptedFields))).message;
 }
 
 interface FrameDecryption {
@@ -122,7 +155,7 @@ interface FrameDecryption {
   failed: number;
 }
 
-async function decryptFrame(data: string, keyring: TransitKeyring | null, tables: readonly string[]): Promise<FrameDecryption> {
+async function decryptFrame(data: string, keyring: TransitKeyring | null, plan: DecryptPlan): Promise<FrameDecryption> {
   let parsed: unknown;
   try {
     parsed = JSON.parse(data);
@@ -133,7 +166,7 @@ async function decryptFrame(data: string, keyring: TransitKeyring | null, tables
   const timedOut = new Promise<PokeDecryption>(resolve => {
     timer = setTimeout(() => resolve({ message: null, failed: 1 }), DECRYPT_TIMEOUT_MS);
   });
-  const { message, failed } = await Promise.race([decryptPoke(parsed, keyring, tables), timedOut]).finally(() => clearTimeout(timer));
+  const { message, failed } = await Promise.race([decryptPoke(parsed, keyring, plan), timedOut]).finally(() => clearTimeout(timer));
   return { data: message === null ? data : JSON.stringify(message), failed };
 }
 
@@ -151,11 +184,9 @@ function closeEventLike(event: CloseEvent): Event {
 export function createDecryptingWebSocket(
   Base: typeof WebSocket,
   getKeyring: KeyringSource,
-  tables: readonly string[] = SYNC_DECRYPTED_TABLES,
+  getEncryptedFields: EncryptedFieldsSource,
 ): typeof WebSocket {
   const released = new WeakSet<Event>();
-  // Zero's frames are compact JSON, so a frame with rows from these tables contains this text.
-  const tableMarkers = tables.map(table => `"tableName":${JSON.stringify(table)}`);
   // Counted across sockets: each resync is a new connection.
   let resyncAttempts = 0;
 
@@ -182,24 +213,25 @@ export function createDecryptingWebSocket(
       // A pong carries no rows and must not wait: Zero drops the connection if it is late.
       if (typeof data === 'string' && data.startsWith('["pong"')) return;
       const keyring = getKeyring();
-      const encrypted =
-        keyring !== 'disabled' &&
+      const plan = keyring === 'disabled' ? null : decryptPlan(getEncryptedFields());
+      const rewrite =
+        plan !== null &&
         typeof data === 'string' &&
-        data.includes('"ENC:') &&
-        tableMarkers.some(marker => data.includes(marker));
+        (data.includes(`"${TABLE_NAME_KEY}"`) ||
+          (data.includes('"ENC:') && plan.markers.some(marker => data.includes(marker))));
       // Only a whole poke applied counts as recovered; a part that decrypts fine says nothing
       // about the part after it.
       const pokeEnd = typeof data === 'string' && data.startsWith('["pokeEnd"');
-      if (!encrypted && !pokeEnd && this.#pending === 0) return;
-      if (!encrypted && this.#pending === 0) {
+      if (!rewrite && !pokeEnd && this.#pending === 0) return;
+      if (!rewrite && this.#pending === 0) {
         resyncAttempts = 0;
         return;
       }
 
       event.stopImmediatePropagation();
       // Decrypts start at once (frames overlap); delivery stays in arrival order.
-      const ready: Promise<FrameDecryption> = encrypted
-        ? decryptFrame(data as string, keyring, tables).catch(() => ({ data: data as string, failed: 1 }))
+      const ready: Promise<FrameDecryption> = rewrite && plan && keyring !== 'disabled'
+        ? decryptFrame(data as string, keyring, plan).catch(() => ({ data: data as string, failed: 1 }))
         : Promise.resolve({ data: data as string, failed: 0 });
       this.#deliverInOrder(async () => {
         const frame = await ready;
@@ -260,15 +292,21 @@ export function createDecryptingWebSocket(
 
 let installed = false;
 let currentKeyring: KeyringSource = () => null;
+let currentEncryptedFields: EncryptedFieldsSource = () => ({});
 
 /**
  * Swaps the browser's WebSocket for one that decrypts Zero's sync messages. Zero looks up the
  * global WebSocket each time it connects, so call this before the Zero instance is created.
- * Each call replaces the keyring source; the WebSocket is swapped only once.
+ * Each call replaces the keyring and config sources; the WebSocket is swapped only once.
  */
-export function installSyncDecryption(getKeyring: KeyringSource): void {
+export function installSyncDecryption(getKeyring: KeyringSource, getEncryptedFields: EncryptedFieldsSource): void {
   currentKeyring = getKeyring;
+  currentEncryptedFields = getEncryptedFields;
   if (installed || typeof globalThis.WebSocket !== 'function') return;
-  globalThis.WebSocket = createDecryptingWebSocket(globalThis.WebSocket, () => currentKeyring(), SYNC_DECRYPTED_TABLES);
+  globalThis.WebSocket = createDecryptingWebSocket(
+    globalThis.WebSocket,
+    () => currentKeyring(),
+    () => currentEncryptedFields(),
+  );
   installed = true;
 }

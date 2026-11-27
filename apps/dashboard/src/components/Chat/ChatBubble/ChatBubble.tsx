@@ -91,6 +91,10 @@ import {
   getParentMessageFromConversation,
 } from '../../../utils/conversationMessageHelpers';
 import {
+  isUndecryptableMessage,
+  UNDECRYPTABLE_MESSAGE_TEXT,
+} from '../../../utils/undecryptableMessage';
+import {
   MESSAGE_REMINDER_MENU_OPTIONS,
   REMINDER_TIME_OPTIONS,
   calculateCustomReminderTime,
@@ -387,7 +391,9 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
     let previewText = '';
     const content = message.content;
 
-    if (content && typeof content === 'string') {
+    if (isUndecryptableMessage(content)) {
+      previewText = UNDECRYPTABLE_MESSAGE_TEXT;
+    } else if (content && typeof content === 'string') {
       const parser = new DOMParser();
       const doc = parser.parseFromString(content, 'text/html');
       const textContent = doc.body.textContent || '';
@@ -861,18 +867,22 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
     );
   };
 
+  const isUndecryptable = isUndecryptableMessage(message.content);
   const canModifyMessage = user?.id ? isMessageEditable(message, user.id) : false;
   // The slash command artifact wrapper is the persisted rendering contract. Keep deletion available,
   // but do not open this message in the generic editor, which would discard that wrapper.
   const canEditMessage =
-    canModifyMessage && !isSlashCommandArtifactMessage(message.content) && !isSharedEntityMessage;
+    canModifyMessage &&
+    !isUndecryptable &&
+    !isSlashCommandArtifactMessage(message.content) &&
+    !isSharedEntityMessage;
   const canDeleteMessage = canModifyMessage && !hasTicket && !isSharedEntityMessage;
 
   // Check if message has meaningful text content (not just attachments).
   // Memoized: this runs a full DOMParser parse — doing it per render meant
   // every hover re-render re-parsed the message (audit finding #7).
   const hasTextContent = useMemo(() => {
-    if (!message?.content) return false;
+    if (!message?.content || isUndecryptableMessage(message.content)) return false;
 
     // Parse HTML and get text content
     const parser = new DOMParser();
@@ -986,7 +996,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
   // registered once per list by MessageHoverToolbar (useMessageHoverShortcuts)
   // and resolve this bubble's handlers via the hover-actions registry below.
   const handleCopyContent = (): void => {
-    if (message?.content) {
+    if (message?.content && !isUndecryptable) {
       copyHtmlToClipboard(message.content)
         .then(() => {
           toast.success('Message content copied to clipboard');

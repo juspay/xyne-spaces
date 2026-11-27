@@ -45,6 +45,8 @@ import { getUserDisplayNameById } from '../../../utils/userDisplayName';
 import { ToolOutputRenderer } from '../../Charts';
 import type { ToolOutput as GeniusToolOutput } from '../../../types/toolOutput';
 import { cn } from '../../../utils/classNames';
+import { isUndecryptableMessage } from '../../../utils/undecryptableMessage';
+import { UndecryptableMessage } from '../UndecryptableMessage/UndecryptableMessage';
 import { isElectronApp, isElectronStandaloneWindow } from '../../../utils/electronApp';
 import { openLink } from '../../../utils/openLink';
 import { logger, Event } from '../../../utils/logger';
@@ -1449,7 +1451,7 @@ const parseNode = (
   return React.createElement(tag, props, ...children);
 };
 
-export const RenderMessageWithHTML: React.FC<RenderMessageWithHTMLProps> = ({
+const RenderMessageWithHTMLContent: React.FC<RenderMessageWithHTMLProps> = ({
   message,
   showEdited = false,
   isSystemMessage = false,
@@ -1606,3 +1608,10 @@ export const RenderMessageWithHTML: React.FC<RenderMessageWithHTMLProps> = ({
     </div>
   );
 };
+
+export const RenderMessageWithHTML: React.FC<RenderMessageWithHTMLProps> = props =>
+  isUndecryptableMessage(props.message) ? (
+    <UndecryptableMessage />
+  ) : (
+    <RenderMessageWithHTMLContent {...props} />
+  );
