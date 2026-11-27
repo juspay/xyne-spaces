@@ -193,7 +193,7 @@ export const GeneratedTagsSubmenu = ({
                     key={tagKey}
                     type='button'
                     onClick={() => handleToggle(tagKey)}
-                    className={`w-full flex items-center justify-between px-3 py-2 rounded-md transition-all outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                    className={`w-full flex items-center justify-between px-3 py-2 rounded-md transition-all outline-hidden focus-visible:ring-2 focus-visible:ring-ring ${
                       isSelected
                         ? 'bg-accent text-accent-foreground'
                         : 'hover:bg-muted text-foreground'
@@ -259,7 +259,7 @@ export const GeneratedTagsSubmenu = ({
                   key={category}
                   type='button'
                   onClick={() => handleCategoryClick(category)}
-                  className='w-full flex items-center justify-between px-3 py-2 rounded-md transition-all outline-none hover:bg-muted text-foreground focus-visible:ring-2 focus-visible:ring-ring'
+                  className='w-full flex items-center justify-between px-3 py-2 rounded-md transition-all outline-hidden hover:bg-muted text-foreground focus-visible:ring-2 focus-visible:ring-ring'
                   data-track-category='Tickets'
                   data-track-name='OpenGeneratedTagCategory'
                   data-track-metadata={JSON.stringify({ category })}

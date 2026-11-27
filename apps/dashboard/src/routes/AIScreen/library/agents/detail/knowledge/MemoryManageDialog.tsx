@@ -201,7 +201,7 @@ export function MemoryManageDialog({
             data-track-category='Claw Agents'
             data-track-name='Agent detail v2: search memories'
             placeholder='Search memories…'
-            className='h-9 w-full rounded-[10px] border border-border bg-background pl-9 pr-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring'
+            className='h-9 w-full rounded-[10px] border border-border bg-background pl-9 pr-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-hidden focus:ring-1 focus:ring-ring'
           />
         </div>
 

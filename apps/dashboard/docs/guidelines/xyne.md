@@ -20,7 +20,7 @@ npm run dev
 | Vite | Build tool |
 | Zero (Rocicorp) | Real-time sync |
 | XState | State machines |
-| TailwindCSS | Styling |
+| Tailwind CSS v4 | Styling |
 | Lucide React | Icons |
 | React Query | API calls |
 
@@ -109,6 +109,13 @@ Components should not "know everything". Break down components when they:
 | No inline styles | Avoid `style={{}}` props |
 | Use design tokens | Leverage Tailwind theme for colors, spacing |
 | Responsive design | Use Tailwind responsive prefixes (`sm:`, `md:`, `lg:`) |
+| Theme lives in CSS | Colours, fonts, radius and animations are `@theme` blocks in `src/global.css`; there is no `tailwind.config.js` |
+| v4 class names | `shadow-xs` / `shadow-sm` (was `shadow-sm` / `shadow`), same shift for `rounded`, `blur`, `drop-shadow`; `outline-hidden`; `ring-3`; `shrink-0`; `bg-linear-to-*`; `bg-black/30` instead of `bg-opacity-*`; `!` goes last (`p-2!`) |
+| CI check | `pnpm check:tailwind-v4` fails on v3-only class names; run it before pushing |
+| Custom utilities | Declare with `@utility name { ... }` in `global.css`, never as classes inside `@layer utilities` |
+| Cascade layers | Order is `workflow-ui, theme, base, vendor, components, utilities` (declared in each HTML entry). Stylesheets from `node_modules` land in `vendor` through PostCSS, except their `@font-face` rules, which stay unlayered so font precedence is unchanged; put our own non-utility CSS in `@layer components`. Utilities always win over both |
+| `dark:` is inert | Themes switch with `data-theme`; target them with `in-data-[theme=midnight]:`, not `dark:` |
+| Message content | Rules for `.jp-message-html` / `.bot-markdown-content` live in `components`, so a utility on the same element wins. To style something only inside message content, use `in-message:` (e.g. `in-message:text-(--link-color)`) |
 
 ```typescript
 // Bad - inline styles

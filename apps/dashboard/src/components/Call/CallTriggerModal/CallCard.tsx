@@ -145,12 +145,12 @@ export const CallCard: React.FC<CallCardProps> = ({
       <div
         className={cn(
           'flex items-center gap-3 px-6 py-4',
-          isCurrentCall ? 'rounded-tl-lg rounded-tr-lg border-b border-border' : '!bg-background',
-          isMobileLiveCall ? 'flex-col !pb-8 !pt-6 !border-none' : 'bg-[#F3FEF1]',
+          isCurrentCall ? 'rounded-tl-lg rounded-tr-lg border-b border-border' : 'bg-background!',
+          isMobileLiveCall ? 'flex-col pb-8! pt-6! border-none!' : 'bg-[#F3FEF1]',
         )}
       >
         {/* Avatars */}
-        <div className='flex-shrink-0'>
+        <div className='shrink-0'>
           {participantUserIds.length > 0 ? (
             <AvatarGroup
               userIds={participantUserIds}
@@ -176,7 +176,7 @@ export const CallCard: React.FC<CallCardProps> = ({
                 data-track-category='CALLS'
                 data-track-name='OpenThreadFromCallCard'
                 className={cn(
-                  'text-sm font-semibold text-foreground text-left bg-transparent border-0 p-0 cursor-pointer hover:underline focus-visible:underline focus:outline-none',
+                  'text-sm font-semibold text-foreground text-left bg-transparent border-0 p-0 cursor-pointer hover:underline focus-visible:underline focus:outline-hidden',
                   isMobileLiveCall ? 'text-md mb-1' : '',
                 )}
               >
@@ -206,14 +206,14 @@ export const CallCard: React.FC<CallCardProps> = ({
           </div>
           <div className='flex items-center gap-3'>
             <div className='text-xs text-muted-foreground'>{initiatorName}</div>
-            <span className='w-1 h-1 bg-gray-600 rounded-full flex-shrink-0' />
+            <span className='w-1 h-1 bg-gray-600 rounded-full shrink-0' />
             <div className='text-xs text-muted-foreground flex items-center gap-1'>
               <Users className='w-3 h-3' />
               {participantCount}
             </div>
             {!isCurrentCall && (
               <>
-                <span className='w-1 h-1 bg-gray-600 rounded-full flex-shrink-0' />
+                <span className='w-1 h-1 bg-gray-600 rounded-full shrink-0' />
                 <div className='text-xs text-muted-foreground'>
                   {callDuration ? `Live ${callDuration}` : 'Just started'}
                 </div>
@@ -223,7 +223,7 @@ export const CallCard: React.FC<CallCardProps> = ({
         </div>
 
         {/* Action button */}
-        <div className='flex-shrink-0 flex items-center gap-4'>
+        <div className='shrink-0 flex items-center gap-4'>
           {isCurrentCall ? (
             <>
               {!isMobileLiveCall && callDuration && (
@@ -243,7 +243,7 @@ export const CallCard: React.FC<CallCardProps> = ({
                 <span
                   className={cn(
                     'text-sm font-semibold text-white bg-red-500 rounded-full px-4 py-2',
-                    isMobileLiveCall ? 'mt-6 !px-8' : '',
+                    isMobileLiveCall ? 'mt-6 px-8!' : '',
                   )}
                 >
                   Leave

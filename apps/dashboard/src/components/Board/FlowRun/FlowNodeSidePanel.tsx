@@ -58,22 +58,22 @@ const FLOW_STEP_INFO_STYLE = {
   skipped: {
     verb: 'Skipped',
     verbColor: 'text-teal-600',
-    surfaceColor: 'border-teal-500/15 bg-teal-500/[0.05]',
+    surfaceColor: 'border-teal-500/15 bg-teal-500/5',
   },
   backlog: {
     verb: 'Moved to backlog',
     verbColor: 'text-amber-600',
-    surfaceColor: 'border-amber-500/15 bg-amber-500/[0.05]',
+    surfaceColor: 'border-amber-500/15 bg-amber-500/5',
   },
   completed: {
     verb: 'Confirmed',
     verbColor: 'text-emerald-600',
-    surfaceColor: 'border-emerald-500/15 bg-emerald-500/[0.05]',
+    surfaceColor: 'border-emerald-500/15 bg-emerald-500/5',
   },
   cancelled: {
     verb: 'Cancelled',
     verbColor: 'text-red-500',
-    surfaceColor: 'border-red-500/15 bg-red-500/[0.05]',
+    surfaceColor: 'border-red-500/15 bg-red-500/5',
   },
 } as const;
 
@@ -161,7 +161,7 @@ const FlowStepCompletionInfo: React.FC<{
         ...resolveActor(lastEditActivity.updatedBy),
         verb: 'Updated',
         verbColor: 'text-amber-600',
-        surfaceColor: 'border-amber-500/15 bg-amber-500/[0.05]',
+        surfaceColor: 'border-amber-500/15 bg-amber-500/5',
         when: new Date(lastEditActivity.timestamp).toLocaleString(undefined, {
           dateStyle: 'medium',
           timeStyle: 'short',
@@ -347,7 +347,7 @@ export const FlowNodeSidePanel: React.FC<FlowNodeSidePanelProps> = ({
           aria-label='More step actions'
           data-track-category='flow_board'
           data-track-name='open_step_actions'
-          className='inline-flex h-8 w-full cursor-pointer items-center justify-center gap-1.5 rounded-md bg-secondary px-3 text-sm font-medium text-secondary-foreground transition outline-none hover:bg-secondary/80 focus-visible:ring-[3px] focus-visible:ring-ring/50'
+          className='inline-flex h-8 w-full cursor-pointer items-center justify-center gap-1.5 rounded-md bg-secondary px-3 text-sm font-medium text-secondary-foreground transition outline-hidden hover:bg-secondary/80 focus-visible:ring-[3px] focus-visible:ring-ring/50'
         >
           More actions
           <ChevronDown size={13} />
@@ -357,14 +357,14 @@ export const FlowNodeSidePanel: React.FC<FlowNodeSidePanelProps> = ({
         <DropdownMenu.Content
           sideOffset={6}
           align='end'
-          className='z-50 w-[var(--radix-dropdown-menu-trigger-width)] rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md'
+          className='z-50 w-(--radix-dropdown-menu-trigger-width) rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md'
         >
           {canBacklog && (
             <DropdownMenu.Item
               onSelect={() => void handleBacklogAction(stepTicketId, stepTitle)}
               data-track-category='flow_board'
               data-track-name='backlog_step'
-              className='flex cursor-pointer select-none items-center justify-center gap-2 rounded-sm px-2 py-1.5 text-xs outline-none hover:bg-muted focus:bg-muted'
+              className='flex cursor-pointer select-none items-center justify-center gap-2 rounded-sm px-2 py-1.5 text-xs outline-hidden hover:bg-muted focus:bg-muted'
             >
               <Archive size={13} className='shrink-0 text-amber-600' />
               Move to backlog
@@ -375,7 +375,7 @@ export const FlowNodeSidePanel: React.FC<FlowNodeSidePanelProps> = ({
               onSelect={() => void handleSkipAction(stepTicketId, stepTitle)}
               data-track-category='flow_board'
               data-track-name='skip_step'
-              className='flex cursor-pointer select-none items-center justify-center gap-2 rounded-sm px-2 py-1.5 text-xs outline-none hover:bg-muted focus:bg-muted'
+              className='flex cursor-pointer select-none items-center justify-center gap-2 rounded-sm px-2 py-1.5 text-xs outline-hidden hover:bg-muted focus:bg-muted'
             >
               <SkipForward size={13} className='shrink-0 text-teal-600' />
               Skip
@@ -385,7 +385,7 @@ export const FlowNodeSidePanel: React.FC<FlowNodeSidePanelProps> = ({
             onSelect={() => void handleStatusAction(stepTicketId, TicketStatusV2.CANCELLED)}
             data-track-category='flow_board'
             data-track-name='cancel_step'
-            className='flex cursor-pointer select-none items-center justify-center gap-2 rounded-sm px-2 py-1.5 text-xs text-red-500 outline-none hover:bg-red-500/10 focus:bg-red-500/10'
+            className='flex cursor-pointer select-none items-center justify-center gap-2 rounded-sm px-2 py-1.5 text-xs text-red-500 outline-hidden hover:bg-red-500/10 focus:bg-red-500/10'
           >
             <XCircle size={13} className='shrink-0' />
             Cancel step
@@ -523,7 +523,7 @@ export const FlowNodeSidePanel: React.FC<FlowNodeSidePanelProps> = ({
             )}
 
             {isRoot && backlogSteps.length > 0 && (
-              <div className='flex flex-col gap-2 rounded-lg border border-amber-500/25 bg-amber-500/[0.05] p-3'>
+              <div className='flex flex-col gap-2 rounded-lg border border-amber-500/25 bg-amber-500/5 p-3'>
                 <div className='flex items-center justify-between gap-2'>
                   <span className='flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.5px] text-amber-600'>
                     <Archive size={12} />
@@ -544,7 +544,7 @@ export const FlowNodeSidePanel: React.FC<FlowNodeSidePanelProps> = ({
                       onClick={() => onSelectBacklog?.(step)}
                       data-track-category='flow_board'
                       data-track-name='open_backlog_step'
-                      className='flex items-center gap-2 rounded-md border border-amber-500/15 bg-background px-2.5 py-2 text-left transition-colors hover:border-amber-500/35 hover:bg-amber-500/[0.04]'
+                      className='flex items-center gap-2 rounded-md border border-amber-500/15 bg-background px-2.5 py-2 text-left transition-colors hover:border-amber-500/35 hover:bg-amber-500/4'
                     >
                       <Archive size={12} className='shrink-0 text-amber-600' />
                       <span className='min-w-0 flex-1 truncate text-[12px] font-medium text-foreground'>
@@ -571,7 +571,7 @@ export const FlowNodeSidePanel: React.FC<FlowNodeSidePanelProps> = ({
             )}
 
             {stepActive && !locked && gate?.type === 'confirmation' && (
-              <div className='flex flex-col gap-2.5 rounded-lg border border-[#6276be]/25 bg-[#6276be]/[0.04] px-3 py-3'>
+              <div className='flex flex-col gap-2.5 rounded-lg border border-[#6276be]/25 bg-[#6276be]/4 px-3 py-3'>
                 <p className='flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.5px] text-[#6276be]'>
                   <CircleCheck size={12} />
                   Needs confirmation
@@ -623,7 +623,7 @@ export const FlowNodeSidePanel: React.FC<FlowNodeSidePanelProps> = ({
 
             {/* Submitted FLOW forms stay compact until explicitly opened for editing. */}
             {!isRoot && manuallySkipped && (
-              <div className='flex flex-col gap-2.5 rounded-lg border border-teal-500/25 bg-teal-500/[0.05] px-3 py-3'>
+              <div className='flex flex-col gap-2.5 rounded-lg border border-teal-500/25 bg-teal-500/5 px-3 py-3'>
                 <p className='flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.5px] text-teal-600'>
                   <SkipForward size={12} />
                   Skipped
@@ -673,7 +673,7 @@ export const FlowNodeSidePanel: React.FC<FlowNodeSidePanelProps> = ({
               !manuallySkipped &&
               ticket.statusV2 === TicketStatusV2.COMPLETED &&
               gate?.type !== 'form' && (
-                <div className='flex flex-col gap-2.5 rounded-lg border border-emerald-500/25 bg-emerald-500/[0.05] px-3 py-3'>
+                <div className='flex flex-col gap-2.5 rounded-lg border border-emerald-500/25 bg-emerald-500/5 px-3 py-3'>
                   <p className='flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.5px] text-emerald-600'>
                     <CircleCheck size={12} />
                     Confirmed
@@ -689,7 +689,7 @@ export const FlowNodeSidePanel: React.FC<FlowNodeSidePanelProps> = ({
 
             {/* Cancelled step: who cancelled it */}
             {!isRoot && ticket.statusV2 === TicketStatusV2.CANCELLED && (
-              <div className='flex flex-col gap-2.5 rounded-lg border border-red-500/25 bg-red-500/[0.05] px-3 py-3'>
+              <div className='flex flex-col gap-2.5 rounded-lg border border-red-500/25 bg-red-500/5 px-3 py-3'>
                 <p className='flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.5px] text-red-500'>
                   <XCircle size={12} />
                   Cancelled
@@ -699,7 +699,7 @@ export const FlowNodeSidePanel: React.FC<FlowNodeSidePanelProps> = ({
             )}
 
             {!isRoot && backlogged && (
-              <div className='flex flex-col gap-2.5 rounded-lg border border-amber-500/25 bg-amber-500/[0.05] px-3 py-3'>
+              <div className='flex flex-col gap-2.5 rounded-lg border border-amber-500/25 bg-amber-500/5 px-3 py-3'>
                 <p className='flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.5px] text-amber-600'>
                   <Archive size={12} />
                   Moved to backlog

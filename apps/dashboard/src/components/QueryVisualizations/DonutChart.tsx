@@ -149,14 +149,12 @@ export const DonutChart: React.FC<DonutChartProps> = ({
                 <div key={index} className='flex items-center justify-between text-xs'>
                   <div className='flex items-center gap-2 min-w-0 flex-1'>
                     <div
-                      className='w-3 h-3 rounded-sm flex-shrink-0'
+                      className='w-3 h-3 rounded-sm shrink-0'
                       style={{ backgroundColor: color }}
                     />
                     <span className='text-gray-600 dark:text-gray-400 truncate'>{item.label}</span>
                   </div>
-                  <span className='font-semibold text-foreground ml-2 flex-shrink-0'>
-                    {percentage}%
-                  </span>
+                  <span className='font-semibold text-foreground ml-2 shrink-0'>{percentage}%</span>
                 </div>
               );
             })}

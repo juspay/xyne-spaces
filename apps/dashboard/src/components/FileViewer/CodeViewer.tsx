@@ -258,7 +258,7 @@ const CodeViewer: React.FC<BaseViewerProps> = memo(({ source, fileName, searchab
           <button
             type='button'
             onClick={() => setMarkdownMode('raw')}
-            className='px-3 py-1.5 rounded-md bg-background/80 dark:bg-black/40 backdrop-blur border border-border text-foreground text-xs hover:bg-accent transition-colors'
+            className='px-3 py-1.5 rounded-md bg-background/80 dark:bg-black/40 backdrop-blur-sm border border-border text-foreground text-xs hover:bg-accent transition-colors'
             data-track-category='FileViewer'
             data-track-name='ToggleMarkdownRaw'
             data-track-metadata={JSON.stringify({ fileName })}
@@ -316,7 +316,7 @@ const CodeViewer: React.FC<BaseViewerProps> = memo(({ source, fileName, searchab
           <button
             type='button'
             onClick={() => setMarkdownMode('rendered')}
-            className='rounded-md border border-border bg-background/80 px-3 py-1.5 text-xs text-foreground backdrop-blur transition-colors hover:bg-accent'
+            className='rounded-md border border-border bg-background/80 px-3 py-1.5 text-xs text-foreground backdrop-blur-sm transition-colors hover:bg-accent'
             data-track-category='FileViewer'
             data-track-name='ToggleMarkdownRendered'
             data-track-metadata={JSON.stringify({ fileName })}
@@ -327,7 +327,7 @@ const CodeViewer: React.FC<BaseViewerProps> = memo(({ source, fileName, searchab
       )}
       {/* Header with file info */}
       <div
-        className={`flex items-center justify-between p-3 border-b border-border dark:border-gray-700 bg-muted dark:bg-gray-800/50 rounded-t-lg flex-shrink-0 ${showChrome ? '' : 'hidden'}`}
+        className={`flex items-center justify-between p-3 border-b border-border dark:border-gray-700 bg-muted dark:bg-gray-800/50 rounded-t-lg shrink-0 ${showChrome ? '' : 'hidden'}`}
       >
         <div className='flex items-center gap-4 min-w-0 flex-1'>
           {language && (
@@ -339,7 +339,7 @@ const CodeViewer: React.FC<BaseViewerProps> = memo(({ source, fileName, searchab
             • {lines.length.toLocaleString()} lines
           </span>
         </div>
-        <div className='flex items-center gap-2 flex-shrink-0'>
+        <div className='flex items-center gap-2 shrink-0'>
           <span className='text-xs text-muted-foreground dark:text-muted-foreground'>
             • {fileSizeMB.toFixed(2)}MB
           </span>
@@ -393,7 +393,7 @@ const CodeViewer: React.FC<BaseViewerProps> = memo(({ source, fileName, searchab
                   data-index={virtualRow.index}
                   className='flex w-full'
                 >
-                  <span className='text-muted-foreground dark:text-muted-foreground text-xs w-12 text-right mr-3 flex-shrink-0 select-none leading-5'>
+                  <span className='text-muted-foreground dark:text-muted-foreground text-xs w-12 text-right mr-3 shrink-0 select-none leading-5'>
                     {virtualRow.index + 1}
                   </span>
                   <span
@@ -404,7 +404,7 @@ const CodeViewer: React.FC<BaseViewerProps> = memo(({ source, fileName, searchab
                         matchesByRow.get(virtualRow.index) ?? [],
                       ),
                     }}
-                    className='flex-1 whitespace-pre-wrap break-words leading-5'
+                    className='flex-1 whitespace-pre-wrap wrap-break-word leading-5'
                   />
                 </div>
               </div>
@@ -414,7 +414,7 @@ const CodeViewer: React.FC<BaseViewerProps> = memo(({ source, fileName, searchab
           <div>
             {lines.map((line, index) => (
               <div key={index} className='flex min-h-[20px]'>
-                <span className='text-muted-foreground dark:text-muted-foreground text-xs w-12 text-right mr-3 flex-shrink-0 select-none leading-5'>
+                <span className='text-muted-foreground dark:text-muted-foreground text-xs w-12 text-right mr-3 shrink-0 select-none leading-5'>
                   {index + 1}
                 </span>
                 <span
@@ -422,7 +422,7 @@ const CodeViewer: React.FC<BaseViewerProps> = memo(({ source, fileName, searchab
                   dangerouslySetInnerHTML={{
                     __html: line ? injectMarks(line, matchesByRow.get(index) ?? []) : '\u00A0',
                   }}
-                  className='flex-1 whitespace-pre-wrap break-words leading-5'
+                  className='flex-1 whitespace-pre-wrap wrap-break-word leading-5'
                 />
               </div>
             ))}

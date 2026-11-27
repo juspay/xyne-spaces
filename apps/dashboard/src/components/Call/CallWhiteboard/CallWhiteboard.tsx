@@ -555,7 +555,7 @@ export function CallWhiteboard({
       <div className='flex h-full min-h-0 w-full flex-col gap-2'>
         <div className='relative min-h-0 flex-1 w-full overflow-hidden rounded-xl border border-gray-700/60 bg-white shadow-2xl'>
           {!displayOnly && (
-            <div className='absolute left-3 top-3 z-20 flex max-w-[calc(100%-4.75rem)] items-center gap-2 overflow-x-auto rounded-full border border-gray-200 bg-white/95 px-2 py-1.5 shadow-lg backdrop-blur'>
+            <div className='absolute left-3 top-3 z-20 flex max-w-[calc(100%-4.75rem)] items-center gap-2 overflow-x-auto rounded-full border border-gray-200 bg-white/95 px-2 py-1.5 shadow-lg backdrop-blur-sm'>
               <button
                 type='button'
                 onClick={() => sendCallWhiteboardEvent({ type: 'setTool', tool: 'pen' })}
@@ -661,7 +661,7 @@ export function CallWhiteboard({
             <button
               type='button'
               onClick={() => setIsDeleteConfirmOpen(true)}
-              className='absolute right-3 top-3 z-20 flex h-9 w-9 items-center justify-center rounded-full border border-red-200 bg-white/95 text-red-600 shadow-lg backdrop-blur transition-colors hover:bg-red-50 hover:text-red-700'
+              className='absolute right-3 top-3 z-20 flex h-9 w-9 items-center justify-center rounded-full border border-red-200 bg-white/95 text-red-600 shadow-lg backdrop-blur-sm transition-colors hover:bg-red-50 hover:text-red-700'
               title='Delete whiteboard page'
               data-track-category='CALLS'
               data-track-name='Whiteboard_Delete_Page_Open'
@@ -674,7 +674,7 @@ export function CallWhiteboard({
           {!displayOnly && visibleDeleteNotice && (
             <div
               className={cn(
-                'absolute left-1/2 top-16 z-20 flex max-w-[calc(100%-2rem)] -translate-x-1/2 items-center gap-2 rounded-full border px-4 py-2 text-sm font-medium shadow-lg backdrop-blur',
+                'absolute left-1/2 top-16 z-20 flex max-w-[calc(100%-2rem)] -translate-x-1/2 items-center gap-2 rounded-full border px-4 py-2 text-sm font-medium shadow-lg backdrop-blur-sm',
                 visibleDeleteNotice.savedBeforeDelete
                   ? 'border-green-200 bg-green-50/95 text-green-800'
                   : 'border-red-200 bg-red-50/95 text-red-800',
@@ -703,7 +703,7 @@ export function CallWhiteboard({
           )}
 
           {!displayOnly && isDeleteConfirmOpen && (
-            <div className='absolute inset-0 z-30 flex items-center justify-center bg-gray-950/45 px-4 backdrop-blur-sm'>
+            <div className='absolute inset-0 z-30 flex items-center justify-center bg-gray-950/45 px-4 backdrop-blur-xs'>
               <div
                 className='w-full max-w-sm rounded-xl border border-gray-200 bg-white p-4 text-gray-950 shadow-2xl'
                 role='dialog'

@@ -39,7 +39,7 @@ export function CanvasCommentActions({
       </DropdownMenuTrigger>
       <DropdownMenuContent
         align='end'
-        className='z-[100]'
+        className='z-100'
         onEscapeKeyDown={event => event.stopPropagation()}
       >
         <DropdownMenuItem

@@ -19,7 +19,7 @@ export function CalendarEventGhost({
   return (
     <div
       className={cn(
-        'absolute overflow-hidden rounded-lg border-2 border-dashed border-primary/70 bg-primary/10 text-primary pointer-events-none z-[4]',
+        'absolute overflow-hidden rounded-lg border-2 border-dashed border-primary/70 bg-primary/10 text-primary pointer-events-none z-4',
         compact ? 'left-1 right-1' : 'left-2 right-2',
       )}
       style={{ top, height, backgroundImage: HATCH_BACKGROUND }}

@@ -111,7 +111,7 @@ const FormScreen = (): ReactElement => {
                 aria-label='Search forms'
                 data-track-category='Forms'
                 data-track-name='Search forms'
-                className='min-w-0 flex-1 bg-transparent text-sm font-[450] leading-[1.2] text-foreground outline-none placeholder:text-muted-foreground'
+                className='min-w-0 flex-1 bg-transparent text-sm font-[450] leading-[1.2] text-foreground outline-hidden placeholder:text-muted-foreground'
               />
             </div>
           </div>

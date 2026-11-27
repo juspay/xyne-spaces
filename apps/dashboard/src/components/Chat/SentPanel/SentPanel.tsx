@@ -151,7 +151,7 @@ const SentGroupMessageRow = ({
 const SentDateGroupBlock = ({ group }: { group: SentDateGroup }): ReactElement => (
   <div className='mb-4 px-2 first:pt-1'>
     <h4 className='text-sm font-semibold text-foreground pb-2 pt-3'>{group.dateText}</h4>
-    <div className='rounded-xl border border-border bg-card overflow-hidden shadow-sm'>
+    <div className='rounded-xl border border-border bg-card overflow-hidden shadow-xs'>
       {group.messages.map(message => (
         <div key={message.messageId} className='border-b border-border last:border-b-0'>
           <SentGroupMessageRow message={message} />

@@ -206,7 +206,7 @@ const ChannelItemV2 = memo(
             isActive
               ? 'text-sidebar-accent-foreground font-medium bg-sidebar-accent border-sidebar-border'
               : 'text-sidebar-foreground hover:text-sidebar-accent-foreground hover:bg-sidebar-accent',
-            shouldShowBold && !isActive && '!font-semibold text-sidebar-accent-foreground',
+            shouldShowBold && !isActive && 'font-semibold! text-sidebar-accent-foreground',
           )}
           style={shouldShowBold && !isActive ? { fontWeight: '700' } : undefined}
         >

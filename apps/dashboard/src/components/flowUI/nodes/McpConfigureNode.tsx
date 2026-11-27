@@ -96,7 +96,7 @@ export const McpConfigureNode: React.FC<McpConfigureNodeProps> = ({ node }) => {
         />
         <div className='min-w-0 flex-1'>
           <div className='flex min-w-0 items-center gap-2'>
-            <p className='truncate text-base font-semibold leading-[1.25] text-foreground'>
+            <p className='truncate text-base font-semibold leading-tight text-foreground'>
               Configure {title}
             </p>
             <span className='shrink-0 rounded px-1 py-px text-xs font-semibold leading-[18px] bg-muted text-muted-foreground'>
@@ -132,7 +132,7 @@ export const McpConfigureNode: React.FC<McpConfigureNodeProps> = ({ node }) => {
                 data-track-category='MCP_CONFIGURE_ARTIFACT'
                 data-track-name='MCP_CONFIGURE_FIELD_CHANGE'
                 className={cn(
-                  'h-9 rounded-lg border bg-background px-3 text-sm text-foreground outline-none',
+                  'h-9 rounded-lg border bg-background px-3 text-sm text-foreground outline-hidden',
                   'placeholder:text-muted-foreground/70 focus:border-ring focus:ring-2 focus:ring-ring/25',
                   hasError
                     ? 'border-destructive focus:border-destructive focus:ring-destructive/20'
@@ -154,7 +154,7 @@ export const McpConfigureNode: React.FC<McpConfigureNodeProps> = ({ node }) => {
           disabled={isSubmitting}
           className={cn(
             'inline-flex h-9 items-center gap-1.5 rounded-lg border border-border bg-background px-3',
-            'text-sm font-medium leading-none text-foreground hover:bg-foreground/[0.04] disabled:cursor-not-allowed disabled:opacity-60',
+            'text-sm font-medium leading-none text-foreground hover:bg-foreground/4 disabled:cursor-not-allowed disabled:opacity-60',
           )}
           data-track-category='MCP_CONFIGURE_ARTIFACT'
           data-track-name='MCP_CONFIGURE_SUBMIT'

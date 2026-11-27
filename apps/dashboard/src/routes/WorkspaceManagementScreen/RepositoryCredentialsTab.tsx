@@ -180,7 +180,7 @@ function CredentialCard(props: {
   };
 
   return (
-    <div className='rounded-xl border border-border bg-card p-6 shadow-sm'>
+    <div className='rounded-xl border border-border bg-card p-6 shadow-xs'>
       <div className='flex items-start justify-between gap-4'>
         <div className='flex items-start gap-3'>
           <div className='rounded-lg bg-muted p-2'>
@@ -318,7 +318,7 @@ function AddCredentialForm(props: { onCancel: () => void; onSaved: () => void })
 
   return (
     <form
-      className='space-y-4 rounded-xl border border-border bg-card p-6 shadow-sm'
+      className='space-y-4 rounded-xl border border-border bg-card p-6 shadow-xs'
       onSubmit={event => {
         event.preventDefault();
         void save();

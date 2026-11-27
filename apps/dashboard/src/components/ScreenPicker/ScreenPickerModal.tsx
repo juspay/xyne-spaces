@@ -193,7 +193,7 @@ export function ScreenPickerModal(): React.ReactElement | null {
                   data-track-category='screen-picker'
                   data-track-name='source-select'
                   className={cn(
-                    'group flex flex-col rounded-lg overflow-hidden border-2 transition-all duration-150 text-left focus:outline-none',
+                    'group flex flex-col rounded-lg overflow-hidden border-2 transition-all duration-150 text-left focus:outline-hidden',
                     selectedId === source.id
                       ? 'border-blue-500 shadow-[0_0_0_1px_rgba(59,130,246,0.3)]'
                       : 'border-border hover:border-blue-400',
@@ -213,7 +213,7 @@ export function ScreenPickerModal(): React.ReactElement | null {
                     )}
                     {/* Check badge */}
                     {selectedId === source.id && (
-                      <div className='absolute top-1.5 right-1.5 w-5 h-5 rounded-full bg-blue-500 flex items-center justify-center shadow'>
+                      <div className='absolute top-1.5 right-1.5 w-5 h-5 rounded-full bg-blue-500 flex items-center justify-center shadow-sm'>
                         <svg className='w-3 h-3 text-white' fill='none' viewBox='0 0 12 12'>
                           <path
                             d='M2 6l3 3 5-5'

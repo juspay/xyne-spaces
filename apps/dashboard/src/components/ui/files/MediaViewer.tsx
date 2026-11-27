@@ -168,7 +168,7 @@ export const MediaViewer: React.FC<MediaViewerProps> = ({
       case 'text':
         return textContent ? (
           <div className='bg-background rounded-lg p-6 max-h-[90vh] overflow-auto'>
-            <pre className='text-sm font-mono whitespace-pre-wrap break-words text-foreground'>
+            <pre className='text-sm font-mono whitespace-pre-wrap wrap-break-word text-foreground'>
               {textContent}
             </pre>
           </div>
@@ -184,7 +184,7 @@ export const MediaViewer: React.FC<MediaViewerProps> = ({
       role='button'
       tabIndex={0}
       aria-label='File viewer - click or press Enter to close'
-      className='fixed inset-0 z-[9999] flex items-center justify-center bg-black/95 pointer-events-auto'
+      className='fixed inset-0 z-9999 flex items-center justify-center bg-black/95 pointer-events-auto'
       onClick={onClose}
       data-track-category='FileViewer'
       data-track-name='CLOSE_MEDIA_VIEWER_BACKDROP'

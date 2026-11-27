@@ -214,7 +214,7 @@ const PathChipsInput = ({
         onBlur={() => {
           if (draft.trim()) commitMany([draft]);
         }}
-        className='flex-1 min-w-[120px] bg-transparent outline-none text-sm px-1 py-0.5'
+        className='flex-1 min-w-[120px] bg-transparent outline-hidden text-sm px-1 py-0.5'
       />
     </label>
   );

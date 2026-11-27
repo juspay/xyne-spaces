@@ -145,7 +145,7 @@ export const DigitalTwinEnablePanel = (): ReactElement => {
                   onChange={e => r.setCustomFrom(e.target.value)}
                   data-track-category='Claw Agents'
                   data-track-name='Digital Twin enable from date'
-                  className='flex-1 rounded-lg border border-border bg-background px-2.5 py-1.5 text-xs text-foreground focus:border-ring focus:outline-none'
+                  className='flex-1 rounded-lg border border-border bg-background px-2.5 py-1.5 text-xs text-foreground focus:border-ring focus:outline-hidden'
                 />
                 <span className='shrink-0 text-[11px] text-muted-foreground'>→</span>
                 <input
@@ -156,7 +156,7 @@ export const DigitalTwinEnablePanel = (): ReactElement => {
                   onChange={e => r.setCustomTo(e.target.value)}
                   data-track-category='Claw Agents'
                   data-track-name='Digital Twin enable to date'
-                  className='flex-1 rounded-lg border border-border bg-background px-2.5 py-1.5 text-xs text-foreground focus:border-ring focus:outline-none'
+                  className='flex-1 rounded-lg border border-border bg-background px-2.5 py-1.5 text-xs text-foreground focus:border-ring focus:outline-hidden'
                 />
               </div>
               <div className='flex flex-wrap gap-1.5'>

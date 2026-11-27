@@ -424,7 +424,7 @@ export const SlashCommandArtifactCard: React.FC<SlashCommandArtifactCardProps> =
 
   return (
     <section
-      className='my-1 flex w-[560px] max-w-full flex-col overflow-hidden rounded-xl border border-border bg-card text-card-foreground shadow-sm'
+      className='my-1 flex w-[560px] max-w-full flex-col overflow-hidden rounded-xl border border-border bg-card text-card-foreground shadow-xs'
       data-slash-command-artifact-message-id={messageId}
     >
       <div className='flex items-center gap-2 px-4 pt-4 text-xs'>

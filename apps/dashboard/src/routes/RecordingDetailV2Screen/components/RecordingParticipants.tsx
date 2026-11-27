@@ -103,7 +103,7 @@ export function RecordingParticipants({
       align='start'
       sideOffset={6}
       focusRef={searchRef}
-      className='w-[19rem] overflow-hidden p-0'
+      className='w-76 overflow-hidden p-0'
       onEscapeKeyDown={event => {
         if (!trimmedQuery) return;
         event.preventDefault();
@@ -135,7 +135,7 @@ export function RecordingParticipants({
             aria-controls='recording-participant-results'
             aria-activedescendant={results[activeIndex]?.id}
             placeholder='Add someone by name or email'
-            className='h-9 flex-1 bg-transparent text-[13px] outline-none placeholder:text-muted-foreground'
+            className='h-9 flex-1 bg-transparent text-[13px] outline-hidden placeholder:text-muted-foreground'
             data-track-category='RecordingDetailV2'
             data-track-name='search_recording_participants'
           />

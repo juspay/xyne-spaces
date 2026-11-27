@@ -26,7 +26,7 @@ export interface LabelFilterProps {
 
 const TRIGGER_CLASS_NAME = 'h-9 gap-1.5 rounded-xl border-border px-3 font-medium shadow-none';
 const LIST_INHERITS_POPOVER_CLASS_NAME =
-  '[[data-theme=midnight]_&_[role=listbox][aria-multiselectable]]:!bg-transparent';
+  '[[data-theme=midnight]_&_[role=listbox][aria-multiselectable]]:bg-transparent!';
 
 export function LabelFilter({
   labels,
@@ -94,7 +94,7 @@ export function LabelFilter({
           type='button'
           variant='outline'
           className={cn(
-            selectedLabels.length === 0 ? 'text-muted-foreground' : '!border-foreground',
+            selectedLabels.length === 0 ? 'text-muted-foreground' : 'border-foreground!',
             triggerClassName,
           )}
           aria-label={

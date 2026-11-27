@@ -91,7 +91,7 @@ function StatusStrip({
 
 function EventRow({ event }: { event: VoiceDebugEvent }): ReactElement {
   return (
-    <li className={cn('break-words', LEVEL_TEXT[event.level])}>
+    <li className={cn('wrap-break-word', LEVEL_TEXT[event.level])}>
       <span className='opacity-60'>
         +{event.sinceTurn}ms <span className='opacity-70'>(Δ{event.sincePrev})</span>
       </span>{' '}

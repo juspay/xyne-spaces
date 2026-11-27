@@ -173,7 +173,7 @@ export const TeamMembersPanel = ({ teamId }: { teamId: string }): ReactElement =
         tone='info'
       />
       {isLoading ? (
-        <div className='flex items-center gap-3 rounded-lg border border-border/70 bg-card px-4 py-3 text-sm text-muted-foreground shadow-sm'>
+        <div className='flex items-center gap-3 rounded-lg border border-border/70 bg-card px-4 py-3 text-sm text-muted-foreground shadow-xs'>
           <Loader2Icon className='size-4 animate-spin' />
           Loading team members from Mettle...
         </div>
@@ -188,7 +188,7 @@ export const TeamMembersPanel = ({ teamId }: { teamId: string }): ReactElement =
           text='Mettle did not return employees for this team.'
         />
       ) : (
-        <div className='overflow-hidden rounded-xl border border-border/70 bg-card shadow-sm'>
+        <div className='overflow-hidden rounded-xl border border-border/70 bg-card shadow-xs'>
           <div className='grid gap-px bg-border/60 sm:grid-cols-2 xl:grid-cols-3'>
             {members.map((member, index) => {
               const name = firstNonEmpty(member.name, member.email, 'Unknown member');
@@ -210,7 +210,7 @@ export const TeamMembersPanel = ({ teamId }: { teamId: string }): ReactElement =
                 <div className='group/member min-h-[116px] bg-card px-4 py-3 transition-colors hover:bg-muted/20'>
                   <div className='flex items-start justify-between gap-3'>
                     <div className='min-w-0'>
-                      <p className='truncate text-sm font-medium text-foreground/90 group-hover/member:whitespace-normal group-hover/member:break-words'>
+                      <p className='truncate text-sm font-medium text-foreground/90 group-hover/member:whitespace-normal group-hover/member:wrap-break-word'>
                         {name}
                       </p>
                       {email ? (
@@ -240,7 +240,7 @@ export const TeamMembersPanel = ({ teamId }: { teamId: string }): ReactElement =
                   data-track-category='team-intelligence'
                   data-track-name='open-mettle-team-member'
                   data-track-metadata={JSON.stringify({ email })}
-                  className='block focus:outline-none focus-visible:ring-2 focus-visible:ring-action-accent'
+                  className='block focus:outline-hidden focus-visible:ring-2 focus-visible:ring-action-accent'
                 >
                   {content}
                 </Link>
@@ -368,7 +368,7 @@ export const SnapshotShell = ({
   const displayNarrative = cleanText(narrative);
   return (
     <div className='flex-1 w-full max-w-7xl mx-auto px-4 py-5 sm:px-6 lg:px-8 space-y-7'>
-      <section className='overflow-hidden rounded-2xl border border-border/70 bg-card shadow-sm'>
+      <section className='overflow-hidden rounded-2xl border border-border/70 bg-card shadow-xs'>
         <div className='bg-muted/20 px-5 py-6 sm:px-7'>
           <div className='flex flex-wrap items-center gap-2'>
             <Pill tone='accent'>{scopeLabel}</Pill>

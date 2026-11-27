@@ -47,7 +47,7 @@ const PreviewCloseButton: React.FC<{ onClose?: () => void }> = ({ onClose }) => 
   return (
     <button
       type='button'
-      className='rounded-full p-0.5 opacity-0 transition-opacity hover:bg-secondary focus:outline-none focus-visible:opacity-100 group-hover:opacity-100'
+      className='rounded-full p-0.5 opacity-0 transition-opacity hover:bg-secondary focus:outline-hidden focus-visible:opacity-100 group-hover:opacity-100'
       onClick={e => {
         e.stopPropagation();
         onClose();
@@ -110,11 +110,7 @@ const MetadataFooter: React.FC<{
   isDM: boolean;
 }> = ({ channelName, isDM }) => (
   <div className='mt-2 flex items-center gap-1.5 text-xs text-muted-foreground'>
-    {isDM ? (
-      <Lock size={11} className='flex-shrink-0' />
-    ) : (
-      <Hash size={11} className='flex-shrink-0' />
-    )}
+    {isDM ? <Lock size={11} className='shrink-0' /> : <Hash size={11} className='shrink-0' />}
     <span className='truncate'>{isDM ? 'Direct message' : channelName}</span>
   </div>
 );
@@ -173,7 +169,7 @@ const NestedLinkCard: React.FC<{
       </div>
 
       {previewImage && !imageError && (
-        <div className='relative aspect-[2/1] w-full overflow-hidden border-t border-border'>
+        <div className='relative aspect-2/1 w-full overflow-hidden border-t border-border'>
           {!imageLoaded && <div className='absolute inset-0 animate-pulse bg-muted' />}
           <img
             src={previewImage}
@@ -326,13 +322,13 @@ const TextPreview: React.FC<{
           recordingShare={recordingShare}
           className='mb-1 flex min-w-0 flex-col gap-1'
           renderNote={noteHtml => (
-            <div className='line-clamp-3 whitespace-pre-wrap break-words text-[13px] text-muted-foreground'>
+            <div className='line-clamp-3 whitespace-pre-wrap wrap-break-word text-[13px] text-muted-foreground'>
               {getInlinePreviewText(noteHtml)}
             </div>
           )}
         />
       ) : (
-        <div className='mb-1 line-clamp-3 whitespace-pre-wrap break-words text-[13px] text-muted-foreground'>
+        <div className='mb-1 line-clamp-3 whitespace-pre-wrap wrap-break-word text-[13px] text-muted-foreground'>
           {inlinePreviewText}
         </div>
       )}

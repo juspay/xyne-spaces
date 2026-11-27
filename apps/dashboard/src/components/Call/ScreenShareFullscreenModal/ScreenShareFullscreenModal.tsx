@@ -142,7 +142,7 @@ export function ScreenShareFullscreenModal({
     // eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions
     <div
       className={cn(
-        'fixed inset-0 z-[80] bg-black',
+        'fixed inset-0 z-80 bg-black',
         !isDrawingEnabled && 'cursor-grab active:cursor-grabbing',
       )}
       onClick={handleBackdropClick}
@@ -172,7 +172,7 @@ export function ScreenShareFullscreenModal({
           'flex items-center justify-center',
           'text-white/90 hover:text-white',
           'transition-all duration-200',
-          'focus:outline-none focus:ring-2 focus:ring-white/30',
+          'focus:outline-hidden focus:ring-2 focus:ring-white/30',
         )}
         aria-label='Close fullscreen view'
         data-track-category='CALLS'
@@ -185,7 +185,7 @@ export function ScreenShareFullscreenModal({
       <div
         className={cn(
           'absolute top-4 left-4 z-10',
-          'bg-black/50 backdrop-blur-sm',
+          'bg-black/50 backdrop-blur-xs',
           'rounded-lg px-4 py-2',
           'border border-white/10',
         )}
@@ -208,7 +208,7 @@ export function ScreenShareFullscreenModal({
         onPanningStart={handlePanStart}
         onPanningStop={handlePanStop}
       >
-        <TransformComponent wrapperClass='!w-full !h-full'>
+        <TransformComponent wrapperClass='w-full! h-full!'>
           <div
             className='flex items-center justify-center'
             style={{ width: '100vw', height: '100vh' }}
@@ -228,7 +228,7 @@ export function ScreenShareFullscreenModal({
       <div
         className={cn(
           'absolute top-16 left-1/2 -translate-x-1/2 z-10',
-          'bg-black/50 backdrop-blur-sm',
+          'bg-black/50 backdrop-blur-xs',
           'rounded-full px-4 py-2',
           'border border-white/10',
           isDrawingEnabled && 'hidden', // hide hints while drawing to reduce visual noise

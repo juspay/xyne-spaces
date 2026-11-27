@@ -16,7 +16,7 @@ export const ActionCards = ({ actions, onSelect }: ActionCardsProps): ReactEleme
         onClick={() => onSelect(action)}
         data-track-category='XyneAI'
         data-track-name='SELECT_SETUP_ACTION'
-        className='flex w-full cursor-pointer items-center gap-3 rounded-xl border border-border bg-card px-4 py-3 text-left transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background'
+        className='flex w-full cursor-pointer items-center gap-3 rounded-xl border border-border bg-card px-4 py-3 text-left transition-colors hover:bg-accent focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background'
       >
         <div className='flex min-w-0 flex-1 flex-col gap-[2px]'>
           <span className='text-[14px] font-semibold leading-[22px] text-foreground'>

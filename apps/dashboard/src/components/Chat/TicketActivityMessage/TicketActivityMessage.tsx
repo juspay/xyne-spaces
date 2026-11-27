@@ -98,7 +98,7 @@ export const TicketActivityMessage: React.FC<TicketActivityMessageProps> = ({
     >
       <div className='flex items-start gap-2 px-4 w-full text-sm text-muted-foreground'>
         {/* Icon + connecting line, aligned within the avatar column */}
-        <div className='w-8 flex-shrink-0 flex flex-col items-center self-stretch mt-0.5'>
+        <div className='w-8 shrink-0 flex flex-col items-center self-stretch mt-0.5'>
           {getIcon()}
           {isNextActivity && <span className='w-0 flex-1 my-1 border-[0.8px] border-border' />}
         </div>
@@ -110,7 +110,7 @@ export const TicketActivityMessage: React.FC<TicketActivityMessageProps> = ({
               <RenderMessageWithHTML message={displayContent} isSystemMessage />
             </div>
             <Tooltip content={formatExactTimestamp(message.createdAt)}>
-              <span className='text-xs text-muted-foreground whitespace-nowrap flex-shrink-0 cursor-default'>
+              <span className='text-xs text-muted-foreground whitespace-nowrap shrink-0 cursor-default'>
                 {formatTimestamp(message.createdAt)}
               </span>
             </Tooltip>

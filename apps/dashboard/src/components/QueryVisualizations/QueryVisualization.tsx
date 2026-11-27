@@ -57,8 +57,8 @@ export const QueryVisualization: React.FC<QueryVisualizationProps> = ({
     return (
       <div
         className={cn(
-          'rounded-xl border border-border/40 bg-gradient-to-br from-background to-background/95 p-8 shadow-lg',
-          'backdrop-blur-sm',
+          'rounded-xl border border-border/40 bg-linear-to-br from-background to-background/95 p-8 shadow-lg',
+          'backdrop-blur-xs',
           className,
         )}
       >
@@ -80,12 +80,12 @@ export const QueryVisualization: React.FC<QueryVisualizationProps> = ({
     return (
       <div
         className={cn(
-          'rounded-xl border border-red-200/50 dark:border-red-800/50 bg-gradient-to-br from-red-50/50 to-pink-50/50 dark:from-red-900/20 dark:to-pink-900/20 p-6 shadow-lg',
-          'backdrop-blur-sm',
+          'rounded-xl border border-red-200/50 dark:border-red-800/50 bg-linear-to-br from-red-50/50 to-pink-50/50 dark:from-red-900/20 dark:to-pink-900/20 p-6 shadow-lg',
+          'backdrop-blur-xs',
           className,
         )}
       >
-        <h3 className='text-sm font-bold bg-gradient-to-r from-red-600 to-red-700 dark:from-red-400 dark:to-red-300 bg-clip-text text-transparent mb-2'>
+        <h3 className='text-sm font-bold bg-linear-to-r from-red-600 to-red-700 dark:from-red-400 dark:to-red-300 bg-clip-text text-transparent mb-2'>
           {title}
         </h3>
         <p className='text-sm text-red-700 dark:text-red-300 font-medium'>{error}</p>
@@ -97,8 +97,8 @@ export const QueryVisualization: React.FC<QueryVisualizationProps> = ({
     return (
       <div
         className={cn(
-          'rounded-xl border border-border/40 bg-gradient-to-br from-muted/30 to-muted/10 p-8 shadow-sm',
-          'backdrop-blur-sm',
+          'rounded-xl border border-border/40 bg-linear-to-br from-muted/30 to-muted/10 p-8 shadow-xs',
+          'backdrop-blur-xs',
           className,
         )}
       >

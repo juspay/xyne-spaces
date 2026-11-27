@@ -43,7 +43,7 @@ const CommonChannelItem: React.FC<CommonChannelItemProps> = ({ channel, currentU
       href={`/chat/dir/${channel.id}`}
       aria-label={`Open ${isDM ? 'direct message' : 'group chat'} with ${displayName}`}
     >
-      <div className='relative flex-shrink-0'>
+      <div className='relative shrink-0'>
         <Avatar userId={finalAvatarUserId} size='rg' showActiveStatus={false} />
         {!isDM && memberCount > 0 && (
           <span className='absolute -bottom-1 -right-1 flex items-center justify-center size-4 text-[10px] font-medium bg-gray-600 text-white rounded-full'>

@@ -206,7 +206,7 @@ export const AddToStreamBaseUiMenuItem = ({
   const { showStreams } = useStreamsVisibility();
   const { streams, choose } = useStreamChoices(source, onChosen);
   const itemClass =
-    'flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm text-foreground outline-none data-[highlighted]:bg-accent';
+    'flex w-full cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm text-foreground outline-hidden data-highlighted:bg-accent';
 
   if (!showStreams) return null;
 

@@ -2,8 +2,8 @@ import { ReactElement } from 'react';
 import type { DailyBriefPayload } from '../../api/dailyBriefApi';
 
 const PRE_CLASS =
-  'overflow-x-auto whitespace-pre-wrap break-words rounded-[10px] border border-border ' +
-  'bg-foreground/[0.03] p-4 font-mono text-[12px] leading-[1.6] text-foreground';
+  'overflow-x-auto whitespace-pre-wrap wrap-break-word rounded-[10px] border border-border ' +
+  'bg-foreground/3 p-4 font-mono text-[12px] leading-[1.6] text-foreground';
 
 const HEADING_CLASS = 'mb-2 text-[13px] font-medium tracking-[-0.1px] text-muted-foreground';
 

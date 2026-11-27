@@ -122,7 +122,7 @@ export function CanvasMermaidWithSource(props: {
           <button
             type='button'
             onClick={() => setEditing(false)}
-            className='absolute right-2 top-2 z-10 flex items-center rounded border border-border bg-background/90 p-1 text-muted-foreground shadow-sm transition-colors hover:bg-accent'
+            className='absolute right-2 top-2 z-10 flex items-center rounded border border-border bg-background/90 p-1 text-muted-foreground shadow-xs transition-colors hover:bg-accent'
             title='Done editing'
             aria-label='Done editing'
             data-track-category='Mermaid'

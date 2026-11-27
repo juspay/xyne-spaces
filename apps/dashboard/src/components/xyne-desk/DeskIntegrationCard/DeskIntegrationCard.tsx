@@ -118,7 +118,7 @@ export const DeskIntegrationCard = ({
             disabled={isDisconnecting}
             className={cn(
               'inline-flex h-[32px] shrink-0 items-center gap-1.5 px-[10px] py-1.5 text-desk-label',
-              'text-desk-destructive border rounded-[10px] shadow-sm',
+              'text-desk-destructive border rounded-[10px] shadow-xs',
               'hover:bg-red-50 transition-colors disabled:opacity-50 disabled:cursor-not-allowed',
             )}
             data-track-category='desk-integration'
@@ -135,7 +135,7 @@ export const DeskIntegrationCard = ({
             disabled={isReconnecting || isDisconnecting}
             className={cn(
               'inline-flex shrink-0 items-center gap-1.5 px-3 py-1.5 text-sm font-medium',
-              'text-foreground border border-border rounded-[10px] bg-background shadow-sm',
+              'text-foreground border border-border rounded-[10px] bg-background shadow-xs',
               'hover:bg-desk-accent-subtle transition-colors disabled:opacity-50 disabled:cursor-not-allowed',
             )}
             data-track-category='desk-integration'
@@ -155,7 +155,7 @@ export const DeskIntegrationCard = ({
       >
         <div className='p-5 flex flex-col gap-3 rounded-[16px]'>
           <div className='flex gap-3'>
-            <AlertTriangle size={18} className='flex-shrink-0 text-amber-500 mt-0.5' />
+            <AlertTriangle size={18} className='shrink-0 text-amber-500 mt-0.5' />
             <div className='flex flex-col gap-2 text-sm'>
               <p className='text-foreground'>
                 Disconnect <span className='font-mono text-xs'>{connectedEmail}</span> from this

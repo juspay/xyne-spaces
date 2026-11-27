@@ -126,7 +126,7 @@ export const RecipientMentionSelector: React.FC<RecipientMentionSelectorProps> =
         {item.isOrgUser ? (
           <Avatar userId={item.id} size='sm' rounded showActiveStatus={false} />
         ) : (
-          <span className='flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-[4px] bg-border text-[10px] font-medium text-muted-foreground'>
+          <span className='flex h-5 w-5 shrink-0 items-center justify-center rounded-[4px] bg-border text-[10px] font-medium text-muted-foreground'>
             {initial}
           </span>
         )}
@@ -134,7 +134,7 @@ export const RecipientMentionSelector: React.FC<RecipientMentionSelectorProps> =
           <span className='text-sm font-medium text-foreground truncate'>{item.name}</span>
           <span className='text-xs text-muted-foreground truncate'>{item.email}</span>
         </div>
-        <span className='text-[10px] text-muted-foreground flex-shrink-0'>
+        <span className='text-[10px] text-muted-foreground shrink-0'>
           {item.isInTo ? 'In To' : SOURCE_LABEL[item.source]}
         </span>
       </div>

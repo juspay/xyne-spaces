@@ -156,7 +156,7 @@ const ChannelsDeskChannelsSection: React.FC<{ channelId: string }> = ({ channelI
               trigger={
                 <button
                   type='button'
-                  className='inline-flex h-[28px] items-center gap-1.5 rounded-[10px] border border-border bg-background px-3 py-1.5 text-desk-label text-foreground shadow-sm transition-colors hover:bg-muted/40 disabled:cursor-not-allowed disabled:opacity-50'
+                  className='inline-flex h-[28px] items-center gap-1.5 rounded-[10px] border border-border bg-background px-3 py-1.5 text-desk-label text-foreground shadow-xs transition-colors hover:bg-muted/40 disabled:cursor-not-allowed disabled:opacity-50'
                   disabled={addMutation.isPending}
                   data-track-category='DeskSettings'
                   data-track-name='CHANNELS_DESK_OPEN_ADD_CHANNEL'

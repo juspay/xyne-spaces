@@ -222,7 +222,7 @@ export const AILandingHero = ({ renderInput, className }: AILandingHeroProps): R
             style={{ top: '-19.14%', height: '108.01%' }}
           />
         </div>
-        <div className='absolute inset-0 bg-gradient-to-b from-transparent to-white' />
+        <div className='absolute inset-0 bg-linear-to-b from-transparent to-white' />
       </div>
 
       {/* Hero section stays centered on desktop and becomes a normal stacked flow on phones. */}
@@ -245,7 +245,7 @@ export const AILandingHero = ({ renderInput, className }: AILandingHeroProps): R
           {renderInput && <div className='w-full'>{renderInput}</div>}
 
           {/* Disclaimer */}
-          <p className='max-w-[28rem] text-center text-[11px] text-muted-foreground/40'>
+          <p className='max-w-md text-center text-[11px] text-muted-foreground/40'>
             Xyne AI can make mistakes, please double-check responses.
           </p>
         </div>
@@ -263,10 +263,7 @@ export const AILandingHero = ({ renderInput, className }: AILandingHeroProps): R
             {/* Left: Recap widget */}
             {showRecapWidget && recapData && (
               <div
-                className={cn(
-                  'min-w-0 flex flex-col',
-                  isMobile ? 'w-full gap-4' : 'flex-[3] gap-5',
-                )}
+                className={cn('min-w-0 flex flex-col', isMobile ? 'w-full gap-4' : 'flex-3 gap-5')}
               >
                 {/* Header */}
                 <div className='flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between'>
@@ -313,10 +310,7 @@ export const AILandingHero = ({ renderInput, className }: AILandingHeroProps): R
             {/* Right: Calls widget */}
             {callCount > 0 && (
               <div
-                className={cn(
-                  'min-w-0 flex flex-col',
-                  isMobile ? 'w-full gap-4' : 'flex-[2] gap-5',
-                )}
+                className={cn('min-w-0 flex flex-col', isMobile ? 'w-full gap-4' : 'flex-2 gap-5')}
               >
                 {/* Header */}
                 <p className='text-sm text-muted-foreground'>
@@ -335,7 +329,7 @@ export const AILandingHero = ({ renderInput, className }: AILandingHeroProps): R
                 {/* Calls list — scrollable */}
                 <div className={cn('relative', isMobile ? '' : '')}>
                   {!isMobile && callsShowTopFade && (
-                    <div className='absolute top-0 inset-x-0 h-8 bg-gradient-to-b from-background to-transparent pointer-events-none z-10' />
+                    <div className='absolute top-0 inset-x-0 h-8 bg-linear-to-b from-background to-transparent pointer-events-none z-10' />
                   )}
                   <div
                     ref={callsScrollRef}
@@ -352,7 +346,7 @@ export const AILandingHero = ({ renderInput, className }: AILandingHeroProps): R
                     />
                   </div>
                   {!isMobile && callsShowBottomFade && (
-                    <div className='absolute bottom-0 inset-x-0 h-8 bg-gradient-to-t from-background to-transparent pointer-events-none z-10' />
+                    <div className='absolute bottom-0 inset-x-0 h-8 bg-linear-to-t from-background to-transparent pointer-events-none z-10' />
                   )}
                 </div>
               </div>

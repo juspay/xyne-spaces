@@ -9,30 +9,30 @@ import type { FileKind, FileTone } from './fileKind';
 
 // A lighter ink in the midnight theme, where the light theme's would sink into the tint.
 const TONE_CLASS: Record<FileTone, { tint: string; ink: string }> = {
-  red: { tint: 'bg-red-500/15', ink: 'text-red-600 [[data-theme=midnight]_&]:text-red-400' },
-  blue: { tint: 'bg-blue-500/15', ink: 'text-blue-600 [[data-theme=midnight]_&]:text-blue-400' },
+  red: { tint: 'bg-red-500/15', ink: 'text-red-600 in-data-[theme=midnight]:text-red-400' },
+  blue: { tint: 'bg-blue-500/15', ink: 'text-blue-600 in-data-[theme=midnight]:text-blue-400' },
   green: {
     tint: 'bg-emerald-500/15',
-    ink: 'text-emerald-600 [[data-theme=midnight]_&]:text-emerald-400',
+    ink: 'text-emerald-600 in-data-[theme=midnight]:text-emerald-400',
   },
   orange: {
     tint: 'bg-orange-500/15',
-    ink: 'text-orange-600 [[data-theme=midnight]_&]:text-orange-400',
+    ink: 'text-orange-600 in-data-[theme=midnight]:text-orange-400',
   },
   slate: {
     tint: 'bg-slate-500/15',
-    ink: 'text-slate-600 [[data-theme=midnight]_&]:text-slate-300',
+    ink: 'text-slate-600 in-data-[theme=midnight]:text-slate-300',
   },
   violet: {
     tint: 'bg-violet-500/15',
-    ink: 'text-violet-600 [[data-theme=midnight]_&]:text-violet-400',
+    ink: 'text-violet-600 in-data-[theme=midnight]:text-violet-400',
   },
   amber: {
     tint: 'bg-amber-500/15',
-    ink: 'text-amber-600 [[data-theme=midnight]_&]:text-amber-400',
+    ink: 'text-amber-600 in-data-[theme=midnight]:text-amber-400',
   },
-  pink: { tint: 'bg-pink-500/15', ink: 'text-pink-600 [[data-theme=midnight]_&]:text-pink-400' },
-  teal: { tint: 'bg-teal-500/15', ink: 'text-teal-600 [[data-theme=midnight]_&]:text-teal-400' },
+  pink: { tint: 'bg-pink-500/15', ink: 'text-pink-600 in-data-[theme=midnight]:text-pink-400' },
+  teal: { tint: 'bg-teal-500/15', ink: 'text-teal-600 in-data-[theme=midnight]:text-teal-400' },
   gray: { tint: 'bg-foreground/[0.07]', ink: 'text-muted-foreground' },
 };
 

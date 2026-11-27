@@ -164,7 +164,7 @@ export const AppFetchMapping = ({
                     />
                   </div>
                   {field.hint ? (
-                    <span className='pl-[8.5rem] text-[10px] leading-snug text-muted-foreground'>
+                    <span className='pl-34 text-[10px] leading-snug text-muted-foreground'>
                       {field.hint}
                     </span>
                   ) : null}

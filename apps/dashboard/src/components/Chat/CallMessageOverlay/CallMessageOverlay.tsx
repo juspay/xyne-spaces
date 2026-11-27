@@ -104,7 +104,7 @@ export function CallMessageOverlay({
           Anchor the Join button to the relatively-positioned MessageBubble card and
           vertically center it against the WHOLE message instead. */}
       {!isUserInThisDevice && (
-        <div className='absolute right-4 top-1/2 -translate-y-1/2 flex-shrink-0'>
+        <div className='absolute right-4 top-1/2 -translate-y-1/2 shrink-0'>
           <CallJoinButton
             action={action}
             onJoin={handleJoinClick}

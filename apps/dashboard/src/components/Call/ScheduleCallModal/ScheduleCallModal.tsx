@@ -1045,7 +1045,7 @@ const ScheduleCallModalContent: React.FC<ScheduleCallModalProps> = ({
         e.preventDefault();
         document.getElementById('call-title')?.focus();
       }}
-      className='max-w-[584px] rounded-xl flex flex-col top-1/3 !-translate-y-1/3'
+      className='max-w-[584px] rounded-xl flex flex-col top-1/3 -translate-y-1/3!'
     >
       <form
         className='flex flex-col w-full'
@@ -1096,7 +1096,7 @@ const ScheduleCallModalContent: React.FC<ScheduleCallModalProps> = ({
                     aria-invalid={!!titleError}
                     aria-describedby={titleError ? 'call-title-error' : undefined}
                     className={cn(
-                      '!text-[22px] truncate h-11',
+                      'text-[22px]! truncate h-11',
                       'px-0 border-none shadow-none focus-visible:ring-0 rounded-none bg-transparent',
                       'font-semibold text-foreground placeholder:text-[22px] placeholder:font-semibold placeholder:text-muted-foreground/70',
                     )}
@@ -1152,7 +1152,7 @@ const ScheduleCallModalContent: React.FC<ScheduleCallModalProps> = ({
                     placeholder={isRecurring ? 'Series starts on' : 'Select date'}
                     minDate={new Date(new Date().setHours(0, 0, 0, 0))}
                     inputClassName={cn(
-                      'text-sm leading-5 bg-transparent !px-3 rounded-lg !h-9 gap-2.5 shrink-0',
+                      'text-sm leading-5 bg-transparent px-3! rounded-lg h-9! gap-2.5 shrink-0',
                       errors.startsAt && 'border-red-500',
                     )}
                     showClearButton={false}
@@ -1224,7 +1224,7 @@ const ScheduleCallModalContent: React.FC<ScheduleCallModalProps> = ({
                           : new Date(new Date().setHours(0, 0, 0, 0))
                       }
                       inputClassName={cn(
-                        'text-sm leading-5 bg-transparent !px-3 rounded-lg !h-9 gap-2.5 shrink-0',
+                        'text-sm leading-5 bg-transparent px-3! rounded-lg h-9! gap-2.5 shrink-0',
                         errors.endsAt && 'border-red-500',
                       )}
                       showClearButton={false}
@@ -1245,7 +1245,7 @@ const ScheduleCallModalContent: React.FC<ScheduleCallModalProps> = ({
                   data-track-category='CALLS'
                   data-track-name={`set-call-duration-${minutes}`}
                   className={cn(
-                    'h-8 px-2.5 rounded-lg border text-[13px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                    'h-8 px-2.5 rounded-lg border text-[13px] transition-colors focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring',
                     durationMinutes === minutes
                       ? 'border-foreground/30 bg-muted text-foreground font-medium'
                       : 'border-border text-muted-foreground hover:bg-muted hover:text-foreground',
@@ -1273,7 +1273,7 @@ const ScheduleCallModalContent: React.FC<ScheduleCallModalProps> = ({
                 <DropdownMenuContent
                   align='start'
                   sideOffset={6}
-                  className='rounded-xl p-1.5 min-w-0 w-[var(--radix-dropdown-menu-trigger-width)]'
+                  className='rounded-xl p-1.5 min-w-0 w-(--radix-dropdown-menu-trigger-width)'
                 >
                   {QUICK_START_MINUTES.map(minutes => (
                     <DropdownMenuItem
@@ -1326,7 +1326,7 @@ const ScheduleCallModalContent: React.FC<ScheduleCallModalProps> = ({
                     <DropdownMenuContent
                       align='start'
                       sideOffset={6}
-                      className='rounded-xl overflow-hidden p-0 [&[data-state=open]]:animate-none [&[data-state=closed]]:animate-none'
+                      className='rounded-xl overflow-hidden p-0 data-[state=open]:animate-none data-[state=closed]:animate-none'
                       asChild
                     >
                       <motion.div
@@ -1577,7 +1577,7 @@ const ScheduleCallModalContent: React.FC<ScheduleCallModalProps> = ({
                                       Repeat on
                                     </p>
                                     <RadioGroup
-                                      className='!gap-1.5 text-[13px]'
+                                      className='gap-1.5! text-[13px]'
                                       value={monthlyType}
                                       onChange={val => setMonthlyType(val as MonthlyType)}
                                     >
@@ -1627,7 +1627,7 @@ const ScheduleCallModalContent: React.FC<ScheduleCallModalProps> = ({
                                   Ends
                                 </p>
                                 <RadioGroup
-                                  className='!gap-1.5'
+                                  className='gap-1.5!'
                                   value={seriesEndsType}
                                   onChange={(val: string) =>
                                     setSeriesEndsType(val as SeriesEndsType)
@@ -1659,7 +1659,7 @@ const ScheduleCallModalContent: React.FC<ScheduleCallModalProps> = ({
                                       // The recurrence panel is a DropdownMenuContent at
                                       // z-[60]; without this the calendar popover (z-50)
                                       // renders behind it. Raise it above the panel.
-                                      contentClassName='z-[70]'
+                                      contentClassName='z-70'
                                       inputClassName={cn(
                                         'text-sm leading-5 bg-transparent rounded-lg h-8 gap-2.5 min-w-44',
                                         seriesEndsType !== 'on' && 'opacity-40 pointer-events-none',

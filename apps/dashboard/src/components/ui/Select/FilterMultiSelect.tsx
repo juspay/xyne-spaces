@@ -112,7 +112,7 @@ export const FilterMultiSelect: React.FC<FilterMultiSelectProps> = ({
           disabled={disabled}
           data-slot='filter-multi-select-trigger'
           className={cn(
-            'flex h-8 w-fit items-center justify-between gap-2 rounded-md border border-input bg-transparent px-3 text-sm whitespace-nowrap shadow-xs transition-[color,box-shadow] outline-none',
+            'flex h-8 w-fit items-center justify-between gap-2 rounded-md border border-input bg-transparent px-3 text-sm whitespace-nowrap transition-[color,box-shadow] outline-hidden',
             'focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50',
             'disabled:cursor-not-allowed disabled:opacity-50',
             '[&_svg]:pointer-events-none [&_svg]:shrink-0',
@@ -153,7 +153,7 @@ export const FilterMultiSelect: React.FC<FilterMultiSelectProps> = ({
           </span>
           <ChevronDownIcon
             className={cn(
-              'size-4 text-muted-foreground opacity-50 transition-transform flex-shrink-0',
+              'size-4 text-muted-foreground opacity-50 transition-transform shrink-0',
               open && 'rotate-180',
             )}
           />
@@ -189,7 +189,7 @@ export const FilterMultiSelect: React.FC<FilterMultiSelectProps> = ({
               }}
               onKeyDown={handleKeyDown}
               placeholder='Search...'
-              className='w-full h-7 px-2 text-sm bg-transparent border border-input rounded-sm outline-none focus:border-ring placeholder:text-muted-foreground'
+              className='w-full h-7 px-2 text-sm bg-transparent border border-input rounded-sm outline-hidden focus:border-ring placeholder:text-muted-foreground'
             />
           </div>
 
@@ -217,7 +217,7 @@ export const FilterMultiSelect: React.FC<FilterMultiSelectProps> = ({
                     data-track-name='TOGGLE_FILTER_OPTION'
                     onMouseEnter={() => setFocusedIndex(index)}
                     className={cn(
-                      'relative flex w-full cursor-default items-center gap-2 rounded-sm py-1.5 pr-8 pl-2 text-sm outline-hidden select-none transition-colors',
+                      'relative flex w-full cursor-default items-center gap-2 rounded-sm py-1.5 pr-8 pl-2 text-sm select-none transition-colors',
                       isFocused
                         ? 'bg-accent text-accent-foreground'
                         : 'hover:bg-accent hover:text-accent-foreground',

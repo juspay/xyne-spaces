@@ -24,7 +24,7 @@ interface ActivityActorPickerProps {
 const PEOPLE_LIMIT = 20;
 
 const ROW_CLASS =
-  'flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-sm text-foreground transition-colors hover:bg-foreground/[6%] focus-visible:outline-none focus-visible:bg-foreground/[6%]';
+  'flex w-full items-center gap-2.5 rounded-lg px-2 py-1.5 text-sm text-foreground transition-colors hover:bg-foreground/6 focus-visible:outline-hidden focus-visible:bg-foreground/6';
 
 export const ActivityActorPicker = ({
   open,
@@ -87,14 +87,14 @@ export const ActivityActorPicker = ({
       sideOffset={6}
       className='w-[300px] rounded-xl border-border p-1.5 shadow-lg'
     >
-      <div className='flex items-center gap-2 rounded-lg bg-foreground/[6%] px-2.5 py-2'>
+      <div className='flex items-center gap-2 rounded-lg bg-foreground/6 px-2.5 py-2'>
         <SearchDefault size={14} className='shrink-0 text-muted-foreground' />
         <input
           value={query}
           onChange={event => setQuery(event.target.value)}
           placeholder={searchPlaceholder}
           aria-label={searchPlaceholder}
-          className='min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground'
+          className='min-w-0 flex-1 bg-transparent text-sm outline-hidden placeholder:text-muted-foreground'
           data-track-category='ACTIVITY'
           data-track-name='ACTOR_FILTER_SEARCH'
           data-testid='activity-actor-picker-search'

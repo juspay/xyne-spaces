@@ -172,7 +172,7 @@ const FileLeafRow: React.FC<{
       <span className='w-3 shrink-0' aria-hidden='true' />
       <FileText size={16} className='shrink-0' />
     </span>
-    <Tooltip content={label} side='top' align='start' className='max-w-xs break-words'>
+    <Tooltip content={label} side='top' align='start' className='max-w-xs wrap-break-word'>
       <span className='block min-w-0 flex-1 truncate text-sm font-medium tracking-[-0.14px]'>
         <HighlightedText text={label} query={highlightQuery} />
       </span>
@@ -513,7 +513,7 @@ export const KbContentsPanel: React.FC<KbContentsPanelProps> = ({
                 />
               ))
             ) : (
-              <p className='px-1.5 py-1 text-[13px] text-sidebar-foreground/60'>
+              <p className='px-1.5 py-1 text-[13px]'>
                 {isSearchActive
                   ? `No collections match “${searchQuery.trim()}”`
                   : 'No collections yet'}
@@ -547,7 +547,7 @@ export const KbContentsPanel: React.FC<KbContentsPanelProps> = ({
                   ))}
                 </GuideRail>
               ) : isSearchActive ? (
-                <p className='px-1.5 py-1 text-[13px] text-sidebar-foreground/60'>
+                <p className='px-1.5 py-1 text-[13px]'>
                   No files or folders match &ldquo;{searchQuery.trim()}&rdquo;
                 </p>
               ) : null}

@@ -52,18 +52,16 @@ const RolesSidebar = ({
           {loading && (
             <div className='space-y-1'>
               {Array.from({ length: 5 }).map((_, i) => (
-                <div key={i} className='h-9 rounded-[10px] bg-sidebar-accent/50 animate-pulse' />
+                <div key={i} className='h-9 rounded-[10px] animate-pulse' />
               ))}
             </div>
           )}
 
           {!loading && roles.length === 0 && (
             <div className='px-2 py-8 text-center'>
-              <UserThree size={20} className='mx-auto text-sidebar-foreground/40 mb-2' />
+              <UserThree size={20} className='mx-auto mb-2' />
               <p className='text-xs text-sidebar-foreground'>No roles yet.</p>
-              <p className='text-xs text-sidebar-foreground/70 mt-0.5'>
-                Create one to get started.
-              </p>
+              <p className='text-xs mt-0.5'>Create one to get started.</p>
             </div>
           )}
 

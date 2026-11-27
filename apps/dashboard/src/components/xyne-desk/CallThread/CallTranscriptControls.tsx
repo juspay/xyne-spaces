@@ -453,7 +453,7 @@ function CallTranscriptViewer({
               </Button>
             </div>
           ) : (
-            <pre className='max-h-[320px] overflow-y-auto whitespace-pre-wrap break-words font-sans leading-relaxed'>
+            <pre className='max-h-[320px] overflow-y-auto whitespace-pre-wrap wrap-break-word font-sans leading-relaxed'>
               {text?.trim() ? text : 'Transcript is empty'}
             </pre>
           )}

@@ -6,7 +6,6 @@ import { v4 as uuidv4 } from 'uuid';
 import { Button } from '../../../components/ui/Button';
 import Textarea from '../../../components/ui/Textarea';
 import { Combobox } from '../../../components/ui/Combobox/Combobox';
-import { cn } from '../../../utils/classNames';
 import { toast } from 'sonner';
 import { COEStatus, RCAStatus } from '@xyne/shared';
 import { coeSchema } from '../schemas';
@@ -546,7 +545,10 @@ export const COEForm = ({
           />
 
           <div className='space-y-1.5'>
-            <label htmlFor={actionTypeFieldId} className='text-sm font-medium text-foreground'>
+            <label
+              htmlFor={actionTypeFieldId}
+              className='block text-sm font-medium text-foreground'
+            >
               Action Type *
             </label>
             <select
@@ -565,7 +567,7 @@ export const COEForm = ({
               }}
               data-track-category='RCA'
               data-track-name='CoeActionTypeSelect'
-              className='w-full px-3 py-2 border border-input rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-foreground'
+              className='w-full px-3 py-2 border border-input rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500 bg-background text-foreground'
             >
               {filteredActionTypeOptions.map(option => (
                 <option key={option.value} value={option.value}>
@@ -577,7 +579,7 @@ export const COEForm = ({
           </div>
 
           <div className='space-y-1.5'>
-            <label htmlFor={statusFieldId} className='text-sm font-medium text-foreground'>
+            <label htmlFor={statusFieldId} className='block text-sm font-medium text-foreground'>
               Status *
             </label>
             <select
@@ -598,7 +600,7 @@ export const COEForm = ({
               }}
               data-track-category='RCA'
               data-track-name='CoeStatusSelect'
-              className='w-full px-3 py-2 border border-input rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background text-foreground'
+              className='w-full px-3 py-2 border border-input rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500 bg-background text-foreground'
             >
               {coeStatusOptions.map(option => (
                 <option key={option.value} value={option.value}>
@@ -609,7 +611,7 @@ export const COEForm = ({
           </div>
 
           <div className='space-y-1.5'>
-            <label htmlFor={actionFieldId} className='text-sm font-medium text-foreground'>
+            <label htmlFor={actionFieldId} className='block text-sm font-medium text-foreground'>
               Action *
             </label>
             <Textarea
@@ -625,11 +627,6 @@ export const COEForm = ({
               placeholder='Describe the action to address the RCA...'
               rows={4}
               aria-invalid={showErrors && !data.action.trim()}
-              className={cn(
-                showErrors &&
-                  !data.action.trim() &&
-                  'aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive',
-              )}
             />
             {renderFieldError(errors.action ?? null, showErrors)}
           </div>
@@ -641,7 +638,7 @@ export const COEForm = ({
   if (!isCoeEnabled) {
     return (
       <div className='max-w-4xl mx-auto'>
-        <div className='bg-background shadow-sm border border-border rounded-xl overflow-hidden p-8'>
+        <div className='bg-background shadow-xs border border-border rounded-xl overflow-hidden p-8'>
           <div className='flex items-center gap-4 mb-4'>
             <div className='h-12 w-12 rounded-xl bg-muted flex items-center justify-center'>
               <svg
@@ -681,8 +678,8 @@ export const COEForm = ({
 
   return (
     <div className='h-full overflow-y-auto'>
-      <div className='bg-background shadow-sm border border-border rounded-xl'>
-        <div className='px-8 py-6 border-b border-border bg-gradient-to-r from-muted/40 to-background'>
+      <div className='bg-background shadow-xs border border-border rounded-xl'>
+        <div className='px-8 py-6 border-b border-border bg-linear-to-r from-muted/40 to-background'>
           <div className='flex items-center gap-3'>
             <div className='h-10 w-10 rounded-lg bg-purple-600 flex items-center justify-center'>
               <svg
@@ -802,7 +799,7 @@ export const COEForm = ({
           )}
 
           {!isLocked && (
-            <div className='sticky bottom-0 -mx-8 -mb-8 p-4 bg-background/95 backdrop-blur border-t border-border flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3'>
+            <div className='sticky bottom-0 -mx-8 -mb-8 p-4 bg-background/95 backdrop-blur-sm border-t border-border flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3'>
               <div className='text-xs text-muted-foreground'>
                 {(pendingCoeValues?.length ?? 0) > 0
                   ? `${pendingCoeValues?.length ?? 0} pending COE(s)`

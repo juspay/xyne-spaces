@@ -7,7 +7,7 @@ import { useCallback, useRef, type ReactElement } from 'react';
  * DESCRIPTION_EDITOR pairs with DetailCard, PROMPT_EDITOR with ProseBox.
  */
 const EDITOR =
-  'w-full rounded-2xl border-border p-4 text-sm leading-5 tracking-[-0.28px] text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-1 focus:ring-ring';
+  'w-full rounded-2xl border-border p-4 text-sm leading-5 tracking-[-0.28px] text-foreground placeholder:text-muted-foreground/60 focus:outline-hidden focus:ring-1 focus:ring-ring';
 
 export const DESCRIPTION_EDITOR = `${EDITOR} border bg-card resize-none overflow-hidden`;
 
@@ -126,7 +126,7 @@ export function ClickToEdit({
       }}
       data-track-category='Claw Agents'
       data-track-name={trackName}
-      className='w-full cursor-text rounded-2xl focus:outline-none focus-visible:ring-1 focus-visible:ring-ring'
+      className='w-full cursor-text rounded-2xl focus:outline-hidden focus-visible:ring-1 focus-visible:ring-ring'
     >
       {children}
     </div>

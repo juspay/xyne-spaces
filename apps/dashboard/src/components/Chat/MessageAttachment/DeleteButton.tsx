@@ -18,7 +18,7 @@ interface DeleteButtonProps {
 }
 
 const VARIANT_STYLES: Record<DeleteButtonVariant, string> = {
-  default: 'flex-shrink-0 text-muted-foreground hover:text-destructive',
+  default: 'shrink-0 text-muted-foreground hover:text-destructive',
   overlay: 'hover:bg-muted text-background hover:text-destructive',
 } as const;
 

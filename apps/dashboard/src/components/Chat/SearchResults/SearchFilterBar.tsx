@@ -536,7 +536,7 @@ export function SearchFilterBar({
                   }}
                   onKeyDown={fromNav.handleInputKeyDown}
                   placeholder='Search people…'
-                  className='w-full text-sm bg-transparent outline-none placeholder:text-muted-foreground'
+                  className='w-full text-sm bg-transparent outline-hidden placeholder:text-muted-foreground'
                   data-track-category='SEARCH_FILTERS'
                   data-track-name='FROM_SEARCH_INPUT'
                 />
@@ -631,7 +631,7 @@ export function SearchFilterBar({
                   }}
                   onKeyDown={inNav.handleInputKeyDown}
                   placeholder='Search channels…'
-                  className='w-full text-sm bg-transparent outline-none placeholder:text-muted-foreground'
+                  className='w-full text-sm bg-transparent outline-hidden placeholder:text-muted-foreground'
                   data-track-category='SEARCH_FILTERS'
                   data-track-name='IN_SEARCH_INPUT'
                 />

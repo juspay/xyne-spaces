@@ -11,7 +11,7 @@ export const ClearChatConfirmOverlay = ({
   onCancel,
   onConfirm,
 }: ClearChatConfirmOverlayProps): ReactElement => (
-  <div className='fixed inset-0 z-[60] flex items-center justify-center'>
+  <div className='fixed inset-0 z-60 flex items-center justify-center'>
     <button
       type='button'
       aria-label='Dismiss'

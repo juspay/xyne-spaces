@@ -256,7 +256,7 @@ export const FilePill: React.FC<FilePillProps> = ({
     <div
       className={cn(
         'group relative flex items-center gap-3 px-3 py-2.5 rounded-lg border border-border bg-card',
-        'hover:border-input hover:shadow-sm transition-all duration-200',
+        'hover:border-input hover:shadow-xs transition-all duration-200',
         'min-w-[200px] max-w-[320px]',
         onClick && 'cursor-pointer',
         isUploading && 'opacity-70',
@@ -281,7 +281,7 @@ export const FilePill: React.FC<FilePillProps> = ({
       {/* File Icon */}
       <div
         className={cn(
-          'flex-shrink-0 w-10 h-10 rounded-lg flex items-center justify-center',
+          'shrink-0 w-10 h-10 rounded-lg flex items-center justify-center',
           config.color,
         )}
       >
@@ -307,7 +307,7 @@ export const FilePill: React.FC<FilePillProps> = ({
       {/* Actions - visible on hover (desktop) or always (mobile) */}
       <div
         className={cn(
-          'flex items-center gap-1 flex-shrink-0',
+          'flex items-center gap-1 shrink-0',
           !isMobile && 'opacity-0 group-hover:opacity-100 transition-opacity duration-200',
         )}
       >

@@ -35,7 +35,7 @@ const NoOrganizationAccessScreen = (): ReactElement => {
 
   return (
     <ThemeProvider>
-      <div className='min-h-screen w-full overflow-x-hidden overflow-y-auto relative bg-gradient-to-br from-slate-50 to-slate-100'>
+      <div className='min-h-screen w-full overflow-x-hidden overflow-y-auto relative bg-linear-to-br from-slate-50 to-slate-100'>
         <div className='min-h-screen w-full flex flex-col items-center justify-center p-4 sm:p-6 md:p-8'>
           <div className='w-full max-w-md flex flex-col items-center gap-8'>
             {/* Logo */}
@@ -55,9 +55,9 @@ const NoOrganizationAccessScreen = (): ReactElement => {
             </div>
 
             {/* Info Card */}
-            <div className='w-full p-6 bg-white border border-slate-200 rounded-xl shadow-sm space-y-4'>
+            <div className='w-full p-6 bg-white border border-slate-200 rounded-xl shadow-xs space-y-4'>
               <div className='flex items-start gap-3'>
-                <div className='w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5'>
+                <div className='w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center shrink-0 mt-0.5'>
                   <Mail className='w-4 h-4 text-blue-600' />
                 </div>
                 <div>

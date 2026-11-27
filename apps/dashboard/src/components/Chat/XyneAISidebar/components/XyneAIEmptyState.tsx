@@ -58,7 +58,7 @@ const SuggestionCard = ({
         'flex flex-col items-start gap-[24px] overflow-clip rounded-[20px] border border-border bg-card px-[20px] pb-[20px] pt-[16px] text-left',
         'shadow-[0px_22px_22px_0px_rgba(41,45,56,0.04),0px_6px_12px_0px_rgba(41,45,56,0.05)]',
         'cursor-pointer transition duration-200 ease-out hover:z-10 hover:-translate-y-1 hover:scale-[1.02] hover:shadow-[0px_28px_30px_0px_rgba(41,45,56,0.07),0px_10px_18px_0px_rgba(41,45,56,0.06)]',
-        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background',
+        'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background',
         className,
       )}
     >
@@ -112,7 +112,7 @@ const Squiggle = ({
 
 /** Decorative avatar placeholder — a muted gradient block, never a real photo. */
 const AvatarPlaceholder = (): ReactElement => (
-  <div className='size-[24px] shrink-0 rounded-[6px] bg-gradient-to-br from-foreground/[0.12] to-foreground/[0.04]' />
+  <div className='size-[24px] shrink-0 rounded-[6px] bg-linear-to-br from-foreground/12 to-foreground/4' />
 );
 
 /** Subtle 4-point sparkle above the heading. Theme-aware via currentColor. */

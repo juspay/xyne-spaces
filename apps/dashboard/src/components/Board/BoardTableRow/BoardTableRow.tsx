@@ -38,7 +38,7 @@ export const BoardTableRow = ({
 
       {/* Automations */}
       <div className='flex-1 flex items-center gap-[4px] min-w-0'>
-        <Zap size={14} className='text-[#6276be] flex-shrink-0' />
+        <Zap size={14} className='text-[#6276be] shrink-0' />
         <span className={`text-[14px] text-foreground ${isSelected ? 'font-semibold' : ''}`}>
           {board.automations || 0}
         </span>
@@ -54,12 +54,12 @@ export const BoardTableRow = ({
       </div>
 
       {/* Actions */}
-      <div className='w-[200px] flex gap-[8px] flex-shrink-0 invisible group-hover:visible'>
+      <div className='w-[200px] flex gap-[8px] shrink-0 invisible group-hover:visible'>
         <Button
           onClick={() => onPreview(board)}
           variant='secondary'
           size='sm'
-          className='flex-shrink-0 whitespace-nowrap bg-background border border-border'
+          className='shrink-0 whitespace-nowrap bg-background border border-border'
           data-track-category='BOARD_CREATE'
           data-track-name='PREVIEW_BOARD'
         >
@@ -68,7 +68,7 @@ export const BoardTableRow = ({
         <Button
           onClick={() => onDuplicate(board)}
           size='sm'
-          className='bg-[#6276be] hover:bg-[#5060a0] text-white flex-shrink-0 whitespace-nowrap'
+          className='bg-[#6276be] hover:bg-[#5060a0] text-white shrink-0 whitespace-nowrap'
           data-track-category='BOARD_CREATE'
           data-track-name='CLONE_BOARD'
         >

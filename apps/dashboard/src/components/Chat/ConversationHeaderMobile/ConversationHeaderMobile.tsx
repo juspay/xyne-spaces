@@ -99,10 +99,10 @@ const ConversationHeaderMobile = ({
   };
   const isStarred = channelUserStatus?.isStarred ?? false;
   const floatingButtonClass =
-    'border border-border bg-background text-foreground shadow-sm transition-colors hover:bg-accent';
+    'border border-border bg-background text-foreground shadow-xs transition-colors hover:bg-accent';
   return (
     <div className='relative w-full p-2 bg-transparent z-10'>
-      <div className='absolute top-0 left-0 right-0 z-0 h-16 bg-gradient-to-b from-background to-transparent touch-none' />
+      <div className='absolute top-0 left-0 right-0 z-0 h-16 bg-linear-to-b from-background to-transparent touch-none' />
       <div className='relative flex items-center gap-x-2'>
         <button
           aria-label='Back to chat directory'
@@ -141,7 +141,7 @@ const ConversationHeaderMobile = ({
           initial='default'
           animate={isExpanded ? 'expanded' : 'default'}
           onClick={() => setIsExpanded(true)}
-          className='absolute z-50 overflow-clip border border-border bg-background text-left text-foreground shadow-sm'
+          className='absolute z-50 overflow-clip border border-border bg-background text-left text-foreground shadow-xs'
           transition={{ type: 'spring', bounce: 0.1, duration: 0.4 }}
           data-track-category='CHANNELS_MOBILE_VIEW'
           data-track-name='EXPAND_HEADER_MOBILE'

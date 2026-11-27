@@ -98,7 +98,7 @@ const utcToIst = (utcString?: string): string => {
 };
 
 const SelectedBadge = (): ReactElement => (
-  <span className='flex-shrink-0 flex items-center justify-center w-4 h-4 rounded-full bg-primary text-primary-foreground'>
+  <span className='shrink-0 flex items-center justify-center w-4 h-4 rounded-full bg-primary text-primary-foreground'>
     <CheckTickSingle size={10} />
   </span>
 );
@@ -280,7 +280,7 @@ const AttachmentSearchResultItem = ({
                   e.stopPropagation();
                   onPreview(result);
                 }}
-                className='p-1 text-muted-foreground hover:text-accent-foreground hover:bg-accent rounded transition-colors focus-visible:outline-none focus-visible:ring-0'
+                className='p-1 text-muted-foreground hover:text-accent-foreground hover:bg-accent rounded transition-colors focus-visible:outline-hidden focus-visible:ring-0'
                 title='Preview file'
                 aria-label='Preview file'
                 data-track-category='GLOBAL_SEARCH'
@@ -435,13 +435,13 @@ const SearchResultItem = ({
           >
             <div className='flex items-start gap-1.5'>
               {mergeMode && (
-                <div className='flex items-center justify-center h-4 w-5 flex-shrink-0 mt-0.5'>
+                <div className='flex items-center justify-center h-4 w-5 shrink-0 mt-0.5'>
                   {isMergeSelected ? (
-                    <span className='flex-shrink-0 flex items-center justify-center w-4 h-4 rounded-full bg-primary text-primary-foreground'>
+                    <span className='shrink-0 flex items-center justify-center w-4 h-4 rounded-full bg-primary text-primary-foreground'>
                       <CheckTickSingle size={10} />
                     </span>
                   ) : (
-                    <span className='w-4 h-4 rounded border border-muted-foreground/30 flex-shrink-0' />
+                    <span className='w-4 h-4 rounded border border-muted-foreground/30 shrink-0' />
                   )}
                 </div>
               )}

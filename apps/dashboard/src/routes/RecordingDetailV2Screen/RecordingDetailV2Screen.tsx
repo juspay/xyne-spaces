@@ -198,7 +198,7 @@ const PRIVATE_SUMMARY_TEMPLATE_OPTION: RecordingSummaryTemplate = {
 // const POST_SPLIT_BUTTON_CLASS =
 //   'text-background hover:bg-foreground/90 hover:text-background dark:hover:bg-foreground/90 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-background';
 
-const CANVAS_POPOVER_LAYER_CLASS = '[&_[style*="--bn-ui-base-z-index"]]:!z-[15]';
+const CANVAS_POPOVER_LAYER_CLASS = '**:[[style*="--bn-ui-base-z-index"]]:z-15!';
 
 function isRecordingLive(recording: RecordingDetail): boolean {
   return recording.status === 'ACTIVE' || recording.status === 'IN_PROGRESS';
@@ -1579,13 +1579,13 @@ export default function RecordingDetailV2Screen({
               ) : // Disabled (LLM)
               // ) : canEdit && hasDetailedSummary ? (
               //   <DropdownMenu>
-              //     <div className='inline-flex h-8 items-stretch overflow-hidden rounded-lg bg-foreground text-background shadow-sm'>
+              //     <div className='inline-flex h-8 items-stretch overflow-hidden rounded-lg bg-foreground text-background shadow-xs'>
               //       <Button
               //         type='button'
               //         variant='ghost'
               //         size='sm'
               //         onClick={() => setShowPostToChannelModal(true)}
-              //         className={`${POST_SPLIT_BUTTON_CLASS} text-xs font-semibold !rounded-2xl`}
+              //         className={`${POST_SPLIT_BUTTON_CLASS} text-xs font-semibold rounded-2xl!`}
               //         data-track-category='RecordingDetailV2'
               //         data-track-name='open_post_to_channel_modal'
               //       >
@@ -1689,7 +1689,7 @@ export default function RecordingDetailV2Screen({
                       onClick={toggleTranscriptPanel}
                       variant='ghost'
                       className={cn(
-                        'inline-flex size-8 items-center justify-center rounded-xl border border-border/70 transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                        'inline-flex size-8 items-center justify-center rounded-xl border border-border/70 transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring',
                         showTranscriptPanel ? 'text-foreground' : 'text-muted-foreground',
                       )}
                       aria-label={!showTranscriptPanel ? 'Open transcript' : 'Close transcript'}
@@ -2029,15 +2029,15 @@ function NotesCanvas({ canvasId }: { canvasId: string }): ReactElement {
       editable={true}
       placeholder='Add your notes here, you can view the transcript live in the transcript tab'
       className={`min-h-0 w-full flex-1 ${CANVAS_POPOVER_LAYER_CLASS}
-        [&_.bn-side-menu]:!hidden
-        [&_.thin-scrollbar]:!pt-2
-        [&_.bn-editor]:!px-0
-        [&_.bn-block-content:has(.ProseMirror-trailingBreak:only-child):after]:!text-base
-        [&_.bn-suggestion-menu]:!w-auto [&_.bn-suggestion-menu]:!no-scrollbar [&_.bn-suggestion-menu]:!max-h-60 [&_.bn-suggestion-menu]:!max-w-[calc(100vw-2rem)]
-        [&_.bn-suggestion-menu-item]:!h-8 [&_.bn-suggestion-menu-item]:!px-2 [&_.bn-suggestion-menu-item]:!py-1
-        [&_.bn-mt-suggestion-menu-item-title]:!text-sm [&_.bn-mt-suggestion-menu-item-title]:!leading-4
-        [&_.bn-mt-suggestion-menu-item-title]:!whitespace-nowrap [&_.bn-mt-suggestion-menu-item-title]:!overflow-hidden [&_.bn-mt-suggestion-menu-item-title]:!text-ellipsis
-        [&_.bn-mt-suggestion-menu-item-section_svg]:!size-4
+        [&_.bn-side-menu]:hidden!
+        [&_.thin-scrollbar]:pt-2!
+        [&_.bn-editor]:px-0!
+        [&_.bn-block-content:has(.ProseMirror-trailingBreak:only-child):after]:text-base!
+        [&_.bn-suggestion-menu]:w-auto! [&_.bn-suggestion-menu]:no-scrollbar! [&_.bn-suggestion-menu]:max-h-60! [&_.bn-suggestion-menu]:max-w-[calc(100vw-2rem)]!
+        [&_.bn-suggestion-menu-item]:h-8! [&_.bn-suggestion-menu-item]:px-2! [&_.bn-suggestion-menu-item]:py-1!
+        [&_.bn-mt-suggestion-menu-item-title]:text-sm! [&_.bn-mt-suggestion-menu-item-title]:leading-4!
+        [&_.bn-mt-suggestion-menu-item-title]:whitespace-nowrap! [&_.bn-mt-suggestion-menu-item-title]:overflow-hidden! [&_.bn-mt-suggestion-menu-item-title]:text-ellipsis!
+        [&_.bn-mt-suggestion-menu-item-section_svg]:size-4!
         `}
       autoFocus={true}
     />
@@ -2068,15 +2068,15 @@ function DetailedSummaryCanvas({ canvasId }: { canvasId: string }): ReactElement
       trackEditedRecordingSummaryBlocks={true}
       className={`w-full ${CANVAS_POPOVER_LAYER_CLASS}
         detailed-summary-canvas-editor
-        [&_.bn-side-menu]:!hidden
-        [&_.thin-scrollbar]:!pt-0
-        [&_.bn-editor]:!px-0
-        [&_.bn-block-content:has(.ProseMirror-trailingBreak:only-child):after]:!text-base
-        [&_.bn-suggestion-menu]:!w-auto [&_.bn-suggestion-menu]:!no-scrollbar [&_.bn-suggestion-menu]:!max-h-60 [&_.bn-suggestion-menu]:!max-w-[calc(100vw-2rem)]
-        [&_.bn-suggestion-menu-item]:!h-8 [&_.bn-suggestion-menu-item]:!px-2 [&_.bn-suggestion-menu-item]:!py-1
-        [&_.bn-mt-suggestion-menu-item-title]:!text-sm [&_.bn-mt-suggestion-menu-item-title]:!leading-4
-        [&_.bn-mt-suggestion-menu-item-title]:!whitespace-nowrap [&_.bn-mt-suggestion-menu-item-title]:!text-ellipsis
-        [&_.bn-mt-suggestion-menu-item-section_svg]:!size-4
+        [&_.bn-side-menu]:hidden!
+        [&_.thin-scrollbar]:pt-0!
+        [&_.bn-editor]:px-0!
+        [&_.bn-block-content:has(.ProseMirror-trailingBreak:only-child):after]:text-base!
+        [&_.bn-suggestion-menu]:w-auto! [&_.bn-suggestion-menu]:no-scrollbar! [&_.bn-suggestion-menu]:max-h-60! [&_.bn-suggestion-menu]:max-w-[calc(100vw-2rem)]!
+        [&_.bn-suggestion-menu-item]:h-8! [&_.bn-suggestion-menu-item]:px-2! [&_.bn-suggestion-menu-item]:py-1!
+        [&_.bn-mt-suggestion-menu-item-title]:text-sm! [&_.bn-mt-suggestion-menu-item-title]:leading-4!
+        [&_.bn-mt-suggestion-menu-item-title]:whitespace-nowrap! [&_.bn-mt-suggestion-menu-item-title]:text-ellipsis!
+        [&_.bn-mt-suggestion-menu-item-section_svg]:size-4!
         `}
     />
   );

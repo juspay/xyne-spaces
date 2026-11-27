@@ -91,7 +91,7 @@ const ApproverDropdown = ({
       <DropdownMenuTrigger asChild disabled={disabled}>
         <button
           type='button'
-          className='w-[160px] h-auto min-h-[32px] px-[8px] py-[7px] bg-background border border-border rounded-[8px] text-[13px] text-left focus:outline-none focus:ring-0 cursor-pointer disabled:text-muted-foreground/50 disabled:cursor-not-allowed flex items-start justify-between'
+          className='w-[160px] h-auto min-h-[32px] px-[8px] py-[7px] bg-background border border-border rounded-[8px] text-[13px] text-left focus:outline-hidden focus:ring-0 cursor-pointer disabled:text-muted-foreground/50 disabled:cursor-not-allowed flex items-start justify-between'
         >
           <span
             className={
@@ -354,7 +354,7 @@ export const ConditionBuilder = ({
   const thenValueOptions = getThenValueOptions();
 
   return (
-    <div className='bg-background rounded-[12px] border border-border shadow-[0px_184px_51px_0px_rgba(0,0,0,0),0px_117px_47px_0px_rgba(0,0,0,0.01),0px_66px_40px_0px_rgba(0,0,0,0.02),0px_29px_29px_0px_rgba(0,0,0,0.03),0px_7px_16px_0px_rgba(0,0,0,0.04)] w-[550px] -ml-[45px] mt-[300px]'>
+    <div className='bg-background rounded-[12px] border border-border shadow-[0px_184px_51px_0px_rgba(0,0,0,0),0px_117px_47px_0px_rgba(0,0,0,0.01),0px_66px_40px_0px_rgba(0,0,0,0.02),0px_29px_29px_0px_rgba(0,0,0,0.03),0px_7px_16px_0px_rgba(0,0,0,0.04)] w-[550px] ml-[-45px] mt-[300px]'>
       {/* Modal Header */}
       <div className='flex items-center gap-[6px] px-[12px] py-[12px] border-b border-border'>
         <span className='flex-1 text-[14px] font-medium text-foreground'>
@@ -515,7 +515,7 @@ export const ConditionBuilder = ({
                     className={`relative w-8 h-4 rounded-full transition-colors border-none p-0 shrink-0 mt-0.5 ${disabled ? 'cursor-not-allowed opacity-40' : 'cursor-pointer'} ${entryOn ? 'bg-[#6276be]' : 'bg-muted-foreground/30'}`}
                   >
                     <div
-                      className={`absolute top-0.5 w-3 h-3 rounded-full bg-white shadow transition-transform ${entryOn ? 'translate-x-4' : 'translate-x-0.5'}`}
+                      className={`absolute top-0.5 w-3 h-3 rounded-full bg-white shadow-sm transition-transform ${entryOn ? 'translate-x-4' : 'translate-x-0.5'}`}
                     />
                   </button>
                   <div>

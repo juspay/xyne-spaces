@@ -8,7 +8,7 @@ interface ContainerNodeProps {
 
 export const CardNode: React.FC<ContainerNodeProps> = ({ node, children }) => {
   return (
-    <div className='rounded-lg border border-border bg-card p-4 shadow-sm' style={node.style}>
+    <div className='rounded-lg border border-border bg-card p-4 shadow-xs' style={node.style}>
       {children}
     </div>
   );

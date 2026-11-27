@@ -849,14 +849,14 @@ export const TicketActivity = ({
           type='button'
           onClick={() => setIsOpen(prev => !prev)}
           aria-expanded={isOpen}
-          className='flex items-center gap-[9px] rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+          className='flex items-center gap-[9px] rounded-md focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring'
           data-track-category='Tickets'
           data-track-name='ToggleActivitySection'
         >
           <ChevronRight
             size={12}
             className={cn(
-              'w-3 shrink-0 text-muted-foreground/70 transition-transform duration-150 ease-[cubic-bezier(0.23,1,0.32,1)]',
+              'w-3 shrink-0 text-muted-foreground/70 transition-transform duration-150 ',
               isOpen && 'rotate-90',
             )}
           />
@@ -881,7 +881,7 @@ export const TicketActivity = ({
             <button
               type='button'
               onClick={toggleSort}
-              className='flex h-[26px] items-center gap-1.5 rounded-lg px-1.5 text-[12.5px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+              className='flex h-[26px] items-center gap-1.5 rounded-lg px-1.5 text-[12.5px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring'
               title={sortOrder === 'newest' ? 'Newest to oldest' : 'Oldest to newest'}
               data-track-category='Tickets'
               data-track-name='ToggleActivitySort'
@@ -997,7 +997,7 @@ export const ActivityComponent = ({
       {/* Content */}
       <div className='flex min-w-0 flex-1 flex-col pt-0.5 pb-3.5'>
         <div className='flex min-w-0 items-start justify-between gap-3.5'>
-          <p className='min-w-0 flex-1 text-[13.5px] leading-[1.6] text-muted-foreground [text-wrap:pretty]'>
+          <p className='min-w-0 flex-1 text-[13.5px] leading-[1.6] text-muted-foreground text-pretty'>
             {activity.activityType !== ActivityType.PR &&
               !hideActorName &&
               (isAiActivity

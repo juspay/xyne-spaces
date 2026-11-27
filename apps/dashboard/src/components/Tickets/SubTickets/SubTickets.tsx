@@ -42,7 +42,7 @@ export function SubTicketsToggle({
         // Enter and Space on the chip must not also open the ticket it sits on.
         onKeyDown={event => event.stopPropagation()}
         className={cn(
-          'flex h-[22px] flex-shrink-0 items-center gap-1 rounded-md border px-1.5 text-xs tabular-nums transition-colors',
+          'flex h-[22px] shrink-0 items-center gap-1 rounded-md border px-1.5 text-xs tabular-nums transition-colors',
           open
             ? 'border-border bg-muted text-foreground'
             : 'border-transparent text-muted-foreground',
@@ -146,7 +146,7 @@ export function SubTicketsTree(props: SubTicketsTreeProps): ReactElement | null 
   if (props.layout === 'list') {
     const { renderItem, renderListLine } = props;
     const connector = (continues: boolean): ReactElement => (
-      <span aria-hidden className='relative w-5 flex-shrink-0 self-stretch'>
+      <span aria-hidden className='relative w-5 shrink-0 self-stretch'>
         <span
           className={cn(
             TREE_LINE,
@@ -186,11 +186,11 @@ export function SubTicketsTree(props: SubTicketsTreeProps): ReactElement | null 
         aria-hidden
         className={cn(
           TREE_LINE,
-          'absolute -left-[13px] -top-1.5 h-[calc(50%+6px)] w-3 rounded-bl-[7px] border-b-[1.5px]',
+          'absolute left-[-13px] -top-1.5 h-[calc(50%+6px)] w-3 rounded-bl-[7px] border-b-[1.5px]',
         )}
       />
       {continues && (
-        <span aria-hidden className={cn(TREE_LINE, 'absolute -bottom-1 -left-[13px] top-1/2')} />
+        <span aria-hidden className={cn(TREE_LINE, 'absolute -bottom-1 left-[-13px] top-1/2')} />
       )}
     </>
   );

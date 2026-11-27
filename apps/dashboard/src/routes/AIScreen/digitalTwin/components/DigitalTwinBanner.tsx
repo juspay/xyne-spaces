@@ -45,8 +45,8 @@ export const DigitalTwinBanner = ({
 
   if (!status.enabled) {
     return (
-      <div className='overflow-hidden rounded-xl border border-status-success/30 bg-card'>
-        <div className='h-0.5 w-full bg-status-success/40' />
+      <div className='overflow-hidden rounded-xl border bg-card'>
+        <div className='h-0.5 w-full' />
         <div className='p-4'>
           <div className='flex items-start gap-2.5'>
             <Brain className='mt-px size-[18px] shrink-0 text-status-success' />
@@ -66,7 +66,7 @@ export const DigitalTwinBanner = ({
             onClick={onEnable}
             data-track-category='Claw Agents'
             data-track-name='Digital Twin enable'
-            className='mt-3.5 flex w-full items-center justify-center gap-2 rounded-lg bg-status-success px-3.5 py-2 text-sm font-semibold text-white transition hover:bg-status-success/90'
+            className='mt-3.5 flex w-full items-center justify-center gap-2 rounded-lg bg-status-success px-3.5 py-2 text-sm font-semibold text-white transition'
           >
             <Brain className='size-4' />
             Enable Digital Twin
@@ -162,7 +162,7 @@ export const DigitalTwinBanner = ({
             const badgeCls = entry.complete
               ? 'bg-status-success text-white'
               : isStuck
-                ? 'border border-status-pending/50 bg-status-pending/10 text-status-pending'
+                ? 'border text-status-pending'
                 : pct > 0
                   ? 'bg-foreground/15 text-foreground'
                   : 'bg-border text-muted-foreground';
@@ -200,7 +200,7 @@ export const DigitalTwinBanner = ({
 
   return (
     <div className='overflow-hidden rounded-xl border border-border bg-card'>
-      <div className='h-0.5 w-full bg-status-success/50' />
+      <div className='h-0.5 w-full' />
       <div className='flex items-start gap-2.5 px-4 py-3.5'>
         <CheckCircle2 className='mt-px size-[18px] shrink-0 text-status-success' />
         <div className='min-w-0 flex-1'>

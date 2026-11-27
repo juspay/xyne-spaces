@@ -210,7 +210,7 @@ export const ScheduleMessageDialog = ({
                     new Date(Date.now() + MAX_SCHEDULE_DAYS * 24 * 60 * 60 * 1000),
                   )}
                   step={900}
-                  className='w-full border border-border rounded-lg px-3 py-2 text-sm bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary'
+                  className='w-full border border-border rounded-lg px-3 py-2 text-sm bg-background text-foreground focus:outline-hidden focus:ring-2 focus:ring-primary'
                   data-track-category={trackCategory}
                   data-track-name='schedule-custom-datetime'
                 />
@@ -289,7 +289,7 @@ export const ScheduleMessageDialog = ({
                 onConfirm(pendingScheduleFor);
                 handleOpenChange(false);
               }}
-              className='text-sm font-medium px-4 py-2 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 transition-colors'
+              className='text-sm font-medium px-4 py-2 rounded-md bg-primary text-primary-foreground hover:bg-primary/90 shadow-xs focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 transition-colors'
               data-track-category={trackCategory}
               data-track-name='confirm-schedule-send'
             >

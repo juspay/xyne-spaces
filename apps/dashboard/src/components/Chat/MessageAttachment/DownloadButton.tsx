@@ -18,7 +18,7 @@ interface DownloadButtonProps {
 }
 
 const VARIANT_STYLES: Record<DownloadButtonVariant, string> = {
-  default: 'text-muted-foreground flex-shrink-0 disabled:cursor-not-allowed',
+  default: 'text-muted-foreground shrink-0 disabled:cursor-not-allowed',
   overlay: 'hover:bg-muted text-background',
 } as const;
 

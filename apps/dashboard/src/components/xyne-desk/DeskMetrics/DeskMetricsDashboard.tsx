@@ -758,7 +758,7 @@ const MetricsAgentTable = ({
       <div className='overflow-x-auto'>
         <table className='w-full text-sm'>
           <thead>
-            <tr className='border-b border-desk-border/60 text-left dark:border-border/60'>
+            <tr className='border-b text-left dark:border-border/60'>
               {agentColumns.map(col => (
                 <th
                   key={col.key}
@@ -800,7 +800,7 @@ const MetricsAgentTable = ({
                 <tr
                   key={row.assigneeId ?? '__unassigned__'}
                   className={cn(
-                    'border-b border-desk-border/40 last:border-b-0 dark:border-border/40',
+                    'border-b last:border-b-0 dark:border-border/40',
                     i % 2 !== 0 && 'bg-muted/20',
                   )}
                 >
@@ -998,7 +998,7 @@ const MetricsTicketTable = ({
           )}
         >
           <thead>
-            <tr className='border-b border-desk-border/60 text-left dark:border-border/60'>
+            <tr className='border-b text-left dark:border-border/60'>
               <th className='px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground'>
                 ID
               </th>
@@ -1057,7 +1057,7 @@ const MetricsTicketTable = ({
               <tr
                 key={row.ticketId}
                 className={cn(
-                  'border-b border-desk-border/40 last:border-b-0 dark:border-border/40',
+                  'border-b last:border-b-0 dark:border-border/40',
                   i % 2 !== 0 && 'bg-muted/20',
                 )}
               >
@@ -1355,7 +1355,7 @@ const AgentAverageTable = ({
       <div className='max-h-[320px] overflow-y-auto'>
         <table className='w-full text-sm'>
           <thead className='sticky top-0 z-10 bg-background'>
-            <tr className='border-b border-desk-border/60 text-left dark:border-border/60'>
+            <tr className='border-b text-left dark:border-border/60'>
               <th className='px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground'>
                 Agent
               </th>
@@ -1375,7 +1375,7 @@ const AgentAverageTable = ({
               <tr
                 key={row.id}
                 className={cn(
-                  'border-b border-desk-border/40 last:border-b-0 dark:border-border/40',
+                  'border-b last:border-b-0 dark:border-border/40',
                   i % 2 !== 0 && 'bg-muted/20',
                 )}
               >
@@ -2019,15 +2019,15 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
       title='Desk Metrics'
       className={cn(
         'left-auto right-0 top-0 bottom-0 h-screen w-[85vw] max-h-none max-w-none translate-x-0 translate-y-0 rounded-l-[16px] rounded-r-none bg-transparent shadow-none',
-        'data-[state=open]:!zoom-in-100 data-[state=open]:!slide-in-from-top-[0%] data-[state=open]:!slide-in-from-right-full',
-        'data-[state=closed]:!zoom-out-100 data-[state=closed]:!slide-out-to-top-[0%] data-[state=closed]:!slide-out-to-right-full',
+        'data-[state=open]:zoom-in-100! data-[state=open]:slide-in-from-top-[0%]! data-[state=open]:slide-in-from-right-full!',
+        'data-[state=closed]:zoom-out-100! data-[state=closed]:slide-out-to-top-[0%]! data-[state=closed]:slide-out-to-right-full!',
       )}
     >
       <div className='relative h-full w-full'>
         <button
           type='button'
           onClick={onClose}
-          className='absolute right-6 top-4 z-20 flex h-8 w-8 items-center justify-center rounded-[10px] border border-desk-border bg-background text-muted-foreground shadow-sm transition-colors hover:bg-accent hover:text-foreground dark:border-border'
+          className='absolute right-6 top-4 z-20 flex h-8 w-8 items-center justify-center rounded-[10px] border border-desk-border bg-background text-muted-foreground shadow-xs transition-colors hover:bg-accent hover:text-foreground dark:border-border'
           aria-label='Close desk metrics'
           data-track-category='DeskMetrics'
           data-track-name='CloseButton'
@@ -2077,7 +2077,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                     className={cn(
                       'flex items-center gap-1.5 rounded-[6px] px-2.5 py-1 text-xs font-medium transition-colors',
                       activeTab === id
-                        ? 'bg-background text-foreground shadow-sm'
+                        ? 'bg-background text-foreground shadow-xs'
                         : 'text-muted-foreground hover:text-foreground',
                     )}
                   >
@@ -2141,7 +2141,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                           onChange={e => setDeskSearch(e.target.value)}
                           onKeyDown={e => e.stopPropagation()}
                           placeholder='Search desks…'
-                          className='w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground'
+                          className='w-full bg-transparent text-sm outline-hidden placeholder:text-muted-foreground'
                           data-track-category='DeskMetrics'
                           data-track-name='SearchDesks'
                         />
@@ -2291,7 +2291,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                       <button
                         type='button'
                         className={cn(
-                          'flex h-[32px] items-center gap-1.5 rounded-[10px] border border-border bg-background px-3 text-sm text-foreground shadow-sm hover:bg-muted',
+                          'flex h-[32px] items-center gap-1.5 rounded-[10px] border border-border bg-background px-3 text-sm text-foreground shadow-xs hover:bg-muted',
                           !canSee('moreFilters') && 'hidden',
                         )}
                         data-track-category='DeskMetrics'
@@ -2315,7 +2315,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                           onChange={e => setFilterSearch(e.target.value)}
                           onKeyDown={e => e.stopPropagation()}
                           placeholder='Search filters…'
-                          className='w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground'
+                          className='w-full bg-transparent text-sm outline-hidden placeholder:text-muted-foreground'
                           data-track-category='DeskMetrics'
                           data-track-name='SearchFilters'
                         />
@@ -2362,7 +2362,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                                 align='start'
                                 sideOffset={4}
                                 collisionPadding={12}
-                                className='z-[70] outline-none'
+                                className='z-70 outline-hidden'
                                 data-custom-field-submenu='true'
                                 onOpenAutoFocus={event => event.preventDefault()}
                               >
@@ -2411,7 +2411,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                                 align='start'
                                 sideOffset={4}
                                 collisionPadding={12}
-                                className='z-[70] outline-none'
+                                className='z-70 outline-hidden'
                                 data-custom-field-submenu='true'
                                 onOpenAutoFocus={event => event.preventDefault()}
                               >
@@ -2461,7 +2461,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                                 align='start'
                                 sideOffset={4}
                                 collisionPadding={12}
-                                className='z-[70] outline-none'
+                                className='z-70 outline-hidden'
                                 data-custom-field-submenu='true'
                                 onOpenAutoFocus={event => event.preventDefault()}
                               >
@@ -2554,7 +2554,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                                   align='start'
                                   sideOffset={4}
                                   collisionPadding={12}
-                                  className='z-[70] outline-none'
+                                  className='z-70 outline-hidden'
                                   data-custom-field-submenu='true'
                                   onOpenAutoFocus={event => event.preventDefault()}
                                 >
@@ -2608,7 +2608,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                                   align='start'
                                   sideOffset={4}
                                   collisionPadding={12}
-                                  className='z-[70] outline-none'
+                                  className='z-70 outline-hidden'
                                   data-custom-field-submenu='true'
                                   onOpenAutoFocus={event => event.preventDefault()}
                                 >
@@ -2661,7 +2661,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                                   align='start'
                                   sideOffset={4}
                                   collisionPadding={12}
-                                  className='z-[70] outline-none'
+                                  className='z-70 outline-hidden'
                                   data-custom-field-submenu='true'
                                   onOpenAutoFocus={event => event.preventDefault()}
                                 >
@@ -2736,7 +2736,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                                       align='start'
                                       sideOffset={4}
                                       collisionPadding={12}
-                                      className='z-[70] outline-none'
+                                      className='z-70 outline-hidden'
                                       data-custom-field-submenu='true'
                                       onOpenAutoFocus={event => event.preventDefault()}
                                     >
@@ -2774,7 +2774,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                         setSelectedAiCategories([]);
                         clearAllCustomFieldFilters();
                       }}
-                      className='flex h-[32px] items-center gap-1.5 rounded-[10px] border border-border bg-background px-3 text-sm text-foreground shadow-sm hover:bg-muted'
+                      className='flex h-[32px] items-center gap-1.5 rounded-[10px] border border-border bg-background px-3 text-sm text-foreground shadow-xs hover:bg-muted'
                       data-track-category='DeskMetrics'
                       data-track-name='ClearDeskMetricsFilters'
                     >
@@ -2877,7 +2877,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                 <button
                   type='button'
                   onClick={() => void refetch()}
-                  className='mt-2 rounded-[10px] border border-desk-accent bg-desk-accent px-3 py-1.5 text-sm font-medium text-white shadow-sm hover:opacity-90'
+                  className='mt-2 rounded-[10px] border border-desk-accent bg-desk-accent px-3 py-1.5 text-sm font-medium text-white shadow-xs hover:opacity-90'
                   data-track-category='DeskMetrics'
                   data-track-name='Retry'
                 >
@@ -3103,7 +3103,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                       {data.counts.stageCounts.map(s => (
                         <div
                           key={s.stageName}
-                          className='flex items-center gap-2 rounded-[8px] border border-desk-border/60 bg-muted/30 px-3 py-1.5 dark:border-border/60'
+                          className='flex items-center gap-2 rounded-[8px] border bg-muted/30 px-3 py-1.5 dark:border-border/60'
                         >
                           <span className='text-xs text-muted-foreground'>{s.stageName}</span>
                           <span className='font-mono text-sm font-semibold tabular-nums text-foreground'>
@@ -3378,7 +3378,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
       {/* Expanded chart overlay */}
       {expandedChart !== null && (
         <div
-          className='fixed inset-0 z-[9999] flex items-center justify-center bg-black/60'
+          className='fixed inset-0 z-9999 flex items-center justify-center bg-black/60'
           role='button'
           tabIndex={-1}
           aria-label='Close expanded chart'

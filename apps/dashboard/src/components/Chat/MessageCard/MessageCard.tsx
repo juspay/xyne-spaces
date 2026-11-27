@@ -94,7 +94,7 @@ export function MessageCard({
         className,
       )}
     >
-      <div className='flex h-8 w-8 flex-shrink-0 items-center justify-center overflow-visible'>
+      <div className='flex h-8 w-8 shrink-0 items-center justify-center overflow-visible'>
         {recipientAvatar}
       </div>
 
@@ -104,7 +104,7 @@ export function MessageCard({
           {!isTimestampFloating && (
             <div
               className={cn(
-                'flex-shrink-0 text-xs text-muted-foreground ml-2 transition-opacity duration-150',
+                'shrink-0 text-xs text-muted-foreground ml-2 transition-opacity duration-150',
                 hasActions && 'group-hover:opacity-0 group-focus-within:opacity-0',
                 timestampClassName,
               )}
@@ -126,7 +126,7 @@ export function MessageCard({
       {isTimestampFloating && (
         <div
           className={cn(
-            'absolute right-3 z-[1] text-xs text-muted-foreground transition-opacity duration-150',
+            'absolute right-3 z-1 text-xs text-muted-foreground transition-opacity duration-150',
             hasActions && 'group-hover:opacity-0 group-focus-within:opacity-0',
             timestampClassName,
           )}
@@ -138,7 +138,7 @@ export function MessageCard({
       {hasActions && (
         // eslint-disable-next-line jsx-a11y/no-static-element-interactions -- island stops propagation so nested controls do not trigger the card's role="button" handler
         <div
-          className='absolute right-2.5 top-2.5 z-10 flex items-center gap-0.5 rounded-md border border-border bg-background px-1 py-0.5 shadow-sm opacity-0 pointer-events-none transition-opacity duration-150 group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto'
+          className='absolute right-2.5 top-2.5 z-10 flex items-center gap-0.5 rounded-md border border-border bg-background px-1 py-0.5 shadow-xs opacity-0 pointer-events-none transition-opacity duration-150 group-hover:opacity-100 group-hover:pointer-events-auto group-focus-within:opacity-100 group-focus-within:pointer-events-auto'
           onClick={e => e.stopPropagation()}
           onKeyDown={e => e.stopPropagation()}
           data-track-category={trackCategory}

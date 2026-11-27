@@ -333,7 +333,7 @@ const AttachmentsBlock: React.FC<AttachmentsBlockProps> = ({
               {imageAttachments.map(attachment => (
                 <div
                   key={attachment.id}
-                  className={`flex items-center gap-2 py-2 text-sm ${isMobile ? 'flex-shrink-0' : ''}`}
+                  className={`flex items-center gap-2 py-2 text-sm ${isMobile ? 'shrink-0' : ''}`}
                 >
                   <MessageAttachment
                     attachment={attachment}
@@ -357,7 +357,7 @@ const AttachmentsBlock: React.FC<AttachmentsBlockProps> = ({
               {previewableFiles.map(attachment => (
                 <div
                   key={attachment.id}
-                  className={`flex items-center gap-2 py-2 text-sm ${isMobile ? 'flex-shrink-0' : ''}`}
+                  className={`flex items-center gap-2 py-2 text-sm ${isMobile ? 'shrink-0' : ''}`}
                 >
                   <MessageAttachment
                     attachment={attachment}
@@ -429,7 +429,7 @@ const AttachmentsBlock: React.FC<AttachmentsBlockProps> = ({
       {deletedAttachments.length > 0 && activeAttachments.length === 0 && (
         <div className='mt-2'>
           <div className='flex items-center gap-3 rounded-lg border border-border bg-muted/30 px-3 py-2 w-fit'>
-            <div className='flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md bg-muted'>
+            <div className='flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-muted'>
               <Trash2 className='h-4 w-4 text-muted-foreground' />
             </div>
             <span className='text-sm text-muted-foreground'>This file was deleted.</span>
@@ -500,12 +500,14 @@ const getMessageBubbleClassName = (
     isBookmarked &&
       variant !== 'pinned' &&
       !isPinned &&
-      !isShowInChannel && ['bg-blue-50/90 rounded-sm message-bookmarked-bg'],
+      !isShowInChannel && [
+        'bg-blue-50/90 in-data-[theme=midnight]:bg-[rgba(59,130,246,0.1)] rounded-sm',
+      ],
     variant === 'pinned' && 'bg-background rounded-xl',
     isHighlighted && 'highlight-message',
     isXyneBot && 'pt-5',
     isPrivateSystemNotice && 'bg-muted pt-3',
-    contentOnly && '!px-0',
+    contentOnly && 'px-0!',
   ]
     .flat()
     .filter(Boolean)
@@ -1367,7 +1369,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                 <div className='flex flex-col gap-2'>
                   {typeof metadata?.['shareNote'] === 'string' && metadata['shareNote'] ? (
                     <div
-                      className={`jp-message-html whitespace-pre-wrap break-all-words inline-block ${getEmojiFontSizeClass(metadata['shareNote'])}`}
+                      className={`jp-message-html whitespace-pre-wrap inline-block leading-6 ${getEmojiFontSizeClass(metadata['shareNote'])}`}
                     >
                       <ExpandableMessage maxHeight={500}>
                         <div className='jp-message-html inline-block'>
@@ -1406,7 +1408,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                   recordingShare={recordingShare}
                   renderNote={noteHtml => (
                     <div
-                      className={`jp-message-html whitespace-pre-wrap break-all-words inline-block ${getEmojiFontSizeClass(noteHtml)}`}
+                      className={`jp-message-html whitespace-pre-wrap inline-block leading-6 ${getEmojiFontSizeClass(noteHtml)}`}
                     >
                       <ExpandableMessage maxHeight={500}>
                         <RenderMessageWithHTML
@@ -1487,7 +1489,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                   {/* Optional message from forwarder */}
                   {forwardedMessageData.optionalText && (
                     <div
-                      className={`jp-message-html whitespace-pre-wrap break-all-words inline-block ${getEmojiFontSizeClass(forwardedMessageData.optionalText)}`}
+                      className={`jp-message-html whitespace-pre-wrap inline-block leading-6 ${getEmojiFontSizeClass(forwardedMessageData.optionalText)}`}
                     >
                       <ExpandableMessage maxHeight={500}>
                         <div className='jp-message-html inline-block'>
@@ -1545,7 +1547,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                         recordingShare={recordingShare}
                         renderNote={noteHtml => (
                           <div
-                            className={`jp-message-html whitespace-pre-wrap break-all-words inline-block text-muted-foreground ${getEmojiFontSizeClass(noteHtml)}`}
+                            className={`jp-message-html whitespace-pre-wrap inline-block leading-6 ${getEmojiFontSizeClass(noteHtml)}`}
                           >
                             <ExpandableMessage maxHeight={500}>
                               <RenderMessageWithHTML
@@ -1579,7 +1581,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                     ) : (
                       <>
                         <div
-                          className={`jp-message-html whitespace-pre-wrap break-all-words inline-block text-muted-foreground ${getEmojiFontSizeClass(resolvedForwardedContent)}`}
+                          className={`jp-message-html whitespace-pre-wrap inline-block leading-6 ${getEmojiFontSizeClass(resolvedForwardedContent)}`}
                         >
                           <ExpandableMessage maxHeight={500}>
                             <div className='jp-message-html inline-block'>
@@ -1623,7 +1625,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                 <>
                   {hasMessageContent(message.content) && (
                     <div
-                      className={`jp-message-html whitespace-pre-wrap break-all-words inline-block ${emojiFontSizeClass}`}
+                      className={`jp-message-html whitespace-pre-wrap inline-block leading-6 ${emojiFontSizeClass}`}
                       style={isSystemMessage ? systemMessageStyles : undefined}
                     >
                       {callLinkOnlyExternalId && (
@@ -1942,7 +1944,7 @@ export const ReactionView = ({
               content={tooltipContent}
               side='top'
               showArrow={false}
-              className='w-max max-w-[calc(100vw-2rem)] whitespace-normal break-words border border-border bg-popover text-center text-popover-foreground text-wrap shadow-md sm:max-w-md'
+              className='w-max max-w-[calc(100vw-2rem)] whitespace-normal wrap-break-word border border-border bg-popover text-center text-popover-foreground text-wrap shadow-md sm:max-w-md'
             >
               <button
                 type='button'

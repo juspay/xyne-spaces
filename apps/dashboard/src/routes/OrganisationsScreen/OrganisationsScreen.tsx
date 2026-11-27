@@ -77,7 +77,7 @@ const Card = ({
   children: React.ReactNode;
   className?: string;
 }): ReactElement => (
-  <div className={cn('rounded-lg border border-border bg-card shadow-sm', className)}>
+  <div className={cn('rounded-lg border border-border bg-card shadow-xs', className)}>
     {children}
   </div>
 );
@@ -325,7 +325,7 @@ const OrgMembersSection = ({
             <select
               value={selectedRole}
               onChange={e => setSelectedRole(e.target.value as OrgRole)}
-              className='px-3 py-2 border border-border rounded-lg bg-background text-foreground text-sm focus:outline-none focus:ring-2 focus:ring-primary min-w-[120px]'
+              className='px-3 py-2 border border-border rounded-lg bg-background text-foreground text-sm focus:outline-hidden focus:ring-2 focus:ring-primary min-w-[120px]'
               data-track-category='Organisations'
               data-track-name='SelectOrgMemberRole'
             >
@@ -640,7 +640,7 @@ export const OrganisationsScreen = (): ReactElement => {
       {/* ── Org mismatch guard ── */}
       {orgMismatch ? (
         <div className='flex-1 flex items-center justify-center p-8'>
-          <div className='max-w-md w-full rounded-xl border border-border bg-card shadow-sm p-8 flex flex-col items-center gap-4 text-center'>
+          <div className='max-w-md w-full rounded-xl border border-border bg-card shadow-xs p-8 flex flex-col items-center gap-4 text-center'>
             <div className='w-14 h-14 rounded-full bg-destructive/10 flex items-center justify-center'>
               <AlertTriangle className='w-7 h-7 text-destructive' />
             </div>
@@ -816,7 +816,7 @@ export const OrganisationsScreen = (): ReactElement => {
 
               {/* Organisation Name field */}
               <div className='space-y-2'>
-                <label htmlFor='org-name' className='text-sm font-medium text-foreground'>
+                <label htmlFor='org-name' className='block text-sm font-medium text-foreground'>
                   Organisation Name <span className='text-destructive'>*</span>
                 </label>
                 <Input
@@ -832,7 +832,10 @@ export const OrganisationsScreen = (): ReactElement => {
 
               {/* Workspace Name field */}
               <div className='space-y-2'>
-                <label htmlFor='workspace-name' className='text-sm font-medium text-foreground'>
+                <label
+                  htmlFor='workspace-name'
+                  className='block text-sm font-medium text-foreground'
+                >
                   Workspace Name <span className='text-destructive'>*</span>
                 </label>
                 <Input
@@ -847,7 +850,7 @@ export const OrganisationsScreen = (): ReactElement => {
 
               {/* Owner Email field */}
               <div className='space-y-2'>
-                <label htmlFor='owner-email' className='text-sm font-medium text-foreground'>
+                <label htmlFor='owner-email' className='block text-sm font-medium text-foreground'>
                   Owner Email <span className='text-destructive'>*</span>
                 </label>
                 <Input

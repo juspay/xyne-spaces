@@ -101,7 +101,7 @@ export function AddHubAgentDialog({
           {candidates.map(agent => (
             <li
               key={agent.id}
-              className='flex min-h-[4.5rem] items-center gap-3 rounded-lg px-2 py-3 hover:bg-muted/40'
+              className='flex min-h-18 items-center gap-3 rounded-lg px-2 py-3 hover:bg-muted/40'
             >
               <LibraryIconTile name={agent.name} color={agent.color || '#6366f1'} />
               <div className='min-w-0 flex-1'>

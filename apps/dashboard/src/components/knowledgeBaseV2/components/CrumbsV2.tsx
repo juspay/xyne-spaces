@@ -14,7 +14,7 @@ interface CrumbsV2Props {
 function Sep(): React.ReactElement {
   return (
     <ChevronRight
-      className='h-3.5 w-3.5 flex-shrink-0 text-muted-foreground/60'
+      className='h-3.5 w-3.5 shrink-0 text-muted-foreground/60'
       aria-hidden
       strokeWidth={1.75}
     />

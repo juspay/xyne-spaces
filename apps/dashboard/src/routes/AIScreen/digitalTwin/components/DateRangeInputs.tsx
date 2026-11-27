@@ -5,7 +5,7 @@ import {
 } from '@/components/ClawAgents/digitalTwin/useDigitalTwinRange';
 
 const INPUT_CLASS =
-  'w-auto shrink-0 rounded-lg border border-border bg-background px-2.5 py-1.5 text-xs text-foreground focus:border-ring focus:outline-none';
+  'w-auto shrink-0 rounded-lg border border-border bg-background px-2.5 py-1.5 text-xs text-foreground focus:border-ring focus:outline-hidden';
 
 export const DateRangeInputs = ({
   range,

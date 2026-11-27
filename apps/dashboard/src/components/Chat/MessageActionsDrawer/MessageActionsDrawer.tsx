@@ -157,7 +157,7 @@ export const MessageActionsDrawer: React.FC<MessageActionsDrawerProps> = ({
       data-track-name='MESSAGE_ACTION'
       data-track-metadata={JSON.stringify({ action: label })}
     >
-      <span className='flex-shrink-0 w-5 h-5 flex items-center justify-center'>{icon}</span>
+      <span className='shrink-0 w-5 h-5 flex items-center justify-center'>{icon}</span>
       <span className='text-sm font-medium'>{label}</span>
     </button>
   );

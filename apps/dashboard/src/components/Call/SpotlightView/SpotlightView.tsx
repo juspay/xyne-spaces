@@ -168,7 +168,7 @@ export function SpotlightView({
           {/* Label */}
           <div
             className={cn(
-              'absolute bg-black/70 backdrop-blur-sm rounded-lg text-white font-medium border border-white/10',
+              'absolute bg-black/70 backdrop-blur-xs rounded-lg text-white font-medium border border-white/10',
               compact
                 ? 'top-2 left-2 px-2 py-1 text-[10px]'
                 : 'top-2 left-2 sm:top-4 sm:left-4 px-2 py-1 sm:px-4 sm:py-2 text-xs sm:text-sm',
@@ -194,9 +194,9 @@ export function SpotlightView({
               <button
                 onClick={onExit}
                 className={cn(
-                  'flex items-center justify-center w-9 h-9 rounded-full bg-black/50 hover:bg-black/70 backdrop-blur-sm',
+                  'flex items-center justify-center w-9 h-9 rounded-full bg-black/50 hover:bg-black/70 backdrop-blur-xs',
                   'border border-white/20 text-white/90 hover:text-white transition-all duration-200',
-                  'focus:outline-none focus:ring-2 focus:ring-white/30',
+                  'focus:outline-hidden focus:ring-2 focus:ring-white/30',
                 )}
                 aria-label='Back to grid view'
                 data-track-category='CALLS'
@@ -213,8 +213,8 @@ export function SpotlightView({
                 onClick={() => onSelect(mainParticipant.identity, 'screen')}
                 className={cn(
                   'flex items-center gap-1.5 rounded-lg border border-white/10',
-                  'bg-black/70 backdrop-blur-sm text-white font-medium hover:bg-black/80 transition-all duration-200',
-                  'focus:outline-none focus:ring-2 focus:ring-white/30',
+                  'bg-black/70 backdrop-blur-xs text-white font-medium hover:bg-black/80 transition-all duration-200',
+                  'focus:outline-hidden focus:ring-2 focus:ring-white/30',
                   compact
                     ? 'px-2 py-1 text-[10px]'
                     : 'px-2 py-1 sm:px-4 sm:py-2 text-xs sm:text-sm',
@@ -234,9 +234,9 @@ export function SpotlightView({
                 onClick={handleExpandClick}
                 className={cn(
                   'flex items-center justify-center',
-                  'bg-black/50 hover:bg-black/70 backdrop-blur-sm border border-white/20 rounded-full',
+                  'bg-black/50 hover:bg-black/70 backdrop-blur-xs border border-white/20 rounded-full',
                   'text-white/90 hover:text-white transition-all duration-200',
-                  'focus:outline-none focus:ring-2 focus:ring-white/30',
+                  'focus:outline-hidden focus:ring-2 focus:ring-white/30',
                   compact ? 'w-8 h-8' : 'w-9 h-9',
                 )}
                 aria-label={
@@ -281,7 +281,7 @@ export function SpotlightView({
                 }
               }}
               className={cn(
-                'aspect-video flex-shrink-0',
+                'aspect-video shrink-0',
                 compact ? 'min-h-[60px]' : 'min-h-[80px] sm:min-h-[120px]',
               )}
               avatarSize={compact ? 'small' : 'medium'}

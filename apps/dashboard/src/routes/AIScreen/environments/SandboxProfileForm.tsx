@@ -637,7 +637,7 @@ function Form({
 
   return (
     <div className='flex h-full flex-col'>
-      <div className='min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]'>
+      <div className='min-h-0 flex-1 overflow-y-auto scrollbar-gutter-stable'>
         <div className='max-w-ai-content mx-auto flex min-h-full flex-col gap-5 px-8 pb-8 pt-8'>
           <div>
             <h1 className='text-2xl font-semibold tracking-tight'>

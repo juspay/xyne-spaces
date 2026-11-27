@@ -223,14 +223,14 @@ export const FileUploadZone: React.FC<FileUploadZoneProps> = ({
                 <div className='flex items-center gap-2 min-w-0'>
                   <span
                     className={cn(
-                      'text-[10px] font-bold text-white px-1.5 py-0.5 rounded flex-shrink-0',
+                      'text-[10px] font-bold text-white px-1.5 py-0.5 rounded shrink-0',
                       getExtensionColor(file.name),
                     )}
                   >
                     {getFileExtension(file.name)}
                   </span>
                   <span className='text-sm text-gray-700 truncate'>{file.name}</span>
-                  <span className='text-xs text-gray-400 flex-shrink-0'>
+                  <span className='text-xs text-gray-400 shrink-0'>
                     {formatFileSize(file.size)}
                   </span>
                 </div>
@@ -240,7 +240,7 @@ export const FileUploadZone: React.FC<FileUploadZoneProps> = ({
                   disabled={disabled}
                   data-track-category='knowledge-base'
                   data-track-name='remove-file'
-                  className='p-1 hover:bg-red-50 rounded transition-colors flex-shrink-0 disabled:opacity-50'
+                  className='p-1 hover:bg-red-50 rounded transition-colors shrink-0 disabled:opacity-50'
                 >
                   <X size={14} className='text-gray-400 hover:text-red-500' />
                 </button>

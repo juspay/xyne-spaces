@@ -169,7 +169,7 @@ const Settings = ({
     <div className='flex flex-col gap-4 min-w-[280px] max-w-[320px] w-full'>
       {/* User identity section */}
       <div className='flex items-start gap-3'>
-        <div className='flex-shrink-0'>
+        <div className='shrink-0'>
           <Avatar userId={user?.id || ''} size='lg' showActiveStatus={false} />
         </div>
         <div className='flex-1 min-w-0 space-y-1'>
@@ -177,7 +177,7 @@ const Settings = ({
 
           <Popover
             trigger={
-              <button className='flex items-center gap-1.5 hover:bg-muted px-1.5 py-0.5 -ml-1.5 rounded-md transition-colors outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-blue-500'>
+              <button className='flex items-center gap-1.5 hover:bg-muted px-1.5 py-0.5 -ml-1.5 rounded-md transition-colors outline-hidden focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-blue-500'>
                 {livePresenceStatus === 'ONLINE' ? (
                   <div className='w-2 h-2 rounded-full bg-green-500 ring-2 ring-background' />
                 ) : (
@@ -260,7 +260,7 @@ const Settings = ({
           {hasValidStatus ? (
             <div className='flex items-center justify-between gap-1 w-full'>
               <div className='flex items-center gap-2 min-w-0 flex-1'>
-                <div className='flex-shrink-0'>
+                <div className='shrink-0'>
                   <StatusIndicator
                     statusEmoji={user?.statusEmoji}
                     statusContent={user?.statusContent}
@@ -278,7 +278,7 @@ const Settings = ({
                 size='lg'
                 onClick={handleClearStatus}
                 trackId='clear_user_status'
-                className='flex-shrink-0 p-1 h-auto hover:bg-accent min-w-[20px]'
+                className='shrink-0 p-1 h-auto hover:bg-accent min-w-[20px]'
                 title='Clear status'
                 aria-label='Clear status'
                 data-track-category='Settings'
@@ -289,7 +289,7 @@ const Settings = ({
             </div>
           ) : (
             <div className='flex items-center p-1 gap-2 text-muted-foreground'>
-              <SmilePlus className='size-4 flex-shrink-0' />
+              <SmilePlus className='size-4 shrink-0' />
               <span className='text-xs truncate'>Set a status</span>
               <ShortcutHint shortcut='global.setStatus' className='ml-auto text-xs' />
             </div>
@@ -303,7 +303,7 @@ const Settings = ({
           <div className='space-y-1'>
             <div className='px-2 py-1 rounded-lg border border-border bg-transparent w-full flex items-center justify-between gap-2'>
               <div className='flex items-center gap-2 min-w-0 flex-1'>
-                <BellOff className='size-4 flex-shrink-0 text-muted-foreground' />
+                <BellOff className='size-4 shrink-0 text-muted-foreground' />
                 <span className='text-sm font-medium text-foreground truncate'>
                   Notifications paused
                 </span>
@@ -311,7 +311,7 @@ const Settings = ({
               <Button
                 variant='ghost'
                 size='lg'
-                className='flex-shrink-0 p-1 h-auto hover:bg-accent min-w-[20px]'
+                className='shrink-0 p-1 h-auto hover:bg-accent min-w-[20px]'
                 title='Resume notifications'
                 aria-label='Resume notifications'
                 onClick={handleResumeNotifications}
@@ -337,7 +337,7 @@ const Settings = ({
                 data-track-name='OpenPauseNotificationsMenu'
               >
                 <div className='flex items-center p-1 gap-2 text-muted-foreground'>
-                  <Bell className='size-4 flex-shrink-0' />
+                  <Bell className='size-4 shrink-0' />
                   <span className='text-xs truncate'>Pause notifications for: </span>
                 </div>
                 <ChevronDown className='size-4 text-muted-foreground' />

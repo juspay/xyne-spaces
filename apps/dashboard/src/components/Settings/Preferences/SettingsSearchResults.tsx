@@ -36,7 +36,7 @@ export const SettingsSearchResults: FC<SettingsSearchResultsProps> = ({
 
   if (results.length === 0) {
     return (
-      <p className='px-2 py-3 text-sm text-muted-foreground break-words'>
+      <p className='px-2 py-3 text-sm text-muted-foreground wrap-break-word'>
         No settings match “{query.trim()}”
       </p>
     );

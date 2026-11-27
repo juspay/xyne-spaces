@@ -135,7 +135,7 @@ export const CollectionStatusDrawer: React.FC<CollectionStatusDrawerProps> = ({
         <DrawerPrimitive.Content
           className={cn(
             'fixed inset-y-0 right-0 z-50 flex w-full max-w-[480px] flex-col',
-            'bg-background shadow-2xl focus:outline-none',
+            'bg-background shadow-2xl focus:outline-hidden',
           )}
         >
           <DrawerPrimitive.Title className='sr-only'>
@@ -145,7 +145,7 @@ export const CollectionStatusDrawer: React.FC<CollectionStatusDrawerProps> = ({
           {/* Header */}
           <div className='flex items-start justify-between gap-3 border-b border-border px-5 py-4'>
             <div className='flex min-w-0 items-center gap-3'>
-              <div className='grid h-9 w-9 flex-shrink-0 place-items-center rounded-md bg-secondary'>
+              <div className='grid h-9 w-9 shrink-0 place-items-center rounded-md bg-secondary'>
                 <Folder className='h-5 w-5 text-muted-foreground' strokeWidth={1.75} />
               </div>
               <div className='min-w-0'>
@@ -159,7 +159,7 @@ export const CollectionStatusDrawer: React.FC<CollectionStatusDrawerProps> = ({
                 ) : null}
               </div>
             </div>
-            <div className='flex flex-shrink-0 items-center gap-2'>
+            <div className='flex shrink-0 items-center gap-2'>
               <span
                 className={cn(
                   'rounded-full px-2.5 py-1 text-[12px] font-medium ring-1',
@@ -203,7 +203,7 @@ export const CollectionStatusDrawer: React.FC<CollectionStatusDrawerProps> = ({
                     )}
                   >
                     <div className='flex items-center gap-3'>
-                      <div className='flex-shrink-0'>
+                      <div className='shrink-0'>
                         <FileCardPreviewV2 format={extOf(row.name)} size='sm' />
                       </div>
                       <div className='min-w-0 flex-1'>
@@ -216,7 +216,7 @@ export const CollectionStatusDrawer: React.FC<CollectionStatusDrawerProps> = ({
                       </div>
                       <span
                         className={cn(
-                          'flex-shrink-0 rounded-full px-2.5 py-1 text-[11.5px] font-medium ring-1',
+                          'shrink-0 rounded-full px-2.5 py-1 text-[11.5px] font-medium ring-1',
                           pill.className,
                         )}
                       >

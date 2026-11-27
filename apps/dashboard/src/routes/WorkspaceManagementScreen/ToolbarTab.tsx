@@ -23,7 +23,7 @@ const Card = ({
   children: React.ReactNode;
   className?: string;
 }): ReactElement => (
-  <div className={cn('rounded-xl border border-border bg-card shadow-sm', className)}>
+  <div className={cn('rounded-xl border border-border bg-card shadow-xs', className)}>
     {children}
   </div>
 );

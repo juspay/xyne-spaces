@@ -18,7 +18,7 @@ const FormCard = ({ form, onClick }: FormCardProps): ReactElement => {
         }
       }}
       onClick={onClick}
-      className='flex flex-col items-start justify-center gap-3 overflow-clip rounded-[20px] border border-border bg-background px-5 pb-4 pt-5 transition-colors hover:bg-muted/40 cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring'
+      className='flex flex-col items-start justify-center gap-3 overflow-clip rounded-[20px] border border-border bg-background px-5 pb-4 pt-5 transition-colors hover:bg-muted/40 cursor-pointer focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring'
       data-track-category='Forms'
       data-track-name='OpenForm'
       data-track-metadata={JSON.stringify({ formId: form.id, formName: form.formName })}

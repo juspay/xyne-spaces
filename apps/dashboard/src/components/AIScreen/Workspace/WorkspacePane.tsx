@@ -501,7 +501,7 @@ function WorkspacePaneInner({
         maximized ? 'fixed inset-0 z-50 h-screen w-screen border-l-0' : 'h-full w-full',
       )}
     >
-      <div className='flex h-11 flex-shrink-0 items-center gap-2 border-b border-border px-2'>
+      <div className='flex h-11 shrink-0 items-center gap-2 border-b border-border px-2'>
         {showDetail ? (
           <>
             <button
@@ -509,14 +509,14 @@ function WorkspacePaneInner({
               onClick={goBack}
               aria-label='Back'
               title='Back'
-              className='grid h-7 w-7 flex-shrink-0 place-items-center rounded text-muted-foreground hover:bg-secondary/60 hover:text-foreground'
+              className='grid h-7 w-7 shrink-0 place-items-center rounded text-muted-foreground hover:bg-secondary/60 hover:text-foreground'
               data-track-category='AskAI'
               data-track-name='workspace-artifact-back'
             >
               <ArrowLeft className='h-4 w-4' />
             </button>
             <span className='flex min-w-0 flex-1 items-center gap-1.5'>
-              {artifactKindIcon(selected.kind, 'h-3.5 w-3.5 flex-shrink-0 text-muted-foreground')}
+              {artifactKindIcon(selected.kind, 'h-3.5 w-3.5 shrink-0 text-muted-foreground')}
               <span className='truncate text-sm font-medium text-foreground' title={selected.title}>
                 {selected.title}
               </span>
@@ -542,7 +542,7 @@ function WorkspacePaneInner({
             type='button'
             onClick={openApp}
             title='Reopen the app panel'
-            className='flex h-7 flex-shrink-0 items-center gap-1.5 rounded-full border border-border px-2.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground'
+            className='flex h-7 shrink-0 items-center gap-1.5 rounded-full border border-border px-2.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground'
             data-track-category='AskAI'
             data-track-name='ArtifactAppPaneReopen'
           >
@@ -556,7 +556,7 @@ function WorkspacePaneInner({
             onClick={onToggleMaximize}
             aria-label={maximized ? 'Restore workspace width' : 'Maximise workspace'}
             title={maximized ? 'Restore workspace width' : 'Maximise workspace'}
-            className='grid h-7 w-7 flex-shrink-0 place-items-center rounded text-muted-foreground hover:bg-secondary/60 hover:text-foreground'
+            className='grid h-7 w-7 shrink-0 place-items-center rounded text-muted-foreground hover:bg-secondary/60 hover:text-foreground'
             data-track-category='AskAI'
             data-track-name='workspace-maximize'
           >
@@ -569,7 +569,7 @@ function WorkspacePaneInner({
             onClick={onCollapse}
             aria-label='Collapse workspace'
             title='Collapse workspace'
-            className='grid h-7 w-7 flex-shrink-0 place-items-center rounded text-muted-foreground hover:bg-secondary/60 hover:text-foreground'
+            className='grid h-7 w-7 shrink-0 place-items-center rounded text-muted-foreground hover:bg-secondary/60 hover:text-foreground'
             data-track-category='AskAI'
             data-track-name='workspace-collapse'
           >
@@ -636,7 +636,7 @@ function WorkspacePaneInner({
             aria-hidden={previewShown ? undefined : true}
           >
             {previewCandidates.length > 1 && (
-              <div className='flex-shrink-0 border-b border-border px-3 py-1.5'>
+              <div className='shrink-0 border-b border-border px-3 py-1.5'>
                 <select
                   value={previewArtifact.id}
                   onChange={event => setPreviewId(event.target.value)}
@@ -699,10 +699,10 @@ function WorkspacePaneInner({
         ) : (
           <div className='flex h-full min-h-0 flex-col'>
             {localFolder && (
-              <div className='flex-shrink-0 border-b border-border px-3 py-2'>
+              <div className='shrink-0 border-b border-border px-3 py-2'>
                 <div className='flex items-center gap-1.5'>
                   <FolderGit2
-                    className='h-3.5 w-3.5 flex-shrink-0 text-muted-foreground'
+                    className='h-3.5 w-3.5 shrink-0 text-muted-foreground'
                     aria-hidden='true'
                   />
                   <span className='truncate text-xs font-medium text-foreground'>

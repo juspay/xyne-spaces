@@ -24,7 +24,7 @@ function RadioGroupItem({
     <RadioGroupPrimitive.Item
       data-slot='radio-group-item'
       className={cn(
-        'border-[1.5px] border-secondary-foreground/50 text-primary focus-visible:border-ring focus-visible:ring-ring/50 aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive dark:bg-input/30 aspect-square size-4 shrink-0 rounded-full shadow-xs transition-[color,box-shadow] outline-none focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-50',
+        'border-[1.5px] border-secondary-foreground/50 text-primary focus-visible:border-ring focus-visible:ring-ring/50 dark:bg-input/30 aspect-square size-4 shrink-0 rounded-full transition-[color,box-shadow] outline-hidden focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-50',
         'data-[state=checked]:border-[1.5px] data-[state=checked]:border-primary',
         className,
       )}
@@ -62,7 +62,7 @@ const RadioGroup = ({
   return (
     <div className={cn('space-y-2', className)}>
       {label && (
-        <label className='text-sm font-normal text-muted-foreground' htmlFor={name}>
+        <label className='block text-sm font-normal text-muted-foreground' htmlFor={name}>
           {label}
         </label>
       )}
@@ -97,10 +97,7 @@ const Radio = ({
     <div className={cn('flex items-center justify-start space-x-3', className)} {...rest}>
       <RadioGroupItem value={value} id={value} />
       <div className='flex-1 space-y-0.5'>
-        <label
-          htmlFor={value}
-          className='text-sm font-normal text-foreground cursor-pointer align-text-bottom'
-        >
+        <label htmlFor={value} className='block text-sm font-normal text-foreground cursor-pointer'>
           {children}
         </label>
         {subtext && <p className='text-xs text-muted-foreground leading-none'>{subtext}</p>}

@@ -18,7 +18,7 @@ export const RCASidebar = ({
   onPreviousPage,
 }: RCASidebarProps) => {
   return (
-    <aside className='h-full w-full bg-background flex flex-col border border-border rounded-xl shadow-sm overflow-hidden'>
+    <aside className='h-full w-full bg-background flex flex-col border border-border rounded-xl shadow-xs overflow-hidden'>
       <div className='p-5 border-b border-border flex items-center justify-between bg-background'>
         <div className='flex items-center gap-2'>
           <ClipboardCheck className='h-4 w-4 text-slate-700' />
@@ -82,7 +82,7 @@ export const RCASidebar = ({
                 </div>
                 <p className='text-xs text-slate-600 line-clamp-1'>Owner: {ownerLabel}</p>
                 <p className='text-xs text-slate-600 line-clamp-1'>Bug Type: {bugTypeLabel}</p>
-                <p className='text-xs text-slate-600 line-clamp-2 break-words'>
+                <p className='text-xs text-slate-600 line-clamp-2 wrap-break-word'>
                   {record.title ?? 'Untitled RCA'}
                 </p>
                 <div className='grid grid-cols-1 gap-2'>
@@ -112,7 +112,7 @@ export const RCASidebar = ({
 
                 <p className='col-span-2 text-xs text-slate-600 line-clamp-1'>{ownerLabel}</p>
 
-                <p className='col-span-5 text-xs text-slate-600 line-clamp-2 break-words'>
+                <p className='col-span-5 text-xs text-slate-600 line-clamp-2 wrap-break-word'>
                   {record.title ?? 'Untitled RCA'}
                 </p>
 

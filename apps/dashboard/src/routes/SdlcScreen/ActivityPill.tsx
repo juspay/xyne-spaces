@@ -93,15 +93,10 @@ export function ActivityPill(props: {
     // Solid when any are yours, so it reads as a chip on any row, a selected sidebar row
     // included; its text takes the page colour, as dark mode's success green is light.
     // Light when none are: something is going on there, but not for you.
-    yours ? 'bg-status-success text-background' : 'bg-status-success/15 text-status-success',
+    yours ? 'bg-status-success text-background' : ' text-status-success',
     small ? 'h-4 px-1.5 text-[10.5px]' : 'h-5 px-2 text-[11px]',
     props.onClick &&
-      cn(
-        'relative z-10',
-        yours
-          ? 'transition-opacity hover:opacity-90'
-          : 'transition-colors hover:bg-status-success/25',
-      ),
+      cn('relative z-10', yours ? 'transition-opacity hover:opacity-90' : 'transition-colors '),
     props.className,
   );
   const content = (

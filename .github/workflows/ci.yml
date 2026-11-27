@@ -178,6 +178,10 @@ jobs:
         if: steps.affected.outputs.run == 'true'
         run: pnpm --filter xyne-spaces-dashboard run format:check
 
+      - name: Tailwind v4 class check
+        if: steps.affected.outputs.run == 'true'
+        run: pnpm check:tailwind-v4
+
       - name: Restore tsc incremental state
         if: steps.affected.outputs.run == 'true'
         uses: actions/cache@v4

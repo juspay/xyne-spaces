@@ -142,7 +142,7 @@ const TimeInput: React.FC<{ value: string; onChange: (v: string) => void }> = ({
     if (!/^\d$/.test(e.key)) e.preventDefault();
   };
 
-  const cls = 'w-7 bg-background px-0.5 py-1 text-center text-xs outline-none';
+  const cls = 'w-7 bg-background px-0.5 py-1 text-center text-xs outline-hidden';
 
   return (
     <div className='inline-flex items-center rounded-md border border-border overflow-hidden focus-within:border-desk-accent'>

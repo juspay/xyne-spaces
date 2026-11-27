@@ -125,7 +125,7 @@ export function GlobalCallOverlay({
   }
 
   return createPortal(
-    <div className={`fixed inset-0 pointer-events-none z-[50]`}>
+    <div className={`fixed inset-0 pointer-events-none z-50`}>
       {/* Global Audio Renderer - attaches all audio tracks independently of UI rendering */}
       {/* The call window renders audio from its shell, ahead of this. */}
       {room && !isCallWindowRoute() && <RoomAudioRenderer room={room} />}

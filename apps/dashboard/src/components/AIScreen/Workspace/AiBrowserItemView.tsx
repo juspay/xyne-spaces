@@ -139,7 +139,7 @@ function AiBrowserItem({ item, shown = true }: AiBrowserItemViewProps): ReactEle
     <div className='flex h-full min-h-0 flex-col'>
       <div className='flex items-center gap-2 border-b border-border px-3 py-1.5 text-xs text-muted-foreground'>
         {isLink ? (
-          <span className='grid h-5 w-5 flex-shrink-0 place-items-center text-muted-foreground'>
+          <span className='grid h-5 w-5 shrink-0 place-items-center text-muted-foreground'>
             {artifactKindIcon('LINK', 'h-3.5 w-3.5')}
           </span>
         ) : null}

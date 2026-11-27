@@ -58,7 +58,7 @@ export const RCADetailsView = ({
   const DetailRow = ({ label, value }: { label: string; value: string | null | undefined }) => (
     <div className='grid grid-cols-1 md:grid-cols-12 gap-2 md:gap-6 py-3 border-b border-border last:border-b-0'>
       <p className='md:col-span-4 text-sm font-medium text-foreground'>{label}</p>
-      <p className='md:col-span-8 text-sm text-muted-foreground whitespace-pre-wrap break-words'>
+      <p className='md:col-span-8 text-sm text-muted-foreground whitespace-pre-wrap wrap-break-word'>
         {value?.trim() || '-'}
       </p>
     </div>

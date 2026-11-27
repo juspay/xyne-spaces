@@ -98,7 +98,7 @@ export const TagReviewFilter = ({
             aria-label={searchPlaceholder}
             data-track-category='TagReview'
             data-track-name='SearchFilter'
-            className='w-full bg-transparent py-1 text-sm outline-none placeholder:text-muted-foreground'
+            className='w-full bg-transparent py-1 text-sm outline-hidden placeholder:text-muted-foreground'
           />
         </div>
       )}

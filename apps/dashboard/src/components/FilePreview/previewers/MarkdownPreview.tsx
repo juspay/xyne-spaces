@@ -67,7 +67,7 @@ const MARKDOWN: Components = {
   p: ({ node: _node, ...props }) => <p className='mb-4 mt-0' {...props} />,
   a: ({ node: _node, children, ...props }) => (
     <a
-      className='outline-none text-[color:var(--link-color)] underline-offset-2 hover:text-[color:var(--link-hover-color)] focus-visible:text-[color:var(--link-hover-color)] hover:underline focus-visible:underline'
+      className='outline-hidden text-(--link-color) underline-offset-2 hover:text-(--link-hover-color) focus-visible:text-(--link-hover-color) hover:underline focus-visible:underline'
       target='_blank'
       rel='noopener noreferrer'
       {...props}
@@ -88,13 +88,13 @@ const MARKDOWN: Components = {
   // A task list's items carry their checkbox in place of the bullet, as on GitHub.
   li: ({ node: _node, ...props }) => (
     <li
-      className='mt-1 has-[>input]:-ml-[1.4em] has-[>input]:list-none [&>input]:mr-2 [&>input]:align-middle [&>p]:mb-2'
+      className='mt-1 has-[>input]:ml-[-1.4em] has-[>input]:list-none [&>input]:mr-2 [&>input]:align-middle [&>p]:mb-2'
       {...props}
     />
   ),
   blockquote: ({ node: _node, ...props }) => (
     <blockquote
-      className='mb-4 mt-0 border-l-[0.25em] border-border px-[1em] text-muted-foreground [&>:last-child]:mb-0'
+      className='mb-4 mt-0 border-l-[0.25em] border-border px-[1em] text-muted-foreground *:last:mb-0'
       {...props}
     />
   ),
@@ -181,7 +181,7 @@ function RenderedMarkdown(props: { text: string }): ReactElement {
     <div className='h-full overflow-y-auto'>
       <article
         ref={articleRef}
-        className='mx-auto max-w-[880px] break-words px-8 pb-16 pt-8 text-[15px] leading-normal text-foreground'
+        className='mx-auto max-w-[880px] wrap-break-word px-8 pb-16 pt-8 text-[15px] leading-normal text-foreground'
       >
         <ReactMarkdown
           remarkPlugins={[remarkGfm]}

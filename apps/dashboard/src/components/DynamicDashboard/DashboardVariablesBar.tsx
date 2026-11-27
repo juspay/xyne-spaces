@@ -333,7 +333,7 @@ const VariableEditor = ({
       <div className='space-y-1'>
         <label
           htmlFor='var-name'
-          className='text-[11px] font-semibold uppercase tracking-wider text-muted-foreground'
+          className='block text-[11px] font-semibold uppercase tracking-wider text-muted-foreground'
         >
           Name (used as <code className='font-mono'>${'{name}'}</code>)
         </label>
@@ -348,7 +348,7 @@ const VariableEditor = ({
       <div className='space-y-1'>
         <label
           htmlFor='var-label'
-          className='text-[11px] font-semibold uppercase tracking-wider text-muted-foreground'
+          className='block text-[11px] font-semibold uppercase tracking-wider text-muted-foreground'
         >
           Label
         </label>
@@ -362,7 +362,7 @@ const VariableEditor = ({
       <div className='space-y-1'>
         <label
           htmlFor='var-options'
-          className='text-[11px] font-semibold uppercase tracking-wider text-muted-foreground'
+          className='block text-[11px] font-semibold uppercase tracking-wider text-muted-foreground'
         >
           Options (comma-separated)
         </label>

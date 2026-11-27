@@ -103,7 +103,7 @@ export function RecordingLoadError({
                   type='button'
                   size={null}
                   onClick={onBack}
-                  className='mt-6 h-9 gap-2 rounded-full bg-foreground px-5 text-[13px] font-medium text-background shadow-sm hover:bg-foreground/90 hover:text-background'
+                  className='mt-6 h-9 gap-2 rounded-full bg-foreground px-5 text-[13px] font-medium text-background shadow-xs hover:bg-foreground/90 hover:text-background'
                   data-track-category='RecordingDetailV2'
                   data-track-name='back_to_recordings_from_error'
                 >

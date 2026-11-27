@@ -164,7 +164,7 @@ export default function AutomationBuilderScreen(): ReactElement {
         <DialogPrimitive.Content
           onPointerDownOutside={e => e.preventDefault()}
           onInteractOutside={e => e.preventDefault()}
-          className='flex h-full w-[420px] shrink-0 flex-col border-l border-border bg-background outline-none'
+          className='flex h-full w-[420px] shrink-0 flex-col border-l border-border bg-background outline-hidden'
         >
           <DialogPrimitive.Title className='hidden'>Version history</DialogPrimitive.Title>
           {versionsId && (

@@ -30,7 +30,7 @@ export interface OverlayPortalProps {
  *    `-translate-x-1/2`, which would otherwise become the containing block and
  *    push the overlay off-centre).
  *  - **Stacking** — applies the composer overlay z-index from context so the
- *    modal paints above the host (`z-[9999]`) instead of behind it.
+ *    modal paints above the host (`z-9999`) instead of behind it.
  *  - **Interactivity** — a modal Radix host sets `pointer-events: none` on all
  *    non-layer `<body>` content, which makes a raw portal click-through;
  *    `pointer-events-auto` restores clicks on the modal itself.

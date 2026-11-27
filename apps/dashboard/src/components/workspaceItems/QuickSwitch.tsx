@@ -72,7 +72,7 @@ export function QuickSwitch({
           type='button'
           aria-label='Jump to an item'
           title='Jump to an item'
-          className='grid h-7 w-7 flex-shrink-0 place-items-center rounded text-muted-foreground hover:bg-secondary/60 hover:text-foreground'
+          className='grid h-7 w-7 shrink-0 place-items-center rounded text-muted-foreground hover:bg-secondary/60 hover:text-foreground'
           data-track-category='Workspace'
           data-track-name='quick-switch-open'
         >
@@ -117,7 +117,7 @@ export function QuickSwitch({
                 data-track-category='Workspace'
                 data-track-name='quick-switch-jump'
               >
-                <span className='flex h-4 w-4 flex-shrink-0 items-center justify-center text-muted-foreground'>
+                <span className='flex h-4 w-4 shrink-0 items-center justify-center text-muted-foreground'>
                   {icon?.(item)}
                 </span>
                 <span className='min-w-0 flex-1 truncate'>{item.title}</span>

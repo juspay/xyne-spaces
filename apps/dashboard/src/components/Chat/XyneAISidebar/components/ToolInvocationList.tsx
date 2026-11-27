@@ -171,7 +171,7 @@ function ToolResult({
   return (
     <pre
       className={cn(
-        'max-h-64 overflow-auto whitespace-pre-wrap break-words',
+        'max-h-64 overflow-auto whitespace-pre-wrap wrap-break-word',
         prose ? 'font-sans text-xs leading-5' : 'font-mono text-[11px] leading-[18px]',
         failed ? 'text-red-500/90' : 'text-muted-foreground/80',
       )}
@@ -243,7 +243,7 @@ export function InvocationItem({
         onClick={() => setExpanded(value => !value)}
         aria-expanded={expanded}
         className={cn(
-          'group/row flex w-full items-start gap-2 text-left leading-5 transition-colors hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:outline-none',
+          'group/row flex w-full items-start gap-2 text-left leading-5 transition-colors hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:outline-hidden',
           nested ? 'rounded-md px-2 py-0.5 text-xs' : 'px-3 py-1 text-[13px]',
         )}
         data-track-category='XyneAI'
@@ -269,7 +269,7 @@ export function InvocationItem({
           {detail && (
             <span
               className={cn(
-                'min-w-0 break-words',
+                'min-w-0 wrap-break-word',
                 runningChild && !expanded ? 'text-muted-foreground/60' : 'text-muted-foreground',
                 preview?.key === 'command' && 'font-mono text-[0.92em]',
                 !expanded && 'truncate',
@@ -315,7 +315,7 @@ export function InvocationItem({
       <Reveal open={expanded}>
         <div className={cn('space-y-1.5 pb-2 pt-0.5', nested ? 'px-2' : 'px-3')}>
           {showArgs && (
-            <pre className='max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-md border border-border/50 px-2.5 py-1.5 font-mono text-[11px] leading-[18px] text-muted-foreground/80'>
+            <pre className='max-h-48 overflow-auto whitespace-pre-wrap wrap-break-word rounded-md border border-border/50 px-2.5 py-1.5 font-mono text-[11px] leading-[18px] text-muted-foreground/80'>
               {JSON.stringify(args, null, 2)}
             </pre>
           )}

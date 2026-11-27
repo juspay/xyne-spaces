@@ -38,7 +38,7 @@ export function Clamped({
         {clipped && (
           <span
             className={cn(
-              'pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t to-transparent',
+              'pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-linear-to-t to-transparent',
               fadeClassName,
             )}
             aria-hidden

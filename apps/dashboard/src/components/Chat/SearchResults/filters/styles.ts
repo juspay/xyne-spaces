@@ -8,16 +8,16 @@
  */
 
 export const CHIP_BASE =
-  'rounded-lg h-6 px-2 text-xs font-medium gap-1.5 border-border hover:bg-muted whitespace-nowrap data-[state=open]:ring-0 data-[state=open]:outline-none';
+  'rounded-lg h-6 px-2 text-xs font-medium gap-1.5 border-border hover:bg-muted whitespace-nowrap data-[state=open]:ring-0 data-[state=open]:outline-hidden';
 
 export const CHIP_ACTIVE =
   'border-primary bg-primary text-primary-foreground hover:bg-primary/90 hover:text-primary-foreground';
 
-export const POPOVER_CONTENT = 'z-[60] bg-popover border border-border rounded-lg shadow-md';
+export const POPOVER_CONTENT = 'z-60 bg-popover border border-border rounded-lg shadow-md';
 
 /** One row in a dropdown menu. Shared with the bar's From/In popovers. */
 export const MENU_ITEM =
-  'flex w-full items-center gap-2 px-3 py-1.5 text-sm rounded text-left focus:outline-none';
+  'flex w-full items-center gap-2 px-3 py-1.5 text-sm rounded text-left focus:outline-hidden';
 
 export const FIELD_LABEL = 'block pb-1.5 text-sm font-semibold';
 
@@ -29,7 +29,7 @@ export const FIELD_BOX =
 export const SELECT_BOX = 'flex-nowrap justify-between';
 
 export const BARE_INPUT =
-  'min-w-[120px] flex-1 bg-transparent outline-none placeholder:text-muted-foreground';
+  'min-w-[120px] flex-1 bg-transparent outline-hidden placeholder:text-muted-foreground';
 
 // .tok
 export const TOKEN =
@@ -47,7 +47,7 @@ export const CHECK_LABEL = 'text-sm text-foreground';
 export const CHECK_GRID = 'grid grid-cols-2 gap-x-4 gap-y-0.5 pt-0.5';
 
 export const MENU_ROW =
-  'flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-muted focus:outline-none';
+  'flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-muted focus:outline-hidden';
 
 export const SUGGESTIONS =
   'mt-1 max-h-40 overflow-y-auto rounded-md border border-border bg-popover';

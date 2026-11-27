@@ -232,9 +232,9 @@ export function ScheduledTab({
 
       <AdminTable
         headers={[
-          { label: 'User', width: 'max-w-[14rem]' },
+          { label: 'User', width: 'max-w-56' },
           ...(showOrgLabels ? [{ label: 'Org' }] : []),
-          { label: 'Agent', width: 'max-w-[14rem]' },
+          { label: 'Agent', width: 'max-w-56' },
           { label: 'Type' },
           { label: 'Schedule', width: 'max-w-[18rem]' },
           { label: 'Next run' },
@@ -246,7 +246,7 @@ export function ScheduledTab({
       >
         {visible.map((job: AdminScheduledJob) => (
           <tr key={job.id} className='border-b border-border hover:bg-muted/40'>
-            <td className='max-w-[14rem] px-4 py-3 align-top leading-5 text-muted-foreground'>
+            <td className='max-w-56 px-4 py-3 align-top leading-5 text-muted-foreground'>
               <PersonPill
                 userId={job.userId}
                 name={job.user?.name || job.user?.email || job.userId}
@@ -258,7 +258,7 @@ export function ScheduledTab({
                 <OrgBadge orgName={orgLabel(job.orgId, job.orgName, orgNamesById)} />
               </td>
             )}
-            <td className='max-w-[14rem] px-4 py-3 align-top leading-5'>
+            <td className='max-w-56 px-4 py-3 align-top leading-5'>
               <Badge variant='secondary' className='-ml-2 max-w-full truncate font-mono'>
                 <HighlightMatch text={job.agentSlug} query={query} />
               </Badge>
@@ -271,12 +271,12 @@ export function ScheduledTab({
             <td className='max-w-[18rem] px-4 py-3 align-top text-xs leading-5 text-muted-foreground'>
               <div className='flex flex-col gap-1'>
                 {job.label && (
-                  <span className='break-words text-foreground'>
+                  <span className='wrap-break-word text-foreground'>
                     <HighlightMatch text={job.label} query={query} />
                   </span>
                 )}
                 {job.type === 'cron' && job.cronExpression && (
-                  <span className='break-words font-mono'>{job.cronExpression}</span>
+                  <span className='wrap-break-word font-mono'>{job.cronExpression}</span>
                 )}
               </div>
             </td>

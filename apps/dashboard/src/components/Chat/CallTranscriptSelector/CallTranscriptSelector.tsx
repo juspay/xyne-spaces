@@ -155,7 +155,7 @@ export const CallTranscriptSelector: React.FC<CallTranscriptSelectorProps> = ({
                     onClick={() => setSelectedCallId(call.id)}
                     className={`w-full text-left px-4 py-3 rounded-lg transition-all border mb-1 ${
                       isActive
-                        ? 'bg-card border-border shadow-sm'
+                        ? 'bg-card border-border shadow-xs'
                         : 'hover:bg-accent/50 border-transparent hover:border-border'
                     } group relative`}
                     data-track-category='CALLS'

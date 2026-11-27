@@ -301,7 +301,7 @@ function CodeViewer({ row }: { row: ReleaseChangeRow }): ReactElement {
               className={cn(
                 'flex min-h-[19px] text-[12.5px] leading-[19px] hover:bg-muted/40',
                 line.number === null &&
-                  'bg-[color-mix(in_srgb,var(--status-failure)_8%,transparent)] line-through decoration-status-failure/60',
+                  'bg-[color-mix(in_srgb,var(--status-failure)_8%,transparent)] line-through ',
               )}
             >
               <span className='w-12 shrink-0 select-none pr-4 text-right font-code text-muted-foreground/60'>
@@ -445,7 +445,7 @@ function ReleaseNotes({
         <button
           type='button'
           onClick={() => onOpenCanvas(analysisCanvasId)}
-          className='flex w-full max-w-[420px] items-center gap-3 self-start rounded-xl border border-border bg-background p-3 text-left transition-[border-color,box-shadow] hover:border-foreground/20 hover:shadow-sm'
+          className='flex w-full max-w-[420px] items-center gap-3 self-start rounded-xl border border-border bg-background p-3 text-left transition-[border-color,box-shadow] hover:border-foreground/20 hover:shadow-xs'
           data-track-category={TRACK_CATEGORY}
           data-track-name='ReleaseCanvasOpened'
         >
@@ -638,7 +638,7 @@ function InsightList({
       {items.map(item => (
         <span key={item} className='flex gap-2.5 text-sm leading-normal text-foreground/85'>
           <span className={cn('mt-[9px] size-1 shrink-0 rounded-full', dotClassName)} />
-          <span className='min-w-0 [overflow-wrap:anywhere]'>{item}</span>
+          <span className='min-w-0 wrap-anywhere'>{item}</span>
         </span>
       ))}
       {items.length === 0 && emptyText && (

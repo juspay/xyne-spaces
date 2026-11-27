@@ -295,7 +295,7 @@ const BookmarksPanel = (): ReactElement => {
                     type='button'
                     onClick={(): void => setActiveTab(tab.id)}
                     className={cn(
-                      'relative overflow-hidden px-1 py-2 flex items-center transition-colors duration-250 cursor-pointer sm:px-4 justify-start border-b-2 text-muted-foreground',
+                      'relative overflow-hidden px-1 py-2 flex items-center transition-colors cursor-pointer sm:px-4 justify-start border-b-2 text-muted-foreground',
                       isCompleteFlashing
                         ? 'border-transparent bg-blue-200/70 dark:bg-blue-500/25 rounded-md'
                         : activeTab === tab.id

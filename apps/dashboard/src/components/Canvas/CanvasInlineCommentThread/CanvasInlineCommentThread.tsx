@@ -466,7 +466,7 @@ export function CanvasInlineCommentThread({
   const renderAnchorQuote = (): React.JSX.Element => (
     <div className='ml-[33px] mt-1.5 flex min-w-0'>
       <span className='w-[3px] shrink-0 rounded-sm bg-[#e5a93d]' aria-hidden='true' />
-      <span className='min-w-0 flex-1 whitespace-pre-wrap break-words pl-[9px] text-[12.5px] leading-[1.5] text-muted-foreground'>
+      <span className='min-w-0 flex-1 whitespace-pre-wrap wrap-break-word pl-[9px] text-[12.5px] leading-normal text-muted-foreground'>
         {anchorQuote}
       </span>
     </div>
@@ -573,7 +573,7 @@ export function CanvasInlineCommentThread({
                 {isInitialComment && anchorQuote && renderAnchorQuote()}
                 {isEditing ? (
                   <div className='ml-[33px] mt-2'>
-                    <OverlayZIndexContext.Provider value='z-[100]'>
+                    <OverlayZIndexContext.Provider value='z-100'>
                       <CanvasCommentComposer
                         id={`canvas-inline-comment-edit-${comment.id}`}
                         channelId={channelId}
@@ -603,7 +603,7 @@ export function CanvasInlineCommentThread({
                 ) : (
                   <p
                     className={cn(
-                      'ml-[33px] mt-[3px] whitespace-pre-wrap break-words text-[13.5px] leading-[1.55] text-foreground [text-wrap:pretty]',
+                      'ml-[33px] mt-[3px] whitespace-pre-wrap wrap-break-word text-[13.5px] leading-[1.55] text-foreground text-pretty',
                       isDeleted && 'italic text-muted-foreground',
                     )}
                   >
@@ -663,7 +663,7 @@ export function CanvasInlineCommentThread({
             showActiveStatus={false}
             className={isDraft ? 'size-[26px]' : 'size-[22px]'}
           />
-          <OverlayZIndexContext.Provider value='z-[100]'>
+          <OverlayZIndexContext.Provider value='z-100'>
             <InputBox
               id={`canvas-inline-comment-${currentThreadId ?? activeAnchor?.blockId ?? canvasId}`}
               {...(channelId && { channelId })}

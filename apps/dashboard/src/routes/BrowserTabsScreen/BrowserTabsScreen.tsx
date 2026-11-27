@@ -79,7 +79,7 @@ function TabSound(props: { tab: BrowserTab }): ReactElement {
       }}
       title={tab.muted ? 'Unmute this tab' : 'Mute this tab'}
       aria-label={tab.muted ? 'Unmute this tab' : 'Mute this tab'}
-      className='flex size-5 shrink-0 items-center justify-center rounded-full text-muted-foreground outline-none transition-colors hover:bg-foreground/10 hover:text-foreground'
+      className='flex size-5 shrink-0 items-center justify-center rounded-full text-muted-foreground outline-hidden transition-colors hover:bg-foreground/10 hover:text-foreground'
       data-track-category='BROWSER'
       data-track-name='TabMuteToggled'
     >
@@ -477,7 +477,7 @@ function BrowserTabsView({
               type='button'
               onClick={() => zoom('reset')}
               title='Reset zoom to 100%'
-              className='shrink-0 rounded-md px-1.5 py-0.5 text-[11px] font-medium tabular-nums text-muted-foreground outline-none transition-colors hover:bg-foreground/10 hover:text-foreground focus-visible:bg-foreground/10'
+              className='shrink-0 rounded-md px-1.5 py-0.5 text-[11px] font-medium tabular-nums text-muted-foreground outline-hidden transition-colors hover:bg-foreground/10 hover:text-foreground focus-visible:bg-foreground/10'
               data-track-category={TRACK}
               data-track-name='BrowserZoomReset'
             >
@@ -570,7 +570,7 @@ function BrowserTabsView({
                       disabled={!web}
                       onClick={() => zoom('reset')}
                       title='Reset to 100%'
-                      className='min-w-[3.25rem] rounded-md px-1 py-1 text-center text-[12px] tabular-nums text-foreground outline-none transition-colors hover:bg-foreground/[0.08] focus-visible:bg-foreground/[0.08] disabled:text-muted-foreground'
+                      className='min-w-13 rounded-md px-1 py-1 text-center text-[12px] tabular-nums text-foreground outline-hidden transition-colors hover:bg-foreground/8 focus-visible:bg-foreground/8 disabled:text-muted-foreground'
                       data-track-category={TRACK}
                       data-track-name='BrowserMenuZoomReset'
                     >

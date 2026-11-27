@@ -253,7 +253,7 @@ const AboutChannel = ({
                     value={editName}
                     onChange={handleNameChange}
                     onKeyDown={handleNameKeyDown}
-                    className='w-full mt-1 p-2 text-sm border border-border rounded-[8px] bg-background text-foreground focus:outline-none focus:ring-1 focus:ring-primary focus:border-transparent'
+                    className='w-full mt-1 p-2 text-sm border border-border rounded-[8px] bg-background text-foreground focus:outline-hidden focus:ring-1 focus:ring-primary focus:border-transparent'
                     placeholder='channel-name'
                     data-testid='channel-rename-input'
                     maxLength={80}
@@ -289,7 +289,7 @@ const AboutChannel = ({
                   </div>
                 </div>
               ) : (
-                <p className='text-sm text-muted-foreground break-words'>#{channel.name}</p>
+                <p className='text-sm text-muted-foreground wrap-break-word'>#{channel.name}</p>
               )}
             </div>
 
@@ -313,7 +313,7 @@ const AboutChannel = ({
 
         {/* Description */}
         {/* Description */}
-        <div className='relative bg-card p-[12px] rounded-[12px] border border-border mb-3 break-words'>
+        <div className='relative bg-card p-[12px] rounded-[12px] border border-border mb-3 wrap-break-word'>
           <div className='flex flex-col gap-y-2'>
             <div className='flex items-start justify-between'>
               <p className='text-sm font-medium text-foreground'>Description</p>
@@ -325,7 +325,7 @@ const AboutChannel = ({
                   value={editDescription}
                   onChange={e => setEditDescription(e.target.value)}
                   onKeyDown={handleKeyDown}
-                  className='w-full mt-2 p-2 text-sm border border-border rounded-[8px] bg-background text-foreground resize-none focus:outline-none focus:ring-1 focus:ring-primary focus:border-transparent'
+                  className='w-full mt-2 p-2 text-sm border border-border rounded-[8px] bg-background text-foreground resize-none focus:outline-hidden focus:ring-1 focus:ring-primary focus:border-transparent'
                   rows={3}
                   placeholder='Add a description...'
                   data-testid='channel-description-input'

@@ -489,9 +489,9 @@ export const QueryDashboardScreen: React.FC = () => {
   ) as DashboardWithQueries;
 
   return (
-    <div className='h-full bg-gradient-to-br from-background via-background to-muted/5 flex flex-col'>
+    <div className='h-full bg-linear-to-br from-background via-background to-muted/5 flex flex-col'>
       {/* Header */}
-      <div className='shrink-0 border-b border-border/40 bg-gradient-to-r from-background via-background to-muted/20 backdrop-blur-sm shadow-sm'>
+      <div className='shrink-0 border-b border-border/40 bg-linear-to-r from-background via-background to-muted/20 backdrop-blur-xs shadow-xs'>
         <div className='px-6 py-4 flex items-center justify-between'>
           <div className='flex items-center gap-3'>
             <button
@@ -505,10 +505,10 @@ export const QueryDashboardScreen: React.FC = () => {
             </button>
             <span className='text-muted-foreground/30'>/</span>
             <div className='flex items-center gap-2'>
-              <div className='flex items-center justify-center w-8 h-8 rounded-lg bg-gradient-to-br from-primary/20 to-primary/10 border border-primary/20 shadow-sm'>
+              <div className='flex items-center justify-center w-8 h-8 rounded-lg bg-linear-to-br from-primary/20 to-primary/10 border border-primary/20 shadow-xs'>
                 <BarChart3 className='w-4 h-4 text-primary' />
               </div>
-              <h1 className='text-base font-bold bg-gradient-to-r from-foreground to-foreground/80 bg-clip-text text-transparent'>
+              <h1 className='text-base font-bold bg-linear-to-r from-foreground to-foreground/80 bg-clip-text text-transparent'>
                 {dashboardData?.name ?? 'Analytics Dashboard'}
               </h1>
             </div>
@@ -519,7 +519,7 @@ export const QueryDashboardScreen: React.FC = () => {
               resetForm();
               setShowCreateModal(true);
             }}
-            className='bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white gap-1.5 shadow-lg hover:shadow-xl transition-all duration-200 font-medium'
+            className='bg-linear-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white gap-1.5 shadow-lg hover:shadow-xl transition-all duration-200 font-medium'
             data-track-category='ANALYTICS'
             data-track-name='Open_Create_Query_Modal'
           >
@@ -530,7 +530,7 @@ export const QueryDashboardScreen: React.FC = () => {
       </div>
 
       {/* Content */}
-      <div className='flex-1 min-h-0 overflow-y-auto px-6 py-6 bg-gradient-to-b from-transparent to-muted/5'>
+      <div className='flex-1 min-h-0 overflow-y-auto px-6 py-6 bg-linear-to-b from-transparent to-muted/5'>
         {/* Queries Display */}
         <QueryResults
           dashboardData={dashboardData}
@@ -541,10 +541,10 @@ export const QueryDashboardScreen: React.FC = () => {
 
       {/* Create/Edit Query Modal */}
       {showCreateModal && (
-        <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm'>
-          <div className='bg-background flex flex-col w-[95vw] h-[90vh] rounded-xl shadow-2xl overflow-hidden border border-border/40 bg-gradient-to-br from-background to-background/95'>
+        <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs'>
+          <div className='bg-background flex flex-col w-[95vw] h-[90vh] rounded-xl shadow-2xl overflow-hidden border border-border/40 bg-linear-to-br from-background to-background/95'>
             {/* Header */}
-            <div className='flex items-center justify-between px-6 py-4 border-b border-border/30 bg-gradient-to-r from-background/80 to-background/60 backdrop-blur-sm'>
+            <div className='flex items-center justify-between px-6 py-4 border-b border-border/30 bg-linear-to-r from-background/80 to-background/60 backdrop-blur-xs'>
               <div className='flex items-center gap-3'>
                 <Button
                   aria-label='Close query editor'
@@ -557,7 +557,7 @@ export const QueryDashboardScreen: React.FC = () => {
                 >
                   <ChevronLeft size={20} />
                 </Button>
-                <span className='font-bold text-lg bg-gradient-to-r from-foreground to-foreground/70 bg-clip-text text-transparent'>
+                <span className='font-bold text-lg bg-linear-to-r from-foreground to-foreground/70 bg-clip-text text-transparent'>
                   {editingQueryId ? 'Edit Query' : 'Create Query'}
                 </span>
               </div>
@@ -572,7 +572,7 @@ export const QueryDashboardScreen: React.FC = () => {
                   Cancel
                 </Button>
                 <Button
-                  className='bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white shadow-lg hover:shadow-xl transition-all duration-200 font-medium'
+                  className='bg-linear-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white shadow-lg hover:shadow-xl transition-all duration-200 font-medium'
                   onClick={() => void handleSaveQuery()}
                   data-track-category='ANALYTICS'
                   data-track-name='Save_Query'
@@ -586,10 +586,13 @@ export const QueryDashboardScreen: React.FC = () => {
             {/* Main Content */}
             <div className='flex-1 min-h-0 overflow-hidden flex'>
               {/* Left Panel - Query Builder */}
-              <div className='flex-1 min-h-0 overflow-y-auto border-r border-border/30 p-6 space-y-6 bg-gradient-to-b from-background/50 to-background'>
+              <div className='flex-1 min-h-0 overflow-y-auto border-r border-border/30 p-6 space-y-6 bg-linear-to-b from-background/50 to-background'>
                 {/* Query Name */}
                 <div className='space-y-2'>
-                  <label htmlFor='query-name' className='text-sm font-semibold text-foreground'>
+                  <label
+                    htmlFor='query-name'
+                    className='block text-sm font-semibold text-foreground'
+                  >
                     Query Name
                   </label>
                   <Input
@@ -597,20 +600,23 @@ export const QueryDashboardScreen: React.FC = () => {
                     value={queryName}
                     onChange={e => setQueryName(e.target.value)}
                     placeholder='Enter query name'
-                    className='border-border/50 bg-background/80 hover:bg-background focus:bg-background focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition-all rounded-lg shadow-sm'
+                    className='border-border/50 bg-background/80 hover:bg-background focus:bg-background focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition-all rounded-lg shadow-xs'
                   />
                 </div>
 
                 {/* Entity Type Selection */}
                 <div className='space-y-2'>
-                  <label htmlFor='entity-type' className='text-sm font-semibold text-foreground'>
+                  <label
+                    htmlFor='entity-type'
+                    className='block text-sm font-semibold text-foreground'
+                  >
                     Entity Type
                   </label>
                   <select
                     id='entity-type'
                     value={selectedEntityType}
                     onChange={e => setSelectedEntityType(e.target.value)}
-                    className='w-full px-4 py-2.5 border border-border/50 rounded-lg bg-background/80 text-foreground hover:bg-background focus:bg-background focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition-all shadow-sm font-medium'
+                    className='w-full px-4 py-2.5 border border-border/50 rounded-lg bg-background/80 text-foreground hover:bg-background focus:bg-background focus:border-primary/50 focus:ring-2 focus:ring-primary/20 transition-all shadow-xs font-medium'
                     data-track-category='ANALYTICS'
                     data-track-name='Select_Entity_Type'
                   >
@@ -633,13 +639,13 @@ export const QueryDashboardScreen: React.FC = () => {
                     <div className='space-y-2'>
                       <label
                         htmlFor='select-fields'
-                        className='text-sm font-semibold text-foreground'
+                        className='block text-sm font-semibold text-foreground'
                       >
                         Select Fields
                       </label>
                       <div
                         id='select-fields'
-                        className='flex flex-wrap gap-2 p-3 rounded-lg border border-border/30 bg-muted/20 backdrop-blur-sm'
+                        className='flex flex-wrap gap-2 p-3 rounded-lg border border-border/30 bg-muted/20 backdrop-blur-xs'
                       >
                         <EntityMultiSelector
                           options={fields.map(f => ({ value: f.name, label: f.label, icon: null }))}
@@ -659,7 +665,7 @@ export const QueryDashboardScreen: React.FC = () => {
                 {visualizationType &&
                   getVisualizationConstraints(visualizationType).requiresAggregation && (
                     <>
-                      <div className='p-3 bg-gradient-to-r from-blue-50/50 to-cyan-50/50 dark:from-blue-900/20 dark:to-cyan-900/20 border border-blue-200/50 dark:border-blue-800/50 rounded-lg shadow-sm backdrop-blur-sm'>
+                      <div className='p-3 bg-linear-to-r from-blue-50/50 to-cyan-50/50 dark:from-blue-900/20 dark:to-cyan-900/20 border border-blue-200/50 dark:border-blue-800/50 rounded-lg shadow-xs backdrop-blur-xs'>
                         <p className='text-xs text-blue-700 dark:text-blue-300 font-semibold'>
                           ℹ️ This visualization requires at least one aggregation
                         </p>
@@ -984,7 +990,7 @@ export const QueryDashboardScreen: React.FC = () => {
 
                 {/* Error Message */}
                 {errorMessage && (
-                  <div className='p-4 bg-gradient-to-r from-red-50/50 to-pink-50/50 dark:from-red-900/20 dark:to-pink-900/20 border border-red-200/50 dark:border-red-800/50 rounded-lg shadow-sm backdrop-blur-sm'>
+                  <div className='p-4 bg-linear-to-r from-red-50/50 to-pink-50/50 dark:from-red-900/20 dark:to-pink-900/20 border border-red-200/50 dark:border-red-800/50 rounded-lg shadow-xs backdrop-blur-xs'>
                     <p className='text-sm text-red-700 dark:text-red-300 font-medium'>
                       {errorMessage}
                     </p>
@@ -993,12 +999,12 @@ export const QueryDashboardScreen: React.FC = () => {
 
                 {/* Filters */}
                 <div className='space-y-2'>
-                  <label htmlFor='filters' className='text-sm font-semibold text-foreground'>
+                  <label htmlFor='filters' className='block text-sm font-semibold text-foreground'>
                     Filters
                   </label>
                   <div
                     id='filters'
-                    className='min-h-[200px] border border-border/30 rounded-lg p-4 bg-muted/10 backdrop-blur-sm hover:border-border/50 transition-colors shadow-sm'
+                    className='min-h-[200px] border border-border/30 rounded-lg p-4 bg-muted/10 backdrop-blur-xs hover:border-border/50 transition-colors shadow-xs'
                   >
                     {fields && query && (
                       <FilterRuleBuilder
@@ -1013,17 +1019,17 @@ export const QueryDashboardScreen: React.FC = () => {
               </div>
 
               {/* Right Panel - Preview */}
-              <div className='flex-1 min-h-0 overflow-y-auto p-6 bg-gradient-to-br from-muted/30 via-background to-muted/20 backdrop-blur-sm'>
+              <div className='flex-1 min-h-0 overflow-y-auto p-6 bg-linear-to-br from-muted/30 via-background to-muted/20 backdrop-blur-xs'>
                 <div className='space-y-4'>
                   {previewLoading && (
-                    <div className='flex items-center justify-center h-32 rounded-lg border border-border/30 bg-muted/20 backdrop-blur-sm'>
+                    <div className='flex items-center justify-center h-32 rounded-lg border border-border/30 bg-muted/20 backdrop-blur-xs'>
                       <p className='text-muted-foreground text-sm font-medium'>
                         Loading preview...
                       </p>
                     </div>
                   )}
                   {previewData && previewData.length > 0 && visualizationType && (
-                    <div className='rounded-lg border border-border/30 bg-white/50 dark:bg-background/50 backdrop-blur-sm shadow-sm p-4 hover:border-border/50 transition-colors'>
+                    <div className='rounded-lg border border-border/30 bg-white/50 dark:bg-background/50 backdrop-blur-xs shadow-xs p-4 hover:border-border/50 transition-colors'>
                       <QueryVisualization
                         title='Preview'
                         data={previewData}
@@ -1033,12 +1039,12 @@ export const QueryDashboardScreen: React.FC = () => {
                     </div>
                   )}
                   {previewData && previewData.length === 0 && (
-                    <div className='flex items-center justify-center h-32 rounded-lg border border-border/30 bg-muted/20 backdrop-blur-sm'>
+                    <div className='flex items-center justify-center h-32 rounded-lg border border-border/30 bg-muted/20 backdrop-blur-xs'>
                       <p className='text-muted-foreground text-sm font-medium'>No data returned</p>
                     </div>
                   )}
                   {!previewData && !previewLoading && (
-                    <div className='flex items-center justify-center h-32 rounded-lg border border-border/30 bg-gradient-to-br from-muted/30 to-muted/10 backdrop-blur-sm'>
+                    <div className='flex items-center justify-center h-32 rounded-lg border border-border/30 bg-linear-to-br from-muted/30 to-muted/10 backdrop-blur-xs'>
                       <p className='text-muted-foreground text-sm font-medium'>
                         Select visualization type to see preview
                       </p>

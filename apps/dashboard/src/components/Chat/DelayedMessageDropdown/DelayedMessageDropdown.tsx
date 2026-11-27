@@ -110,7 +110,7 @@ export const DelayedMessageDropdown = ({
           align='end'
           sideOffset={6}
           collisionPadding={8}
-          className='z-[60] min-w-[240px] max-w-[280px] bg-background border border-border rounded-lg shadow-lg py-1.5'
+          className='z-60 min-w-[240px] max-w-[280px] bg-background border border-border rounded-lg shadow-lg py-1.5'
         >
           <button
             type='button'

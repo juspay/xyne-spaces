@@ -258,7 +258,7 @@ function ModeTile({
       data-track-name={`schedule-mode-${active ? 'active' : 'inactive'}`}
       className={cn(
         'flex flex-col gap-1 rounded-lg border px-3 py-2.5 text-left transition-colors',
-        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/40',
+        'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-foreground/40',
         active
           ? 'border-foreground/40 bg-accent/50'
           : 'border-border bg-background hover:bg-accent/30',

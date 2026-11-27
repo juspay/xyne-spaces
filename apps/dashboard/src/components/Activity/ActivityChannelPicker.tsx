@@ -71,14 +71,14 @@ export const ActivityChannelPicker = ({
 
   return (
     <div
-      className='flex flex-col p-1 animate-in slide-in-from-right-2 duration-200 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:animate-none'
+      className='flex flex-col p-1 animate-in slide-in-from-right-2 duration-200 motion-reduce:animate-none'
       data-testid='activity-channel-picker'
     >
       <div className='flex items-center justify-between gap-2'>
         <button
           type='button'
           onClick={onBack}
-          className='flex h-8 items-center gap-1 rounded-sm pl-1 pr-2 text-sm font-medium text-foreground transition-colors hover:bg-foreground/[6%] focus-visible:bg-foreground/[6%] focus-visible:outline-none'
+          className='flex h-8 items-center gap-1 rounded-sm pl-1 pr-2 text-sm font-medium text-foreground transition-colors hover:bg-foreground/6 focus-visible:bg-foreground/6 focus-visible:outline-hidden'
           aria-label='Back to activity options'
           data-track-category='ACTIVITY'
           data-track-name='CHANNEL_FILTER_BACK'
@@ -93,7 +93,7 @@ export const ActivityChannelPicker = ({
           tabIndex={selectedChannelIds.length > 0 ? 0 : -1}
           aria-hidden={selectedChannelIds.length === 0}
           className={cn(
-            'h-8 rounded-sm px-2 text-xs font-medium text-muted-foreground transition-[color,background-color,opacity] duration-150 hover:bg-foreground/[6%] hover:text-foreground focus-visible:bg-foreground/[6%] focus-visible:outline-none',
+            'h-8 rounded-sm px-2 text-xs font-medium text-muted-foreground transition-[color,background-color,opacity] duration-150 hover:bg-foreground/6 hover:text-foreground focus-visible:bg-foreground/6 focus-visible:outline-hidden',
             selectedChannelIds.length === 0 && 'pointer-events-none opacity-0',
           )}
           data-track-category='ACTIVITY'
@@ -104,7 +104,7 @@ export const ActivityChannelPicker = ({
         </button>
       </div>
 
-      <div className='mt-1 flex h-8 items-center gap-2 rounded-sm bg-foreground/[6%] px-2.5'>
+      <div className='mt-1 flex h-8 items-center gap-2 rounded-sm bg-foreground/6 px-2.5'>
         <SearchDefault size={14} className='shrink-0 text-muted-foreground' />
         <input
           ref={searchRef}
@@ -115,7 +115,7 @@ export const ActivityChannelPicker = ({
           }}
           placeholder='Search channels'
           aria-label='Search channels'
-          className='min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground'
+          className='min-w-0 flex-1 bg-transparent text-sm outline-hidden placeholder:text-muted-foreground'
           data-track-category='ACTIVITY'
           data-track-name='CHANNEL_FILTER_SEARCH'
           data-testid='activity-channel-picker-search'
@@ -141,7 +141,7 @@ export const ActivityChannelPicker = ({
                     : [...selectedChannelIds, channel.id],
                 )
               }
-              className='flex h-9 w-full items-center gap-2.5 rounded-sm px-2 text-sm text-foreground transition-colors hover:bg-foreground/[6%] focus-visible:bg-foreground/[6%] focus-visible:outline-none'
+              className='flex h-9 w-full items-center gap-2.5 rounded-sm px-2 text-sm text-foreground transition-colors hover:bg-foreground/6 focus-visible:bg-foreground/6 focus-visible:outline-hidden'
               data-track-category='ACTIVITY'
               data-track-name='CHANNEL_FILTER_TOGGLE'
               data-track-metadata={JSON.stringify({
@@ -160,10 +160,10 @@ export const ActivityChannelPicker = ({
                   viewBox='0 0 10 8'
                   fill='none'
                   className={cn(
-                    'h-2 w-2.5 transition-[opacity,transform,filter] duration-200 ease-[cubic-bezier(0.2,0,0,1)]',
+                    'h-2 w-2.5 transition-[opacity,transform,filter] duration-200 ',
                     isSelected
-                      ? 'scale-100 opacity-100 blur-0'
-                      : 'scale-[0.25] opacity-0 blur-[4px]',
+                      ? 'scale-100 opacity-100 blur-none'
+                      : 'scale-[0.25] opacity-0 blur-xs',
                   )}
                 >
                   <path
@@ -178,7 +178,7 @@ export const ActivityChannelPicker = ({
               <ChannelGlyph size={14} className='shrink-0 text-muted-foreground' />
               <span className='min-w-0 flex-1 truncate text-left'>{channel.name}</span>
               {unread > 0 && (
-                <span className='shrink-0 rounded-md bg-foreground/[6%] px-1 text-[0.625rem] font-bold tabular-nums text-muted-foreground'>
+                <span className='shrink-0 rounded-md bg-foreground/6 px-1 text-[0.625rem] font-bold tabular-nums text-muted-foreground'>
                   {unread > 99 ? '99+' : unread}
                 </span>
               )}

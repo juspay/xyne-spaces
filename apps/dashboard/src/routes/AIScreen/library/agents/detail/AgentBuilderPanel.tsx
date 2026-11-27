@@ -49,7 +49,7 @@ export function AgentBuilderPanel({
           onClick={toggle}
           data-track-category='Claw Agents'
           data-track-name={`Agent builder: switch to ${isBuilder ? 'preview' : 'builder'}`}
-          className='flex h-8 items-center gap-1.5 rounded-full border border-border bg-card px-3 text-xs font-medium text-muted-foreground shadow-sm transition-colors hover:bg-muted hover:text-foreground'
+          className='flex h-8 items-center gap-1.5 rounded-full border border-border bg-card px-3 text-xs font-medium text-muted-foreground shadow-xs transition-colors hover:bg-muted hover:text-foreground'
         >
           {isBuilder ? (
             <Eye className='size-3.5' aria-hidden />

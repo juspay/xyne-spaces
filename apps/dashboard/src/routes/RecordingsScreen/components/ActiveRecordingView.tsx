@@ -81,7 +81,7 @@ function TranscriptSearchBar({
           transition={{ duration: 0.15, ease: 'easeOut' }}
           className='flex items-center gap-3 h-10 px-3.5 border border-border bg-background rounded-xl'
         >
-          <Search className='size-4 text-muted-foreground/70 flex-shrink-0' strokeWidth={1.5} />
+          <Search className='size-4 text-muted-foreground/70 shrink-0' strokeWidth={1.5} />
           <input
             ref={inputRef}
             type='text'
@@ -90,7 +90,7 @@ function TranscriptSearchBar({
             onKeyDown={onKeyDown}
             placeholder='Find in transcript'
             autoFocus
-            className='flex-1 min-w-0 bg-transparent text-sm text-foreground placeholder:text-muted-foreground/70 outline-none'
+            className='flex-1 min-w-0 bg-transparent text-sm text-foreground placeholder:text-muted-foreground/70 outline-hidden'
             data-track-category='RecordingsScreen'
             data-track-name='transcript_search_input'
           />
@@ -192,7 +192,7 @@ function TranscriptSkeleton({ skeletonRows, containerRef }: TranscriptSkeletonPr
                 />
               )}
               <span
-                className='absolute left-[55px] top-[5px] z-[1] size-[7px] rounded-full bg-muted-foreground/40'
+                className='absolute left-[55px] top-[5px] z-1 size-[7px] rounded-full bg-muted-foreground/40'
                 style={{ boxShadow: '0 0 0 2px hsl(var(--background))' }}
               />
               <div className='flex-1'>
@@ -205,7 +205,7 @@ function TranscriptSkeleton({ skeletonRows, containerRef }: TranscriptSkeletonPr
       </div>
 
       <div className='flex-none relative'>
-        <div className='absolute inset-x-0 bottom-full h-12 bg-gradient-to-t from-background to-transparent pointer-events-none' />
+        <div className='absolute inset-x-0 bottom-full h-12 bg-linear-to-t from-background to-transparent pointer-events-none' />
         <div className='flex items-center justify-center gap-2.5 pb-5 bg-background'>
           <span className='flex items-end gap-0.5 h-3.5'>
             {[0, 1, 2].map(i => (
@@ -336,7 +336,7 @@ export function ActiveRecordingView({
       {/* Transcript Sub-header */}
       <div className='pointer-events-none absolute inset-x-0 top-0 z-30 h-16 px-5 pt-3'>
         <div
-          className='absolute inset-0 bg-gradient-to-b from-background from-0% via-background/85 via-45% to-background [mask-image:linear-gradient(to_bottom,black_0%,black_45%,rgba(0,0,0,0.5)_62%,transparent_82%)] [-webkit-mask-image:linear-gradient(to_bottom,black_0%,black_45%,rgba(0,0,0,0.5)_62%,transparent_82%)]'
+          className='absolute inset-0 bg-linear-to-b from-background from-0% via-background/85 via-45% to-background mask-[linear-gradient(to_bottom,black_0%,black_45%,rgba(0,0,0,0.5)_62%,transparent_82%)] [-webkit-mask-image:linear-gradient(to_bottom,black_0%,black_45%,rgba(0,0,0,0.5)_62%,transparent_82%)]'
           aria-hidden='true'
         />
         <div className='pointer-events-auto relative flex items-center justify-between'>
@@ -416,7 +416,7 @@ export function ActiveRecordingView({
                         {/* Timeline dot */}
                         {isLive ? (
                           <motion.span
-                            className='relative z-[1] size-[7px] rounded-full bg-destructive mt-[9px]'
+                            className='relative z-1 size-[7px] rounded-full bg-destructive mt-[9px]'
                             style={{
                               boxShadow:
                                 '0 0 0 2px hsl(var(--background)), 0 0 0 5px hsl(var(--destructive) / 0.15)',
@@ -427,7 +427,7 @@ export function ActiveRecordingView({
                           />
                         ) : (
                           <motion.span
-                            className='relative z-[1] size-[7px] rounded-full bg-border mt-[9px]'
+                            className='relative z-1 size-[7px] rounded-full bg-border mt-[9px]'
                             style={{ boxShadow: '0 0 0 2px hsl(var(--background))' }}
                             initial={{ scale: 0, opacity: 0 }}
                             animate={{ scale: 1, opacity: 1 }}

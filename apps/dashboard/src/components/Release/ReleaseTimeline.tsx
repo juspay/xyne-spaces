@@ -171,7 +171,7 @@ export const ReleaseTimeline = ({
           <li key={g.key} className='ml-6'>
             <span
               className={cn(
-                'absolute -left-[11px] flex items-center justify-center w-[22px] h-[22px] rounded-full ring-4 ring-background',
+                'absolute left-[-11px] flex items-center justify-center w-[22px] h-[22px] rounded-full ring-4 ring-background',
                 visual.bg,
               )}
             >
@@ -201,7 +201,7 @@ export const ReleaseTimeline = ({
             {uniqueMessages.length > 0 && (
               <div className='mt-0.5 text-sm text-muted-foreground space-y-0.5'>
                 {uniqueMessages.map((m, i) => (
-                  <p key={i} className='whitespace-pre-wrap break-words'>
+                  <p key={i} className='whitespace-pre-wrap wrap-break-word'>
                     {m}
                   </p>
                 ))}

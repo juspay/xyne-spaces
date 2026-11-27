@@ -565,7 +565,7 @@ const ReleaseDetailScreen = (): ReactElement => {
             <span>Back to Releases</span>
           </button>
 
-          <div className='bg-background rounded-lg shadow-sm border border-border p-6 space-y-6'>
+          <div className='bg-background rounded-lg shadow-xs border border-border p-6 space-y-6'>
             {/* Header */}
             <div className='flex items-start justify-between gap-4'>
               <h1 className='text-2xl font-bold text-foreground'>{releaseLabel}</h1>
@@ -655,7 +655,7 @@ const ReleaseDetailScreen = (): ReactElement => {
               </Tabs.List>
 
               {/* Dev Tickets tab */}
-              <Tabs.Content value='testing' className='mt-6 outline-none'>
+              <Tabs.Content value='testing' className='mt-6 outline-hidden'>
                 <div className='mb-3 flex flex-wrap justify-end gap-2'>
                   {canManageRelease && availableColumns.length > 0 && (
                     <DropdownMenu.Root>
@@ -683,7 +683,7 @@ const ReleaseDetailScreen = (): ReactElement => {
                                 checked={checked}
                                 onCheckedChange={value => toggleColumn(col.key, value)}
                                 onSelect={e => e.preventDefault()}
-                                className='flex cursor-pointer items-center justify-between gap-3 rounded px-3 py-2 text-sm text-foreground outline-none data-[highlighted]:bg-muted'
+                                className='flex cursor-pointer items-center justify-between gap-3 rounded px-3 py-2 text-sm text-foreground outline-hidden data-highlighted:bg-muted'
                               >
                                 <span>{col.label}</span>
                                 <span
@@ -716,7 +716,7 @@ const ReleaseDetailScreen = (): ReactElement => {
                                       checked={checked}
                                       onCheckedChange={value => toggleColumn(col.key, value)}
                                       onSelect={e => e.preventDefault()}
-                                      className='flex cursor-pointer items-center justify-between gap-3 rounded px-3 py-2 text-sm text-foreground outline-none data-[highlighted]:bg-muted'
+                                      className='flex cursor-pointer items-center justify-between gap-3 rounded px-3 py-2 text-sm text-foreground outline-hidden data-highlighted:bg-muted'
                                     >
                                       <span>{col.label}</span>
                                       <span
@@ -822,7 +822,7 @@ const ReleaseDetailScreen = (): ReactElement => {
                 )}
               </Tabs.Content>
 
-              <Tabs.Content value='envs' className='mt-6 outline-none space-y-6'>
+              <Tabs.Content value='envs' className='mt-6 outline-hidden space-y-6'>
                 <ChangeSections
                   groups={envsByApp}
                   kind='ENV'
@@ -831,7 +831,7 @@ const ReleaseDetailScreen = (): ReactElement => {
                 />
               </Tabs.Content>
 
-              <Tabs.Content value='migrations' className='mt-6 outline-none space-y-6'>
+              <Tabs.Content value='migrations' className='mt-6 outline-hidden space-y-6'>
                 <ChangeSections
                   groups={migrationsByApp}
                   kind='MIGRATION'
@@ -843,11 +843,11 @@ const ReleaseDetailScreen = (): ReactElement => {
               {/* Timeline tab — audit log of everything that happened on this
                   release (commit analyses, SubTicket creation, env/migration
                   captures, system events, canvas publishes). */}
-              <Tabs.Content value='timeline' className='mt-6 outline-none'>
+              <Tabs.Content value='timeline' className='mt-6 outline-hidden'>
                 <ReleaseTimeline events={timelineEvents} />
               </Tabs.Content>
 
-              <Tabs.Content value='releasenotes' className='mt-6 outline-none'>
+              <Tabs.Content value='releasenotes' className='mt-6 outline-hidden'>
                 <div className='mb-4 flex items-start justify-between gap-3'>
                   <div>
                     <h3 className='text-sm font-semibold text-foreground'>Release Insights</h3>

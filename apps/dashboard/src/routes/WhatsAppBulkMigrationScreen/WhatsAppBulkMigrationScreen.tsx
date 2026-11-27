@@ -530,14 +530,14 @@ const WhatsAppBulkMigrationScreen = (): ReactElement => {
               </p>
             </div>
             <div className='grid grid-cols-2 gap-3 text-left lg:min-w-[360px]'>
-              <div className='rounded-xl border border-border bg-background/80 p-3 shadow-sm'>
+              <div className='rounded-xl border border-border bg-background/80 p-3 shadow-xs'>
                 <p className='text-[11px] uppercase tracking-wide text-muted-foreground'>Staging</p>
                 <p className='mt-1 text-sm font-semibold text-foreground'>GCS-backed zip storage</p>
                 <p className='mt-1 text-xs text-muted-foreground'>
                   Uploads persist briefly for retries
                 </p>
               </div>
-              <div className='rounded-xl border border-border bg-background/80 p-3 shadow-sm'>
+              <div className='rounded-xl border border-border bg-background/80 p-3 shadow-xs'>
                 <p className='text-[11px] uppercase tracking-wide text-muted-foreground'>
                   Execution
                 </p>
@@ -553,7 +553,7 @@ const WhatsAppBulkMigrationScreen = (): ReactElement => {
         </div>
 
         <div className='space-y-6 p-6'>
-          <section className='overflow-hidden rounded-3xl border border-border/70 bg-card/80 shadow-sm'>
+          <section className='overflow-hidden rounded-3xl border border-border/70 bg-card/80 shadow-xs'>
             <div className='border-b border-border/70 bg-background/90 px-5 py-4'>
               <div className='flex flex-wrap gap-2'>
                 <button
@@ -563,7 +563,7 @@ const WhatsAppBulkMigrationScreen = (): ReactElement => {
                   data-track-name='open-bulk-import-tab'
                   className={`rounded-full px-4 py-2 text-sm font-medium transition ${
                     activeTab === 'import'
-                      ? 'bg-sky-600 text-white shadow-sm'
+                      ? 'bg-sky-600 text-white shadow-xs'
                       : 'border border-border/70 bg-background text-muted-foreground hover:text-foreground'
                   }`}
                 >
@@ -576,7 +576,7 @@ const WhatsAppBulkMigrationScreen = (): ReactElement => {
                   data-track-name='open-bulk-delete-tab'
                   className={`rounded-full px-4 py-2 text-sm font-medium transition ${
                     activeTab === 'delete'
-                      ? 'bg-rose-600 text-white shadow-sm'
+                      ? 'bg-rose-600 text-white shadow-xs'
                       : 'border border-border/70 bg-background text-muted-foreground hover:text-foreground'
                   }`}
                 >
@@ -587,7 +587,7 @@ const WhatsAppBulkMigrationScreen = (): ReactElement => {
 
             {activeTab === 'import' ? (
               <div className='space-y-6 p-5'>
-                <section className='rounded-3xl border border-border/70 bg-card/80 p-5 shadow-sm'>
+                <section className='rounded-3xl border border-border/70 bg-card/80 p-5 shadow-xs'>
                   <div className='flex items-center gap-2 text-sm font-semibold text-foreground'>
                     <CloudUpload className='h-4 w-4 text-sky-600' />
                     Stage Zip Files
@@ -649,7 +649,7 @@ const WhatsAppBulkMigrationScreen = (): ReactElement => {
                   )}
                 </section>
 
-                <section className='rounded-3xl border border-border/70 bg-card/80 p-5 shadow-sm'>
+                <section className='rounded-3xl border border-border/70 bg-card/80 p-5 shadow-xs'>
                   <div className='flex items-center gap-2 text-sm font-semibold text-foreground'>
                     <Users className='h-4 w-4 text-emerald-600' />
                     Shared Name to Email Mappings
@@ -702,7 +702,7 @@ const WhatsAppBulkMigrationScreen = (): ReactElement => {
                   </div>
                 </section>
 
-                <section className='rounded-3xl border border-border/70 bg-card/80 p-5 shadow-sm'>
+                <section className='rounded-3xl border border-border/70 bg-card/80 p-5 shadow-xs'>
                   <div className='flex items-center justify-between gap-3'>
                     <div>
                       <h3 className='text-sm font-semibold text-foreground'>
@@ -882,7 +882,7 @@ const WhatsAppBulkMigrationScreen = (): ReactElement => {
                 </section>
               </div>
             ) : (
-              <section className='rounded-3xl border border-border/70 bg-card/80 p-5 shadow-sm'>
+              <section className='rounded-3xl border border-border/70 bg-card/80 p-5 shadow-xs'>
                 <div className='flex items-center gap-2 text-sm font-semibold text-foreground'>
                   <Trash2 className='h-4 w-4 text-rose-600' />
                   Delete Imported Messages

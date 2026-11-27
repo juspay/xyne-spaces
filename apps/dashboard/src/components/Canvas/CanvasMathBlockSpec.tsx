@@ -65,7 +65,7 @@ function CanvasMathBlock(props: {
             <div className='absolute right-2 top-2 z-10 opacity-0 transition-opacity focus-within:opacity-100 group-hover/math:opacity-100'>
               {/* One bar of icon actions, shaped like the diagram block's, so an
                   equation and a diagram are operated the same way. */}
-              <div className='flex items-center gap-1 rounded-lg border border-border bg-background/90 p-1 shadow-sm backdrop-blur-sm'>
+              <div className='flex items-center gap-1 rounded-lg border border-border bg-background/90 p-1 shadow-xs backdrop-blur-xs'>
                 <button
                   type='button'
                   onClick={toggleEditing}
@@ -110,7 +110,7 @@ function CanvasMathBlock(props: {
           <button
             type='button'
             onClick={() => setEditing(false)}
-            className='absolute right-2 top-2 z-10 flex items-center rounded border border-border bg-background/90 p-1 text-muted-foreground shadow-sm transition-colors hover:bg-accent'
+            className='absolute right-2 top-2 z-10 flex items-center rounded border border-border bg-background/90 p-1 text-muted-foreground shadow-xs transition-colors hover:bg-accent'
             title='Done editing'
             aria-label='Done editing'
             data-track-category='CANVAS'

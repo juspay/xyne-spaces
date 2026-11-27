@@ -328,7 +328,7 @@ export const SearchResultMessageCard = memo(function SearchResultMessageCard({
             e.stopPropagation();
             navigateToMessage();
           }}
-          className='absolute top-1 right-2 z-20 opacity-0 group-hover:opacity-100 p-1.5 rounded-md bg-card border border-border shadow-sm text-muted-foreground hover:bg-muted transition-opacity'
+          className='absolute top-1 right-2 z-20 opacity-0 group-hover:opacity-100 p-1.5 rounded-md bg-card border border-border shadow-xs text-muted-foreground hover:bg-muted transition-opacity'
           title='Open in home'
           aria-label='Open in home'
           data-track-category='SEARCH_RESULTS'

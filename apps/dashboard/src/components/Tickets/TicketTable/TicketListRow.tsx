@@ -103,7 +103,7 @@ const TicketListRowBase: React.FC<TicketListRowProps> = ({
       data-track-name='TicketListRow'
     >
       <span
-        className={`flex w-4 flex-shrink-0 items-center justify-center transition-opacity ${
+        className={`flex w-4 shrink-0 items-center justify-center transition-opacity ${
           isSelected ? '' : 'opacity-0 group-hover/listrow:opacity-100'
         }`}
       >
@@ -136,19 +136,19 @@ const TicketListRowBase: React.FC<TicketListRowProps> = ({
       </span>
 
       {visibleColumns.has('priority') && (
-        <span className='flex w-5 flex-shrink-0 items-center justify-center'>
+        <span className='flex w-5 shrink-0 items-center justify-center'>
           <PriorityPicker ticketId={ticket.id} priority={ticket.priority} compact />
         </span>
       )}
 
-      <span className='w-[4.5rem] flex-shrink-0 truncate font-mono text-xs font-medium text-muted-foreground'>
+      <span className='w-18 shrink-0 truncate font-mono text-xs font-medium text-muted-foreground'>
         {ticket.xyneId}
       </span>
 
       {treeConnector}
 
       {visibleColumns.has('status') && (
-        <span className='relative flex w-5 flex-shrink-0 items-center justify-center self-stretch'>
+        <span className='relative flex w-5 shrink-0 items-center justify-center self-stretch'>
           <StagePicker
             ticketId={ticket.id}
             stageName={ticket.stageName}
@@ -183,14 +183,14 @@ const TicketListRowBase: React.FC<TicketListRowProps> = ({
           <Tooltip
             content={`${subProgress.done} of ${subProgress.total} sub-${noun.plural} completed`}
           >
-            <span className='flex flex-shrink-0 items-center gap-1 text-xs text-muted-foreground'>
+            <span className='flex shrink-0 items-center gap-1 text-xs text-muted-foreground'>
               <Subtask className='h-3.5 w-3.5' />
               {subProgress.done}/{subProgress.total}
             </span>
           </Tooltip>
         ))}
 
-      <span className='ml-auto flex flex-shrink-0 items-center gap-2.5 pl-3'>
+      <span className='ml-auto flex shrink-0 items-center gap-2.5 pl-3'>
         {visibleColumns.has('tags') && tags.length > 0 && (
           <LabelPicker ticket={ticket} tags={tags} availableTags={availableTags}>
             {tags.slice(0, 2).map(tag => (
@@ -198,7 +198,7 @@ const TicketListRowBase: React.FC<TicketListRowProps> = ({
                 key={tag.id}
                 className='flex max-w-[120px] items-center gap-1.5 rounded-full border border-border px-2 py-0.5 text-xs text-muted-foreground'
               >
-                <span className='h-1.5 w-1.5 flex-shrink-0 rounded-full bg-xyne-purple-400'></span>
+                <span className='h-1.5 w-1.5 shrink-0 rounded-full bg-xyne-purple-400'></span>
                 <span className='truncate'>{tag.name}</span>
               </span>
             ))}
@@ -292,9 +292,9 @@ export const TicketListRowLine: React.FC<TicketListRowLineProps> = ({
   children,
 }) => (
   <div className={`flex h-full min-w-0 items-center px-3 ${isComfortView ? 'gap-2.5' : 'gap-2'}`}>
-    <span className='w-4 flex-shrink-0' />
-    {visibleColumns.has('priority') && <span className='w-5 flex-shrink-0' />}
-    <span className='w-[4.5rem] flex-shrink-0' />
+    <span className='w-4 shrink-0' />
+    {visibleColumns.has('priority') && <span className='w-5 shrink-0' />}
+    <span className='w-18 shrink-0' />
     {connector}
     {children}
   </div>

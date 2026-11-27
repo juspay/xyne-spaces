@@ -131,7 +131,7 @@ export const IconPicker = ({
       description='Search the Xyne icon set by name or category, then pick one.'
       // `max-w-*` as well as width: the base content class sets `max-w-md`, and
       // a width alone loses to it.
-      className='w-[min(92vw,48rem)] max-w-[48rem]'
+      className='w-[min(92vw,48rem)] max-w-3xl'
       {...(!controlled && {
         trigger: (
           <button
@@ -238,7 +238,7 @@ export const IconPicker = ({
                           'flex aspect-square w-full items-center justify-center rounded-lg transition-colors',
                           selected
                             ? 'bg-primary/15 text-primary ring-1 ring-primary/40'
-                            : 'text-muted-foreground hover:bg-card hover:text-foreground hover:shadow-sm',
+                            : 'text-muted-foreground hover:bg-card hover:text-foreground hover:shadow-xs',
                         )}
                         data-track-category={trackCategory}
                         data-track-name={`${trackPrefix}IconPick`}

@@ -67,7 +67,7 @@ export const ChannelTabsMenu = ({
       aria-hidden
       className='relative h-0 overflow-hidden transition-[height] duration-200 [transition-timing-function:cubic-bezier(0.23,1,0.32,1)]'
     >
-      <span className='absolute inset-0 rounded-md border-[1.5px] border-dashed border-foreground/15 bg-foreground/[0.02]' />
+      <span className='absolute inset-0 rounded-md border-[1.5px] border-dashed border-foreground/15 bg-foreground/2' />
     </li>
   );
 
@@ -106,13 +106,13 @@ export const ChannelTabsMenu = ({
               data-track-name='OPEN_ADD_TAB_MENU'
               className={cn(
                 'flex size-7 items-center justify-center rounded-lg text-muted-foreground transition-[color,background-color,transform] duration-150 ease-out hover:bg-muted/60 hover:text-foreground active:scale-[0.96] motion-reduce:transition-none',
-                'group-data-[drop-target]/add:scale-105 group-data-[drop-target]/add:bg-muted group-data-[drop-target]/add:text-foreground',
+                'group-data-drop-target/add:scale-105 group-data-drop-target/add:bg-muted group-data-drop-target/add:text-foreground',
                 open && 'bg-muted text-foreground',
               )}
             >
               <PlusDefault
                 size={14}
-                className='transition-transform duration-200 motion-reduce:transition-none [transition-timing-function:cubic-bezier(0.23,1,0.32,1)] group-data-[drop-target]/add:rotate-45'
+                className='transition-transform duration-200 motion-reduce:transition-none [transition-timing-function:cubic-bezier(0.23,1,0.32,1)] group-data-drop-target/add:rotate-45'
               />
             </button>
           }
@@ -203,7 +203,7 @@ export const ChannelTabsMenu = ({
                 data-testid='channel-tabs-customize'
                 data-track-category='CHANNELS'
                 data-track-name='CUSTOMIZE_TABS'
-                className='block w-full rounded-md px-2.5 py-1.5 text-left text-sm font-medium text-[color:var(--mention-color)] transition-colors duration-100 hover:bg-accent'
+                className='block w-full rounded-md px-2.5 py-1.5 text-left text-sm font-medium text-(--mention-color) transition-colors duration-100 hover:bg-accent'
               >
                 Customize tabs
               </button>

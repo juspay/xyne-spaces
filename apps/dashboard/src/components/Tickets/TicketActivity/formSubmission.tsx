@@ -138,7 +138,7 @@ export const FormSubmissionBlock = ({
               <span className='text-[11px] text-muted-foreground shrink-0'>
                 {fv.globalField?.fieldName ?? fv.formField?.fieldName ?? fv.fieldId}
               </span>
-              <span className='text-[11px] text-foreground text-right break-words min-w-0'>
+              <span className='text-[11px] text-foreground text-right wrap-break-word min-w-0'>
                 {renderFormFieldValue(fv)}
               </span>
             </div>

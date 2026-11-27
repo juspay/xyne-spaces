@@ -171,7 +171,7 @@ export const WorkspaceSelectionScreen = (): ReactElement => {
 
   if (isLoading) {
     return (
-      <div className='min-h-screen flex items-center justify-center bg-background/60 backdrop-blur-sm'>
+      <div className='min-h-screen flex items-center justify-center bg-background/60 backdrop-blur-xs'>
         <div className='flex flex-col items-center gap-3'>
           <Loader2 className='w-8 h-8 animate-spin text-[hsl(var(--primary))]' />
           <p className='text-sm text-muted-foreground'>Loading your workspaces...</p>
@@ -191,14 +191,14 @@ export const WorkspaceSelectionScreen = (): ReactElement => {
           }}
         >
           {/* Header */}
-          <div className='relative px-8 pt-10 pb-8 border-b border-border/60 bg-gradient-to-b from-muted/40 to-transparent'>
+          <div className='relative px-8 pt-10 pb-8 border-b border-border/60 bg-linear-to-b from-muted/40 to-transparent'>
             <div className='flex flex-col items-center text-center'>
               <div className='mb-5 relative'>
                 <div className='absolute inset-0 rounded-2xl bg-[hsl(var(--primary))]/20 blur-2xl transform translate-y-2' />
                 <img
                   src='/svgs/xyne.svg'
                   alt='Xyne Spaces'
-                  className='relative h-10 w-auto drop-shadow-sm'
+                  className='relative h-10 w-auto drop-shadow-xs'
                 />
               </div>
               <h1 className='text-2xl sm:text-3xl font-semibold tracking-tight text-foreground'>
@@ -247,7 +247,7 @@ export const WorkspaceSelectionScreen = (): ReactElement => {
                       className='group relative flex items-center gap-4 w-full rounded-2xl border border-border/70 bg-background/60 p-4 text-left transition-all duration-200 hover:border-[hsl(var(--primary))]/40 hover:bg-accent/60 hover:shadow-[0_8px_24px_-8px_rgba(0,0,0,0.08)] hover:-translate-y-0.5 active:translate-y-0 disabled:opacity-60 disabled:cursor-not-allowed'
                     >
                       <div
-                        className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-xl ${colorClass} text-white text-sm font-bold shadow-sm`}
+                        className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-xl ${colorClass} text-white text-sm font-bold shadow-xs`}
                       >
                         {getInitials(workspace.name)}
                       </div>
@@ -324,7 +324,7 @@ export const WorkspaceSelectionScreen = (): ReactElement => {
                       value={newWorkspaceName}
                       onChange={e => setNewWorkspaceName(e.target.value)}
                       placeholder='e.g. Engineering, Design, Sales'
-                      className='flex-1 rounded-xl border border-border bg-background px-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-[hsl(var(--primary))]/30 focus:border-[hsl(var(--primary))]/40'
+                      className='flex-1 rounded-xl border border-border bg-background px-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-hidden focus:ring-2 focus:ring-[hsl(var(--primary))]/30 focus:border-[hsl(var(--primary))]/40'
                       disabled={isCreating}
                       autoFocus
                     />

@@ -260,7 +260,7 @@ export function TemplateAttachmentsField({
             data-track-category='automation-builder'
             data-track-name='send-message-create-template'
             onClick={openNewFileEditor}
-            className='flex min-h-20 items-center justify-center gap-3 rounded-md border border-border px-4 py-3 text-left text-muted-foreground hover:border-foreground/30 hover:bg-accent/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/40'
+            className='flex min-h-20 items-center justify-center gap-3 rounded-md border border-border px-4 py-3 text-left text-muted-foreground hover:border-foreground/30 hover:bg-accent/30 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-foreground/40'
           >
             <FileCode2 className='size-4' />
             <span className='flex flex-col'>
@@ -287,7 +287,7 @@ export function TemplateAttachmentsField({
             }}
             className={cn(
               'flex min-h-20 items-center justify-center gap-3 rounded-md border border-dashed px-4 py-3 text-left',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/40',
+              'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-foreground/40',
               dragging
                 ? 'border-amber-500 bg-amber-500/10 text-foreground'
                 : 'border-border text-muted-foreground hover:border-foreground/30 hover:bg-accent/30',
@@ -327,7 +327,7 @@ export function TemplateAttachmentsField({
             : 'Create file template'
         }
         description='Insert automation variables into the file template.'
-        className='!h-[92vh] !w-[96vw] !max-w-[1440px] overflow-hidden'
+        className='h-[92vh]! w-[96vw]! max-w-[1440px]! overflow-hidden'
         onPointerDownOutside={event => {
           if (editorSaving) event.preventDefault();
         }}
@@ -371,7 +371,7 @@ export function TemplateAttachmentsField({
                       })
                     }
                     spellCheck={false}
-                    className='h-8 w-80 min-w-0 rounded-md border border-border bg-background px-2.5 font-mono text-xs text-foreground outline-none focus:ring-2 focus:ring-foreground/20'
+                    className='h-8 w-80 min-w-0 rounded-md border border-border bg-background px-2.5 font-mono text-xs text-foreground outline-hidden focus:ring-2 focus:ring-foreground/20'
                     aria-label='New file name'
                   />
                 </label>
@@ -387,7 +387,7 @@ export function TemplateAttachmentsField({
                         filename: `${getBasename(editorSession.filename)}${event.target.value}`,
                       })
                     }
-                    className='h-8 rounded-md border border-border bg-background px-2.5 text-xs text-foreground outline-none focus:ring-2 focus:ring-foreground/20'
+                    className='h-8 rounded-md border border-border bg-background px-2.5 text-xs text-foreground outline-hidden focus:ring-2 focus:ring-foreground/20'
                     aria-label='New file type'
                   >
                     <option value='.txt'>Plain text (.txt)</option>
@@ -447,7 +447,7 @@ export function TemplateAttachmentsField({
                     value={editorContent}
                     onChange={event => setEditorContent(event.target.value)}
                     spellCheck={false}
-                    className='min-h-0 flex-1 resize-none bg-background p-5 font-mono text-sm leading-6 text-foreground outline-none focus:ring-2 focus:ring-inset focus:ring-foreground/20'
+                    className='min-h-0 flex-1 resize-none bg-background p-5 font-mono text-sm leading-6 text-foreground outline-hidden focus:ring-2 focus:ring-inset focus:ring-foreground/20'
                   />
                 </section>
                 <section className='flex min-h-[320px] min-w-0 flex-col border-t border-border lg:min-h-0 lg:border-t-0'>
@@ -610,7 +610,7 @@ function TemplatePreview({
   }
 
   return (
-    <pre className='min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words bg-background p-5 font-mono text-sm leading-6 text-foreground'>
+    <pre className='min-h-0 flex-1 overflow-auto whitespace-pre-wrap wrap-break-word bg-background p-5 font-mono text-sm leading-6 text-foreground'>
       {content}
     </pre>
   );

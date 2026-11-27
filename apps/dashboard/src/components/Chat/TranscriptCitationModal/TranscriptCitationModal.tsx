@@ -128,7 +128,7 @@ export function TranscriptCitationModal(): ReactElement | null {
   const close = (): void => transcriptCitationStore.close();
 
   return createPortal(
-    <div className='fixed inset-0 z-[70]' role='dialog' aria-modal='true' aria-label='Transcript'>
+    <div className='fixed inset-0 z-70' role='dialog' aria-modal='true' aria-label='Transcript'>
       <button
         type='button'
         aria-label='Close transcript'

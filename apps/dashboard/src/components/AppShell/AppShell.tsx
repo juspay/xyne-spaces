@@ -58,21 +58,21 @@ export function AppToaster({ className }: { className?: string }): ReactElement 
           pointerEvents: 'auto',
         },
         classNames: {
-          toast: 'relative items-start group !pt-3 !pr-3 !pb-3 !pl-4',
+          toast: 'relative items-start group pt-3! pr-3! pb-3! pl-4!',
           icon: 'mt-1',
-          title: '!text-card-foreground !font-semibold !max-w-[calc(100%-2rem)] !mr-8',
-          description: '!text-card-foreground/80',
+          title: 'text-card-foreground! font-semibold! max-w-[calc(100%-2rem)]! mr-8!',
+          description: 'text-card-foreground/80!',
 
-          actionButton: '!bg-primary !text-primary-foreground hover:!bg-primary/90 !mt-8',
-          cancelButton: '!bg-secondary !text-secondary-foreground hover:!bg-secondary/80 !mt-8',
+          actionButton: 'bg-primary! text-primary-foreground! hover:bg-primary/90! mt-8!',
+          cancelButton: 'bg-secondary! text-secondary-foreground! hover:bg-secondary/80! mt-8!',
 
           closeButton:
-            '!absolute !right-3 !top-5 !left-auto !bg-transparent !border-0 !ring-0 focus:!ring-0 focus:!outline-none !opacity-100 !text-card-foreground hover:!opacity-50 rounded-md z-10',
+            'absolute! right-3! top-5! left-auto! bg-transparent! border-0! ring-0! focus:ring-0! focus:outline-hidden! opacity-100! text-card-foreground! hover:opacity-50! rounded-md z-10',
 
-          success: '!text-status-success',
-          error: '!text-status-failure',
-          warning: '!text-status-pending',
-          info: '!text-status-scheduled',
+          success: 'text-status-success!',
+          error: 'text-status-failure!',
+          warning: 'text-status-pending!',
+          info: 'text-status-scheduled!',
         },
       }}
     />

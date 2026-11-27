@@ -260,8 +260,8 @@ export function AddressBar(props: {
       className={cn(
         'flex min-w-0 items-center transition-[background-color,box-shadow,border-color]',
         props.variant === 'bar'
-          ? 'mx-1.5 h-8 flex-1 gap-1.5 rounded-lg bg-foreground/[0.06] pl-1 pr-2 focus-within:bg-background focus-within:ring-1 focus-within:ring-border'
-          : 'h-12 w-full gap-3 rounded-2xl border border-border bg-background px-4 shadow-sm focus-within:border-foreground/20 focus-within:shadow-md',
+          ? 'mx-1.5 h-8 flex-1 gap-1.5 rounded-lg bg-foreground/6 pl-1 pr-2 focus-within:bg-background focus-within:ring-1 focus-within:ring-border'
+          : 'h-12 w-full gap-3 rounded-2xl border border-border bg-background px-4 shadow-xs focus-within:border-foreground/20 focus-within:shadow-md',
       )}
     >
       {props.variant === 'hero' ? (
@@ -317,7 +317,7 @@ export function AddressBar(props: {
         aria-controls={listId}
         {...(open && { 'aria-activedescendant': `${listId}-${highlight}` })}
         className={cn(
-          'h-full min-w-0 flex-1 bg-transparent text-foreground outline-none placeholder:text-muted-foreground',
+          'h-full min-w-0 flex-1 bg-transparent text-foreground outline-hidden placeholder:text-muted-foreground',
           props.variant === 'bar' ? 'text-[12.5px]' : 'text-[15px]',
         )}
         data-track-category={props.trackCategory}
@@ -341,7 +341,7 @@ export function AddressBar(props: {
             data-xyne-overlay=''
             // Keeps the keyboard in the bar: a click here chooses, it doesn't blur.
             onMouseDown={event => event.preventDefault()}
-            className='fixed z-[70] overflow-hidden rounded-xl border border-border bg-popover py-1 text-popover-foreground shadow-xl'
+            className='fixed z-70 overflow-hidden rounded-xl border border-border bg-popover py-1 text-popover-foreground shadow-xl'
             style={{ left: place.left, top: place.top, width: place.width }}
           >
             {suggestions.map((suggestion, index) => (

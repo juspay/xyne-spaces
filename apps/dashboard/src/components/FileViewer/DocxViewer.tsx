@@ -132,7 +132,7 @@ export const DocxViewer: React.FC<BaseViewerProps> = ({ source, searchable }) =>
 
       {error && !loading && (
         <div className='absolute inset-0 flex items-center justify-center z-10'>
-          <div className='bg-red-100 dark:bg-red-900 p-4 rounded shadow'>
+          <div className='bg-red-100 dark:bg-red-900 p-4 rounded shadow-sm'>
             <p className='text-red-700 dark:text-red-300 font-semibold'>Error loading document</p>
             <p className='text-red-600 dark:text-red-400 text-sm'>{error}</p>
             <button

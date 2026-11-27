@@ -331,14 +331,14 @@ const ConfluenceMigrationScreen = (): ReactElement => {
               </p>
             </div>
             <div className='grid grid-cols-2 gap-3 text-left lg:min-w-[320px]'>
-              <div className='rounded-xl border border-border bg-background/80 p-3 shadow-sm'>
+              <div className='rounded-xl border border-border bg-background/80 p-3 shadow-xs'>
                 <p className='text-[11px] uppercase tracking-wide text-muted-foreground'>
                   Execution
                 </p>
                 <p className='mt-1 text-sm font-semibold text-foreground'>Async backend job</p>
                 <p className='mt-1 text-xs text-muted-foreground'>Progress tracked in Redis</p>
               </div>
-              <div className='rounded-xl border border-border bg-background/80 p-3 shadow-sm'>
+              <div className='rounded-xl border border-border bg-background/80 p-3 shadow-xs'>
                 <p className='text-[11px] uppercase tracking-wide text-muted-foreground'>Shape</p>
                 <p className='mt-1 text-sm font-semibold text-foreground'>
                   Project general channel
@@ -350,7 +350,7 @@ const ConfluenceMigrationScreen = (): ReactElement => {
         </div>
 
         <div className='p-6 space-y-6'>
-          <section className='overflow-hidden rounded-3xl border border-border/70 bg-card shadow-sm'>
+          <section className='overflow-hidden rounded-3xl border border-border/70 bg-card shadow-xs'>
             <div className='border-b border-border/70 bg-muted/20 px-5 py-4'>
               <div className='flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between'>
                 <div>
@@ -367,7 +367,7 @@ const ConfluenceMigrationScreen = (): ReactElement => {
             </div>
 
             <div className='grid grid-cols-1 gap-4 p-5 xl:grid-cols-3'>
-              <div className='rounded-2xl border border-border/70 bg-background p-4 shadow-sm'>
+              <div className='rounded-2xl border border-border/70 bg-background p-4 shadow-xs'>
                 <label
                   htmlFor='confluence-space-key'
                   className='mb-2 block text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'
@@ -391,7 +391,7 @@ const ConfluenceMigrationScreen = (): ReactElement => {
                 </p>
               </div>
 
-              <div className='rounded-2xl border border-border/70 bg-background p-4 shadow-sm'>
+              <div className='rounded-2xl border border-border/70 bg-background p-4 shadow-xs'>
                 <label
                   htmlFor='confluence-target-project'
                   className='mb-2 block text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'
@@ -431,7 +431,7 @@ const ConfluenceMigrationScreen = (): ReactElement => {
                 </p>
               </div>
 
-              <div className='rounded-2xl border border-border/70 bg-background p-4 shadow-sm'>
+              <div className='rounded-2xl border border-border/70 bg-background p-4 shadow-xs'>
                 <label
                   htmlFor='confluence-target-channel'
                   className='mb-2 block text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'
@@ -470,7 +470,7 @@ const ConfluenceMigrationScreen = (): ReactElement => {
                 </p>
               </div>
 
-              <div className='rounded-2xl border border-border/70 bg-background p-4 shadow-sm'>
+              <div className='rounded-2xl border border-border/70 bg-background p-4 shadow-xs'>
                 <div className='flex items-start justify-between gap-3'>
                   <div>
                     <p className='text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'>
@@ -523,7 +523,7 @@ const ConfluenceMigrationScreen = (): ReactElement => {
           </section>
 
           {preview && (
-            <section className='overflow-hidden rounded-3xl border border-border/70 bg-card shadow-sm'>
+            <section className='overflow-hidden rounded-3xl border border-border/70 bg-card shadow-xs'>
               <div className='border-b border-border/70 bg-muted/20 px-5 py-4'>
                 <div className='flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between'>
                   <div>
@@ -667,7 +667,7 @@ const ConfluenceMigrationScreen = (): ReactElement => {
           )}
 
           {migrationProgress && (
-            <section className='rounded-2xl border border-sky-200 bg-sky-50/60 p-5 shadow-sm'>
+            <section className='rounded-2xl border border-sky-200 bg-sky-50/60 p-5 shadow-xs'>
               <div className='flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between'>
                 <div>
                   <h3 className='text-sm font-semibold text-foreground'>Live Migration Progress</h3>
@@ -702,7 +702,7 @@ const ConfluenceMigrationScreen = (): ReactElement => {
           )}
 
           {(result || visiblePageResults.length > 0) && (
-            <section className='overflow-hidden rounded-3xl border border-border/70 bg-card shadow-sm'>
+            <section className='overflow-hidden rounded-3xl border border-border/70 bg-card shadow-xs'>
               <div className='border-b border-border/70 bg-muted/20 px-5 py-4'>
                 <h3 className='text-sm font-semibold text-foreground'>Import Results</h3>
                 <p className='mt-1 text-xs text-muted-foreground'>
@@ -781,7 +781,7 @@ const ConfluenceMigrationScreen = (): ReactElement => {
 };
 
 const MetricCard = ({ label, value }: { label: string; value: string }): ReactElement => (
-  <div className='rounded-xl border border-border/70 bg-background p-3 shadow-sm'>
+  <div className='rounded-xl border border-border/70 bg-background p-3 shadow-xs'>
     <p className='text-[11px] uppercase tracking-wide text-muted-foreground'>{label}</p>
     <p className='mt-1 truncate text-sm font-semibold text-foreground'>{value}</p>
   </div>

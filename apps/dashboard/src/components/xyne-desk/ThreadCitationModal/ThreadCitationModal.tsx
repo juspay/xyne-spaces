@@ -121,7 +121,7 @@ export function ThreadCitationModal(): ReactElement | null {
 
   const modalCard = (
     <div className='flex flex-col w-full h-full bg-background dark:bg-[#1E1E1E] rounded-xl shadow-2xl border border-border/60 overflow-hidden'>
-      <div className='flex items-center justify-between px-3 py-2 border-b border-border/60 flex-shrink-0'>
+      <div className='flex items-center justify-between px-3 py-2 border-b border-border/60 shrink-0'>
         <button
           type='button'
           onClick={close}
@@ -174,7 +174,7 @@ export function ThreadCitationModal(): ReactElement | null {
         <button
           type='button'
           aria-label='Close source preview'
-          className='fixed inset-0 z-[55] bg-black/40 backdrop-blur-[3px] cursor-default'
+          className='fixed inset-0 z-55 bg-black/40 backdrop-blur-[3px] cursor-default'
           onClick={close}
           data-track-category='AIDraft'
           data-track-name='CloseThreadCitationBackdrop'

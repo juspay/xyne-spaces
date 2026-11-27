@@ -105,14 +105,14 @@ export const ApproverSelector = ({
         className='self-start'
       />
 
-      <div className='relative flex-shrink-0'>
+      <div className='relative shrink-0'>
         <Search className='absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground' />
         <input
           type='text'
           value={searchQuery}
           onChange={e => setSearchQuery(e.target.value)}
           placeholder={tab === 'USERS' ? 'Search User' : 'Search Role'}
-          className='w-full h-10 pl-10 pr-3 border border-border rounded-lg text-[14px] text-foreground placeholder:text-muted-foreground/50 bg-background focus:outline-none focus:ring-1 focus:ring-[#6276be]'
+          className='w-full h-10 pl-10 pr-3 border border-border rounded-lg text-[14px] text-foreground placeholder:text-muted-foreground/50 bg-background focus:outline-hidden focus:ring-1 focus:ring-[#6276be]'
           data-track-category='board_config'
           data-track-name={tab === 'USERS' ? 'search_user' : 'search_role'}
         />
@@ -170,7 +170,7 @@ export const ApproverSelector = ({
                     data-track-category='board_config'
                     data-track-name='select_approver_role'
                   >
-                    <div className='flex items-center justify-center w-8 h-8 rounded-full bg-action-primary/10 text-action-primary shrink-0'>
+                    <div className='flex items-center justify-center w-8 h-8 rounded-full text-action-primary shrink-0'>
                       <ShieldCheck className='w-4 h-4' />
                     </div>
                     <div className='flex flex-col min-w-0 flex-1'>

@@ -27,7 +27,7 @@ export function WeekView({
   return (
     <>
       <div className='flex-1 overflow-auto bg-background px-6 py-6'>
-        <div className='bg-background rounded-xl border border-border shadow-sm overflow-hidden'>
+        <div className='bg-background rounded-xl border border-border shadow-xs overflow-hidden'>
           <div className='grid grid-cols-7 bg-muted border-b border-border'>
             {days.map(day => {
               const isToday = isSameDay(day, new Date());

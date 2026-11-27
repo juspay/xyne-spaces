@@ -207,8 +207,8 @@ export function parseStreamingContent(content: string): StreamingParsedContent {
 // Copy icon matching the provided design
 const CopyIcon = (): ReactElement => (
   <div className='w-3.5 h-3.5 relative overflow-hidden'>
-    <div className='w-2 h-2 left-[5px] top-[5px] absolute outline outline-1 outline-offset-[-0.58px] outline-muted-foreground rounded-[1px]' />
-    <div className='w-2 h-2 left-[1.25px] top-[1.25px] absolute outline outline-1 outline-offset-[-0.58px] outline-muted-foreground rounded-[1px] bg-muted' />
+    <div className='w-2 h-2 left-[5px] top-[5px] absolute outline-solid outline-1 outline-offset-[-0.58px] outline-muted-foreground rounded-[1px]' />
+    <div className='w-2 h-2 left-[1.25px] top-[1.25px] absolute outline-solid outline-1 outline-offset-[-0.58px] outline-muted-foreground rounded-[1px] bg-muted' />
   </div>
 );
 
@@ -799,7 +799,7 @@ export const Summary = (props: SummaryProps): ReactElement => {
           <button
             aria-label='Close summary'
             onClick={onClose}
-            className='p-2 rounded-lg outline outline-1 outline-offset-[-1px] outline-input flex justify-center items-center gap-2.5 overflow-hidden hover:bg-accent transition-colors'
+            className='p-2 rounded-lg outline-solid outline-1 -outline-offset-1 outline-input flex justify-center items-center gap-2.5 overflow-hidden hover:bg-accent transition-colors'
             data-track-category='CHAT_SUMMARY'
             data-track-name='Close_Summary'
           >
@@ -836,7 +836,7 @@ export const Summary = (props: SummaryProps): ReactElement => {
               </div>
               <SkeletonLoader />
             </div>
-            <div className='absolute bottom-0 left-0 right-0 h-20 bg-gradient-to-t from-gray-50 to-transparent pointer-events-none' />
+            <div className='absolute bottom-0 left-0 right-0 h-20 bg-linear-to-t from-gray-50 to-transparent pointer-events-none' />
           </div>
         )}
 

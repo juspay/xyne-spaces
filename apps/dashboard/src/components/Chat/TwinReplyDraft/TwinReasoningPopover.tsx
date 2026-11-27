@@ -90,7 +90,7 @@ export function TwinReasoningPopover({
       // tray sits low, and the body scrolls internally.
       className={cn(
         'flex w-[512px] max-w-[calc(100vw-24px)] flex-col overflow-hidden p-0',
-        'max-h-[var(--radix-popover-content-available-height)] border-border shadow-lg',
+        'max-h-(--radix-popover-content-available-height) border-border shadow-lg',
       )}
     >
       <div className='flex h-full min-h-0 flex-col'>
@@ -184,7 +184,7 @@ function TabButton({
       className={cn(
         'flex items-center gap-1.5 rounded px-2.5 py-1 text-xs font-semibold transition-colors',
         active
-          ? 'bg-background text-foreground shadow-sm'
+          ? 'bg-background text-foreground shadow-xs'
           : 'text-muted-foreground hover:text-foreground',
       )}
     >

@@ -21,7 +21,7 @@ interface VideoTileFullscreenModalProps {
  * (no browser Fullscreen API) so it behaves consistently across web/Electron
  * without extra permission prompts or fallback UI — same pattern already
  * proven for screen shares. Fills the ENTIRE viewport edge-to-edge (no
- * padding/max-width) and uses z-[80] — deliberately above the call controls
+ * padding/max-width) and uses z-80 — deliberately above the call controls
  * bar and side panels (z-50/z-[60]), which otherwise render later in the DOM
  * and paint on top of an equal z-50 modal.
  */
@@ -88,7 +88,7 @@ export function VideoTileFullscreenModal({
   return (
     // eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions
     <div
-      className='fixed inset-0 z-[80] flex items-center justify-center bg-black'
+      className='fixed inset-0 z-80 flex items-center justify-center bg-black'
       onClick={handleBackdropClick}
       onKeyDown={(e): void => {
         if (e.key === 'Enter' || e.key === ' ') {
@@ -109,8 +109,8 @@ export function VideoTileFullscreenModal({
         onClick={onClose}
         className={cn(
           'absolute top-4 right-4 z-10 flex h-10 w-10 items-center justify-center rounded-full',
-          'border border-white/20 bg-black/50 text-white/90 backdrop-blur-sm transition-all duration-200',
-          'hover:bg-black/70 hover:text-white focus:outline-none focus:ring-2 focus:ring-white/30',
+          'border border-white/20 bg-black/50 text-white/90 backdrop-blur-xs transition-all duration-200',
+          'hover:bg-black/70 hover:text-white focus:outline-hidden focus:ring-2 focus:ring-white/30',
         )}
         aria-label='Close expanded view'
         data-track-category='CALLS'

@@ -48,7 +48,7 @@ export const FlowPlanEdge: FC<EdgeProps<FlowPlanEdgeData>> = ({
               event.stopPropagation();
               data.onDelete?.();
             }}
-            className='flow-plan-edge-delete nodrag nopan flex h-4 w-4 items-center justify-center rounded-full border border-border bg-background text-muted-foreground shadow-sm transition-colors hover:border-red-400 hover:text-red-500'
+            className='flow-plan-edge-delete nodrag nopan flex h-4 w-4 items-center justify-center rounded-full border border-border bg-background text-muted-foreground shadow-xs transition-colors hover:border-red-400 hover:text-red-500'
             style={{
               position: 'absolute',
               transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,

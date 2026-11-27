@@ -124,7 +124,7 @@ export const BoardFormSelector = ({
                         e.stopPropagation();
                         handleCheckboxChange(form.id, e.target.checked);
                       }}
-                      className='flex-shrink-0 w-4 h-4 text-blue-600 border-input rounded focus:ring-ring cursor-pointer'
+                      className='shrink-0 w-4 h-4 text-blue-600 border-input rounded focus:ring-ring cursor-pointer'
                       data-track-event='change'
                       data-track-category='Board'
                       data-track-name='ToggleFormSelection'
@@ -173,7 +173,7 @@ export const BoardFormSelector = ({
                       isExpanded ? `Collapse ${form.formName}` : `Expand ${form.formName}`
                     }
                     aria-expanded={isExpanded}
-                    className={`flex-shrink-0 ml-2 transition-transform cursor-pointer ${
+                    className={`shrink-0 ml-2 transition-transform cursor-pointer ${
                       isExpanded ? 'rotate-90' : ''
                     }`}
                     role='button'
@@ -224,7 +224,7 @@ export const BoardFormSelector = ({
                                   {field.fieldName}
                                 </span>
                               </div>
-                              <div className='flex-shrink-0'>
+                              <div className='shrink-0'>
                                 <span className='text-xs px-2 py-1 bg-blue-100 text-blue-700 rounded whitespace-nowrap'>
                                   {field.fieldType}
                                 </span>

@@ -191,7 +191,7 @@ export const ThreadTags = ({
               })}
               className={cn(
                 'group/chip inline-flex items-center gap-0.5 rounded-full text-[11px] font-medium',
-                'leading-[16px] whitespace-nowrap align-middle py-[1px]',
+                'leading-[16px] whitespace-nowrap align-middle py-px',
                 canEdit ? 'pl-1.5 pr-1' : 'px-1.5',
                 onInspect && 'cursor-pointer',
                 // Dashed, not a second badge: it reads as provisional without adding anything

@@ -67,9 +67,9 @@ function ArchivedPill(): ReactElement {
 
 // One quiet style: the group a row sits in says whether it is pinned.
 const pinClass =
-  'inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border bg-background px-2.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
+  'inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border bg-background px-2.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring';
 // Fixed slots, so the pin and the menu line up down the list whatever a row has.
-const pinSlot = 'flex w-[5.5rem] shrink-0 justify-end';
+const pinSlot = 'flex w-22 shrink-0 justify-end';
 const menuSlot = 'flex w-7 shrink-0 justify-end';
 
 function PinButton(props: { pinned: boolean; label: string; onToggle: () => void }): ReactElement {
@@ -98,7 +98,7 @@ function Help({ about, children }: { about: string; children: ReactNode }): Reac
       <button
         type='button'
         aria-label={`About ${about}`}
-        className='grid size-5 shrink-0 place-items-center rounded-full text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+        className='grid size-5 shrink-0 place-items-center rounded-full text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring'
       >
         <HelpCircle className='size-3.5' aria-hidden />
       </button>
@@ -348,7 +348,7 @@ export function SdlcKnowledgeSection(props: {
           Add
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align='end' className='w-64 rounded-xl p-1.5 shadow-sm'>
+      <DropdownMenuContent align='end' className='w-64 rounded-xl p-1.5 shadow-xs'>
         <DropdownMenuItem
           onClick={() => {
             setAiDraft(
@@ -394,7 +394,7 @@ export function SdlcKnowledgeSection(props: {
   );
 
   const rowClass =
-    'flex cursor-pointer items-center gap-3 px-5 py-2.5 transition-colors hover:bg-muted/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring';
+    'flex cursor-pointer items-center gap-3 px-5 py-2.5 transition-colors hover:bg-muted/30 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring';
   const onlyMine = (
     <span
       className='shrink-0 rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground'
@@ -547,7 +547,7 @@ export function SdlcKnowledgeSection(props: {
                 </DropdownMenuTrigger>
                 <DropdownMenuContent
                   align='end'
-                  className='w-48 rounded-xl p-1.5 shadow-sm'
+                  className='w-48 rounded-xl p-1.5 shadow-xs'
                   onClick={event => event.stopPropagation()}
                 >
                   {/* Already given to everyone: a pin for me on top would change nothing. */}
@@ -593,14 +593,14 @@ export function SdlcKnowledgeSection(props: {
                   onClick={event => event.stopPropagation()}
                   data-track-category='SdlcHub'
                   data-track-name='HubKnowledgeSkillMenuOpened'
-                  className='grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+                  className='grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring'
                 >
                   <Ellipsis size={16} />
                 </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent
                 align='end'
-                className='w-48 rounded-xl p-1.5 shadow-sm'
+                className='w-48 rounded-xl p-1.5 shadow-xs'
                 onClick={event => event.stopPropagation()}
               >
                 {skill && personal && (
@@ -959,7 +959,7 @@ export function SdlcKnowledgeSection(props: {
                 onClick={() => setPickerOpen(false)}
                 data-track-category='SdlcHub'
                 data-track-name='HubKnowledgeSkillPickerClosed'
-                className='grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+                className='grid size-7 shrink-0 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring'
               >
                 <X size={15} />
               </button>

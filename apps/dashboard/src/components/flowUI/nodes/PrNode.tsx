@@ -45,7 +45,7 @@ import { createMarkdownComponents } from '../../../utils/markdownComponents';
  * WidgetPreview (via PreviewSplitDialog → Radix, portals to <body>) renders OUTSIDE
  * the `.jp-message-html` container, so the global underline/blue link rule does
  * not reach its links. The card's own PR link IS inside that container, so it
- * carries the `!text-foreground !no-underline` override to beat that rule.
+ * carries the `text-foreground! no-underline!` override to beat that rule.
  *
  * ── Wire contract (backend emits this) ───────────────────────────────────────
  * The PR is one component inside a FlowJSON FlowDefinition. Source of truth +
@@ -144,7 +144,7 @@ export const PrNode: React.FC<PrNodeProps> = ({ node }) => {
         <TitleBlock ticketId={props.ticketId} title={props.title} desc={props.desc} />
       </div>
 
-      <div className='flex items-center gap-2 border-t border-border bg-foreground/[0.03] px-4 py-3'>
+      <div className='flex items-center gap-2 border-t border-border bg-foreground/3 px-4 py-3'>
         {!insidePreview && (
           <button
             type='button'
@@ -224,7 +224,7 @@ const TitleBlock: React.FC<{
 );
 
 // Card-footer "Open in <Provider>" link. This lives INSIDE the `.jp-message-html`
-// container, so `!text-foreground !no-underline` are needed to beat the global
+// container, so `text-foreground! no-underline!` are needed to beat the global
 // `.jp-message-html a` rule (blue + underline) that otherwise wins by specificity.
 const FooterLink: React.FC<{
   href: string;
@@ -234,7 +234,7 @@ const FooterLink: React.FC<{
     href={href}
     target='_blank'
     rel='noopener noreferrer'
-    className='rounded-lg px-2 py-1.5 text-sm font-medium leading-[1.2] !text-foreground !no-underline hover:!text-foreground'
+    className='rounded-lg px-2 py-1.5 text-sm font-medium leading-[1.2] text-foreground! no-underline! hover:text-foreground!'
     data-track-category='PR_ARTIFACT'
     data-track-name='CLICK_OPEN_PR'
   >

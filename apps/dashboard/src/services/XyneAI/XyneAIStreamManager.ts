@@ -3052,9 +3052,9 @@ class XyneAIStreamManager {
       // block the full basis drops the button onto its own line under the
       // preview. Spacing goes through actionButtonStyle rather than a class:
       // per-toast classNames are appended to the Toaster-level ones (App.tsx
-      // sets `!mt-8`), and between two equally-specific utilities CSS source
+      // sets `mt-8!`), and between two equally-specific utilities CSS source
       // order decides — an inline style is the only reliable override.
-      classNames: { toast: '!flex-wrap', content: '!basis-full' },
+      classNames: { toast: 'flex-wrap!', content: 'basis-full!' },
       actionButtonStyle: { marginTop: 8, marginLeft: 'auto' },
       onAutoClose: clear,
       onDismiss: clear,

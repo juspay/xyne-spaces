@@ -43,7 +43,7 @@ export const TicketAssignmentActivity = ({
 
   const expandedContent = (
     <div className='flex flex-col gap-1 mt-2'>
-      <div className='text-sm font-medium break-words whitespace-normal'>
+      <div className='text-sm font-medium wrap-break-word whitespace-normal'>
         {isRecipientAssigned ? (
           <>You have been assigned to ticket &ldquo;{ticket.title}&rdquo;</>
         ) : (
@@ -52,7 +52,7 @@ export const TicketAssignmentActivity = ({
           </>
         )}
       </div>
-      <div className='text-xs text-muted-foreground break-words whitespace-normal'>
+      <div className='text-xs text-muted-foreground wrap-break-word whitespace-normal'>
         Ticket ID: <span className='font-mono'>{ticketXyneId}</span>
       </div>
     </div>

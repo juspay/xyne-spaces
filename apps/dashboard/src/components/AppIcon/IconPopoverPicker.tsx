@@ -48,7 +48,7 @@ export const IconPopoverPicker = ({
       side='bottom'
       align='start'
       sideOffset={6}
-      className='w-[22rem] p-0'
+      className='w-88 p-0'
       trigger={
         <button
           type='button'
@@ -74,7 +74,7 @@ export const IconPopoverPicker = ({
           aria-label='Search icons'
           data-track-category={trackCategory}
           data-track-name={`${trackPrefix}IconSearch`}
-          className='h-8 w-full rounded-lg border border-border bg-background px-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring'
+          className='h-8 w-full rounded-lg border border-border bg-background px-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-hidden focus:ring-1 focus:ring-ring'
         />
         {names.length === 0 ? (
           <p className='py-6 text-center text-xs text-muted-foreground'>No icons match.</p>

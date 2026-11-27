@@ -77,7 +77,7 @@ const Column = ({ icon, iconClass, title, description, children }: ColumnProps) 
       </div>
       <div className='min-w-0'>
         <h3 className='text-sm font-medium text-foreground mb-0.5'>{title}</h3>
-        <p className='text-xs text-muted-foreground leading-[1.5]'>{description}</p>
+        <p className='text-xs text-muted-foreground leading-normal'>{description}</p>
       </div>
     </div>
     <div className='p-3 flex flex-col gap-2 flex-1'>{children}</div>
@@ -485,7 +485,7 @@ const BoardRolesConfigScreen = ({
     <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/50'>
       <div className='bg-background flex flex-col w-[90vw] h-[85vh] rounded-lg shadow-xl overflow-hidden border border-border'>
         {/* ── Top bar ── */}
-        <header className='flex items-center justify-between px-4 py-3 border-b border-border flex-shrink-0'>
+        <header className='flex items-center justify-between px-4 py-3 border-b border-border shrink-0'>
           <div className='flex items-center gap-2 min-w-0'>
             <Button
               variant='ghost'
@@ -520,12 +520,12 @@ const BoardRolesConfigScreen = ({
         </header>
 
         {showAutoRecomputeToggle && (
-          <div className='flex items-center justify-between px-4 py-3 border-b border-border flex-shrink-0'>
+          <div className='flex items-center justify-between px-4 py-3 border-b border-border shrink-0'>
             <div className='min-w-0'>
               <h3 className='text-sm font-medium text-foreground mb-0.5'>
                 Automatic ETA management
               </h3>
-              <p className='text-xs text-muted-foreground leading-[1.5]'>
+              <p className='text-xs text-muted-foreground leading-normal'>
                 Extend the ticket due date automatically when a stage forecast runs later than the
                 current commitment. Never shortens an existing due date. Changes apply to tickets on
                 their next stage move or estimate change, not retroactively.
@@ -542,11 +542,11 @@ const BoardRolesConfigScreen = ({
         )}
 
         {boardType === BoardType.NON_LINEAR && (
-          <div className='px-4 py-3 border-b border-border flex-shrink-0'>
+          <div className='px-4 py-3 border-b border-border shrink-0'>
             <div className='flex items-start justify-between gap-4 mb-3'>
               <div className='min-w-0'>
                 <h3 className='text-sm font-medium text-foreground mb-0.5'>Standard Path</h3>
-                <p className='text-xs text-muted-foreground leading-[1.5]'>
+                <p className='text-xs text-muted-foreground leading-normal'>
                   An expected route through this board, used only to forecast ticket due dates - it
                   never restricts which stage moves are actually allowed. Must start with a
                   non-terminal stage, include a To Do/Started/Completed stage, and end Completed.

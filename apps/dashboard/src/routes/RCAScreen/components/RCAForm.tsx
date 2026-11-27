@@ -3,7 +3,6 @@ import { useForm, type Path, type PathValue } from 'react-hook-form';
 import { Button } from '../../../components/ui/Button';
 import Textarea from '../../../components/ui/Textarea';
 import { Combobox } from '../../../components/ui/Combobox/Combobox';
-import { cn } from '../../../utils/classNames';
 import { useZero } from '../../../hooks/useZero';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { toast } from 'sonner';
@@ -294,9 +293,9 @@ export const RCAForm = ({
 
   return (
     <div className='h-full overflow-y-auto'>
-      <div className='bg-background shadow-sm border border-border rounded-xl'>
+      <div className='bg-background shadow-xs border border-border rounded-xl'>
         {/* Header */}
-        <div className='px-8 py-6 border-b border-border bg-gradient-to-r from-muted/40 to-background'>
+        <div className='px-8 py-6 border-b border-border bg-linear-to-r from-muted/40 to-background'>
           <div className='flex items-center gap-3'>
             <div className='h-10 w-10 rounded-lg bg-blue-600 flex items-center justify-center'>
               <svg
@@ -361,7 +360,7 @@ export const RCAForm = ({
 
           {/* Title */}
           <div className='space-y-1.5'>
-            <label htmlFor='rca-title' className='text-sm font-medium text-foreground'>
+            <label htmlFor='rca-title' className='block text-sm font-medium text-foreground'>
               Title *
             </label>
             <input
@@ -374,14 +373,14 @@ export const RCAForm = ({
               data-track-name='RcaTitleInput'
               placeholder='Short RCA title...'
               readOnly={!isRcaEditable}
-              className='w-full px-3 py-2 border border-input rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-blue-500'
+              className='w-full px-3 py-2 border border-input rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-hidden focus:ring-2 focus:ring-blue-500'
             />
             {renderFieldError(getFieldError('title'), showErrors || isTouched('title'))}
           </div>
 
           {/* Summary */}
           <div className='space-y-1.5'>
-            <label htmlFor='rca-summary' className='text-sm font-medium text-foreground'>
+            <label htmlFor='rca-summary' className='block text-sm font-medium text-foreground'>
               Summary *
             </label>
             <Textarea
@@ -393,11 +392,6 @@ export const RCAForm = ({
               rows={3}
               readOnly={!isRcaEditable}
               aria-invalid={showErrors && !!getFieldError('summary')}
-              className={cn(
-                showErrors &&
-                  !!getFieldError('summary') &&
-                  'aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive',
-              )}
             />
             {renderFieldError(getFieldError('summary'), showErrors || isTouched('summary'))}
           </div>
@@ -405,7 +399,7 @@ export const RCAForm = ({
           {/* Root Cause & Severity */}
           <div className='grid grid-cols-1 md:grid-cols-2 gap-4'>
             <div className='space-y-1.5'>
-              <label htmlFor='rca-root-cause' className='text-sm font-medium text-foreground'>
+              <label htmlFor='rca-root-cause' className='block text-sm font-medium text-foreground'>
                 Root Cause *
               </label>
               <Textarea
@@ -417,17 +411,12 @@ export const RCAForm = ({
                 rows={4}
                 readOnly={!isRcaEditable}
                 aria-invalid={showErrors && !!getFieldError('rootCause')}
-                className={cn(
-                  showErrors &&
-                    !!getFieldError('rootCause') &&
-                    'aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive',
-                )}
               />
               {renderFieldError(getFieldError('rootCause'), showErrors || isTouched('rootCause'))}
             </div>
 
             <div className='space-y-1.5'>
-              <label htmlFor='rca-severity' className='text-sm font-medium text-foreground'>
+              <label htmlFor='rca-severity' className='block text-sm font-medium text-foreground'>
                 Severity *
               </label>
               <select
@@ -440,7 +429,7 @@ export const RCAForm = ({
                 data-track-category='RCA'
                 data-track-name='RcaSeveritySelect'
                 disabled={!isRcaEditable}
-                className='w-full px-3 py-2 border border-input rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background'
+                className='w-full px-3 py-2 border border-input rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500 bg-background'
               >
                 {severityOptions.map(option => (
                   <option key={option.value} value={option.value}>
@@ -455,7 +444,7 @@ export const RCAForm = ({
           {/* Bug Type & Category */}
           <div className='grid grid-cols-1 md:grid-cols-2 gap-4'>
             <div className='space-y-1.5'>
-              <label htmlFor='rca-bug-type' className='text-sm font-medium text-foreground'>
+              <label htmlFor='rca-bug-type' className='block text-sm font-medium text-foreground'>
                 Bug Type *
               </label>
               <select
@@ -466,7 +455,7 @@ export const RCAForm = ({
                 data-track-category='RCA'
                 data-track-name='RcaBugTypeSelect'
                 disabled={!isRcaEditable}
-                className='w-full px-3 py-2 border border-input rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background'
+                className='w-full px-3 py-2 border border-input rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500 bg-background'
               >
                 <option value=''>Select bug type</option>
                 {bugTypeOptions.map(option => (
@@ -480,7 +469,10 @@ export const RCAForm = ({
 
             {formValues.bugType && bugTypeValue !== 'ui_ux' && (
               <div className='space-y-1.5'>
-                <label htmlFor='rca-category-type' className='text-sm font-medium text-foreground'>
+                <label
+                  htmlFor='rca-category-type'
+                  className='block text-sm font-medium text-foreground'
+                >
                   Category Type *
                 </label>
                 <select
@@ -491,7 +483,7 @@ export const RCAForm = ({
                   data-track-category='RCA'
                   data-track-name='RcaCategoryTypeSelect'
                   disabled={!isRcaEditable}
-                  className='w-full px-3 py-2 border border-input rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background'
+                  className='w-full px-3 py-2 border border-input rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500 bg-background'
                 >
                   <option value=''>Select category</option>
                   {filteredCategories.map(option => (
@@ -509,7 +501,10 @@ export const RCAForm = ({
           {showIssueCategory && (
             <div className='grid grid-cols-1 md:grid-cols-2 gap-4'>
               <div className='space-y-1.5'>
-                <label htmlFor='rca-issue-category' className='text-sm font-medium text-foreground'>
+                <label
+                  htmlFor='rca-issue-category'
+                  className='block text-sm font-medium text-foreground'
+                >
                   Issue Category *
                 </label>
                 <select
@@ -520,7 +515,7 @@ export const RCAForm = ({
                   data-track-category='RCA'
                   data-track-name='RcaIssueCategorySelect'
                   disabled={!isRcaEditable}
-                  className='w-full px-3 py-2 border border-input rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background'
+                  className='w-full px-3 py-2 border border-input rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500 bg-background'
                 >
                   <option value=''>Select issue category</option>
                   {filteredIssueCategoryOptions.map(option => (
@@ -542,7 +537,10 @@ export const RCAForm = ({
           {/* Issue Start Time */}
           <div className='grid grid-cols-1 md:grid-cols-3 gap-4'>
             <div className='space-y-1.5'>
-              <label htmlFor='rca-issue-start' className='text-sm font-medium text-foreground'>
+              <label
+                htmlFor='rca-issue-start'
+                className='block text-sm font-medium text-foreground'
+              >
                 Issue Start Time *
               </label>
               <input
@@ -553,13 +551,13 @@ export const RCAForm = ({
                 data-track-category='RCA'
                 data-track-name='RcaIssueStartInput'
                 disabled={!isRcaEditable}
-                className='w-full px-3 py-2 border border-input rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-background'
+                className='w-full px-3 py-2 border border-input rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500 bg-background'
               />
             </div>
           </div>
 
           {/* Footer */}
-          <div className='sticky bottom-0 -mx-8 -mb-8 p-4 bg-background/95 backdrop-blur border-t border-border flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3'>
+          <div className='sticky bottom-0 -mx-8 -mb-8 p-4 bg-background/95 backdrop-blur-sm border-t border-border flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3'>
             <div className='text-xs text-muted-foreground'>
               Created {formatDate(selectedRecord.createdAt)} - Updated{' '}
               {formatDate(selectedRecord.updatedAt)}

@@ -498,7 +498,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
             {barDrag && (
               <DragableSixDots
                 aria-hidden
-                className='size-3.5 shrink-0 opacity-0 transition-opacity duration-150 ease-out [@media(hover:hover)_and_(pointer:fine)]:group-data-[highlighted]/row:opacity-40'
+                className='size-3.5 shrink-0 opacity-0 transition-opacity duration-150 ease-out [@media(hover:hover)_and_(pointer:fine)]:group-data-highlighted/row:opacity-40'
               />
             )}
           </span>
@@ -533,7 +533,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
       sideOffset={8}
       collisionPadding={16}
       avoidCollisions={true}
-      className='z-[60] bg-popover rounded-lg shadow-md p-0'
+      className='z-60 bg-popover rounded-lg shadow-md p-0'
     >
       <div className='w-[320px]'>
         <FrequentEmojiRow onSelect={applyReaction} messageId={messageId} />
@@ -574,7 +574,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
         <span
           data-bar-gap=''
           aria-hidden
-          className='pointer-events-none absolute left-0 top-1 size-7 rounded-md border-[1.5px] border-dashed border-foreground/15 bg-foreground/[0.02] opacity-0'
+          className='pointer-events-none absolute left-0 top-1 size-7 rounded-md border-[1.5px] border-dashed border-foreground/15 bg-foreground/2 opacity-0'
         />
       )}
 
@@ -604,7 +604,7 @@ export const HoverActionsToolbar: React.FC<HoverActionsToolbarProps> = ({
               className={
                 compact
                   ? 'size-7 rounded-md text-muted-foreground hover:text-foreground'
-                  : 'size-7 text-muted-foreground data-[drop-target]:scale-110 data-[drop-target]:bg-accent data-[drop-target]:text-foreground'
+                  : 'size-7 text-muted-foreground data-drop-target:scale-110 data-drop-target:bg-accent data-drop-target:text-foreground'
               }
               title='More actions'
               aria-label='More actions'

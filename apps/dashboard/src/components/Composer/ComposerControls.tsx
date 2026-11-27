@@ -72,9 +72,9 @@ import { AUTO_MODEL_DESCRIPTION, fitCount } from './Composer.utils';
 
 /** Menus share one surface so the +, model and agent menus read as one family. */
 export const MENU_SURFACE =
-  'z-[60] rounded-[18px] border border-border/70 bg-popover p-1.5 text-popover-foreground shadow-[0_12px_36px_-12px_rgba(0,0,0,0.22)] outline-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[side=top]:slide-in-from-bottom-1 data-[side=bottom]:slide-in-from-top-1 data-[side=right]:slide-in-from-left-1 data-[side=left]:slide-in-from-right-1';
+  'z-60 rounded-[18px] border border-border/70 bg-popover p-1.5 text-popover-foreground shadow-[0_12px_36px_-12px_rgba(0,0,0,0.22)] outline-hidden data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[side=top]:slide-in-from-bottom-1 data-[side=bottom]:slide-in-from-top-1 data-[side=right]:slide-in-from-left-1 data-[side=left]:slide-in-from-right-1';
 export const MENU_ROW =
-  'flex h-9 w-full cursor-pointer select-none items-center gap-3 rounded-[10px] px-2.5 text-left text-sm text-foreground outline-none transition-colors data-[highlighted]:bg-accent data-[state=open]:bg-accent data-[disabled]:cursor-not-allowed data-[disabled]:opacity-50';
+  'flex h-9 w-full cursor-pointer select-none items-center gap-3 rounded-[10px] px-2.5 text-left text-sm text-foreground outline-hidden transition-colors data-highlighted:bg-accent data-[state=open]:bg-accent data-disabled:cursor-not-allowed data-disabled:opacity-50';
 export const MENU_ICON = 'size-[18px] shrink-0 text-muted-foreground';
 export const MENU_SEPARATOR = 'mx-2.5 my-1.5 h-px bg-border/70';
 
@@ -168,7 +168,7 @@ const MenuSwitch = ({ checked }: { checked: boolean }): ReactElement => (
   >
     <span
       className={cn(
-        'size-3.5 rounded-full bg-background shadow-sm transition-transform',
+        'size-3.5 rounded-full bg-background shadow-xs transition-transform',
         checked && 'translate-x-3.5',
       )}
     />
@@ -819,7 +819,7 @@ export function ModeChips({
           aria-label={`${mode.label} is on. Turn off`}
           title={`${mode.label} is on — click to turn off`}
           className={cn(
-            'group/mode inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full bg-[var(--mention-bg)] text-sm text-[color:var(--mention-color)]',
+            'group/mode inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full bg-(--mention-bg) text-sm text-(--mention-color)',
             compact ? 'w-8 justify-center' : 'pl-2 pr-2.5',
           )}
           data-track-category='XyneAI'
@@ -921,7 +921,7 @@ function ThinkingSlider({
       // No row highlight: the thumb shows focus instead.
       className={cn(
         MENU_ROW,
-        'group/thinking h-auto cursor-default flex-col items-stretch gap-0 pb-3 pt-2 data-[highlighted]:bg-transparent',
+        'group/thinking h-auto cursor-default flex-col items-stretch gap-0 pb-3 pt-2 data-highlighted:bg-transparent',
       )}
       data-track-category='XyneAI'
       data-track-name='SELECT_THINKING_LEVEL'
@@ -970,8 +970,8 @@ function ThinkingSlider({
         <span
           aria-hidden
           className={cn(
-            'absolute top-1/2 size-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 bg-background shadow-sm transition-[left,border-color,box-shadow] duration-200 ease-out motion-reduce:transition-none',
-            'group-data-[highlighted]/thinking:ring-4 group-data-[highlighted]/thinking:ring-foreground/10',
+            'absolute top-1/2 size-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 bg-background shadow-xs transition-[left,border-color,box-shadow] duration-200 ease-out motion-reduce:transition-none',
+            'group-data-highlighted/thinking:ring-4 group-data-highlighted/thinking:ring-foreground/10',
             isAuto ? 'border-muted-foreground/40' : 'border-foreground',
           )}
           style={{ left: stopAt(fraction) }}
@@ -1153,7 +1153,7 @@ export function ModelMenu({
                       }
                     }}
                     placeholder='Search...'
-                    className='mb-1 h-9 w-full bg-transparent px-2.5 text-sm outline-none placeholder:text-muted-foreground'
+                    className='mb-1 h-9 w-full bg-transparent px-2.5 text-sm outline-hidden placeholder:text-muted-foreground'
                     data-track-category='XyneAI'
                     data-track-name='SEARCH_MODELS'
                   />
@@ -1361,7 +1361,7 @@ export function AgentsSubmenu({ agent }: { agent: ComposerAgentControl }): React
                   }
                 }}
                 placeholder='Search agents'
-                className='h-9 min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground'
+                className='h-9 min-w-0 flex-1 bg-transparent text-sm outline-hidden placeholder:text-muted-foreground'
                 data-track-category='XyneAI'
                 data-track-name='SearchAgentSelector'
               />
@@ -1510,7 +1510,7 @@ export function AgentPicker({
               value={query}
               onValueChange={setQuery}
               placeholder='Search agents'
-              className='h-11 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground'
+              className='h-11 flex-1 bg-transparent text-sm outline-hidden placeholder:text-muted-foreground'
               data-track-category='XyneAI'
               data-track-name='SearchAgentSelector'
             />

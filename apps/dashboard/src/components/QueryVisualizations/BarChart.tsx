@@ -76,8 +76,8 @@ export const BarChart: React.FC<BarChartProps> = ({
   return (
     <div
       className={cn(
-        'rounded-xl border border-border/40 bg-gradient-to-br from-background via-background/90 to-background/80 p-6',
-        'shadow-lg hover:shadow-xl transition-all duration-300 overflow-hidden backdrop-blur-sm',
+        'rounded-xl border border-border/40 bg-linear-to-br from-background via-background/90 to-background/80 p-6',
+        'shadow-lg hover:shadow-xl transition-all duration-300 overflow-hidden backdrop-blur-xs',
         fillHeight && 'h-full flex flex-col',
         className,
       )}
@@ -85,7 +85,7 @@ export const BarChart: React.FC<BarChartProps> = ({
       {(title || queryLabel) && (
         <div className='mb-4 pb-4 border-b border-border/30 shrink-0'>
           {title && (
-            <h3 className='text-base font-bold bg-gradient-to-r from-foreground to-foreground/80 bg-clip-text text-transparent truncate'>
+            <h3 className='text-base font-bold bg-linear-to-r from-foreground to-foreground/80 bg-clip-text text-transparent truncate'>
               {title}
             </h3>
           )}
@@ -106,7 +106,7 @@ export const BarChart: React.FC<BarChartProps> = ({
             {[0, 0.25, 0.5, 0.75, 1].map((_, i) => (
               <div
                 key={i}
-                className='w-full h-px bg-gradient-to-r from-border/30 via-border/20 to-transparent'
+                className='w-full h-px bg-linear-to-r from-border/30 via-border/20 to-transparent'
               />
             ))}
           </div>
@@ -153,7 +153,7 @@ export const BarChart: React.FC<BarChartProps> = ({
                       boxShadow: `0 4px 12px ${color}40`,
                     }}
                   >
-                    <div className='absolute bottom-full left-1/2 -translate-x-1/2 mb-3 px-3 py-2 bg-gradient-to-r from-gray-900 to-gray-800 dark:from-gray-700 dark:to-gray-600 text-white text-xs font-semibold rounded-lg whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity z-10 pointer-events-none shadow-lg'>
+                    <div className='absolute bottom-full left-1/2 -translate-x-1/2 mb-3 px-3 py-2 bg-linear-to-r from-gray-900 to-gray-800 dark:from-gray-700 dark:to-gray-600 text-white text-xs font-semibold rounded-lg whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity z-10 pointer-events-none shadow-lg'>
                       {item.value}
                     </div>
                   </div>

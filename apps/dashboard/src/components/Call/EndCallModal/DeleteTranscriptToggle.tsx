@@ -37,7 +37,7 @@ export function DeleteTranscriptToggle({
           data-testid='delete-transcript-toggle'
           data-track-category='CALLS'
           data-track-name='DELETE_TRANSCRIPT_TOGGLE'
-          className='mt-0.5 h-4 w-4 flex-shrink-0 accent-[var(--destructive)]'
+          className='mt-0.5 h-4 w-4 shrink-0 accent-(--destructive)'
         />
       </div>
       {error && <p className='mt-2 text-xs text-destructive'>{error}</p>}

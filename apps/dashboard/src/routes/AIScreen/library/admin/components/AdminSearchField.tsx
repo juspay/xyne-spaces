@@ -22,7 +22,7 @@ export function AdminSearchField({
   return (
     <div
       className={cn(
-        'flex min-w-[12rem] items-center gap-2 border-b border-border pb-1 pt-1 focus-within:border-foreground',
+        'flex min-w-48 items-center gap-2 border-b border-border pb-1 pt-1 focus-within:border-foreground',
         className,
       )}
     >
@@ -44,7 +44,7 @@ export function AdminSearchField({
         data-bwignore='true'
         data-track-category={trackCategory}
         data-track-name={trackName}
-        className='h-7 w-full border-0 bg-transparent p-0 text-sm text-foreground outline-none placeholder:text-muted-foreground'
+        className='h-7 w-full border-0 bg-transparent p-0 text-sm text-foreground outline-hidden placeholder:text-muted-foreground'
       />
       {value && (
         <button

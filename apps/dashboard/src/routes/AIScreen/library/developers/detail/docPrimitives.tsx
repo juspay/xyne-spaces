@@ -171,7 +171,7 @@ export function Tabs<T extends string>({
             className={cn(
               'h-7 rounded-lg px-3 text-xs font-medium transition-colors',
               active === option
-                ? 'bg-card text-foreground shadow-sm'
+                ? 'bg-card text-foreground shadow-xs'
                 : 'text-muted-foreground hover:text-foreground',
             )}
           >

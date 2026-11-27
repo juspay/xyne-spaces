@@ -34,12 +34,12 @@ export function AgentColorRow({ color, onChange }: AgentColorRowProps): ReactEle
             data-track-category='Claw Agents'
             data-track-name='Create agent v2: pick color'
             className={cn(
-              'flex size-6 shrink-0 items-center justify-center rounded-full text-white transition-all duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
+              'flex size-6 shrink-0 items-center justify-center rounded-full text-white transition-all duration-150 focus:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2',
               !selected && 'opacity-80 hover:scale-110 hover:opacity-100',
             )}
             style={{ backgroundColor: value, boxShadow: haloFor(value, selected) }}
           >
-            {selected && <CheckTickSingle className='size-3 drop-shadow-sm' aria-hidden />}
+            {selected && <CheckTickSingle className='size-3 drop-shadow-xs' aria-hidden />}
           </button>
         );
       })}

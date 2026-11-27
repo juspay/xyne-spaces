@@ -191,7 +191,7 @@ const MobileChatDirectory = ({
                       <DropdownMenuTrigger asChild>
                         <button
                           aria-label='Sort channels'
-                          className='text-muted-foreground hover:text-foreground transition-colors focus:outline-none'
+                          className='text-muted-foreground hover:text-foreground transition-colors focus:outline-hidden'
                           onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
                             e.preventDefault();
                             e.stopPropagation();

@@ -326,7 +326,7 @@ export const FileViewerPanel: React.FC<{
       {/* Two-row toolbar, mirroring KnowledgeBaseV2Screen's header/breadcrumbRow
           split: an actions row (Ask AI / Vespa / Share / Download) with the
           divider, then a nav row below it (back / filename · meta). */}
-      <div className='flex flex-shrink-0 items-center justify-end gap-2 border-b border-border bg-background px-5 py-2.5'>
+      <div className='flex shrink-0 items-center justify-end gap-2 border-b border-border bg-background px-5 py-2.5'>
         {onOpenChat && (
           <Tooltip content='Ask AI about this file' side='bottom'>
             <button
@@ -335,7 +335,7 @@ export const FileViewerPanel: React.FC<{
               aria-label='Ask AI'
               data-track-category='knowledge-base'
               data-track-name='file-viewer-open-ai-chat'
-              className='inline-flex h-10 w-10 items-center justify-center rounded-full border border-border bg-background text-foreground shadow-sm transition hover:bg-muted'
+              className='inline-flex h-10 w-10 items-center justify-center rounded-full border border-border bg-background text-foreground shadow-xs transition hover:bg-muted'
             >
               <XyneAIStar size={22} />
             </button>
@@ -395,7 +395,7 @@ export const FileViewerPanel: React.FC<{
           onClick={handleBackNavigation}
           aria-label='Back'
           title='Back'
-          className='grid h-7 w-7 flex-shrink-0 place-items-center rounded-md text-muted-foreground transition hover:bg-secondary hover:text-foreground'
+          className='grid h-7 w-7 shrink-0 place-items-center rounded-md text-muted-foreground transition hover:bg-secondary hover:text-foreground'
           data-track-category='knowledge-base'
           data-track-name='file-viewer-back'
         >
@@ -406,7 +406,7 @@ export const FileViewerPanel: React.FC<{
           <span className='truncate text-[13.5px] font-medium text-foreground' title={file.name}>
             {file.name}
           </span>
-          <span className='flex-shrink-0 text-[12px] text-muted-foreground'>
+          <span className='shrink-0 text-[12px] text-muted-foreground'>
             {extLabel(file.name)} · {formatBytes(file.size)}
           </span>
         </div>
@@ -416,10 +416,10 @@ export const FileViewerPanel: React.FC<{
         <div className='min-w-0 flex-1 overflow-auto'>{renderContent()}</div>
         {vespaInspectorOpen && fileId && (
           <aside
-            className='flex h-full w-[420px] max-w-[45vw] flex-shrink-0 flex-col border-l border-border bg-background'
+            className='flex h-full w-[420px] max-w-[45vw] shrink-0 flex-col border-l border-border bg-background'
             aria-label='Vespa document inspector'
           >
-            <div className='flex h-10 flex-shrink-0 items-center gap-2 border-b border-border px-3'>
+            <div className='flex h-10 shrink-0 items-center gap-2 border-b border-border px-3'>
               <Database className='h-4 w-4 text-muted-foreground' aria-hidden strokeWidth={1.75} />
               <div className='min-w-0 flex-1'>
                 <p className='truncate text-[13px] font-medium text-foreground'>Vespa document</p>

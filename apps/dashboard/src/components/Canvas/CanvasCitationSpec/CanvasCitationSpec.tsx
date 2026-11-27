@@ -59,7 +59,7 @@ const PILL_CLASS =
   'xyne-canvas-citation pointer-events-auto inline-flex items-center align-middle whitespace-nowrap ' +
   'mx-[2px] rounded-[5px] border border-orange-200 bg-orange-50 px-1.5 py-0.5 text-[11px] ' +
   'font-semibold leading-none text-orange-700 transition-colors hover:border-orange-300 hover:bg-orange-100 ' +
-  'hover:text-orange-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-300 ' +
+  'hover:text-orange-800 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-orange-300 ' +
   'dark:border-orange-400/40 dark:bg-orange-400/10 dark:text-orange-200 dark:hover:bg-orange-400/20 ' +
   'cursor-pointer select-none';
 

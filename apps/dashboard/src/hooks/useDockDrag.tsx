@@ -358,7 +358,7 @@ const DockLayer = <S extends DockSession>({
   const session = React.useSyncExternalStore(store.subscribe, store.get);
   if (!session) return null;
   return createPortal(
-    <div ref={layerRef} aria-hidden className='pointer-events-none fixed left-0 top-0 z-[70]'>
+    <div ref={layerRef} aria-hidden className='pointer-events-none fixed left-0 top-0 z-70'>
       <DockChip
         session={session}
         values={values}

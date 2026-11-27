@@ -140,7 +140,7 @@ export function VisibilityTab({
 
       {hasMaxWorkload && (
         <div className='rounded-2xl border border-border bg-card p-4'>
-          <p className='text-[13px] leading-[1.5] text-foreground'>
+          <p className='text-[13px] leading-normal text-foreground'>
             Max workload: <span className='font-medium'>{maxWorkload}</span>. Members at or above
             this weighted load won&apos;t receive new tickets. If everyone is at capacity, no one is
             assigned.
@@ -235,7 +235,7 @@ export function VisibilityTab({
       </div>
 
       <div className='rounded-2xl border border-border bg-muted/40 p-4'>
-        <p className='text-[13px] leading-[1.5] text-muted-foreground'>
+        <p className='text-[13px] leading-normal text-muted-foreground'>
           Lower score is assigned first. Numbers reflect the last synced workload the engine scores
           on. Scores shown here are shifted so the lowest reads as 0 — this is display-only and
           doesn&apos;t change the actual assignment math or ordering. A Cold-Start Offset appears

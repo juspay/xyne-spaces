@@ -35,7 +35,7 @@ export function RecapCardsList({
   return (
     <div className={cn('relative', className)}>
       {showFades && showTopFade && (
-        <div className='absolute top-0 inset-x-0 h-8 bg-gradient-to-b from-background to-transparent pointer-events-none z-10' />
+        <div className='absolute top-0 inset-x-0 h-8 bg-linear-to-b from-background to-transparent pointer-events-none z-10' />
       )}
       <div
         ref={scrollRef}
@@ -53,7 +53,7 @@ export function RecapCardsList({
                 #{card.channelName}
               </p>
               {card.summary[0] && (
-                <p className='text-[12.5px] leading-[1.5] text-muted-foreground/80 line-clamp-2'>
+                <p className='text-[12.5px] leading-normal text-muted-foreground/80 line-clamp-2'>
                   {card.summary[0]}
                 </p>
               )}
@@ -72,7 +72,7 @@ export function RecapCardsList({
         ))}
       </div>
       {showFades && showBottomFade && (
-        <div className='absolute bottom-0 inset-x-0 h-8 bg-gradient-to-t from-background to-transparent pointer-events-none z-10' />
+        <div className='absolute bottom-0 inset-x-0 h-8 bg-linear-to-t from-background to-transparent pointer-events-none z-10' />
       )}
     </div>
   );

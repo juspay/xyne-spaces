@@ -85,7 +85,7 @@ export const McpDefinitionDialog = ({
         value={patch[key] ?? ''}
         placeholder={placeholder}
         onChange={(e): void => setPatch(prev => ({ ...prev, [key]: e.target.value }))}
-        className='h-10 w-full rounded-lg border border-border bg-background px-3 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-primary'
+        className='h-10 w-full rounded-lg border border-border bg-background px-3 text-sm text-foreground outline-hidden transition-colors placeholder:text-muted-foreground focus:border-primary'
         data-testid={`mcp-def-${key}`}
         data-track-category='Claw MCP'
         data-track-name='EditMcpDefinitionField'

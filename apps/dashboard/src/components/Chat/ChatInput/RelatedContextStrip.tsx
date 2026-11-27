@@ -46,7 +46,7 @@ const EDGE_FADE_PX = 24;
 function ChipWhere({ item }: { item: RelatedItem }): ReactElement {
   // Capped and cut with an ellipsis, so a long canvas or ticket title can't stretch
   // the chip; the hover preview has the whole name.
-  return <span className='min-w-0 max-w-[12rem] truncate'>{useWhereOf(item)}</span>;
+  return <span className='min-w-0 max-w-48 truncate'>{useWhereOf(item)}</span>;
 }
 
 function Preview({ item }: { item: RelatedItem }): ReactElement {
@@ -264,7 +264,7 @@ export function RelatedContextStrip({
                               <button
                                 type='button'
                                 onClick={event => onOpen(item, event)}
-                                className='group flex h-6 max-w-[20rem] items-center gap-1 rounded-[6px] bg-activity-chip px-1.5 text-xs leading-none text-muted-foreground transition-colors duration-150 hover:bg-activity-chip-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.98]'
+                                className='group flex h-6 max-w-[20rem] items-center gap-1 rounded-[6px] bg-activity-chip px-1.5 text-xs leading-none text-muted-foreground transition-colors duration-150 hover:bg-activity-chip-hover hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring active:scale-[0.98]'
                                 data-track-category='CHAT_INPUT'
                                 data-track-name='RELATED_CONTEXT_OPEN'
                                 data-track-label={item.label}
@@ -302,7 +302,7 @@ export function RelatedContextStrip({
                 <button
                   type='button'
                   onClick={onDismiss}
-                  className='shrink-0 rounded-[6px] p-1 text-muted-foreground transition-colors duration-150 hover:bg-activity-chip-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+                  className='shrink-0 rounded-[6px] p-1 text-muted-foreground transition-colors duration-150 hover:bg-activity-chip-hover hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring'
                   aria-label='Hide related conversations'
                   data-track-category='CHAT_INPUT'
                   data-track-name='RELATED_CONTEXT_DISMISS'

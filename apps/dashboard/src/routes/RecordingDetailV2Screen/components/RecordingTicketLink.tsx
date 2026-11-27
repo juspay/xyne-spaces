@@ -30,7 +30,7 @@ const TICKET_SEARCH_LIMIT = 20;
 
 /** Matches the header's other pills (date, labels, share). */
 const CHIP_CLASS_NAME =
-  'inline-flex h-6 items-center gap-1.5 rounded-lg border border-border bg-background px-2 text-xs font-normal text-foreground shadow-xs';
+  'inline-flex h-6 items-center gap-1.5 rounded-lg border border-border bg-background px-2 text-xs font-normal text-foreground ';
 
 /**
  * Links a recording to exactly one ticket. `EntitySelector`'s `selectedValue` is a

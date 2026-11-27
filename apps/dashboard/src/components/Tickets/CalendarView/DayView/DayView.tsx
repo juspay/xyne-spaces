@@ -18,7 +18,7 @@ export function DayView({ currentDate, tickets, onTicketClick }: DayViewProps): 
         {/* Day Header */}
         <div className='mb-6 flex items-center justify-between'>
           <div className='flex items-center gap-3'>
-            <div className='w-12 h-12 rounded-xl bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-100 flex items-center justify-center'>
+            <div className='w-12 h-12 rounded-xl bg-linear-to-br from-blue-50 to-indigo-50 border border-blue-100 flex items-center justify-center'>
               <Calendar className='w-6 h-6 text-blue-500' />
             </div>
             <div>
@@ -41,7 +41,7 @@ export function DayView({ currentDate, tickets, onTicketClick }: DayViewProps): 
 
         {/* Tickets List */}
         {dayTickets.length > 0 ? (
-          <div className='bg-background rounded-xl border border-border shadow-sm overflow-hidden'>
+          <div className='bg-background rounded-xl border border-border shadow-xs overflow-hidden'>
             <div className='px-6 py-4 bg-muted border-b border-border'>
               <h3 className='text-sm font-semibold text-foreground uppercase tracking-wide'>
                 {noun.pluralTitle}

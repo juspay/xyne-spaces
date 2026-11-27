@@ -28,7 +28,7 @@ export function IncomingCallDevHarness(): ReactElement | null {
           exercising the accept/reject flow, which needs the real container. */}
       <IncomingCallCard vm={fixture.vm} onAccept={noop} onReject={noop} />
 
-      <div className='fixed bottom-4 left-1/2 z-[60] flex max-w-[calc(100vw-32px)] -translate-x-1/2 flex-col gap-2 rounded-xl bg-popover p-3 text-popover-foreground shadow-lg ring-1 ring-border'>
+      <div className='fixed bottom-4 left-1/2 z-60 flex max-w-[calc(100vw-32px)] -translate-x-1/2 flex-col gap-2 rounded-xl bg-popover p-3 text-popover-foreground shadow-lg ring-1 ring-border'>
         <div className='flex flex-wrap justify-center gap-1'>
           {INCOMING_CALL_FIXTURES.map(f => (
             <button

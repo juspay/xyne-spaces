@@ -1221,7 +1221,7 @@ const RadarPanel = (): ReactElement => {
       <div
         key={key}
         className={cn(
-          'relative group/card rounded-2xl border border-border bg-card text-card-foreground border-l-[3px] border-l-[#e8604c] shadow-sm',
+          'relative group/card rounded-2xl border border-border bg-card text-card-foreground border-l-[3px] border-l-[#e8604c] shadow-xs',
           !multi && 'cursor-pointer',
         )}
         {...(multi
@@ -1798,7 +1798,7 @@ const RadarPanel = (): ReactElement => {
       </div>
       <ul className='mt-1 space-y-1'>
         {trail.checks.map((c, i) => (
-          <li key={`${c.sourceMessageId}-${i}`} className='break-words'>
+          <li key={`${c.sourceMessageId}-${i}`} className='wrap-break-word'>
             <span className='text-foreground'>“{c.title}”</span>
             {c.itemTitle ? (
               <span className='text-muted-foreground'> ~ “{c.itemTitle}”</span>
@@ -1851,10 +1851,10 @@ const RadarPanel = (): ReactElement => {
           <div className='text-[10px] font-bold uppercase tracking-wide text-[#e8604c]'>
             Model&apos;s read
           </div>
-          <div className='mt-0.5 text-foreground break-words'>{run.assessment}</div>
+          <div className='mt-0.5 text-foreground wrap-break-word'>{run.assessment}</div>
         </div>
       )}
-      {run.error && <div className='mt-1.5 text-red-500 break-words'>{run.error}</div>}
+      {run.error && <div className='mt-1.5 text-red-500 wrap-break-word'>{run.error}</div>}
       {run.dedupChecks && run.dedupChecks.checks.length > 0 && dedupSection(run.dedupChecks)}
       {opCount(run.droppedOps) > 0 && (
         <div className='mt-1.5 px-2 py-1.5 rounded-lg bg-red-500/5 text-red-600'>
@@ -2251,7 +2251,7 @@ const RadarPanel = (): ReactElement => {
             single row it says nothing the row itself does not. */}
             {visible.length > 1 && (mode === 'include' || selected.size > 0) && (
               <button
-                className='w-full flex items-center gap-3 px-3 py-2 text-sm font-semibold hover:bg-accent focus:outline-none focus-visible:bg-accent'
+                className='w-full flex items-center gap-3 px-3 py-2 text-sm font-semibold hover:bg-accent focus:outline-hidden focus-visible:bg-accent'
                 data-track-category='RADAR'
                 data-track-name='FILTER_PENDING_SELECT_ALL'
                 onClick={() => {
@@ -2285,7 +2285,7 @@ const RadarPanel = (): ReactElement => {
             the tick column left of the unscrolled rows above it. Hiding it
             keeps one control column; the clipped fourth row is the affordance
             that there is more. */}
-            <div className='max-h-32 overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden'>
+            <div className='max-h-32 overflow-y-auto scrollbar-none [&::-webkit-scrollbar]:hidden'>
               {visible.length === 0 && (
                 <div className='px-3 py-2 text-xs text-muted-foreground'>
                   {query
@@ -2308,7 +2308,7 @@ const RadarPanel = (): ReactElement => {
                       lockedTeam ? `On ${lockedTeam} — untick the team to remove them` : undefined
                     }
                     className={cn(
-                      'group/member w-full flex items-center gap-2.5 px-3 py-2 text-sm hover:bg-accent focus:outline-none focus-visible:bg-accent',
+                      'group/member w-full flex items-center gap-2.5 px-3 py-2 text-sm hover:bg-accent focus:outline-hidden focus-visible:bg-accent',
                       lockedTeam && 'cursor-not-allowed',
                     )}
                     data-track-category='RADAR'
@@ -2402,7 +2402,7 @@ const RadarPanel = (): ReactElement => {
         disabled={full}
         title={full ? `At most ${MAX_TEAM_MEMBERS} members` : undefined}
         className={cn(
-          'w-full flex items-center gap-2.5 px-3 py-2 text-sm hover:bg-accent focus:outline-none focus-visible:bg-accent',
+          'w-full flex items-center gap-2.5 px-3 py-2 text-sm hover:bg-accent focus:outline-hidden focus-visible:bg-accent',
           full && 'opacity-50 cursor-not-allowed',
         )}
         data-track-category='RADAR'
@@ -2450,7 +2450,7 @@ const RadarPanel = (): ReactElement => {
         ].map(mode => (
           <button
             key={mode.id}
-            className='w-full flex items-center gap-3 px-3 py-2 text-sm hover:bg-accent focus:outline-none focus-visible:bg-accent'
+            className='w-full flex items-center gap-3 px-3 py-2 text-sm hover:bg-accent focus:outline-hidden focus-visible:bg-accent'
             data-track-category='RADAR'
             data-track-name='FILTER_OTHERS_MODE'
             onClick={() => setOthersMode(mode.id)}
@@ -2490,7 +2490,7 @@ const RadarPanel = (): ReactElement => {
         teams.map(team => (
           <button
             key={team.id}
-            className='w-full flex items-center gap-3 px-3 py-2 text-sm hover:bg-accent focus:outline-none focus-visible:bg-accent'
+            className='w-full flex items-center gap-3 px-3 py-2 text-sm hover:bg-accent focus:outline-hidden focus-visible:bg-accent'
             data-track-category='RADAR'
             data-track-name='FILTER_BY_TEAM'
             onClick={() =>
@@ -2920,7 +2920,7 @@ const RadarPanel = (): ReactElement => {
             {ruleValueOptions.map(option => (
               <button
                 key={option.value}
-                className='w-full flex items-center gap-3 px-3 py-2 text-sm text-left hover:bg-accent focus:outline-none focus-visible:bg-accent'
+                className='w-full flex items-center gap-3 px-3 py-2 text-sm text-left hover:bg-accent focus:outline-hidden focus-visible:bg-accent'
                 data-track-category='RADAR'
                 data-track-name='ADD_RULE_VALUE'
                 onClick={() => addRuleValues(option.values)}
@@ -3312,7 +3312,7 @@ const RadarPanel = (): ReactElement => {
           {railItem('time', 'Time', timeRange === 'any' ? 0 : 1)}
         </div>
 
-        <div className='flex-1 min-w-0 p-6 max-h-[38rem] overflow-y-auto'>
+        <div className='flex-1 min-w-0 p-6 max-h-152 overflow-y-auto'>
           {filterCategory === 'pending' &&
             (tab !== 'waiting' ? (
               // Pending me tab: the only thing left to narrow is who asked.

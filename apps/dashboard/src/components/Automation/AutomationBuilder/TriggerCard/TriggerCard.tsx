@@ -253,7 +253,7 @@ export function TriggerCard({
             className={cn(
               'flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs',
               'text-muted-foreground hover:text-foreground hover:bg-accent/40',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/40',
+              'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-foreground/40',
             )}
           >
             Change
@@ -305,7 +305,7 @@ function TriggerEmptyStateBody({
             className={cn(
               'inline-flex items-center gap-2 rounded-md bg-amber-500/10 px-3 py-1.5',
               'text-sm font-medium text-amber-700 dark:text-amber-400 hover:bg-amber-500/20 transition-colors',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/40',
+              'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-amber-500/40',
             )}
           >
             <Search className='size-4' aria-hidden='true' />
@@ -375,7 +375,7 @@ function TriggerPickerContent({
   return (
     <>
       <div className='flex items-center gap-2 border-b border-border px-3 py-2'>
-        <Search className='size-4 flex-shrink-0 text-muted-foreground' aria-hidden='true' />
+        <Search className='size-4 shrink-0 text-muted-foreground' aria-hidden='true' />
         <input
           ref={searchRef}
           type='search'
@@ -385,7 +385,7 @@ function TriggerPickerContent({
           placeholder='Search triggers…'
           data-track-category='automation-builder'
           data-track-name='trigger-picker-search'
-          className='flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground'
+          className='flex-1 bg-transparent text-sm outline-hidden placeholder:text-muted-foreground'
         />
       </div>
       <div className='flex-1 overflow-y-auto py-1'>
@@ -428,7 +428,7 @@ function TriggerPickerContent({
                   >
                     <span
                       className={cn(
-                        'flex size-6 flex-shrink-0 items-center justify-center rounded-md',
+                        'flex size-6 shrink-0 items-center justify-center rounded-md',
                         style.iconTint,
                       )}
                     >

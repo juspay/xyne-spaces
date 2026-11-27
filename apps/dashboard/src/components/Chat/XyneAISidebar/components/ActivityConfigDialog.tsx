@@ -81,7 +81,7 @@ export const ActivityConfigDialog = ({
   if (!isOpen) return null;
 
   return (
-    <div className='fixed inset-0 z-[60] flex items-center justify-center bg-black/50'>
+    <div className='fixed inset-0 z-60 flex items-center justify-center bg-black/50'>
       <div className='bg-popover rounded-lg shadow-lg w-full max-w-md mx-4 overflow-hidden'>
         {/* Header */}
         <div className='flex items-center justify-between px-4 py-3 border-b border-border'>
@@ -170,7 +170,7 @@ export const ActivityConfigDialog = ({
                     value={newEventName}
                     onChange={e => setNewEventName(e.target.value)}
                     placeholder='Enter display name'
-                    className='w-full px-3 py-2 bg-background border border-border rounded-lg text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/20 focus:border-ring transition-all'
+                    className='w-full px-3 py-2 bg-background border border-border rounded-lg text-sm text-foreground placeholder:text-muted-foreground focus:outline-hidden focus:ring-2 focus:ring-ring/20 focus:border-ring transition-all'
                   />
                 </div>
 
@@ -187,7 +187,7 @@ export const ActivityConfigDialog = ({
                     value={newEventCategory}
                     onChange={e => setNewEventCategory(e.target.value)}
                     placeholder='Enter display category'
-                    className='w-full px-3 py-2 bg-background border border-border rounded-lg text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/20 focus:border-ring transition-all'
+                    className='w-full px-3 py-2 bg-background border border-border rounded-lg text-sm text-foreground placeholder:text-muted-foreground focus:outline-hidden focus:ring-2 focus:ring-ring/20 focus:border-ring transition-all'
                   />
                 </div>
               </div>
@@ -195,7 +195,7 @@ export const ActivityConfigDialog = ({
               {/* Warning if updating existing alias */}
               {hasExistingAlias && (
                 <div className='flex items-start gap-2 p-3 bg-muted rounded-md border border-border'>
-                  <AlertTriangle className='w-4 h-4 text-status-pending mt-0.5 flex-shrink-0' />
+                  <AlertTriangle className='w-4 h-4 text-status-pending mt-0.5 shrink-0' />
                   <div className='text-sm text-status-pending'>
                     This will overwrite the existing alias. The new name will be shown for all
                     users.
@@ -227,7 +227,7 @@ export const ActivityConfigDialog = ({
             data-ph-capture-attribute-track-id='save_activity_config'
             data-track-category='XYNE_AI_SIDEBAR'
             data-track-name='SAVE_ACTIVITY_CONFIG'
-            className='px-4 py-2 text-sm font-medium text-action-primary-foreground bg-action-primary rounded-md hover:bg-action-primary/90 transition-colors'
+            className='px-4 py-2 text-sm font-medium text-action-primary-foreground bg-action-primary rounded-md transition-colors'
             type='button'
           >
             {hasExistingAlias ? 'Update' : 'Save'}

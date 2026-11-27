@@ -25,7 +25,7 @@ const SKILL_MD_NODE: SkillTreeFile = {
 };
 
 const Body = ({ children }: { children: string }): ReactElement => (
-  <p className='whitespace-pre-wrap break-words text-sm font-normal leading-5 tracking-[-0.28px] text-foreground'>
+  <p className='whitespace-pre-wrap wrap-break-word text-sm font-normal leading-5 tracking-[-0.28px] text-foreground'>
     {children}
   </p>
 );
@@ -82,7 +82,7 @@ export function SkillDetailPanel({
         <div className='flex w-full items-center justify-between gap-4'>
           <div className='flex min-w-0 items-center gap-2.5'>
             <span
-              className='flex size-11 shrink-0 items-center justify-center rounded-xl border border-border bg-card text-muted-foreground shadow-sm'
+              className='flex size-11 shrink-0 items-center justify-center rounded-xl border border-border bg-card text-muted-foreground shadow-xs'
               aria-hidden
             >
               <Staroflife className='size-6' />

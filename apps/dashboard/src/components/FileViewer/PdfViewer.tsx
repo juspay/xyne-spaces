@@ -483,9 +483,9 @@ export const PdfViewer: React.FC<BaseViewerProps> = ({
   return (
     <div className='relative w-full h-full flex flex-col bg-gray-100 dark:bg-[#1E1E1E]'>
       {/* Navigation / zoom toolbar */}
-      <div className='sticky top-0 bg-white dark:bg-[#1E1E1E] shadow-md z-10 p-4 pt-[65px] border-b border-gray-200 dark:border-gray-700 w-full flex-shrink-0'>
+      <div className='sticky top-0 bg-white dark:bg-[#1E1E1E] shadow-md z-10 p-4 pt-[65px] border-b border-gray-200 dark:border-gray-700 w-full shrink-0'>
         <div className='flex items-center justify-center'>
-          <div className='flex items-center bg-muted dark:bg-gray-700 rounded-lg px-4 py-2 shadow-sm'>
+          <div className='flex items-center bg-muted dark:bg-gray-700 rounded-lg px-4 py-2 shadow-xs'>
             {/* Previous page */}
             <button
               onClick={(): void => goToPage(currentPage - 1)}
@@ -529,7 +529,7 @@ export const PdfViewer: React.FC<BaseViewerProps> = ({
                 disabled={numPages === 0}
                 data-track-category='FileViewer'
                 data-track-name='SELECT_PDF_PAGE_INPUT'
-                className='w-16 px-2 py-1 text-sm text-center bg-background dark:bg-gray-600 border border-input dark:border-gray-500 rounded text-foreground dark:text-gray-200 focus:outline-none focus:border-muted-foreground dark:focus:border-muted-foreground'
+                className='w-16 px-2 py-1 text-sm text-center bg-background dark:bg-gray-600 border border-input dark:border-gray-500 rounded text-foreground dark:text-gray-200 focus:outline-hidden focus:border-muted-foreground dark:focus:border-muted-foreground'
               />
               <span className='text-sm text-muted-foreground dark:text-muted-foreground'>
                 of {numPages || '—'}
@@ -604,7 +604,7 @@ export const PdfViewer: React.FC<BaseViewerProps> = ({
       <div className='relative flex-1 min-h-0'>
         <div
           ref={containerRef}
-          className='absolute inset-0 overflow-auto [&_.pdfViewer]:min-w-full [&_.pdfViewer_.page]:!mx-auto'
+          className='absolute inset-0 overflow-auto [&_.pdfViewer]:min-w-full [&_.pdfViewer_.page]:mx-auto!'
         >
           <div ref={viewerInnerRef} className='pdfViewer' />
         </div>

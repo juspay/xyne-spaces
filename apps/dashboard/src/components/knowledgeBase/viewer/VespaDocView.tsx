@@ -103,7 +103,7 @@ function Section({
         className='flex w-full items-center gap-2 px-3 py-1.5 text-left transition hover:bg-secondary/50'
       >
         <ChevronRight
-          className={`h-3 w-3 flex-shrink-0 text-muted-foreground transition-transform ${open ? 'rotate-90' : ''}`}
+          className={`h-3 w-3 shrink-0 text-muted-foreground transition-transform ${open ? 'rotate-90' : ''}`}
           aria-hidden
           strokeWidth={2}
         />
@@ -139,7 +139,7 @@ function ChunkCards({ rows }: { rows: ChunkRow[] }): React.ReactElement {
             </span>
             {chunk.pages.length > 0 && <span>page {chunk.pages.join(', ')}</span>}
           </header>
-          <pre className='whitespace-pre-wrap break-words font-mono text-[11.5px] leading-relaxed text-foreground/85'>
+          <pre className='whitespace-pre-wrap wrap-break-word font-mono text-[11.5px] leading-relaxed text-foreground/85'>
             {chunk.text || '(empty)'}
           </pre>
         </article>
@@ -170,13 +170,15 @@ function ChunkMetaCards({ entries }: { entries: ChunkMeta[] }): React.ReactEleme
             {Array.isArray(entry.block_labels) && entry.block_labels.length > 0 && (
               <>
                 <dt className='text-muted-foreground'>block_labels</dt>
-                <dd className='break-words text-foreground/85'>{entry.block_labels.join(', ')}</dd>
+                <dd className='wrap-break-word text-foreground/85'>
+                  {entry.block_labels.join(', ')}
+                </dd>
               </>
             )}
             {Array.isArray(entry.headings) && entry.headings.length > 0 && (
               <>
                 <dt className='text-muted-foreground'>headings</dt>
-                <dd className='break-words text-foreground/85'>{entry.headings.join(' > ')}</dd>
+                <dd className='wrap-break-word text-foreground/85'>{entry.headings.join(' > ')}</dd>
               </>
             )}
             {typeof entry.bbox_l === 'number' &&
@@ -212,10 +214,8 @@ function StringList({ items }: { items: string[] }): React.ReactElement {
     <ol className='space-y-0.5 font-mono text-[11.5px] text-foreground/85'>
       {items.map((item, index) => (
         <li key={`${index}-${item.slice(0, 16)}`} className='flex items-baseline gap-2'>
-          <span className='flex-shrink-0 text-[10px] text-muted-foreground tabular-nums'>
-            {index}
-          </span>
-          <span className='break-words'>{item}</span>
+          <span className='shrink-0 text-[10px] text-muted-foreground tabular-nums'>{index}</span>
+          <span className='wrap-break-word'>{item}</span>
         </li>
       ))}
     </ol>
@@ -224,7 +224,7 @@ function StringList({ items }: { items: string[] }): React.ReactElement {
 
 function TextBlock({ text }: { text: string }): React.ReactElement {
   return (
-    <pre className='whitespace-pre-wrap break-words font-mono text-[11.5px] leading-relaxed text-foreground/85'>
+    <pre className='whitespace-pre-wrap wrap-break-word font-mono text-[11.5px] leading-relaxed text-foreground/85'>
       {text || '(empty)'}
     </pre>
   );
@@ -238,7 +238,7 @@ function JsonStringBlock({ value }: { value: string }): React.ReactElement {
     parsed = null;
   }
   return (
-    <pre className='max-h-96 overflow-auto whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-foreground/85'>
+    <pre className='max-h-96 overflow-auto whitespace-pre-wrap wrap-break-word font-mono text-[11px] leading-relaxed text-foreground/85'>
       {parsed === null ? value : stringify(parsed)}
     </pre>
   );
@@ -333,7 +333,7 @@ export const VespaDocView: React.FC<{ itemId: string; name: string }> = ({ itemI
         </div>
         <dl className='mt-1 grid grid-cols-1 gap-y-0.5 font-mono text-[10.5px]'>
           <div className='flex min-w-0 gap-1'>
-            <dt className='flex-shrink-0 text-muted-foreground'>docId</dt>
+            <dt className='shrink-0 text-muted-foreground'>docId</dt>
             <dd className='truncate text-foreground/85' title={doc.docId}>
               {doc.docId}
             </dd>
@@ -434,7 +434,7 @@ export const VespaDocView: React.FC<{ itemId: string; name: string }> = ({ itemI
             {rawOpen ? 'Hide raw Vespa fields' : 'Show raw Vespa fields'}
           </button>
           {rawOpen && (
-            <pre className='mt-2 max-h-96 overflow-auto whitespace-pre-wrap break-words rounded-md border border-border/60 bg-background/70 px-2 py-1.5 font-mono text-[10.5px] leading-relaxed text-foreground/85'>
+            <pre className='mt-2 max-h-96 overflow-auto whitespace-pre-wrap wrap-break-word rounded-md border border-border/60 bg-background/70 px-2 py-1.5 font-mono text-[10.5px] leading-relaxed text-foreground/85'>
               {stringify(fields)}
             </pre>
           )}

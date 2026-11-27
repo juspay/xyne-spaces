@@ -124,7 +124,7 @@ export const PromptMarkerRail = ({
               // A 2px line is not a hit target: the button owns a taller band
               // with the tick drawn centred inside it. The bands touch, so the
               // pointer is never off a tick while travelling the rail.
-              className='pointer-events-auto flex h-2 w-full items-center pl-1 focus:outline-none'
+              className='pointer-events-auto flex h-2 w-full items-center pl-1 focus:outline-hidden'
               data-track-category='AskAI'
               data-track-name='PromptMarkerJump'
             >

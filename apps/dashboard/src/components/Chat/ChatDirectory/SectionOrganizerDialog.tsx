@@ -404,7 +404,7 @@ export const SectionOrganizerDialog = ({
               }
               data-track-category='CHAT_SIDEBAR'
               data-track-name='ORGANIZER_SET_ACTIVE_WINDOW'
-              className='w-14 rounded border border-border bg-background px-1.5 py-1 text-center text-xs text-foreground outline-none focus:ring-2 focus:ring-ring'
+              className='w-14 rounded border border-border bg-background px-1.5 py-1 text-center text-xs text-foreground outline-hidden focus:ring-2 focus:ring-ring'
             />
             days
           </label>
@@ -464,7 +464,7 @@ export const SectionOrganizerDialog = ({
                       data-track-category='CHAT_SIDEBAR'
                       data-track-name='ORGANIZER_RENAME_SECTION'
                       className={cn(
-                        'min-w-0 flex-1 border-0 border-b border-transparent bg-transparent px-0.5 py-0.5 text-[13px] font-medium text-foreground outline-none focus:border-b-primary',
+                        'min-w-0 flex-1 border-0 border-b border-transparent bg-transparent px-0.5 py-0.5 text-[13px] font-medium text-foreground outline-hidden focus:border-b-primary',
                         row.hasNameError && 'border-b-destructive focus:border-b-destructive',
                       )}
                     />

@@ -58,7 +58,7 @@ export function ScrollFadeBox({
       </div>
       {showFade && (
         <span
-          className='pointer-events-none absolute inset-x-px bottom-px h-16 rounded-b-2xl bg-gradient-to-t from-card to-transparent'
+          className='pointer-events-none absolute inset-x-px bottom-px h-16 rounded-b-2xl bg-linear-to-t from-card to-transparent'
           aria-hidden
         />
       )}
@@ -84,7 +84,7 @@ export function ProseBox({
       {...(className ? { className } : {})}
       resetKeys={[children]}
     >
-      <p className='whitespace-pre-wrap break-words text-sm font-normal leading-5 tracking-[-0.28px] text-foreground'>
+      <p className='whitespace-pre-wrap wrap-break-word text-sm font-normal leading-5 tracking-[-0.28px] text-foreground'>
         {children}
       </p>
     </ScrollFadeBox>

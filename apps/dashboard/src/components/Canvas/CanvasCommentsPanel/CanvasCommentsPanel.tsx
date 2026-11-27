@@ -307,7 +307,7 @@ export function CanvasCommentComposer({
         value={preserveOnSubmit ? initialValueRef.current : value}
         disabled={disabled}
         className={cn(
-          'canvas-comment-composer rounded-[18px] border border-input bg-background shadow-sm ring-1 ring-border/70 focus-within:border-primary/40 focus-within:ring-2 focus-within:ring-primary/10',
+          'canvas-comment-composer rounded-[18px] border border-input bg-background shadow-xs ring-1 ring-border/70 focus-within:border-primary/40 focus-within:ring-2 focus-within:ring-primary/10',
           minHeightClassName,
         )}
         features={{
@@ -417,7 +417,7 @@ function CanvasCommentThreadSection({
                     'flex h-5 shrink-0 items-center gap-1.5 rounded-full px-2 text-[11px] font-semibold',
                     isResolved
                       ? 'bg-muted text-muted-foreground'
-                      : 'bg-amber-50 text-amber-800 [[data-theme=midnight]_&]:bg-amber-400/15 [[data-theme=midnight]_&]:text-amber-300',
+                      : 'bg-amber-50 text-amber-800 in-data-[theme=midnight]:bg-amber-400/15 in-data-[theme=midnight]:text-amber-300',
                   )}
                 >
                   <span
@@ -435,7 +435,7 @@ function CanvasCommentThreadSection({
             {isInitialComment && thread.anchorText && (
               <div className='flex min-w-0 gap-2'>
                 <span className='w-[2px] shrink-0 rounded-sm bg-[#e5a93d]' aria-hidden='true' />
-                <span className='min-w-0 flex-1 whitespace-pre-wrap break-words text-[12.5px] leading-[1.5] text-muted-foreground'>
+                <span className='min-w-0 flex-1 whitespace-pre-wrap wrap-break-word text-[12.5px] leading-normal text-muted-foreground'>
                   {thread.anchorText}
                 </span>
               </div>
@@ -469,7 +469,7 @@ function CanvasCommentThreadSection({
             ) : (
               <p
                 className={cn(
-                  'whitespace-pre-wrap break-words [text-wrap:pretty]',
+                  'whitespace-pre-wrap wrap-break-word text-pretty',
                   isReply
                     ? 'pl-7 text-[13px] leading-[1.55] text-muted-foreground'
                     : 'text-[13.5px] leading-[1.6] text-foreground',
@@ -787,7 +787,7 @@ export function CanvasCommentsPanel({
             </p>
             <div className='mb-2 flex min-w-0 gap-2'>
               <span className='w-[2px] shrink-0 rounded-sm bg-[#e5a93d]' aria-hidden='true' />
-              <span className='line-clamp-3 min-w-0 flex-1 text-[12.5px] leading-[1.5] text-muted-foreground'>
+              <span className='line-clamp-3 min-w-0 flex-1 text-[12.5px] leading-normal text-muted-foreground'>
                 {selectedTextAnchor.anchorText}
               </span>
             </div>

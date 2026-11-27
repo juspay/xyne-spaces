@@ -85,9 +85,7 @@ const renderEmoji = (
     const imageUrl = `${API_BASE_URL}/emojis/${customEmoji.emojiId}/stream`;
 
     return (
-      <span
-        className={`group inline-flex items-center justify-center flex-shrink-0 ${customSizeClass}`}
-      >
+      <span className={`group inline-flex items-center justify-center shrink-0 ${customSizeClass}`}>
         <img
           src={imageUrl}
           alt={customEmoji.name}

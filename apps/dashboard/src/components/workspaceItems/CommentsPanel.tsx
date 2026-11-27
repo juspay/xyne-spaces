@@ -97,7 +97,7 @@ export function CommentsPanel({
 
   return (
     <div className='flex h-full min-h-0 w-72 flex-col border-l border-border bg-background'>
-      <div className='flex h-9 flex-shrink-0 items-center gap-2 border-b border-border px-3 text-xs text-muted-foreground'>
+      <div className='flex h-9 shrink-0 items-center gap-2 border-b border-border px-3 text-xs text-muted-foreground'>
         <MessageSquare className='h-3.5 w-3.5' aria-hidden='true' />
         <span>
           {comments.length === 0
@@ -160,7 +160,7 @@ export function CommentsPanel({
       </div>
 
       {store.add ? (
-        <div className='flex-shrink-0 border-t border-border p-2'>
+        <div className='shrink-0 border-t border-border p-2'>
           {draftAnchor?.quote ? (
             <p className='mb-1 truncate border-l-2 border-primary/50 pl-2 text-[11px] italic text-muted-foreground'>
               {draftAnchor.quote.slice(0, MAX_QUOTE_PREVIEW)}
@@ -178,7 +178,7 @@ export function CommentsPanel({
             }
             data-track-category='Workspace'
             data-track-name='comment-draft'
-            className='w-full resize-none rounded-md border border-border bg-transparent px-2 py-1.5 text-xs text-foreground outline-none focus:border-ring'
+            className='w-full resize-none rounded-md border border-border bg-transparent px-2 py-1.5 text-xs text-foreground outline-hidden focus:border-ring'
           />
           <div className='mt-1.5 flex items-center justify-end gap-1.5'>
             {sink && draftAnchor?.quote ? (

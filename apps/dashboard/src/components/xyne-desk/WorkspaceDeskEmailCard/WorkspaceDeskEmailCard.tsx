@@ -98,12 +98,12 @@ export const WorkspaceDeskEmailCard = (): ReactElement => {
 
         {isLoading ? (
           <div className='flex items-center gap-2 text-sm text-muted-foreground'>
-            <Loader2 size={14} className='animate-spin flex-shrink-0' />
+            <Loader2 size={14} className='animate-spin shrink-0' />
             <span className='text-xs'>Loading...</span>
           </div>
         ) : isConfigured ? (
           <div className='flex items-center gap-2 text-sm text-muted-foreground'>
-            <Mail size={14} className='flex-shrink-0' />
+            <Mail size={14} className='shrink-0' />
             <span className='truncate font-mono text-xs' title={status?.displayName ?? ''}>
               {status?.displayName}
             </span>
@@ -188,7 +188,7 @@ export const WorkspaceDeskEmailCard = (): ReactElement => {
       >
         <div className='p-5 flex flex-col gap-3'>
           <div className='flex gap-3'>
-            <AlertTriangle size={18} className='flex-shrink-0 text-amber-500 mt-0.5' />
+            <AlertTriangle size={18} className='shrink-0 text-amber-500 mt-0.5' />
             <div className='flex flex-col gap-2 text-sm'>
               <p className='text-foreground'>
                 Disconnect <span className='font-mono text-xs'>{status?.displayName}</span> from

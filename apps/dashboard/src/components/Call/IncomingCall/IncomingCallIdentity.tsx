@@ -69,11 +69,11 @@ export function IncomingCallIdentity({ identity }: IncomingCallIdentityProps): R
           <>
             <span
               aria-hidden
-              className='incoming-call-radar pointer-events-none absolute inset-0 animate-call-radar rounded-full border-[1.5px] border-[var(--call-ring-accent)]'
+              className='incoming-call-radar pointer-events-none absolute inset-0 animate-call-radar rounded-full border-[1.5px] border-(--call-ring-accent)'
             />
             <span
               aria-hidden
-              className='incoming-call-radar pointer-events-none absolute inset-0 animate-call-radar rounded-full border-[1.5px] border-[var(--call-ring-accent)]'
+              className='incoming-call-radar pointer-events-none absolute inset-0 animate-call-radar rounded-full border-[1.5px] border-(--call-ring-accent)'
               style={{ animationDelay: '750ms' }}
             />
           </>
@@ -101,7 +101,7 @@ export function IncomingCallIdentity({ identity }: IncomingCallIdentityProps): R
             'relative rounded-full shadow-[0_0_0_2px_hsl(var(--popover))]',
             // Caller on top, each subsequent avatar tucked behind — until one is
             // hovered, which lifts it clear of its neighbours.
-            'z-[var(--stack-depth)] hover:z-20',
+            'z-(--stack-depth) hover:z-20',
             index > 0 && '-ml-3',
           )}
           style={{ '--stack-depth': identity.visible.length - index } as CSSProperties}

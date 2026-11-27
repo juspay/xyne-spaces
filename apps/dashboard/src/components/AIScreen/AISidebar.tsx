@@ -430,7 +430,7 @@ function SessionHistory({
                         setRenamingId(null);
                       }
                     }}
-                    className='min-w-0 flex-1 self-stretch bg-transparent pr-1 text-sm outline-none'
+                    className='min-w-0 flex-1 self-stretch bg-transparent pr-1 text-sm outline-hidden'
                     aria-label='Rename chat'
                     data-track-category='XyneAI'
                     data-track-name='RENAME_SESSION_INPUT'

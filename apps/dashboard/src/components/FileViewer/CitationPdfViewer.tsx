@@ -303,9 +303,9 @@ export const CitationPdfViewer: React.FC<CitationPdfViewerProps> = ({
     <div className='relative w-full h-full flex flex-col bg-gray-100 dark:bg-[#1E1E1E]'>
       {/* Navigation bar — matches existing PdfViewer style */}
       {!loading && !error && numPages && (
-        <div className='sticky top-0 bg-white dark:bg-[#1E1E1E] shadow-md z-10 p-4 border-b border-gray-200 dark:border-gray-700 w-full flex-shrink-0'>
+        <div className='sticky top-0 bg-white dark:bg-[#1E1E1E] shadow-md z-10 p-4 border-b border-gray-200 dark:border-gray-700 w-full shrink-0'>
           <div className='flex items-center justify-center'>
-            <div className='flex items-center bg-gray-100 dark:bg-gray-700 rounded-lg px-4 py-2 shadow-sm'>
+            <div className='flex items-center bg-gray-100 dark:bg-gray-700 rounded-lg px-4 py-2 shadow-xs'>
               {/* eslint-disable local-rules/require-tracking-on-click */}
               <button
                 onClick={() => goToPage(currentVisiblePage - 1)}
@@ -340,7 +340,7 @@ export const CitationPdfViewer: React.FC<CitationPdfViewerProps> = ({
                       commitPageInput();
                     } else if (e.key === 'Escape') setPageInput(null);
                   }}
-                  className='w-16 px-2 py-1 text-sm text-center bg-white dark:bg-gray-600 border border-gray-300 dark:border-gray-500 rounded text-gray-800 dark:text-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none'
+                  className='w-16 px-2 py-1 text-sm text-center bg-white dark:bg-gray-600 border border-gray-300 dark:border-gray-500 rounded text-gray-800 dark:text-gray-200 focus:outline-hidden focus:ring-1 focus:ring-blue-500 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none'
                 />
                 <span className='text-sm text-gray-500 dark:text-gray-400'>of {numPages}</span>
               </div>

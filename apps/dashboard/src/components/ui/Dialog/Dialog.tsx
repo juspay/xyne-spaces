@@ -15,8 +15,8 @@ export interface DialogProps {
   className?: string;
   /**
    * Tailwind z-index class for the overlay + content. Defaults to `z-50`. Raise
-   * it (e.g. `z-[10000]`) when the dialog is opened from inside a higher-z
-   * surface such as the Cmd+K dialog (`z-[9999]`).
+   * it (e.g. `z-10000`) when the dialog is opened from inside a higher-z
+   * surface such as the Cmd+K dialog (`z-9999`).
    */
   zIndexClassName?: string;
   focusRef?: RefObject<HTMLElement | null>;
@@ -121,7 +121,7 @@ export const Dialog = ({
       <DialogPrimitive.Portal>
         <DialogPrimitive.Overlay
           className={cn(
-            'fixed inset-0 bg-black/50 backdrop-blur-sm',
+            'fixed inset-0 bg-black/50 backdrop-blur-xs',
             zIndexClassName,
             'data-[state=open]:animate-in data-[state=closed]:animate-out',
             'data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
@@ -161,7 +161,7 @@ export const Dialog = ({
             'w-full',
             'max-w-md',
             'bg-popover text-popover-foreground rounded-lg shadow-lg',
-            'outline-none focus:outline-none',
+            'outline-hidden focus:outline-hidden',
             zIndexClassName,
             'data-[state=open]:animate-in data-[state=closed]:animate-out',
             'data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',

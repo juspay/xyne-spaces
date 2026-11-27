@@ -180,7 +180,7 @@ export function CallTimelineBar({
                     aria-label='Choose what to play'
                     data-track-category='CallTimeline'
                     data-track-name='timeline_playback_mode'
-                    className='rounded text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+                    className='rounded text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring'
                   >
                     <ChevronDown className='size-3.5' />
                   </button>
@@ -216,7 +216,7 @@ export function CallTimelineBar({
               data-track-category='CallTimeline'
               data-track-name='seek_timeline'
               aria-label='Seek within the call'
-              className='absolute -inset-y-2.5 left-0 z-[5] w-full cursor-pointer opacity-0'
+              className='absolute -inset-y-2.5 left-0 z-5 w-full cursor-pointer opacity-0'
             />
           )}
 
@@ -323,7 +323,7 @@ export function CallTimelineBar({
           {/* Says why nothing is playing, rather than leaving it looking stalled. */}
           {playback.state !== 'idle' && playback.isInGap && (
             <span
-              className='pointer-events-none absolute bottom-full z-20 mb-1.5 -translate-x-1/2 whitespace-nowrap rounded-md border border-border bg-popover px-1.5 py-0.5 text-[11px] leading-tight text-muted-foreground shadow-sm'
+              className='pointer-events-none absolute bottom-full z-20 mb-1.5 -translate-x-1/2 whitespace-nowrap rounded-md border border-border bg-popover px-1.5 py-0.5 text-[11px] leading-tight text-muted-foreground shadow-xs'
               style={{ left: `${playheadPercent}%` }}
               role='status'
             >

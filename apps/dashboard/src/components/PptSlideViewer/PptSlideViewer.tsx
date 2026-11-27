@@ -400,7 +400,7 @@ export const PptSlideViewer: React.FC<PptSlideViewerProps> = props => {
             >
               {displayTitle}
             </span>
-            <div className='flex items-center gap-2 ml-2 flex-shrink-0'>
+            <div className='flex items-center gap-2 ml-2 shrink-0'>
               <button
                 onClick={enterPresent}
                 disabled={!current}

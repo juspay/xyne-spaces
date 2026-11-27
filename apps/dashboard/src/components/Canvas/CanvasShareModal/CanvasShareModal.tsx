@@ -478,7 +478,7 @@ export const CanvasShareModal: React.FC<CanvasShareModalProps> = ({
             content={canvas.title || 'Untitled Canvas'}
             side='bottom'
             align='start'
-            className='max-w-xs break-words'
+            className='max-w-xs wrap-break-word'
           >
             <span className='truncate text-muted-foreground'>
               “{canvas.title || 'Untitled Canvas'}”
@@ -546,13 +546,13 @@ export const CanvasShareModal: React.FC<CanvasShareModalProps> = ({
                 data-testid='canvas-user-search-input'
                 data-track-category='CANVAS'
                 data-track-name='SHARE_SEARCH_INPUT'
-                className='flex-1 min-w-[120px] bg-transparent outline-none text-sm py-1'
+                className='flex-1 min-w-[120px] bg-transparent outline-hidden text-sm py-1'
               />
             </div>
 
             {/* Results dropdown */}
             {query.trim() && results.length > 0 ? (
-              <div className='absolute left-0 right-0 top-[calc(100%+4px)] z-[60] max-h-64 overflow-y-auto rounded-lg border border-border bg-popover shadow-md p-1'>
+              <div className='absolute left-0 right-0 top-[calc(100%+4px)] z-60 max-h-64 overflow-y-auto rounded-lg border border-border bg-popover shadow-md p-1'>
                 {results.map(c => (
                   <button
                     key={`${c.kind}:${c.id}`}
@@ -578,7 +578,7 @@ export const CanvasShareModal: React.FC<CanvasShareModalProps> = ({
                 ))}
               </div>
             ) : query.trim() ? (
-              <div className='absolute left-0 right-0 top-[calc(100%+4px)] z-[60] rounded-lg border border-border bg-popover shadow-md px-3 py-2.5 text-sm text-muted-foreground'>
+              <div className='absolute left-0 right-0 top-[calc(100%+4px)] z-60 rounded-lg border border-border bg-popover shadow-md px-3 py-2.5 text-sm text-muted-foreground'>
                 No people, groups, or channels found
               </div>
             ) : null}
@@ -766,7 +766,7 @@ const RoleSelect: React.FC<RoleSelectProps> = ({ value, allowOwner, allowRemove,
   return (
     <Select.Root value={value} onValueChange={onChange}>
       <Select.Trigger
-        className='inline-flex items-center gap-1 h-8 px-2 rounded-md text-sm text-foreground border border-transparent outline-none hover:border-input hover:bg-background data-[state=open]:border-input focus-visible:border-ring'
+        className='inline-flex items-center gap-1 h-8 px-2 rounded-md text-sm text-foreground border border-transparent outline-hidden hover:border-input hover:bg-background data-[state=open]:border-input focus-visible:border-ring'
         aria-label='Change role'
       >
         <Select.Value>{label}</Select.Value>
@@ -779,14 +779,14 @@ const RoleSelect: React.FC<RoleSelectProps> = ({ value, allowOwner, allowRemove,
           position='popper'
           sideOffset={4}
           align='end'
-          className='z-[70] min-w-[180px] overflow-hidden rounded-lg border border-border bg-popover shadow-md'
+          className='z-70 min-w-[180px] overflow-hidden rounded-lg border border-border bg-popover shadow-md'
         >
           <Select.Viewport className='p-1'>
             {roles.map(role => (
               <Select.Item
                 key={role}
                 value={role}
-                className='relative flex items-center pl-7 pr-2 py-1.5 text-sm rounded-md cursor-pointer outline-none select-none data-[highlighted]:bg-accent'
+                className='relative flex items-center pl-7 pr-2 py-1.5 text-sm rounded-md cursor-pointer outline-hidden select-none data-highlighted:bg-accent'
               >
                 <Select.ItemIndicator className='absolute left-1.5'>
                   <Check className='size-3.5' />
@@ -805,7 +805,7 @@ const RoleSelect: React.FC<RoleSelectProps> = ({ value, allowOwner, allowRemove,
                 <div className='h-px bg-border my-1' role='separator' aria-hidden='true' />
                 <Select.Item
                   value={REMOVE_ACCESS_SELECT_VALUE}
-                  className='relative flex items-center pl-7 pr-2 py-1.5 text-sm rounded-md cursor-pointer text-red-600 outline-none select-none data-[highlighted]:bg-red-50 dark:data-[highlighted]:bg-red-950/40'
+                  className='relative flex items-center pl-7 pr-2 py-1.5 text-sm rounded-md cursor-pointer text-red-600 outline-hidden select-none data-highlighted:bg-red-50 dark:data-highlighted:bg-red-950/40'
                 >
                   <Select.ItemText>Remove access</Select.ItemText>
                 </Select.Item>
@@ -831,7 +831,7 @@ const GeneralAccessSelect: React.FC<GeneralAccessSelectProps> = ({ value, onChan
   return (
     <Select.Root value={value} onValueChange={v => onChange(v as CanvasVisibility)}>
       <Select.Trigger
-        className='inline-flex items-center gap-1 -ml-1.5 px-1.5 py-0.5 rounded-md text-sm font-medium text-foreground outline-none hover:bg-background data-[state=open]:bg-background'
+        className='inline-flex items-center gap-1 -ml-1.5 px-1.5 py-0.5 rounded-md text-sm font-medium text-foreground outline-hidden hover:bg-background data-[state=open]:bg-background'
         data-testid='canvas-visibility-select'
         aria-label='General access'
       >
@@ -845,12 +845,12 @@ const GeneralAccessSelect: React.FC<GeneralAccessSelectProps> = ({ value, onChan
           position='popper'
           sideOffset={4}
           align='start'
-          className='z-[70] min-w-[280px] overflow-hidden rounded-lg border border-border bg-popover shadow-md'
+          className='z-70 min-w-[280px] overflow-hidden rounded-lg border border-border bg-popover shadow-md'
         >
           <Select.Viewport className='p-1'>
             <Select.Item
               value={CanvasVisibility.PRIVATE}
-              className='relative flex items-start gap-2 pl-7 pr-2 py-2 text-sm rounded-md cursor-pointer outline-none select-none data-[highlighted]:bg-accent'
+              className='relative flex items-start gap-2 pl-7 pr-2 py-2 text-sm rounded-md cursor-pointer outline-hidden select-none data-highlighted:bg-accent'
             >
               <Select.ItemIndicator className='absolute left-1.5 top-2.5'>
                 <Check className='size-3.5' />
@@ -865,7 +865,7 @@ const GeneralAccessSelect: React.FC<GeneralAccessSelectProps> = ({ value, onChan
             </Select.Item>
             <Select.Item
               value={CanvasVisibility.PUBLIC}
-              className='relative flex items-start gap-2 pl-7 pr-2 py-2 text-sm rounded-md cursor-pointer outline-none select-none data-[highlighted]:bg-accent'
+              className='relative flex items-start gap-2 pl-7 pr-2 py-2 text-sm rounded-md cursor-pointer outline-hidden select-none data-highlighted:bg-accent'
             >
               <Select.ItemIndicator className='absolute left-1.5 top-2.5'>
                 <Check className='size-3.5' />

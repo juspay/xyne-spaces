@@ -85,7 +85,7 @@ export const ExpandableMessage: React.FC<ExpandableMessageProps> = ({
         {children !== undefined ? (
           children
         ) : (
-          <div className='jp-message-html whitespace-pre-wrap break-all-words'>
+          <div className='jp-message-html whitespace-pre-wrap'>
             <RenderMessageWithHTML
               message={message ?? ''}
               showEdited={showEdited}

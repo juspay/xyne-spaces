@@ -122,7 +122,7 @@ export const UserGroupSubmenu = ({
               type='button'
               onClick={handleSelectAllToggle}
               className={`
-                w-full flex items-center gap-3 px-3 py-2 rounded-md transition-all outline-none
+                w-full flex items-center gap-3 px-3 py-2 rounded-md transition-all outline-hidden
                 ${allVisibleSelected ? 'bg-accent text-accent-foreground' : 'hover:bg-muted text-foreground'}
                 focus-visible:ring-2 focus-visible:ring-ring border-b border-border/50
               `}
@@ -146,7 +146,7 @@ export const UserGroupSubmenu = ({
                   type='button'
                   onClick={() => handleGroupToggle(group.id)}
                   className={`
-                    w-full flex items-center gap-3 px-3 py-2 rounded-md transition-all outline-none
+                    w-full flex items-center gap-3 px-3 py-2 rounded-md transition-all outline-hidden
                     ${isSelected ? 'bg-accent text-accent-foreground' : 'hover:bg-muted text-foreground'}
                     focus-visible:ring-2 focus-visible:ring-ring
                   `}

@@ -201,7 +201,7 @@ export const DashboardAiChat = ({
           disabled={isStreaming}
           data-track-category={trackCategory}
           data-track-name='Chat_Input_Change'
-          className='w-full text-sm text-foreground caret-foreground placeholder:text-muted-foreground outline-none resize-none bg-transparent'
+          className='w-full text-sm text-foreground caret-foreground placeholder:text-muted-foreground outline-hidden resize-none bg-transparent'
         />
         <div className='flex items-center justify-end mt-1'>
           <button

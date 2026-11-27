@@ -20,7 +20,7 @@ import { SUBSYSTEM_ICONS, subsystemLabel } from './subsystems';
 
 const TONE_CLASS: Record<'default' | 'success' | 'danger', string> = {
   default: 'text-muted-foreground hover:text-foreground',
-  success: 'text-muted-foreground hover:bg-status-success/10 hover:text-status-success',
+  success: 'text-muted-foreground hover:text-status-success',
   danger: 'text-muted-foreground hover:bg-destructive/10 hover:text-destructive',
 };
 
@@ -136,7 +136,7 @@ export const CandidateRow = ({
             disabled={isBusy}
             rows={3}
             autoFocus
-            className='w-full resize-none rounded-lg border border-primary bg-background px-2.5 py-1.5 text-sm leading-relaxed text-foreground focus:outline-none disabled:opacity-60'
+            className='w-full resize-none rounded-lg border border-primary bg-background px-2.5 py-1.5 text-sm leading-relaxed text-foreground focus:outline-hidden disabled:opacity-60'
           />
         ) : (
           <TruncatedTooltip content={committed}>

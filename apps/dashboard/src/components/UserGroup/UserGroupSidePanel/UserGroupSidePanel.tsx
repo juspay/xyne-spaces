@@ -68,9 +68,9 @@ export const UserGroupSidePanel = ({
   return (
     <div className='h-full min-h-0 w-full bg-background flex flex-col'>
       {/* Header - Slack-like design */}
-      <div className='flex items-center justify-between px-6 py-4 border-b border-border bg-background flex-shrink-0'>
+      <div className='flex items-center justify-between px-6 py-4 border-b border-border bg-background shrink-0'>
         <div className='flex items-center gap-3 min-w-0 flex-1'>
-          <div className='flex items-center justify-center w-9 h-9 bg-blue-500 rounded-md flex-shrink-0'>
+          <div className='flex items-center justify-center w-9 h-9 bg-blue-500 rounded-md shrink-0'>
             <Users className='w-5 h-5 text-white' />
           </div>
           <div className='min-w-0 flex-1'>
@@ -84,7 +84,7 @@ export const UserGroupSidePanel = ({
           onClick={handleClose}
           data-track-category='USER_GROUP_SIDEPANEL'
           data-track-name='CLOSE_SIDEPANEL'
-          className='p-1.5 hover:bg-muted rounded transition-colors flex-shrink-0 ml-2'
+          className='p-1.5 hover:bg-muted rounded transition-colors shrink-0 ml-2'
           aria-label='Close'
         >
           <X className='w-5 h-5 text-muted-foreground' />
@@ -129,7 +129,7 @@ export const UserGroupSidePanel = ({
                     <p className='text-[12px] text-muted-foreground truncate'>{user.email}</p>
                   </div>
                   {roleName && (
-                    <span className='text-[12px] px-2 py-0.5 rounded font-medium flex-shrink-0 bg-muted text-muted-foreground'>
+                    <span className='text-[12px] px-2 py-0.5 rounded font-medium shrink-0 bg-muted text-muted-foreground'>
                       {roleName}
                     </span>
                   )}

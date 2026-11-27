@@ -395,7 +395,7 @@ export function DesignPanel({ artifact, title }: DesignPanelProps): ReactElement
     <div
       className={cn(
         'flex min-h-0 w-full flex-col bg-background',
-        fullscreen ? 'fixed inset-0 z-[70] h-dvh' : 'h-full',
+        fullscreen ? 'fixed inset-0 z-70 h-dvh' : 'h-full',
       )}
       data-testid='design-panel'
       data-fullscreen={fullscreen || undefined}
@@ -496,7 +496,7 @@ export function DesignPanel({ artifact, title }: DesignPanelProps): ReactElement
               )}
             </button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align='end' className='z-[80] w-56'>
+          <DropdownMenuContent align='end' className='z-80 w-56'>
             <DropdownMenuItem
               onSelect={() => setInspecting(value => !value)}
               data-track-category='AskAI'
@@ -597,7 +597,7 @@ export function DesignPanel({ artifact, title }: DesignPanelProps): ReactElement
             <button
               type='button'
               onClick={copySource}
-              className='absolute right-3 top-3 z-10 flex h-7 items-center gap-1.5 rounded border border-border bg-background/95 px-2 text-[11px] text-foreground shadow-sm hover:bg-secondary'
+              className='absolute right-3 top-3 z-10 flex h-7 items-center gap-1.5 rounded border border-border bg-background/95 px-2 text-[11px] text-foreground shadow-xs hover:bg-secondary'
               data-track-category='AskAI'
               data-track-name='design-copy-source'
             >
@@ -627,17 +627,17 @@ export function DesignPanel({ artifact, title }: DesignPanelProps): ReactElement
           </div>
         )}
         {selection && selectionStale && (
-          <div className='pointer-events-none absolute left-1/2 top-3 -translate-x-1/2 rounded-full border border-amber-500/40 bg-background/95 px-3 py-1.5 text-[11px] text-amber-600 shadow-md backdrop-blur dark:text-amber-400'>
+          <div className='pointer-events-none absolute left-1/2 top-3 -translate-x-1/2 rounded-full border border-amber-500/40 bg-background/95 px-3 py-1.5 text-[11px] text-amber-600 shadow-md backdrop-blur-sm dark:text-amber-400'>
             The design changed — reselect to be precise
           </div>
         )}
         {inspecting && !selection && (
-          <div className='pointer-events-none absolute left-1/2 top-3 -translate-x-1/2 rounded-full border border-primary/40 bg-background/95 px-3 py-1.5 text-[11px] text-primary shadow-md backdrop-blur'>
+          <div className='pointer-events-none absolute left-1/2 top-3 -translate-x-1/2 rounded-full border border-primary/40 bg-background/95 px-3 py-1.5 text-[11px] text-primary shadow-md backdrop-blur-sm'>
             Click an element to select it
           </div>
         )}
         {streaming && (
-          <div className='absolute bottom-6 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-full border border-border bg-background/95 px-3 py-1.5 text-[11px] text-muted-foreground shadow-md backdrop-blur'>
+          <div className='absolute bottom-6 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-full border border-border bg-background/95 px-3 py-1.5 text-[11px] text-muted-foreground shadow-md backdrop-blur-sm'>
             <span className='h-1.5 w-1.5 animate-pulse rounded-full bg-primary' />
             Agent is updating the design
           </div>

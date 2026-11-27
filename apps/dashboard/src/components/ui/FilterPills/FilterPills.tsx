@@ -50,7 +50,7 @@ export const FilterPills = <T extends string>({
           className={cn(
             'flex shrink-0 items-center gap-1 rounded-full border px-3 py-1.5 text-base transition-colors',
             'min-[700px]:px-2.5 min-[700px]:py-1 min-[700px]:text-sm',
-            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40',
+            'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary/40',
             isActive
               ? 'border-border bg-accent font-semibold text-primary'
               : 'border-foreground/15 bg-background font-semibold text-muted-foreground hover:bg-accent',

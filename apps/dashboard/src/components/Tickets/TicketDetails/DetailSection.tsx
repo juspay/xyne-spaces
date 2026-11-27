@@ -7,14 +7,14 @@ export const DetailSectionGate = ({
 }: {
   children: React.ReactNode;
 }): React.ReactElement => (
-  <span className='inline-flex h-5 shrink-0 items-center gap-1.5 rounded-full border border-orange-500/30 bg-orange-500/[0.07] px-2 text-[10.5px] font-semibold text-orange-700 [[data-theme=midnight]_&]:text-orange-400'>
+  <span className='inline-flex h-5 shrink-0 items-center gap-1.5 rounded-full border border-orange-500/30 bg-orange-500/[0.07] px-2 text-[10.5px] font-semibold text-orange-700 in-data-[theme=midnight]:text-orange-400'>
     <span className='h-[5px] w-[5px] shrink-0 rounded-full bg-orange-500' />
     {children}
   </span>
 );
 
 export const DetailRowGate = ({ children }: { children: React.ReactNode }): React.ReactElement => (
-  <span className='inline-flex h-[19px] shrink-0 items-center rounded-[5px] border border-orange-500/30 bg-orange-500/[0.07] px-[7px] text-[10px] font-semibold text-orange-700 [[data-theme=midnight]_&]:text-orange-400'>
+  <span className='inline-flex h-[19px] shrink-0 items-center rounded-[5px] border border-orange-500/30 bg-orange-500/[0.07] px-[7px] text-[10px] font-semibold text-orange-700 in-data-[theme=midnight]:text-orange-400'>
     {children}
   </span>
 );
@@ -40,7 +40,7 @@ export const DetailToggle = ({
     data-track-category='Tickets'
     data-track-name='ToggleDetailOption'
     data-track-metadata={JSON.stringify({ option: label })}
-    className='flex h-[26px] shrink-0 items-center gap-2 rounded-lg px-1.5 text-[12.5px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+    className='flex h-[26px] shrink-0 items-center gap-2 rounded-lg px-1.5 text-[12.5px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring'
   >
     <span className='whitespace-nowrap'>{label}</span>
     <span
@@ -51,7 +51,7 @@ export const DetailToggle = ({
     >
       <span
         className={cn(
-          'absolute top-0.5 h-3 w-3 rounded-full bg-background shadow-[0_1px_2px_rgba(20,22,26,0.25)] transition-[left] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)]',
+          'absolute top-0.5 h-3 w-3 rounded-full bg-background shadow-[0_1px_2px_rgba(20,22,26,0.25)] transition-[left] duration-150 ',
           checked ? 'left-[14px]' : 'left-0.5',
         )}
       />
@@ -86,7 +86,7 @@ export const DetailSection = ({
         <button
           type='button'
           onClick={() => setOpen(prev => !prev)}
-          className='flex min-w-0 items-center gap-[9px] rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+          className='flex min-w-0 items-center gap-[9px] rounded-md text-left focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring'
           aria-expanded={open}
           data-track-category='Tickets'
           data-track-name='ToggleDetailSection'
@@ -95,7 +95,7 @@ export const DetailSection = ({
           <ChevronRight
             size={12}
             className={cn(
-              'w-3 shrink-0 text-muted-foreground/70 transition-transform duration-150 ease-[cubic-bezier(0.23,1,0.32,1)]',
+              'w-3 shrink-0 text-muted-foreground/70 transition-transform duration-150 ',
               open && 'rotate-90',
             )}
           />

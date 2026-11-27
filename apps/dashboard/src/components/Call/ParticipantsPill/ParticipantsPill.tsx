@@ -21,7 +21,7 @@ function FaceAvatar({ participant }: { participant: ParticipantInfo }): React.Re
       size='xs'
       pictureUrl={url}
       backgroundColor={getAvatarColors(participant.identity).avatar}
-      className='!h-7 !w-7 !text-[11px] shadow-none ring-2 ring-[#333537] group-hover:ring-[#404245] group-aria-pressed:ring-[#a8c7fa]'
+      className='h-7! w-7! text-[11px]! shadow-none ring-2 ring-[#333537] group-hover:ring-[#404245] group-aria-pressed:ring-[#a8c7fa]'
     />
   );
 }
@@ -74,7 +74,7 @@ export function ParticipantsPill({
       title={label}
       className={cn(
         'group relative flex h-10 items-center gap-2 rounded-full pl-1.5 pr-3.5 text-sm font-medium transition-colors',
-        'outline-none focus-visible:ring-2 focus-visible:ring-[#a8c7fa] focus-visible:ring-offset-2 focus-visible:ring-offset-[#131314]',
+        'outline-hidden focus-visible:ring-2 focus-visible:ring-[#a8c7fa] focus-visible:ring-offset-2 focus-visible:ring-offset-[#131314]',
         isOpen ? 'bg-[#a8c7fa] text-[#062e6f]' : 'bg-[#333537] text-[#e3e3e3] hover:bg-[#404245]',
       )}
       data-testid='add-participant-button'

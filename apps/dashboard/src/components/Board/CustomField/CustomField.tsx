@@ -395,7 +395,7 @@ export const CustomField = ({
     <div ref={containerRef} className='border border-border rounded-[12px] shadow-md p-4'>
       <div className='flex items-center justify-between mb-4'>
         {/* Grip icon placeholder for alignment */}
-        <div className='w-4 flex-shrink-0'>
+        <div className='w-4 shrink-0'>
           <GripVertical size={16} className='text-xyne-gray-300' />
         </div>
 
@@ -407,7 +407,7 @@ export const CustomField = ({
             projectId={projectId}
             inputRef={inputRef}
             placeholder={mode === 'create' ? 'Custom Field' : 'Field name'}
-            className='w-40 px-3 py-2 border-0 bg-transparent text-[14px] focus:outline-none focus:ring-0 placeholder:text-muted-foreground'
+            className='w-40 px-3 py-2 border-0 bg-transparent text-[14px] focus:outline-hidden focus:ring-0 placeholder:text-muted-foreground'
             onSelectExisting={suggestion => {
               setFieldName(suggestion.fieldName);
               setFieldType(mapFromFormFieldType(suggestion.fieldType) as FieldType);
@@ -444,7 +444,7 @@ export const CustomField = ({
               <ChevronDown className='h-4 w-4 text-muted-foreground' />
             </button>
             {fieldTypeDropdownOpen && (
-              <div className='absolute top-full left-0 mt-1 w-[140px] bg-background border border-input rounded-md shadow-lg z-[100] overflow-hidden max-h-[240px] overflow-y-auto'>
+              <div className='absolute top-full left-0 mt-1 w-[140px] bg-background border border-input rounded-md shadow-lg z-100 overflow-hidden max-h-[240px] overflow-y-auto'>
                 {fieldTypeOptions.map(option => (
                   <button
                     key={option.value}
@@ -482,7 +482,7 @@ export const CustomField = ({
               aria-label='Required'
               aria-pressed={fieldRequired}
               onClick={() => setFieldRequired(!fieldRequired)}
-              className={`w-[28px] h-[18px] rounded-full transition-colors relative flex-shrink-0 ${
+              className={`w-[28px] h-[18px] rounded-full transition-colors relative shrink-0 ${
                 fieldRequired ? 'bg-xyne-primary-500' : 'bg-gray-600'
               }`}
               data-track-category='form'
@@ -541,7 +541,7 @@ export const CustomField = ({
                 onBlur={() => tryApplyBulkDraft()}
                 placeholder='One option per line. Paste from a spreadsheet, comma-separated list, etc.'
                 rows={8}
-                className='w-full min-h-[120px] max-h-[240px] px-[10px] py-[8px] text-[13px] text-foreground bg-background border border-border rounded-[8px] resize-y focus:outline-none focus:ring-1 focus:ring-[#6276be]/40'
+                className='w-full min-h-[120px] max-h-[240px] px-[10px] py-[8px] text-[13px] text-foreground bg-background border border-border rounded-[8px] resize-y focus:outline-hidden focus:ring-1 focus:ring-[#6276be]/40'
                 data-track-category='form'
                 data-track-name='bulk_options_textarea'
               />
@@ -582,7 +582,7 @@ export const CustomField = ({
                     >
                       <GripVertical
                         size={16}
-                        className='text-muted-foreground flex-shrink-0 cursor-grab'
+                        className='text-muted-foreground shrink-0 cursor-grab'
                       />
                       <input
                         type='text'
@@ -593,7 +593,7 @@ export const CustomField = ({
                             prev.map((opt, i) => (i === idx ? { ...opt, value: newValue } : opt)),
                           );
                         }}
-                        className='flex-1 bg-transparent text-[13px] text-foreground focus:outline-none'
+                        className='flex-1 bg-transparent text-[13px] text-foreground focus:outline-hidden'
                         data-track-category='form'
                         data-track-name='edit-option'
                       />
@@ -604,7 +604,7 @@ export const CustomField = ({
                             e.stopPropagation();
                             toggleBranchPanel(option.id);
                           }}
-                          className={`text-[11px] font-mono px-2 py-[3px] rounded-full whitespace-nowrap flex-shrink-0 ${
+                          className={`text-[11px] font-mono px-2 py-[3px] rounded-full whitespace-nowrap shrink-0 ${
                             branchFields.length > 0
                               ? 'bg-[#6276be]/10 text-[#6276be] hover:bg-[#6276be] hover:text-white'
                               : 'border border-dashed border-border text-muted-foreground hover:border-[#6276be] hover:text-[#6276be] hover:bg-[#6276be]/10'
@@ -694,7 +694,7 @@ export const CustomField = ({
                                       childField.id,
                                     );
                                   }}
-                                  className={`w-6 h-3.5 rounded-full transition-colors relative flex-shrink-0 ${
+                                  className={`w-6 h-3.5 rounded-full transition-colors relative shrink-0 ${
                                     childField.required ? 'bg-[#6276BE]' : 'bg-gray-600'
                                   }`}
                                   data-track-category='form'
@@ -727,7 +727,7 @@ export const CustomField = ({
                                       childField.id,
                                     );
                                   }}
-                                  className={`w-6 h-3.5 rounded-full transition-colors relative flex-shrink-0 ${
+                                  className={`w-6 h-3.5 rounded-full transition-colors relative shrink-0 ${
                                     childField.visibleInCreate ? 'bg-[#6276BE]' : 'bg-gray-600'
                                   }`}
                                   data-track-category='form'
@@ -803,7 +803,7 @@ export const CustomField = ({
                         ? 'Add another option (paste multiple at once)'
                         : 'Add option (paste multiple at once)'
                     }
-                    className='flex-1 bg-transparent text-[13px] text-foreground placeholder:text-muted-foreground focus:outline-none'
+                    className='flex-1 bg-transparent text-[13px] text-foreground placeholder:text-muted-foreground focus:outline-hidden'
                     data-track-category='form'
                     data-track-name='option-input'
                   />

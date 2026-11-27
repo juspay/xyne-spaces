@@ -84,7 +84,7 @@ const ClawMetricsScreen = (): ReactElement => {
             onChange={event => setSelectedAgent(event.target.value || null)}
             data-track-category='Claw Agents'
             data-track-name='Select metrics scope'
-            className='h-9 min-w-44 rounded-md border border-border bg-background px-3 text-sm text-foreground outline-none focus:ring-2 focus:ring-ring'
+            className='h-9 min-w-44 rounded-md border border-border bg-background px-3 text-sm text-foreground outline-hidden focus:ring-2 focus:ring-ring'
           >
             <option value=''>All workspace</option>
             {agentSlugs.map(slug => (

@@ -104,7 +104,7 @@ const ThreadRow = memo(
             <TwinDraftIndicator conversationId={conversationId} />
           </div>
         </div>
-        <div className='border border-border rounded-xl overflow-hidden bg-card shadow-sm'>
+        <div className='border border-border rounded-xl overflow-hidden bg-card shadow-xs'>
           <div className='bg-card'>
             <ThreadMessages
               channelId={channelId}

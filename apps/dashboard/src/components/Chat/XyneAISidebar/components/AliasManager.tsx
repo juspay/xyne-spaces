@@ -40,9 +40,9 @@ export const AliasManager = ({
 
   return (
     <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/50'>
-      <div className='bg-popover rounded-lg shadow-lg w-fit min-w-[56rem] max-w-[90vw] mx-4 overflow-hidden flex flex-col max-h-[80vh]'>
+      <div className='bg-popover rounded-lg shadow-lg w-fit min-w-4xl max-w-[90vw] mx-4 overflow-hidden flex flex-col max-h-[80vh]'>
         {/* Header */}
-        <div className='flex items-center justify-between px-4 py-3 border-b border-border flex-shrink-0'>
+        <div className='flex items-center justify-between px-4 py-3 border-b border-border shrink-0'>
           <div>
             <h2 className='text-lg font-semibold text-foreground'>Activity Aliases</h2>
             <p className='text-sm text-muted-foreground mt-0.5'>
@@ -117,7 +117,7 @@ export const AliasManager = ({
                             Blacklisted
                           </span>
                         ) : (
-                          <span className='inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium bg-status-success/10 text-status-success'>
+                          <span className='inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium text-status-success'>
                             Active
                           </span>
                         )}
@@ -181,7 +181,7 @@ export const AliasManager = ({
         </div>
 
         {/* Footer */}
-        <div className='flex justify-end px-4 py-3 border-t border-border bg-muted flex-shrink-0'>
+        <div className='flex justify-end px-4 py-3 border-t border-border bg-muted shrink-0'>
           <button
             onClick={onClose}
             data-track-category='XYNE_AI_SIDEBAR'

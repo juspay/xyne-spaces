@@ -54,7 +54,7 @@ export function TranscriptDispositionModal({
           onClick: onConfirm,
           disabled: submitting,
           trackName: 'END_CALL_CONFIRM_SOLO',
-          className: 'bg-action-primary hover:bg-action-primary/90 text-action-primary-foreground',
+          className: 'bg-action-primary text-action-primary-foreground',
         },
       ]}
     />

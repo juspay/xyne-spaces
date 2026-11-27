@@ -127,7 +127,7 @@ function PasswordPrompt(props: {
           data-track-name='PdfPasswordTyped'
           aria-invalid={props.wrong}
           className={cn(
-            'mt-4 h-9 w-full rounded-lg border bg-background px-3 text-[13px] text-foreground outline-none placeholder:text-muted-foreground focus:ring-1',
+            'mt-4 h-9 w-full rounded-lg border bg-background px-3 text-[13px] text-foreground outline-hidden placeholder:text-muted-foreground focus:ring-1',
             props.wrong
               ? 'border-destructive focus:ring-destructive'
               : 'border-border focus:ring-ring',
@@ -141,7 +141,7 @@ function PasswordPrompt(props: {
         <button
           type='submit'
           disabled={!password}
-          className='outline-none mt-4 h-8 w-full rounded-lg bg-foreground text-[13px] font-medium text-background transition-opacity hover:opacity-90 focus-visible:opacity-90 disabled:pointer-events-none disabled:opacity-40'
+          className='outline-hidden mt-4 h-8 w-full rounded-lg bg-foreground text-[13px] font-medium text-background transition-opacity hover:opacity-90 focus-visible:opacity-90 disabled:pointer-events-none disabled:opacity-40'
           data-track-category='FilePreview'
           data-track-name='PdfPasswordSubmitted'
         >
@@ -429,7 +429,7 @@ export function PdfDocumentView({ source }: { source: PdfSource }): ReactElement
                 }}
                 inputMode='numeric'
                 aria-label={`Go to page, of ${pageCount}`}
-                className='h-6 w-9 rounded-md bg-foreground/[0.06] text-center text-xs text-foreground outline-none focus:ring-1 focus:ring-ring'
+                className='h-6 w-9 rounded-md bg-foreground/6 text-center text-xs text-foreground outline-hidden focus:ring-1 focus:ring-ring'
                 data-track-category='FilePreview'
                 data-track-name='PdfPageTyped'
               />
@@ -450,7 +450,7 @@ export function PdfDocumentView({ source }: { source: PdfSource }): ReactElement
                   type='button'
                   title='Zoom'
                   aria-label={`Zoom level, ${Math.round(scale * 100)}%`}
-                  className='outline-none flex h-7 min-w-[64px] items-center justify-center gap-0.5 rounded-md px-1.5 text-xs tabular-nums text-muted-foreground transition-colors hover:bg-foreground/[0.08] focus-visible:bg-foreground/[0.08] hover:text-foreground focus-visible:text-foreground data-[state=open]:bg-foreground/[0.08] data-[state=open]:text-foreground'
+                  className='outline-hidden flex h-7 min-w-[64px] items-center justify-center gap-0.5 rounded-md px-1.5 text-xs tabular-nums text-muted-foreground transition-colors hover:bg-foreground/8 focus-visible:bg-foreground/8 hover:text-foreground focus-visible:text-foreground data-[state=open]:bg-foreground/8 data-[state=open]:text-foreground'
                   data-track-category='FilePreview'
                   data-track-name='PdfZoomMenuOpened'
                 >
@@ -524,7 +524,7 @@ export function PdfDocumentView({ source }: { source: PdfSource }): ReactElement
           ref={containerRef}
           // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- a scrolling region the keyboard must reach
           tabIndex={0}
-          className='xyne-pdf absolute inset-0 overflow-auto outline-none'
+          className='xyne-pdf absolute inset-0 overflow-auto outline-hidden'
         >
           <div ref={pagesRef} className='pdfViewer' />
         </div>

@@ -62,7 +62,7 @@ export const XyneAIHeader = ({
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [isAgentInfoModalOpen, setIsAgentInfoModalOpen] = useState(false);
   const mwebActionPillClass =
-    'flex w-8 h-8 justify-center items-center rounded-full border border-[#FFF] bg-[linear-gradient(180deg,_#FFF_0%,_#FAFAFA_100%)] shadow-[inset_0_4px_6px_0_#F5F5F5,0_0_12px_0_#E5E5E5] shrink-0';
+    'flex w-8 h-8 justify-center items-center rounded-full border border-white bg-[linear-gradient(180deg,#FFF_0%,#FAFAFA_100%)] shadow-[inset_0_4px_6px_0_#F5F5F5,0_0_12px_0_#E5E5E5] shrink-0';
 
   const handleClose = (): void => {
     if (onClose) {

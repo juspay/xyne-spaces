@@ -356,7 +356,7 @@ const TicketReportsScreen = ({
 
   const items = exportRows ?? [];
   const inputClass =
-    'h-10 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground outline-none transition-colors focus:border-ring focus:ring-2 focus:ring-ring/20';
+    'h-10 w-full rounded-md border border-input bg-background px-3 text-sm text-foreground outline-hidden transition-colors focus:border-ring focus:ring-2 focus:ring-ring/20';
   const resetFilters = (): void => {
     if (!requiresProject && !effectiveLockedProjectId) setProjectId('');
     setBoardIds([]);
@@ -442,7 +442,7 @@ const TicketReportsScreen = ({
           </div>
         </div>
 
-        <section className='mb-6 overflow-visible rounded-xl border border-border bg-background shadow-sm'>
+        <section className='mb-6 overflow-visible rounded-xl border border-border bg-background shadow-xs'>
           <div className='flex flex-wrap items-center justify-between gap-3 border-b border-border px-5 py-4'>
             <div className='flex items-center gap-2'>
               <SlidersHorizontal className='size-4 text-muted-foreground' />
@@ -712,7 +712,7 @@ const TicketReportsScreen = ({
             {formError && (
               <div className='mt-4 flex items-start gap-2 rounded-lg border border-destructive/20 bg-destructive/10 px-3 py-2.5 text-sm text-destructive'>
                 <AlertCircle className='mt-0.5 size-4 shrink-0' />
-                <span className='break-words'>{formError}</span>
+                <span className='wrap-break-word'>{formError}</span>
               </div>
             )}
 
@@ -737,7 +737,7 @@ const TicketReportsScreen = ({
           </div>
         </section>
 
-        <section className='overflow-hidden rounded-xl border border-border bg-background shadow-sm'>
+        <section className='overflow-hidden rounded-xl border border-border bg-background shadow-xs'>
           <div className='flex items-center justify-between border-b border-border px-5 py-4'>
             <div>
               <h2 className='text-sm font-semibold text-foreground'>Generated reports</h2>

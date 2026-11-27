@@ -52,7 +52,7 @@ export const HighlightedText: React.FC<{ text: string; query?: string | undefine
     parts.push(
       <mark
         key={`${matchIndex}-${matchEnd}`}
-        className='rounded bg-[var(--search-result-highlight-bg)] px-0.5 text-foreground'
+        className='rounded bg-(--search-result-highlight-bg) px-0.5 text-foreground'
       >
         {text.slice(matchIndex, matchEnd)}
       </mark>,
@@ -147,7 +147,7 @@ export const CanvasRow: React.FC<CanvasRowProps> = ({
               content={canvas.title || 'Untitled'}
               side='top'
               align='start'
-              className='max-w-xs break-words'
+              className='max-w-xs wrap-break-word'
             >
               <span className='min-w-0 flex-1 truncate block text-sm font-medium tracking-[-0.14px]'>
                 <HighlightedText text={canvas.title || 'Untitled'} query={highlightQuery} />
@@ -163,7 +163,7 @@ export const CanvasRow: React.FC<CanvasRowProps> = ({
                 {visibleLabels.map(label => (
                   <span
                     key={label.id}
-                    className='inline-flex h-5 max-w-[96px] items-center gap-1 rounded-md border border-sidebar-border-muted bg-sidebar px-1.5 text-[11px] leading-none text-sidebar-foreground/70'
+                    className='inline-flex h-5 max-w-[96px] items-center gap-1 rounded-md border border-sidebar-border-muted bg-sidebar px-1.5 text-[11px] leading-none'
                   >
                     <span
                       className={`size-1.5 shrink-0 rounded-full ${getCanvasLabelDotClassName(
@@ -173,11 +173,7 @@ export const CanvasRow: React.FC<CanvasRowProps> = ({
                     <span className='truncate'>{label.name}</span>
                   </span>
                 ))}
-                {hiddenLabelCount > 0 && (
-                  <span className='text-[11px] text-sidebar-foreground/50'>
-                    +{hiddenLabelCount}
-                  </span>
-                )}
+                {hiddenLabelCount > 0 && <span className='text-[11px]'>+{hiddenLabelCount}</span>}
               </span>
             )}
           </button>

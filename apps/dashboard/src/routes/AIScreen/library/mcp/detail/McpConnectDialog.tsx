@@ -192,7 +192,7 @@ export const McpConnectDialog = ({
               placeholder={field.placeholder}
               autoComplete='off'
               onChange={(e): void => setValues(prev => ({ ...prev, [field.name]: e.target.value }))}
-              className='h-10 w-full rounded-lg border border-border bg-background px-3 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus:border-primary'
+              className='h-10 w-full rounded-lg border border-border bg-background px-3 text-sm text-foreground outline-hidden transition-colors placeholder:text-muted-foreground focus:border-primary'
               data-testid={`mcp-cred-${field.name}`}
               data-track-category='Claw MCP'
               data-track-name='EditMcpCredential'
