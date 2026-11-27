@@ -41,7 +41,7 @@ import { decryptRequestBody, hasTransitCaller, sanitizeForLog, transitCaller } f
 export function encryptedRoute(contract: RequestContract, options: Omit<EncryptedRouteOptions, 'contract'>) {
   // A route whose callers come through the ingress transit proxy has no encryption step where
   // that proxy is not deployed: its callers send plaintext, as before the proxy existed.
-  if (options.transitProxyIngress && !config.internal.transitProxyIngressEnabled) {
+  if (options.transitProxyIngress && !config.internal.transitProxyEnabled) {
     return [];
   }
   return [enterDekPassthrough, transformRequest({ contract, ...options }), makeBodyUnreadable(contract), transformResponse];
@@ -54,7 +54,7 @@ export type EncryptedRouteOptions = {
   resolveWorkspaceId: (req: Request) => Promise<string>;
   /**
    * The route's callers are bots behind the ingress transit proxy (Xyne Apps). The encryption
-   * step runs only where that proxy is deployed (TRANSIT_PROXY_INGRESS_ENABLED); off, the route
+   * step runs only where that proxy is deployed (TRANSIT_PROXY_ENABLED); off, the route
    * takes plaintext. requireTransitProxyIngress (on /api/apps) refuses callers that do not
    * match the setting.
    */

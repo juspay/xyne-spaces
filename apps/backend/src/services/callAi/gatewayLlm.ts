@@ -4,7 +4,7 @@ import { getEncryptionProvider } from '@/services/encryption';
 import { logger } from '@/utils/logger';
 
 /**
- * Non-Claw call AI through the egress transit proxy, so the reply is never plaintext here: the
+ * Call AI through the egress transit proxy (TRANSIT_PROXY_ENABLED), so the reply is never plaintext here: the
  * chat-completions request is sealed for the proxy by the encryption service (sealEvent, target
  * `call-litellm`: it adds LiteLLM's URL and key), the proxy's `POST /deliver` opens it, calls
  * LiteLLM and returns the answer with every string encrypted (CEK), and transformRequest turns
@@ -24,7 +24,7 @@ const DEK_CIPHERTEXT = /^ENC:v\d+\|(?!tk-)[^|]+\|/;
 const LLM_PATH = '/chat/completions';
 
 export function isGatewayLlmEnabled(): boolean {
-  return Boolean(config.internal.transitProxyEgressUrl) && config.enc.enableDbEncryption;
+  return config.internal.transitProxyEnabled;
 }
 
 export interface GatewayLlmTask {

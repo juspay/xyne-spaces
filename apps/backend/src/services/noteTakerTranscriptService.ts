@@ -8,7 +8,6 @@ import { fileSchema, SubApp } from '@/vespa/src/types';
 import { acquireLock, releaseLock } from '@/utils/distributedLock';
 import { transcriptService, type TranscriptEntry } from '@/services/transcriptService';
 import type { SummaryModelType } from '@/services/callLlmRetry';
-import { isClawCallAiEnabled } from '@/services/callAi/clawCallAiRunner';
 import { isGatewayLlmEnabled } from '@/services/callAi/gatewayLlm';
 import { runWithDekPassthrough } from '@/services/encryption';
 import { callDocumentService, numberTranscriptSegments, type CitationContext } from '@/services/callDocumentService';
@@ -151,14 +150,14 @@ class NoteTakerTranscriptService {
       const formattedTranscript = await this.getFormattedTranscript(callId, entries);
       if (!formattedTranscript) return;
 
-      // AI outputs run on the Claw agent; without it there is no LLM engine, so
-      // the transcript is only attached and indexed.
-      const engine = isClawCallAiEnabled() ? 'claw' : isGatewayLlmEnabled() ? 'gateway' : 'none';
+      // With the transit proxy AI outputs are sealed on the egress gateway; without it the
+      // backend calls LiteLLM directly.
+      const engine = isGatewayLlmEnabled() ? 'gateway' : 'direct';
       logger.info(`[${callId}] call_ai_engine_selected`, { engine, path: 'note_taker' });
-      if (engine === 'claw') {
-        await this.generateAiOutputs(call, formattedTranscript, entries.length);
-      } else if (engine === 'gateway') {
+      if (engine === 'gateway') {
         await this.generateSealedAiOutputs(call, formattedTranscript, entries.length);
+      } else {
+        await this.generateAiOutputs(call, formattedTranscript, entries.length);
       }
       await this.queueVespaIndexing(call);
 
@@ -234,10 +233,10 @@ class NoteTakerTranscriptService {
   }
 
   /**
-   * Without Claw, on the egress gateway: the summary and title come back as workspace-DEK
+   * With the transit proxy, on the egress gateway: the summary and title come back as workspace-DEK
    * ciphertext and are stored as-is (DEK passthrough: not re-encrypted, not decrypted). The
-   * detailed-summary canvas runs as with Claw; its reply is decrypted here (executeStreamingLlmRequest).
-   * Labels and title syncs need Claw.
+   * detailed-summary canvas runs as on the direct engine; its reply is decrypted here (executeStreamingLlmRequest).
+   * Labels and title syncs are skipped.
    */
   private async generateSealedAiOutputs(call: Call, formattedTranscript: string, entryCount: number): Promise<void> {
     const callId = call.externalId;
@@ -262,7 +261,7 @@ class NoteTakerTranscriptService {
     ]);
 
     // Re-read the title so a user rename made while the LLM was working wins. (The title is
-    // ciphertext here, so unlike the Claw path it is stored as the model wrote it and the notes
+    // ciphertext here, so unlike the direct path it is stored as the model wrote it and the notes
     // canvas title is not synced.)
     let title = generatedTitle;
     if (title && (await repositories.calls.findByExternalId(callId))?.title) {
@@ -308,7 +307,7 @@ class NoteTakerTranscriptService {
       detailedSummaryCanvasId: detailedSummary?.canvasId,
       markedItems: detailedSummary?.markedItems.length ?? 0,
     });
-    // Notified once everything is stored, as on the Claw path.
+    // Notified once everything is stored, as on the direct path.
     if (detailedSummary) {
       await this.notifySummaryReady(call, detailedSummary.rawSummary);
     }

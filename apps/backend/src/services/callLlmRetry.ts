@@ -5,8 +5,17 @@ import { logger } from '@/utils/logger';
 import { repositories } from '@/database/repositories';
 // import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
 // import { OrgLLMServiceAccountPurpose } from '@xyne/shared';
-import { runCallAiTask } from '@/services/callAi/callAiGateway';
 import { isGatewayLlmEnabled, runLlmOnGateway, runLlmOnGatewayForPlaintext } from '@/services/callAi/gatewayLlm';
+import { isDirectLlmConfigured, runLlmDirect } from '@/services/callAi/directLlm';
+
+/**
+ * Call AI engines, picked by TRANSIT_PROXY_ENABLED:
+ * - on: the egress transit proxy (gatewayLlm). A task marked `sealed` gets its reply as
+ *   workspace-DEK ciphertext to store as-is; the detailed-summary canvas operations
+ *   (PLAINTEXT_GATEWAY_OPERATIONS) get theirs decrypted. Any other task needs the reply as
+ *   plaintext the backend must not hold, so it is skipped.
+ * - off: LiteLLM directly (directLlm), plaintext.
+ */
 
 const DEFAULT_MODEL = 'glm-latest';
 
@@ -61,6 +70,15 @@ export interface ExecuteStreamingLlmOptions {
   onDelta?: (accumulatedContent: string) => void | Promise<void>;
 }
 
+export interface CallLlmOptions {
+  modelType?: SummaryModelType;
+  /**
+   * The caller only stores the reply. With the transit proxy it then comes back as
+   * workspace-DEK ciphertext of `workspaceId`.
+   */
+  sealed?: { workspaceId: string };
+}
+
 const failedResult = (status: string): ExtractedContent =>
   ({
     ok: false,
@@ -68,58 +86,30 @@ const failedResult = (status: string): ExtractedContent =>
     status,
   }) as ExtractedContent;
 
-/** Map a Claw-engine result into the extracted-content shape. */
-const clawExtractedAdapter = {
-  ok: (content: string): ExtractedContent => ({ ok: true, content }),
-  fail: (reason: string): ExtractedContent => failedResult(`claw_${reason}`),
-};
+const errorMessage = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
-// The framework LLM client was removed (original kept at the bottom of this file),
-// so Claw is the only engine. These "legacy" results are what the gateway returns
-// when CALL_AI_USE_CLAW_AGENT is off, the task has no call behind it, or the Claw
-// run failed.
-function llmUnavailable(operation: string, callId: string | undefined): ExtractedContent {
-  logger.warn(`[${callId || 'unknown'}] ${operation}_skipped`, { reason: 'llm_unavailable' });
+function llmUnavailable(operation: string, callId: string | undefined, reason: string): ExtractedContent {
+  logger.warn(`[${callId || 'unknown'}] ${operation}_skipped`, { reason });
   return failedResult('llm_unavailable');
 }
 
-/**
- * The caller only stores the reply. Without Claw it then runs on the egress gateway
- * and the content comes back as workspace-DEK ciphertext of `workspaceId`.
- */
-export interface SealedOutput {
-  workspaceId: string;
-  modelType?: SummaryModelType;
-}
-
-/**
- * Run a non-streaming call LLM task on the Claw agent (CALL_AI_USE_CLAW_AGENT,
- * see services/callAi). Retries live in the Claw runner. Otherwise a task with
- * `sealed` runs on the egress gateway (gatewayLlm).
- */
+/** A non-streaming call LLM task on the engine TRANSIT_PROXY_ENABLED picks (see the top of this file). */
 export async function executeCallLlmWithRetry(
   _createAgent: () => unknown,
   buildPrompt: () => string,
   operation: string,
   callId: string,
   buildSystemPrompt?: () => string | undefined,
-  sealed?: SealedOutput,
+  options: CallLlmOptions = {},
 ): Promise<ExtractedContent> {
-  const systemPrompt = buildSystemPrompt?.()?.trim();
+  const systemPrompt = buildSystemPrompt?.()?.trim() || undefined;
   const userPrompt = buildPrompt();
-  return runCallAiTask(
-    {
-      operation,
-      userPrompt,
-      ...(systemPrompt ? { systemPrompt } : {}),
-      ...(callId && callId !== 'unknown' ? { callId } : {}),
-    },
-    clawExtractedAdapter,
-    async () =>
-      sealed && isGatewayLlmEnabled()
-        ? runSealedOnGateway(operation, callId, userPrompt, systemPrompt, sealed)
-        : llmUnavailable(operation, callId),
-  );
+  if (isGatewayLlmEnabled()) {
+    return options.sealed
+      ? runSealedOnGateway(operation, callId, userPrompt, systemPrompt, options.sealed.workspaceId, options.modelType)
+      : llmUnavailable(operation, callId, 'needs_plaintext_reply');
+  }
+  return runDirect(operation, callId, userPrompt, systemPrompt, options.modelType);
 }
 
 async function runSealedOnGateway(
@@ -127,7 +117,8 @@ async function runSealedOnGateway(
   callId: string,
   userPrompt: string,
   systemPrompt: string | undefined,
-  sealed: SealedOutput,
+  workspaceId: string,
+  modelType: SummaryModelType | undefined,
 ): Promise<ExtractedContent> {
   try {
     const content = await runLlmOnGateway({
@@ -135,76 +126,86 @@ async function runSealedOnGateway(
       callId: callId || 'unknown',
       userPrompt,
       systemPrompt,
-      model: resolveSummaryModel(sealed.modelType),
-      workspaceId: sealed.workspaceId,
+      model: resolveSummaryModel(modelType),
+      workspaceId,
     });
     return { ok: true, content };
   } catch (error) {
-    logger.warn(`[${callId || 'unknown'}] ${operation}_gateway_failed`, {
-      engine: 'gateway',
-      error: error instanceof Error ? error.message : String(error),
-    });
+    logger.warn(`[${callId || 'unknown'}] ${operation}_gateway_failed`, { engine: 'gateway', error: errorMessage(error) });
     return failedResult('gateway_failed');
   }
 }
 
-/** Same as executeCallLlmWithRetry; kept for best-effort extras such as labels and tickets. */
+async function runDirect(
+  operation: string,
+  callId: string | undefined,
+  userPrompt: string,
+  systemPrompt: string | undefined,
+  modelType: SummaryModelType | undefined,
+): Promise<ExtractedContent> {
+  if (!isDirectLlmConfigured()) {
+    return llmUnavailable(operation, callId, 'litellm_not_configured');
+  }
+  try {
+    const content = await runLlmDirect({ userPrompt, systemPrompt, model: resolveSummaryModel(modelType) });
+    return { ok: true, content };
+  } catch (error) {
+    logger.warn(`[${callId || 'unknown'}] ${operation}_direct_failed`, { engine: 'direct', error: errorMessage(error) });
+    return failedResult('direct_failed');
+  }
+}
+
+/** Same as executeCallLlmWithRetry for best-effort extras such as labels and tickets. */
 export async function executeCallLlmOnce(
   _createAgent: () => unknown,
   prompt: string,
   operation: string,
   callId: string | undefined,
 ): Promise<ExtractedContent> {
-  return runCallAiTask(
-    {
-      operation,
-      userPrompt: prompt,
-      ...(callId && callId !== 'unknown' ? { callId } : {}),
-    },
-    clawExtractedAdapter,
-    async () => llmUnavailable(operation, callId),
-  );
+  return isGatewayLlmEnabled()
+    ? llmUnavailable(operation, callId, 'needs_plaintext_reply')
+    : runDirect(operation, callId, prompt, undefined, undefined);
 }
 
 /**
- * Run a "streaming" call LLM task on the Claw agent. Claw runs do not stream text
- * back, so `onDelta` fires once with the complete content.
+ * A "streaming" call LLM task. Neither engine streams text back, so `onDelta` fires once with
+ * the complete content.
  */
 export async function executeStreamingLlmRequest(
   options: ExecuteStreamingLlmOptions,
 ): Promise<StreamingLlmResult> {
-  return runCallAiTask<StreamingLlmResult>(
-    {
-      operation: options.operation,
+  const callId = options.callId || 'unknown';
+  if (isGatewayLlmEnabled()) {
+    if (PLAINTEXT_GATEWAY_OPERATIONS.has(options.operation) && options.callId) {
+      return runPlaintextOnGateway(options);
+    }
+    logger.warn(`[${callId}] ${options.operation}_skipped`, { reason: 'needs_plaintext_reply' });
+    return { ok: false, reason: 'litellm_credentials_missing' };
+  }
+  if (!isDirectLlmConfigured()) {
+    logger.warn(`[${callId}] ${options.operation}_skipped`, { reason: 'litellm_not_configured' });
+    return { ok: false, reason: 'litellm_credentials_missing' };
+  }
+  try {
+    const content = await runLlmDirect({
       userPrompt: options.userPrompt,
       ...(options.systemPrompt ? { systemPrompt: options.systemPrompt } : {}),
-      ...(options.callId ? { callId: options.callId } : {}),
+      model: resolveSummaryModel(options.modelType),
       ...(options.abortSignal ? { abortSignal: options.abortSignal } : {}),
-    },
-    {
-      ok: async (content) => {
-        await emitFinalDelta(options, content);
-        return { ok: true, content };
-      },
-      fail: (reason, error) => ({
-        ok: false,
-        reason: reason === 'cancelled' || reason === 'empty_content' ? reason : 'exception',
-        error: `claw_${reason}${error ? `: ${error}` : ''}`,
-      }),
-    },
-    async () => {
-      if (PLAINTEXT_GATEWAY_OPERATIONS.has(options.operation) && options.callId && isGatewayLlmEnabled()) {
-        return runPlaintextOnGateway(options);
-      }
-      logger.warn(`[${options.callId || 'unknown'}] ${options.operation}_skipped`, { reason: 'llm_unavailable' });
-      return { ok: false, reason: 'litellm_credentials_missing' };
-    },
-  );
+    });
+    await emitFinalDelta(options, content);
+    return { ok: true, content };
+  } catch (error) {
+    if (options.abortSignal?.aborted) return { ok: false, reason: 'cancelled' };
+    const message = errorMessage(error);
+    logger.warn(`[${callId}] ${options.operation}_direct_failed`, { engine: 'direct', error: message });
+    return { ok: false, reason: 'exception', error: `direct: ${message}` };
+  }
 }
 
 /**
- * Without Claw, the detailed-summary canvas (and the template choice it uses) runs on the
- * egress gateway like the summary, but its reply is decrypted here: the canvas, marked items
+ * With the transit proxy, the detailed-summary canvas (and the template choice it uses) runs on
+ * the egress gateway like the summary, but its reply is decrypted here: the canvas, marked items
  * and notifications are built from the text.
  */
 const PLAINTEXT_GATEWAY_OPERATIONS = new Set([
@@ -234,7 +235,7 @@ async function runPlaintextOnGateway(options: ExecuteStreamingLlmOptions): Promi
     return { ok: true, content };
   } catch (error) {
     if (options.abortSignal?.aborted) return { ok: false, reason: 'cancelled' };
-    const message = error instanceof Error ? error.message : String(error);
+    const message = errorMessage(error);
     logger.warn(`[${callId}] ${options.operation}_gateway_failed`, { engine: 'gateway', error: message });
     return { ok: false, reason: 'exception', error: `gateway: ${message}` };
   }
@@ -246,7 +247,7 @@ async function emitFinalDelta(options: ExecuteStreamingLlmOptions, content: stri
     await options.onDelta(content);
   } catch (error) {
     logger.warn(`[${options.callId || 'unknown'}] ${options.operation}_on_delta_failed`, {
-      error: error instanceof Error ? error.message : String(error),
+      error: errorMessage(error),
     });
   }
 }

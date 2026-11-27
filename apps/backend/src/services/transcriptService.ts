@@ -23,7 +23,8 @@ import {
   executeStreamingLlmRequest,
   type SummaryModelType,
 } from './callLlmRetry';
-import { isClawCallAiEnabled } from '@/services/callAi/clawCallAiRunner';
+import { isGatewayLlmEnabled } from '@/services/callAi/gatewayLlm';
+import { runWithDekPassthrough } from '@/services/encryption';
 import { callRecordingService } from '@/services/callRecordingService';
 import { callLabelService } from '@/services/callLabelService';
 import { TagMethod } from '@xyne/shared';
@@ -1109,8 +1110,8 @@ export class TranscriptService {
    * Generate AI summary from the formatted transcript with explicit retry loop.
    */
   /**
-   * `options.sealed`: the summary is only stored. Without Claw it then runs on the egress
-   * gateway and comes back as workspace-DEK ciphertext (store it as-is, never read it).
+   * `options.sealed`: the summary is only stored. With the transit proxy it then comes back as
+   * workspace-DEK ciphertext (store it as-is, never read it).
    */
   async generateCallSummary(
     transcript: string,
@@ -1130,7 +1131,7 @@ export class TranscriptService {
       'call_summary',
       callId || 'unknown',
       undefined,
-      options.sealed ? { workspaceId: options.sealed.workspaceId, modelType } : undefined,
+      { modelType, sealed: options.sealed },
     );
 
     if (!extracted.ok) {
@@ -1175,7 +1176,7 @@ export class TranscriptService {
       'call_title',
       callId || 'unknown',
       undefined,
-      options.sealed ? { workspaceId: options.sealed.workspaceId, modelType } : undefined,
+      { modelType, sealed: options.sealed },
     );
 
     if (!extracted.ok) {
@@ -1255,8 +1256,7 @@ export class TranscriptService {
 
     try {
       const extracted = await executeCallLlmOnce(
-        // The legacy agent keeps resolving credentials without the call, as before;
-        // `callId` only lets the Claw engine act as the call's creator.
+        // `callId` is for logs only.
         () => this.createAgent(),
         prompt,
         'ticket_suggestions',
@@ -1408,8 +1408,7 @@ export class TranscriptService {
 
     try {
       const extracted = await executeCallLlmOnce(
-        // The legacy agent keeps resolving credentials without the call, as before;
-        // `callId` only lets the Claw engine act as the call's creator.
+        // `callId` is for logs only.
         () => this.createAgent(),
         prompt,
         'pulse_data',
@@ -1457,6 +1456,93 @@ export class TranscriptService {
    * @param markdownSummary - The AI-generated Markdown summary
    * @param ticketSuggestions - Optional array of ticket suggestions to append as markdown
    */
+  /**
+   * With the transit proxy, on the egress gateway: the summary and title come back as workspace-DEK
+   * ciphertext and are stored as-is: on the call, as the summary reply in the conversation and as
+   * the call message's title (message content is an encrypted field, so the dashboard decrypts
+   * it like the call's own fields). The detailed-summary canvas runs as on the direct engine; its
+   * reply is decrypted here. The outputs that need the summary or transcript as plaintext (ticket
+   * suggestions, labels, Pulse and the recording filename) are skipped.
+   */
+  private async generateSealedCallOutputs(
+    call: Call,
+    formattedTranscript: string,
+    titleInput: string,
+    conversationId: string,
+    callMessageId: string,
+  ): Promise<void> {
+    const callId = call.externalId;
+    const sealed = { workspaceId: call.workspaceId };
+    const threw = (event: string) => (error: unknown): null => {
+      logger.error(`[${callId}] ${event}`, { path: 'live_call', error: error instanceof Error ? error.message : String(error) });
+      return null;
+    };
+    const [aiSummary, generatedTitle, detailedSummary] = await Promise.all([
+      this.generateCallSummary(formattedTranscript, callId, undefined, undefined, { sealed }).catch(threw('generate_summary_threw')),
+      call.title || call.callType === CallType.HEADLESS
+        ? null
+        : this.generateCallTitle(titleInput, callId, undefined, undefined, { sealed }).catch(threw('generate_title_threw')),
+      callDocumentService.generateAndPostDetailedSummary(callId, formattedTranscript, conversationId).catch((error) => {
+        logDetailedSummaryFailed(callId, 'unexpected_error', error);
+        return null;
+      }),
+    ]);
+
+    // A rename made while the LLM was working wins.
+    let title = generatedTitle;
+    if (title && (await repositories.calls.findByExternalId(callId))?.title) {
+      logger.info(`[${callId}] ai_title_discarded`, { reason: 'renamed_during_processing', path: 'live_call' });
+      title = null;
+    }
+    const data = { ...(aiSummary ? { aiSummary } : {}), ...(title ? { title } : {}) };
+    if (Object.keys(data).length === 0) {
+      logger.error(`[${callId}] ai_summary_skipped`, { reason: 'generation_failed', path: 'live_call' });
+    } else {
+      try {
+        await runWithDekPassthrough(() => repositories.calls.update(call.id, data));
+        logger.info(`[${callId}] call_record_updated`, {
+          fields_updated: Object.keys(data).join(','),
+          path: 'live_call',
+          engine: 'gateway',
+          // Stored as-is: each must be workspace-DEK ciphertext (ENC:v1|<dekId>|…), never plaintext.
+          stored: Object.fromEntries(
+            Object.entries(data).map(([field, value]) => [field, /^ENC:v\d+\|[^|]+\|/.exec(value)?.[0] ?? 'NOT_CIPHERTEXT']),
+          ),
+        });
+      } catch (error) {
+        logger.error(`[${callId}] call_record_update_failed`, { stage: 'sealed_summary_save', path: 'live_call', error });
+      }
+    }
+
+    // Writes keep ciphertext as it is; passthrough keeps the messages it reads back encrypted.
+    if (aiSummary) {
+      try {
+        await runWithDekPassthrough(() => this.postSummaryAsReply(conversationId, callId, aiSummary));
+      } catch (error) {
+        logger.error(`[${callId}] post_summary_reply_failed`, { stage: 'post_summary_reply', path: 'live_call', error });
+      }
+    }
+    if (title) {
+      try {
+        await processCallWithSummaryTx(callMessageId, title);
+        logger.info(`[${callId}] call_title_updated`, { path: 'live_call' });
+      } catch (error) {
+        logger.error(`[${callId}] call_title_update_failed`, { path: 'live_call', error });
+      }
+    }
+
+    const detailedOk = detailedSummary?.success === true;
+    logger.info(`[${callId}] call_ai_gateway_outputs`, {
+      path: 'live_call',
+      summary: aiSummary ? 'ok' : 'failed',
+      title: call.title ? 'kept' : title ? 'ok' : generatedTitle ? 'discarded' : 'failed',
+      detailedSummary: detailedOk ? 'ok' : 'failed',
+    });
+    if (detailedOk && detailedSummary.rawSummary) {
+      await emitCallSummaryReadyToApp(callId, detailedSummary.rawSummary);
+    }
+  }
+
   async postSummaryAsReply(
     conversationId: string,
     callId: string,
@@ -1945,12 +2031,10 @@ export class TranscriptService {
         return;
       }
 
-      // AI outputs run on the Claw agent; without it there is no LLM engine, so
-      // the transcript is only indexed.
-      if (!isClawCallAiEnabled()) {
-        await this.queueTranscriptIndexing(call);
-        return;
-      }
+      // With the transit proxy AI outputs are sealed on the egress gateway; without it the
+      // backend calls LiteLLM directly.
+      const engine = isGatewayLlmEnabled() ? 'gateway' : 'direct';
+      logger.info(`[${callId}] call_ai_engine_selected`, { engine, path: 'live_call' });
 
       // Retrieve and format transcript for AI.
       const transcriptContent = await this.retrieveTranscript(callId);
@@ -1973,6 +2057,12 @@ export class TranscriptService {
         if (conversationMessages) {
           titleInput = `CONVERSATION CONTEXT:\n${conversationMessages}\n\nCALL TRANSCRIPT:\n${formattedTranscript}`;
         }
+      }
+
+      if (engine === 'gateway') {
+        await this.generateSealedCallOutputs(call, formattedTranscript, titleInput, callMessage.conversationId, messageId);
+        await this.queueTranscriptIndexing(call);
+        return;
       }
 
       const startTime = Date.now();
