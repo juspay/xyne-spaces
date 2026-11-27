@@ -160,6 +160,8 @@ export interface PostprocessContext {
   entityId: string;
   sourceId: string;
   normalizedData: NormalizedData;
+  /** True when this message created the conversation (unset on the duplicate path). */
+  isNew?: boolean;
 }
 
 /**

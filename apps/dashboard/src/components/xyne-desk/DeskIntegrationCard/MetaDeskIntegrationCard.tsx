@@ -87,6 +87,11 @@ export const MetaDeskIntegrationCard = ({
         successMessage: `${p.accounts} disconnected. ${p.history} is preserved.`,
       }}
       disconnect={sourceId => p.disconnect(channelId, sourceId)}
+      accountDisconnectBullets={() => [
+        p.stopBullet,
+        `Your existing ${p.history} on this desk is kept.`,
+        `You can reconnect this ${p.account} later.`,
+      ]}
       onReconnect={async (account, label) => {
         const confirmed = await confirm({
           title: `Reconnect ${p.account}`,

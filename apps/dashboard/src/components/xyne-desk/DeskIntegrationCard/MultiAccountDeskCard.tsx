@@ -2,8 +2,10 @@ import { ReactElement, ReactNode, useState } from 'react';
 import { Plug, Plus, Unplug } from 'lucide-react';
 import { toast } from 'sonner';
 import type { DeskAppIntegration } from '../../../hooks/useChannelConnectedEmail';
+import { globalClickTracker } from '../../../services/Analytics/globalClickTracker';
 import { getApiErrorMessage } from '../../../utils/apiError';
 import Button from '../../ui/Button';
+import { DisconnectConfirmDialog } from '../DisconnectConfirmDialog';
 import { DeskConnectionCard } from './DeskConnectionCard';
 
 /** Runs a per-account action with the row's shared busy state and error toast. */
@@ -22,10 +24,12 @@ export interface MultiAccountDeskCardProps {
   /** Slug for tracking names, e.g. 'instagram-account'. */
   accountSlug: string;
   disconnectAll: { title: string; bullets: string[]; successMessage: string };
-  /** Disconnects one account (API call only; confirmation is `confirmDisconnect`). */
+  /** Disconnects one account (API call only; the card asks for confirmation first). */
   disconnect: (sourceId: string) => Promise<void>;
-  /** Asks before a single-account disconnect; omitted ⇒ no confirmation. */
-  confirmDisconnect?: (label: string) => Promise<boolean>;
+  /** What the confirm dialog lists for disconnecting one account. */
+  accountDisconnectBullets: (label: string) => string[];
+  /** Turns an API error into a message; defaults to the backend's text. */
+  errorMessage?: (error: unknown, fallback: string) => string;
   onReconnect: (account: DeskAppIntegration, label: string) => Promise<void> | void;
   onAdd: () => Promise<void> | void;
   /** Called after any change so the parent can refresh what it shows. */
@@ -60,7 +64,8 @@ export const MultiAccountDeskCard = ({
   accountSlug,
   disconnectAll,
   disconnect,
-  confirmDisconnect,
+  accountDisconnectBullets,
+  errorMessage = getApiErrorMessage,
   onReconnect,
   onAdd,
   onChanged,
@@ -71,6 +76,8 @@ export const MultiAccountDeskCard = ({
 }: MultiAccountDeskCardProps): ReactElement => {
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [isAdding, setIsAdding] = useState(false);
+  /** The account whose disconnect is awaiting confirmation. */
+  const [pendingDisconnect, setPendingDisconnect] = useState<DeskAppIntegration | null>(null);
 
   const labelOf = (account: DeskAppIntegration): string =>
     account.displayName
@@ -82,7 +89,7 @@ export const MultiAccountDeskCard = ({
     try {
       await action();
     } catch (error) {
-      toast.error(getApiErrorMessage(error, 'Something went wrong — please try again.'));
+      toast.error(errorMessage(error, 'Something went wrong — please try again.'));
     } finally {
       setBusyKey(null);
     }
@@ -95,7 +102,7 @@ export const MultiAccountDeskCard = ({
       }
       toast.success(disconnectAll.successMessage);
     } catch (error) {
-      toast.error(getApiErrorMessage(error, 'Failed to disconnect — please try again.'));
+      toast.error(errorMessage(error, 'Failed to disconnect — please try again.'));
       throw error;
     } finally {
       // Some accounts may have been disconnected before a failure: show the real state either way.
@@ -103,21 +110,52 @@ export const MultiAccountDeskCard = ({
     }
   };
 
-  const handleToggle = (account: DeskAppIntegration): Promise<void> => {
-    const label = labelOf(account);
-    if (!account.isActive) {
-      return run(`reconnect:${account.id}`, async () => {
-        await onReconnect(account, label);
-      });
+  const handleToggle = (account: DeskAppIntegration): void => {
+    if (account.isActive) {
+      // Confirm first; the row only shows progress once the user has confirmed.
+      setPendingDisconnect(account);
+      return;
     }
-    return run(`disconnect:${account.id}`, async () => {
-      if (confirmDisconnect && !(await confirmDisconnect(label))) {
-        return;
-      }
+    const label = labelOf(account);
+    void run(`reconnect:${account.id}`, async () => {
+      await onReconnect(account, label);
+    });
+  };
+
+  /** Same confirm dialog and INTEGRATION_DISCONNECTED analytics as the desk-wide disconnect. */
+  const confirmAccountDisconnect = async (): Promise<void> => {
+    const account = pendingDisconnect;
+    if (!account) {
+      return;
+    }
+    const label = labelOf(account);
+    const dims = { provider, scope: 'account' };
+    const startedAt = Date.now();
+    setBusyKey(`disconnect:${account.id}`);
+    try {
       await disconnect(account.id);
+      globalClickTracker.trackManualEvent(trackCategory, 'INTEGRATION_DISCONNECTED', undefined, {
+        ...dims,
+        latencyMs: Date.now() - startedAt,
+      });
+      setPendingDisconnect(null);
       onChanged();
       toast.success(`${label} disconnected.`);
-    });
+    } catch (error) {
+      globalClickTracker.trackManualEvent(
+        trackCategory,
+        'INTEGRATION_DISCONNECT_FAILED',
+        undefined,
+        {
+          ...dims,
+          latencyMs: Date.now() - startedAt,
+          errorKind: error instanceof Error ? error.name : 'unknown',
+        },
+      );
+      toast.error(errorMessage(error, `Failed to disconnect ${label}.`));
+    } finally {
+      setBusyKey(null);
+    }
   };
 
   const handleAdd = async (): Promise<void> => {
@@ -125,7 +163,7 @@ export const MultiAccountDeskCard = ({
     try {
       await onAdd();
     } catch (error) {
-      toast.error(getApiErrorMessage(error, `Failed to add ${noun.one}.`));
+      toast.error(errorMessage(error, `Failed to add ${noun.one}.`));
     } finally {
       setIsAdding(false);
     }
@@ -182,7 +220,7 @@ export const MultiAccountDeskCard = ({
                     size='sm'
                     loading={busyKey === toggleKey}
                     disabled={busyKey !== null}
-                    onClick={() => void handleToggle(account)}
+                    onClick={() => handleToggle(account)}
                     data-track-category={trackCategory}
                     data-track-name={`toggle-${accountSlug}-connection`}
                   >
@@ -212,6 +250,21 @@ export const MultiAccountDeskCard = ({
           </Button>
         </div>
       )}
+
+      <DisconnectConfirmDialog
+        open={pendingDisconnect !== null}
+        onOpenChange={open => {
+          if (!open && busyKey === null) {
+            setPendingDisconnect(null);
+          }
+        }}
+        title={`Disconnect ${pendingDisconnect ? labelOf(pendingDisconnect) : noun.one}`}
+        prompt={`Disconnect ${pendingDisconnect ? labelOf(pendingDisconnect) : `this ${noun.one}`} from this desk?`}
+        bullets={pendingDisconnect ? accountDisconnectBullets(labelOf(pendingDisconnect)) : []}
+        isPending={pendingDisconnect !== null && busyKey === `disconnect:${pendingDisconnect.id}`}
+        onConfirm={() => void confirmAccountDisconnect()}
+        trackCategory={trackCategory}
+      />
 
       {children}
     </div>

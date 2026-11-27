@@ -8,7 +8,16 @@ import type { NormalizedData } from '@/integrations/core/types';
 import { SOCIAL_MEDIA_INTERACTION_TYPES } from '@/integrations/social-media/constants';
 import { db } from '@/database/client';
 import { XApiError, isXCreditsDepleted, isXRateLimited, isXReplyNotPermitted, xApiClient, type XApiClient } from './client';
-import { URL_PATTERN, X_DM_THREAD_PREFIX, X_LIGHT_RANGES, X_MAX_DM_LENGTH, X_MAX_POST_LENGTH, X_POST_THREAD_PREFIX, X_URL_LENGTH } from './constants';
+import {
+  X_DM_THREAD_PREFIX,
+  X_EMOJI_PATTERN,
+  X_LIGHT_RANGES,
+  X_MAX_DM_LENGTH,
+  X_MAX_POST_LENGTH,
+  X_POST_THREAD_PREFIX,
+  X_URL_LENGTH,
+  X_URL_PATTERN,
+} from './constants';
 import { dmCounterparty } from './normalizer';
 import { parseXCredentials, XConnectionLostError, xchatAccountFor, xTokenService, type XTokenService } from './tokenService';
 import { xDmExternalId, xPostExternalId, xPostUrl } from './transformer';
@@ -32,20 +41,23 @@ export function pickReplyTargetPostId(sourceId: string, inboundExternalIds: stri
   return best?.toString();
 }
 
-
-
 /**
- * Post length as X counts it: URLs count 23; CJK, emoji and other characters outside the light
- * ranges count 2. Emoji sequences are counted per code point, so they may count high: this errs
- * towards rejecting here rather than at X. X's own rejection is still mapped, as a fallback.
+ * Post length as X counts it (twitter-text weighting): every link counts 23, every emoji 2 however
+ * many code points it has, CJK and other characters outside the light ranges 2, everything else 1.
+ * Close to X's own count; X's rejection is still mapped as a fallback.
  */
 export function xPostLength(text: string): number {
   let length = 0;
-  const withoutUrls = text.replace(URL_PATTERN, () => {
-    length += X_URL_LENGTH;
-    return '';
-  });
-  for (const ch of withoutUrls) {
+  const rest = text
+    .replace(X_URL_PATTERN, () => {
+      length += X_URL_LENGTH;
+      return '';
+    })
+    .replace(X_EMOJI_PATTERN, () => {
+      length += 2;
+      return '';
+    });
+  for (const ch of rest) {
     const cp = ch.codePointAt(0)!;
     length += X_LIGHT_RANGES.some(([lo, hi]) => cp >= lo && cp <= hi) ? 1 : 2;
   }

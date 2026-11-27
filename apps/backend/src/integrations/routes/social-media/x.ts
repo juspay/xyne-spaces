@@ -30,6 +30,7 @@ import {
   parseXCredentials,
   replaceXCredentials,
   updateXCredentials,
+  withoutUserSecrets,
   xTokenService,
 } from '../../adapters/social-media/x/tokenService';
 import { XChatUnlockError, xchatService } from '../../adapters/social-media/x/xchat';
@@ -393,12 +394,18 @@ router.get('/x/oauth/callback', async (req: Request, res: Response): Promise<voi
 
 /**
  * Stops X delivery for a source, revokes and blanks its tokens and deletes its XChat keys (app keys
- * kept for reconnect). Runs on a fresh read under the credentials lock, so it revokes the current
- * refresh token rather than one a concurrent refresh already rotated. No-op if already torn down.
+ * kept for reconnect). Under the credentials lock it only reads and blanks, which is quick; the X
+ * calls run after the lock with what was read. Blanking first means no refresh can rotate the token
+ * in between, so the revoked token is the current one. No-op if already torn down.
  */
 export async function teardownXSource(sourceId: string): Promise<void> {
-  await updateXCredentials(sourceId, (creds) => xConnectionService.teardown(creds));
+  const read: { creds?: XCredentials } = {};
+  await updateXCredentials(sourceId, (current) => {
+    read.creds = current;
+    return withoutUserSecrets(current);
+  });
   xchatService.forget(sourceId);
+  if (read.creds) await xConnectionService.releaseAtX(read.creds);
 }
 
 // POST /:channelId/x/:sourceId/disconnect

@@ -414,6 +414,7 @@ export class ExternalSourceCore {
         entityId: resolvedEntityId,
         sourceId: source.id,
         normalizedData,
+        isNew,
       });
     }
 

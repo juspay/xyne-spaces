@@ -187,17 +187,16 @@ export const XDeskIntegrationCard = ({
     }
   };
 
-  const disableXChatFor = async (sourceId: string, label: string): Promise<void> => {
-    const confirmed = await confirm({
+  const confirmDisableXChat = (label: string): Promise<boolean> =>
+    confirm({
       title: `Turn off XChat for ${label}`,
       description:
         'The stored XChat keys are deleted. New encrypted DMs will appear as locked messages until XChat is enabled again.',
       confirmLabel: 'Turn off',
       cancelLabel: 'Cancel',
     });
-    if (!confirmed) {
-      return;
-    }
+
+  const disableXChatFor = async (sourceId: string, label: string): Promise<void> => {
     await disableXChat(channelId, sourceId);
     refresh();
     toast.success(`XChat turned off for ${label}.`);
@@ -225,15 +224,12 @@ export const XDeskIntegrationCard = ({
         successMessage: 'X accounts disconnected. Existing tickets are kept.',
       }}
       disconnect={sourceId => disconnectXAccount(channelId, sourceId)}
-      confirmDisconnect={label =>
-        confirm({
-          title: `Disconnect ${label}`,
-          description:
-            'New mentions, replies and DMs for this account will stop creating tickets. Its XChat keys are deleted and its X tokens revoked. Existing tickets are kept.',
-          confirmLabel: 'Disconnect',
-          cancelLabel: 'Cancel',
-        })
-      }
+      accountDisconnectBullets={() => [
+        'New mentions, replies and DMs for this account stop creating tickets.',
+        'Its stored XChat keys are deleted and its X tokens revoked.',
+        'Existing tickets are kept; you can reconnect it later.',
+      ]}
+      errorMessage={xErrorMessage}
       onReconnect={(account, label) =>
         openKeysDialog({ mode: 'reconnect', sourceId: account.id, label })
       }
@@ -259,11 +255,18 @@ export const XDeskIntegrationCard = ({
             size='sm'
             loading={busyKey === `xchat:${account.id}`}
             disabled={busyKey !== null}
-            onClick={() =>
-              status.xchatEnabled
-                ? void run(`xchat:${account.id}`, () => disableXChatFor(account.id, label))
-                : openXChatDialog(account.id, label)
-            }
+            onClick={() => {
+              if (!status.xchatEnabled) {
+                openXChatDialog(account.id, label);
+                return;
+              }
+              // Confirm first: the button only spins once the user has confirmed.
+              void confirmDisableXChat(label).then(confirmed => {
+                if (confirmed) {
+                  void run(`xchat:${account.id}`, () => disableXChatFor(account.id, label));
+                }
+              });
+            }}
             data-track-category={TRACK}
             data-track-name={status.xchatEnabled ? 'disable-xchat' : 'enable-xchat'}
           >

@@ -2,6 +2,7 @@ import type { ExternalSource } from '@prisma/client';
 import { BaseFlow } from '@/integrations/core/baseFlow';
 import type { IngestionOptions } from '@/integrations/core/types';
 import { xPoller, type XPoller, type XPollWindow } from './poller';
+import { isXGapRepairRunning, X_REPAIR_RUNNING_MESSAGE } from './repairFlag';
 
 /** Overlap re-read on cursor-based runs; ingest dedups what was already stored. */
 export const X_SYNC_OVERLAP_MS = 2 * 60_000;
@@ -28,12 +29,12 @@ export function xPollWindow(source: ExternalSource, options: IngestionOptions | 
 }
 
 /**
- * Whether a finished run may move the cursor, and to where. The cursor means "everything up to here
- * has been read", so a run may only extend it contiguously: it must have read its whole window, that
- * window must start at or before the current cursor (no hole in between), and it must reach the
- * present. A cursor-based run always qualifies. A manual 24 h fetch or a gap repair qualifies only
- * when it overlaps the cursor; e.g. after a 3-day outage a 24 h fetch leaves the cursor alone, so
- * the next cursor run still reads the hole.
+ * Whether a finished manual or cursor-based run may move the cursor ("everything up to here has
+ * been read"). It must have read its whole window, reached the present, and started at or before
+ * what is already covered: the cursor itself, or the 7-day floor (older is deliberately never
+ * read, so a run starting there leaves no hole even when the cursor is older). E.g. after a 3-day
+ * outage a 24 h manual fetch leaves the cursor alone, so the next catch-up still reads the hole.
+ * (While the stream runs it saves the cursor itself; see streamWorker.)
  */
 export function xCursorAdvance(
   source: Pick<ExternalSource, 'lastSyncCursor'>,
@@ -46,7 +47,9 @@ export function xCursorAdvance(
   const cursor = source.lastSyncCursor ? Date.parse(source.lastSyncCursor) : Number.NaN;
   // No cursor yet: the run started at or after connect time (xPollWindow never reads earlier), so
   // nothing before it is owed.
-  return !Number.isFinite(cursor) || window.start.getTime() <= cursor;
+  if (!Number.isFinite(cursor)) return true;
+  const covered = Math.max(cursor, syncStartedAt.getTime() - X_MAX_CURSOR_LOOKBACK_MS);
+  return window.start.getTime() <= covered;
 }
 
 /**
@@ -63,6 +66,9 @@ export class XFlow extends BaseFlow {
   async preprocess(rawPayload: unknown, source?: ExternalSource, options?: IngestionOptions): Promise<unknown> {
     if (rawPayload !== undefined) return rawPayload;
     if (!source) throw new Error('X source is required for polling');
+    // A gap repair is reading this account right now: a parallel manual fetch would only read the
+    // same data again. (The reverse is allowed: a repair never waits for a manual fetch.)
+    if (await isXGapRepairRunning(source.id)) throw new Error(X_REPAIR_RUNNING_MESSAGE);
     const window = xPollWindow(source, options);
     const { items, complete } = await this.poller.poll(source, window);
     this.coverage.set(source.id, xCursorAdvance(source, window, complete, new Date()));

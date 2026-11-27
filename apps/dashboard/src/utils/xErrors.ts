@@ -25,13 +25,18 @@ const X_ERROR_MESSAGES: Record<string, string> = {
   x_connection_failed: 'Failed to connect X. Please try again.',
 };
 
+/** Own keys only: a code such as `constructor` from the URL must not hit Object.prototype. */
+const knownMessage = (code: string | undefined): string | undefined =>
+  code !== undefined && Object.prototype.hasOwnProperty.call(X_ERROR_MESSAGES, code)
+    ? X_ERROR_MESSAGES[code]
+    : undefined;
+
 /** Message for an error code from the OAuth redirect (`?socialMediaError=…`). */
 export function xRedirectErrorMessage(code: string): string {
-  return X_ERROR_MESSAGES[code] ?? 'X connection error. Please try again.';
+  return knownMessage(code) ?? 'X connection error. Please try again.';
 }
 
 /** Message for a failed X API call: the code's message, else the backend's text, else `fallback`. */
 export function xErrorMessage(error: unknown, fallback: string): string {
-  const code = getXErrorCode(error);
-  return (code && X_ERROR_MESSAGES[code]) || getApiErrorMessage(error, fallback);
+  return knownMessage(getXErrorCode(error)) ?? getApiErrorMessage(error, fallback);
 }

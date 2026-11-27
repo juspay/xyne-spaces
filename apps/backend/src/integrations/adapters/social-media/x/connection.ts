@@ -140,18 +140,16 @@ export class XConnectionService {
   }
 
   /**
-   * Disconnect cleanup: stop event delivery, revoke the user's refresh token, and return
-   * credentials with the tokens blanked and XChat keys removed. App keys are kept so reconnect does not ask for them again.
+   * The X side of a disconnect, best effort: stop event delivery and revoke the refresh token.
    */
-  async teardown(creds: XCredentials): Promise<XCredentials> {
+  async releaseAtX(creds: Pick<XCredentials, 'app' | 'xUserId' | 'tokens'>): Promise<void> {
     await this.removeSubscriptions(creds);
+    if (!creds.tokens.refreshToken) return;
     try {
       await this.client.revokeToken(creds.app, creds.tokens.refreshToken, 'refresh_token');
     } catch (error) {
       logger.warn(`${TAG} Token revoke failed (non-fatal)`, { xUserId: creds.xUserId, error: String(error) });
     }
-    // XChat keys are the account's chat identity: never keep them past a disconnect.
-    return { ...creds, xchat: undefined, tokens: { accessToken: '', refreshToken: '', expiresAt: 0 } };
   }
 }
 

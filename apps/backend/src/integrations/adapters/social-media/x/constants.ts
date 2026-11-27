@@ -41,4 +41,16 @@ export const X_LIGHT_RANGES: Array<[number, number]> = [
 ];
 /** X shortens every URL to a t.co link and counts it as this many characters. */
 export const X_URL_LENGTH = 23;
-export const URL_PATTERN = /https?:\/\/\S+/gi;
+/**
+ * What X links (and so counts as X_URL_LENGTH): http(s) and www. links, and bare domains with a
+ * common TLD (X links `example.com` too). Erring towards matching only makes the count higher.
+ */
+export const X_URL_PATTERN =
+  /(?:https?:\/\/|www\.)\S+|\b[a-z0-9][a-z0-9-]*(?:\.[a-z0-9-]+)*\.(?:com|net|org|io|co|in|ai|app|dev|me|ly|gg|tv|us|uk|info|biz|xyz|so|to)\b(?:\/\S*)?/gi;
+/**
+ * One emoji as the reader sees it: a pictograph with its variation selector, skin-tone modifier and
+ * zero-width-joiner parts (e.g. a family emoji), or a flag (a regional-indicator pair). X counts
+ * each as 2, however many code points it has.
+ */
+export const X_EMOJI_PATTERN =
+  /\p{Regional_Indicator}{2}|\p{Extended_Pictographic}(?:\uFE0F|\p{Emoji_Modifier})*(?:\u200D\p{Extended_Pictographic}(?:\uFE0F|\p{Emoji_Modifier})*)*/gu;

@@ -27,8 +27,7 @@ import { ExternalMessageRepository } from '@/database/repositories/externalMessa
 import { emailService } from '@/services/emailService';
 import { updateSourceSyncCursorLocked } from '@/bypassAcl/emailFetchServices';
 import { websocketService } from '@/services/websocketService';
-import { vespaQueue } from '@/queues/vespaQueue';
-import { ticketSchema } from '@/vespa/src/types';
+import { backdateConversationToMessage } from '@/integrations/core/backdateConversation';
 import {
   AttachmentConversionService,
   ExternalAttachmentService,
@@ -750,47 +749,6 @@ export class AppDeskRefetch extends BaseRefetch {
     }
   }
 
-  /**
-   * A ticket is dated by the message that created it. When the live push
-   * dropped a thread's opening messages, a later reply created the ticket, and
-   * this pull is now appending messages OLDER than the ticket itself. Move the
-   * ticket and its conversation back to the oldest message so the created-at
-   * filter and ordering match the real thread start.
-   *
-   * Conditional updateMany: it only ever moves a date earlier, so a re-run, a
-   * concurrent append or an out-of-order page can't push it forward again.
-   */
-  private async backdateThreadToMessage(conversationId: string, sentAt: Date): Promise<void> {
-    const lateTickets = await db.ticket.findMany({
-      where: { conversationId, createdAt: { gt: sentAt } },
-      select: { id: true, workspaceId: true },
-    });
-    const [tickets, conversations] = await db.$transaction([
-      db.ticket.updateMany({
-        where: { conversationId, createdAt: { gt: sentAt } },
-        data: { createdAt: sentAt },
-      }),
-      db.conversation.updateMany({
-        where: { conversationId, createdAt: { gt: sentAt } },
-        data: { createdAt: sentAt },
-      }),
-    ]);
-    if (tickets.count > 0 || conversations.count > 0) {
-      logger.info(`${TAG} backdated thread to an older pulled message`, {
-        conversationId,
-        createdAt: sentAt.toISOString(),
-      });
-    }
-    // The ticket's search doc carries createdAt too; a feed job re-reads the
-    // row, so re-feeding it picks up the new date. (The stage ETA is not
-    // affected: it is computed from ingest time, not from createdAt.)
-    for (const ticket of lateTickets) {
-      vespaQueue
-        .addJob({ schema: ticketSchema, jobType: 'feed', docId: ticket.id, workspaceId: ticket.workspaceId })
-        .catch((err: unknown) => logger.error(`${TAG} Vespa re-feed after backdate failed`, { ticketId: ticket.id, err }));
-    }
-  }
-
   /** Mirror of appDeskInbound's persist path for one pulled message. */
   private async ingestMessage(ctx: IngestContext, message: AppDeskExportMessage): Promise<'created' | 'appended' | 'skipped' | 'failed'> {
     const { source, channelId } = ctx;
@@ -869,7 +827,7 @@ export class AppDeskRefetch extends BaseRefetch {
         ...(uploadedFiles.length > 0 && { uploadedFiles }),
       });
       await this.applyFormFieldsToThread(ctx, message, threadEmail.conversationId);
-      await this.backdateThreadToMessage(threadEmail.conversationId, receivedAt);
+      await backdateConversationToMessage(threadEmail.conversationId, receivedAt);
       return 'appended';
     }
 

@@ -204,7 +204,7 @@ export class XApiClient {
   getMentions(
     userToken: string,
     xUserId: string,
-    opts: { sinceId?: string; startTime?: string; paginationToken?: string; maxResults?: number },
+    opts: { sinceId?: string; startTime?: string; endTime?: string; paginationToken?: string; maxResults?: number },
   ) {
     return this.request<{ data?: XPost[]; includes?: { users?: XUser[] }; meta: { newest_id?: string; next_token?: string } }>(
       'GET',
@@ -215,6 +215,7 @@ export class XApiClient {
           max_results: String(opts.maxResults ?? 100),
           since_id: opts.sinceId,
           start_time: opts.sinceId ? undefined : opts.startTime,
+          end_time: opts.endTime,
           pagination_token: opts.paginationToken,
           'tweet.fields': 'created_at,conversation_id,in_reply_to_user_id,referenced_tweets,author_id',
           expansions: 'author_id',

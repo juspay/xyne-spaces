@@ -3,6 +3,7 @@ import { EmailType, FormFieldType } from '@xyne/shared';
 import { BaseTransformer } from '@/integrations/core/baseTransformer';
 import type { NormalizedData, ParseResult } from '@/integrations/core/types';
 import { SOCIAL_MEDIA_INTERACTION_TYPES } from '@/integrations/social-media/constants';
+import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { xApiClient } from './client';
 import { X_AUTHOR_ID_FIELD, X_DM_THREAD_PREFIX, X_POST_LINK_FIELD, X_POST_THREAD_PREFIX } from './constants';
@@ -19,6 +20,24 @@ export type XReadyItem = Exclude<XInboundItem, { kind: 'xchat' }>;
 export const XCHAT_LOCKED_TEXT =
   '🔒 Encrypted XChat message. Enable XChat in this desk\'s X settings to read it here, or open X to read and reply.';
 export const XCHAT_UNREADABLE_TEXT = '🔒 Encrypted XChat message that could not be decrypted. Open X to read and reply.';
+/** Shared start of both placeholders: how a stored placeholder body is recognised. */
+const XCHAT_PLACEHOLDER_MARK = '🔒 Encrypted XChat message';
+const isPlaceholderText = (text: string) => text.startsWith(XCHAT_PLACEHOLDER_MARK);
+
+/**
+ * What is stored for this message id already: nothing, a locked/unreadable XChat placeholder (the
+ * decrypted id equals the event's payload.id, live-verified), or the message itself.
+ */
+async function storedState(sourceId: string, externalId: string): Promise<'none' | 'placeholder' | 'stored'> {
+  const stored = await db.externalMessage.findUnique({
+    where: { externalSourceId_externalId: { externalSourceId: sourceId, externalId } },
+    select: { entityId: true },
+  });
+  if (!stored) return 'none';
+  if (!stored.entityId) return 'stored';
+  const email = await db.email.findUnique({ where: { id: stored.entityId }, select: { body: true } });
+  return email && isPlaceholderText(email.body) ? 'placeholder' : 'stored';
+}
 
 /**
  * Dedup key: the resource id (Post id / DM event id), scoped to the source. `event_uuid` is not
@@ -39,7 +58,11 @@ export const xDmThreadId = (dmConversationId: string) => `${X_DM_THREAD_PREFIX}$
 export const xPostUrl = (postId: string, username?: string) =>
   `https://x.com/${username ?? 'i/web'}/status/${postId}`;
 
-export function transformXInbound(item: XReadyItem, source: Pick<ExternalSource, 'id' | 'displayName'>): NormalizedData {
+export function transformXInbound(
+  item: XReadyItem,
+  source: Pick<ExternalSource, 'id' | 'displayName'>,
+  opts: { replacesPlaceholder?: boolean } = {},
+): NormalizedData {
   const brand = source.displayName ? [`@${source.displayName}`] : [];
 
   if (item.kind === 'post') {
@@ -77,10 +100,6 @@ export function transformXInbound(item: XReadyItem, source: Pick<ExternalSource,
 
   const handle = item.sender?.username ? `@${item.sender.username}` : item.senderId;
   const isXChat = item.channel === 'xchat';
-  // A readable XChat message replaces a locked/unreadable placeholder stored earlier under the same
-  // id (the decrypted id equals the event's payload.id, live-verified); otherwise ingest would see a
-  // duplicate and keep the placeholder forever. Placeholders themselves never overwrite anything.
-  const replacesPlaceholder = isXChat && item.text !== XCHAT_LOCKED_TEXT && item.text !== XCHAT_UNREADABLE_TEXT;
   return {
     externalId: xDmExternalId(source.id, item.id),
     externalThreadId: xDmThreadId(item.conversationId),
@@ -92,7 +111,9 @@ export function transformXInbound(item: XReadyItem, source: Pick<ExternalSource,
       to: brand,
       type: EmailType.DEFAULT,
       skipBlockingCheck: true,
-      ...(replacesPlaceholder && { updateExisting: true }),
+      // Readable text replaces a placeholder stored earlier under the same id; without this ingest
+      // would see a duplicate and keep the placeholder forever (see storedAsPlaceholder).
+      ...(opts.replacesPlaceholder && { updateExisting: true }),
     },
     metadata: {
       eventType: SOCIAL_MEDIA_INTERACTION_TYPES.DM,
@@ -180,11 +201,33 @@ export class XTransformer extends BaseTransformer<XInboundItem, NormalizedData[]
     if (!source) return { success: false, error: 'Missing source for X transform' };
     if (item?.kind === 'xchat') {
       const items = await decryptXChatPayload(item.payload, source);
-      return { success: true, data: items.map((i) => transformXInbound(i, source)) };
+      return { success: true, data: (await Promise.all(items.map((i) => this.toNormalized(i, source)))).flat() };
     }
     if (item?.kind !== 'post' && item?.kind !== 'dm') return { success: false, error: 'Invalid X inbound item' };
+    return { success: true, data: await this.toNormalized(item, source, { resolveSender: true }) };
+  }
+
+  /**
+   * A message already stored produces nothing, so core never re-runs it: a re-read (manual fetch,
+   * gap repair, catch-up, a streamed copy of a polled message) would otherwise go through core's
+   * duplicate path, re-download attachments and re-run postprocess, which reopens resolved
+   * tickets. The one exception: readable text for a stored XChat placeholder replaces it in place
+   * (updateExisting, which neither reopens nor backdates).
+   */
+  private async toNormalized(
+    item: XReadyItem,
+    source: ExternalSource,
+    opts: { resolveSender?: boolean } = {},
+  ): Promise<NormalizedData[]> {
+    const externalId = item.kind === 'post' ? xPostExternalId(source.id, item.post.id) : xDmExternalId(source.id, item.id);
+    const stored = await storedState(source.id, externalId);
+    const readableXChat = item.kind === 'dm' && item.channel === 'xchat' && !isPlaceholderText(item.text);
+    const replacesPlaceholder = stored === 'placeholder' && readableXChat;
+    if (stored !== 'none' && !replacesPlaceholder) return [];
     // Polled XChat messages carry ids only; resolve the handle so the ticket shows @customer.
-    if (item.kind === 'dm' && !item.sender) item = { ...item, sender: await lookupSender(source, item.senderId) };
-    return { success: true, data: [transformXInbound(item, source)] };
+    if (opts.resolveSender && item.kind === 'dm' && !item.sender) {
+      item = { ...item, sender: await lookupSender(source, item.senderId) };
+    }
+    return [transformXInbound(item, source, { replacesPlaceholder })];
   }
 }

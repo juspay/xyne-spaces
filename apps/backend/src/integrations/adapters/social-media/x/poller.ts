@@ -29,13 +29,48 @@ export interface XPollWindow {
   end?: Date;
 }
 
+/** The three independent things a poll reads. */
+export type XPollPart = 'mentions' | 'dms' | 'chats';
+export const X_POLL_PARTS: readonly XPollPart[] = ['mentions', 'dms', 'chats'];
+
 export interface XPollResult {
   items: XInboundItem[];
-  /** False when a cap stopped a run before it reached the window start. */
+  /** False when a cap stopped a run before it reached the window start, or a part failed. */
   complete: boolean;
+  /** Parts that errored: worth retrying (only these), unlike a cap. */
+  failedParts?: XPollPart[];
+  /** The first part error, so a caller can tell e.g. "out of credits" from a network blip. */
+  firstError?: unknown;
 }
 
 const inWindow = (at: Date, w: XPollWindow) => at >= w.start && (!w.end || at <= w.end);
+
+/** When an item happened on X (0 if unknown, so it sorts first and cannot create a later ticket). */
+export function xItemTime(item: XInboundItem): number {
+  if (item.kind === 'post') return item.post.created_at ? Date.parse(item.post.created_at) : 0;
+  if (item.kind === 'dm') return item.createdAt.getTime();
+  return Number(item.payload.created_at_msec) || 0;
+}
+
+/**
+ * X returns every timeline newest first. Ingesting oldest first means a new conversation's ticket is
+ * created by its real first message, so the ticket's date and SLA start there.
+ */
+export const sortOldestFirst = (items: XInboundItem[]): XInboundItem[] =>
+  [...items].sort((a, b) => xItemTime(a) - xItemTime(b));
+
+/** The poll part that reads this kind of item, so a failed ingest retries only that part. */
+export const xPollPartOf = (item: XInboundItem): XPollPart =>
+  item.kind === 'post' ? 'mentions' : item.kind === 'dm' ? 'dms' : 'chats';
+
+/**
+ * `end_time` for the mentions query, so only the window's posts are read (and billed). X rejects an
+ * end_time less than 10 s before the request; a window ending later is filtered after the fetch.
+ */
+const X_MIN_END_TIME_AGE_MS = 15_000;
+function mentionsEndTime(window: XPollWindow, now = Date.now()): string | undefined {
+  return window.end && window.end.getTime() <= now - X_MIN_END_TIME_AGE_MS ? window.end.toISOString() : undefined;
+}
 
 export class XPoller {
   constructor(
@@ -44,31 +79,39 @@ export class XPoller {
     private readonly xchat: XChatService = xchatService,
   ) {}
 
-  async poll(source: ExternalSource, window: XPollWindow): Promise<XPollResult> {
+  /**
+   * Reads `parts` (default: all three) for the window. Each part keeps what it fetched even if
+   * another fails (e.g. the DM endpoint's 15-per-15-min limit returns 429); failed parts are
+   * reported so a retry can re-run just those. Throws only when every requested part failed.
+   */
+  async poll(source: ExternalSource, window: XPollWindow, parts: readonly XPollPart[] = X_POLL_PARTS): Promise<XPollResult> {
     const creds = parseXCredentials(source.credentials);
-    // Each part keeps what it fetched even if another fails (e.g. the DM endpoint's 15-per-15-min
-    // limit returns 429): a failed part only makes the run incomplete, so the cursor stays put.
-    const names = ['mentions', 'dms', 'chats'] as const;
-    const settled = await Promise.allSettled([
-      this.mentions(source, creds.xUserId, window),
-      this.dms(source, creds.xUserId, window),
-      this.chats(source, creds.xUserId, window),
-    ]);
-    const parts: XPollResult[] = [];
+    const read = (part: XPollPart) =>
+      part === 'mentions'
+        ? this.mentions(source, creds.xUserId, window)
+        : part === 'dms'
+          ? this.dms(source, creds.xUserId, window)
+          : this.chats(source, creds.xUserId, window);
+    const settled = await Promise.allSettled(parts.map(read));
+    const done: XPollResult[] = [];
+    const failedParts: XPollPart[] = [];
     const failures: unknown[] = [];
     settled.forEach((outcome, i) => {
       if (outcome.status === 'fulfilled') {
-        parts.push(outcome.value);
+        done.push(outcome.value);
         return;
       }
+      failedParts.push(parts[i]);
       failures.push(outcome.reason);
-      logger.warn(`${TAG} Poll part failed`, { sourceId: source.id, part: names[i], error: String(outcome.reason) });
+      logger.warn(`${TAG} Poll part failed`, { sourceId: source.id, part: parts[i], error: String(outcome.reason) });
     });
     // Nothing worked at all: surface it rather than report an empty, "successful" sync.
-    if (parts.length === 0) throw failures[0];
-    const result = {
-      items: parts.flatMap((p) => p.items),
-      complete: failures.length === 0 && parts.every((p) => p.complete),
+    if (done.length === 0) throw failures[0];
+    const result: XPollResult = {
+      items: sortOldestFirst(done.flatMap((p) => p.items)),
+      complete: failedParts.length === 0 && done.every((p) => p.complete),
+      failedParts,
+      ...(failures.length > 0 && { firstError: failures[0] }),
     };
     logger.info(`${TAG} Polled`, {
       sourceId: source.id,
@@ -86,7 +129,11 @@ export class XPoller {
     let token: string | undefined;
     for (let page = 0; page < X_POLL_LIMITS.mentionPages; page++) {
       const res = await this.tokens.withUserToken(source, (t) =>
-        this.client.getMentions(t, xUserId, { startTime: window.start.toISOString(), paginationToken: token }),
+        this.client.getMentions(t, xUserId, {
+          startTime: window.start.toISOString(),
+          endTime: mentionsEndTime(window),
+          paginationToken: token,
+        }),
       );
       posts.push(...(res.data ?? []));
       users.push(...(res.includes?.users ?? []));
