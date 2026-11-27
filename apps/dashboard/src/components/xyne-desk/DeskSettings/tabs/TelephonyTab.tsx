@@ -26,9 +26,9 @@ import type { useDeskSettingsForm } from '../useDeskSettingsForm';
 type DeskSettingsForm = ReturnType<typeof useDeskSettingsForm>;
 
 const inputClass =
-  'w-full max-w-[400px] rounded-[10px] border border-border bg-background px-3 py-1.5 text-sm text-foreground shadow-sm focus:outline-none focus-visible:ring-1 focus-visible:ring-desk-accent';
+  'w-full max-w-[400px] rounded-[10px] border border-border bg-background px-3 py-1.5 text-sm text-foreground shadow-xs focus:outline-hidden focus-visible:ring-1 focus-visible:ring-desk-accent';
 const secondaryButtonClass =
-  'inline-flex items-center gap-1.5 rounded-[10px] border border-border bg-background px-3 py-1.5 text-sm font-medium text-foreground shadow-sm hover:bg-muted/40 disabled:cursor-not-allowed disabled:opacity-50';
+  'inline-flex items-center gap-1.5 rounded-[10px] border border-border bg-background px-3 py-1.5 text-sm font-medium text-foreground shadow-xs hover:bg-muted/40 disabled:cursor-not-allowed disabled:opacity-50';
 
 interface Draft {
   connectionId: string;
@@ -337,7 +337,7 @@ export const TelephonyTab: React.FC<{ form: DeskSettingsForm }> = ({ form }) => 
                     type='checkbox'
                     checked={selectedCallTypes.includes(callType.id)}
                     onChange={e => toggleCallType(callType.id, e.target.checked)}
-                    className='h-4 w-4 rounded border-border text-desk-accent focus:ring-desk-accent'
+                    className='h-4 w-4 rounded-sm border-border text-desk-accent focus:ring-desk-accent'
                     data-track-category='DeskSettings'
                     data-track-name={`ToggleCallType_${callType.id}`}
                   />
@@ -429,7 +429,7 @@ export const TelephonyTab: React.FC<{ form: DeskSettingsForm }> = ({ form }) => 
           type='button'
           onClick={onSave}
           disabled={!isDirty || !draft.connectionId || saveMutation.isPending}
-          className='rounded-[10px] border border-desk-accent bg-desk-accent px-3 py-1.5 text-sm font-medium text-white shadow-sm hover:opacity-90 focus:outline-none focus-visible:ring-1 focus-visible:ring-desk-accent disabled:cursor-not-allowed disabled:opacity-50'
+          className='rounded-[10px] border border-desk-accent bg-desk-accent px-3 py-1.5 text-sm font-medium text-white shadow-xs hover:opacity-90 focus:outline-hidden focus-visible:ring-1 focus-visible:ring-desk-accent disabled:cursor-not-allowed disabled:opacity-50'
           data-track-category='DeskSettings'
           data-track-name='SaveTelephony'
         >

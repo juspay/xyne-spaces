@@ -804,7 +804,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
               <div className='space-y-2'>
                 <label
                   htmlFor='call-provider-select'
-                  className='text-sm font-medium text-foreground'
+                  className='block text-sm font-medium text-foreground'
                 >
                   Call provider <span className='text-muted-foreground'>*</span>
                 </label>
@@ -834,7 +834,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
               <div className='space-y-2'>
                 <label
                   htmlFor='call-connection-select'
-                  className='text-sm font-medium text-foreground'
+                  className='block text-sm font-medium text-foreground'
                 >
                   Call connection <span className='text-muted-foreground'>*</span>
                 </label>
@@ -862,7 +862,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
               {selectedCallConnectionId ? (
                 <>
                   <div className='space-y-2'>
-                    <label className='text-sm font-medium text-foreground'>
+                    <label className='block text-sm font-medium text-foreground'>
                       {callRoutingKeyLabel}s
                     </label>
                     <EntityMultiSelector
@@ -889,7 +889,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
                       type='checkbox'
                       checked={callIsDefault}
                       onChange={e => setCallIsDefault(e.target.checked)}
-                      className='mt-0.5 h-4 w-4 rounded border-border text-desk-accent focus:ring-desk-accent'
+                      className='mt-0.5 h-4 w-4 rounded-sm border-border text-desk-accent focus:ring-desk-accent'
                       data-track-category='ADD_CHANNEL_FORM'
                       data-track-name='ToggleCallDeskDefault'
                     />

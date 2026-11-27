@@ -19,7 +19,7 @@ import { Dialog } from '../../ui/Dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../ui/Select';
 
 const inputClass =
-  'w-full rounded-[10px] border border-border bg-background px-3 py-1.5 text-sm text-foreground shadow-sm focus:outline-none focus-visible:ring-1 focus-visible:ring-desk-accent';
+  'w-full rounded-[10px] border border-border bg-background px-3 py-1.5 text-sm text-foreground shadow-xs focus:outline-hidden focus-visible:ring-1 focus-visible:ring-desk-accent';
 
 function validateAgentMapping(value: unknown): string | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -288,7 +288,7 @@ export const CallConnectionDialog = ({
                       label='Webhook URL'
                       help='Xyne registers this URL with the provider on save. Use it if you set the webhook up by hand.'
                     >
-                      <div className='max-w-[720px] rounded-[14px] border border-border bg-background px-3 py-2 shadow-sm'>
+                      <div className='max-w-[720px] rounded-[14px] border border-border bg-background px-3 py-2 shadow-xs'>
                         <div className='flex items-start gap-3'>
                           <code className='min-w-0 flex-1 overflow-x-auto whitespace-nowrap text-xs text-foreground'>
                             {existing?.webhookUrl ?? 'Unavailable'}
@@ -319,7 +319,7 @@ export const CallConnectionDialog = ({
                         type='button'
                         onClick={() => subscribeMutation.mutate()}
                         disabled={subscribeMutation.isPending}
-                        className='rounded-[12px] border border-border bg-background px-3 py-2 text-sm font-medium text-foreground shadow-sm transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50'
+                        className='rounded-[12px] border border-border bg-background px-3 py-2 text-sm font-medium text-foreground shadow-xs transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50'
                         data-track-category='workspace-telephony'
                         data-track-name='SubscribeLiveEvents'
                       >
@@ -375,7 +375,7 @@ export const CallConnectionDialog = ({
             type='button'
             onClick={onSave}
             disabled={!canSave}
-            className='rounded-[12px] border border-desk-accent bg-desk-accent px-4 py-2 text-sm font-medium text-white shadow-sm transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50'
+            className='rounded-[12px] border border-desk-accent bg-desk-accent px-4 py-2 text-sm font-medium text-white shadow-xs transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50'
             data-track-category='workspace-telephony'
             data-track-name='SaveConnection'
           >

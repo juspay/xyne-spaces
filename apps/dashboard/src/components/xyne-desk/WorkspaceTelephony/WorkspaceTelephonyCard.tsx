@@ -16,7 +16,7 @@ import { useConfirmDialog } from '../../../hooks/useConfirmDialog';
 import { CallConnectionDialog } from './CallConnectionDialog';
 
 const buttonClass =
-  'inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-2.5 py-1 text-xs font-medium text-foreground shadow-sm transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50';
+  'inline-flex items-center gap-1.5 rounded-md border border-border bg-background px-2.5 py-1 text-xs font-medium text-foreground shadow-xs transition-colors hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50';
 
 /** Workspace call-provider connections; desks pick theirs in Desk Settings → Telephony. */
 export const WorkspaceTelephonyCard = (): ReactElement => {
