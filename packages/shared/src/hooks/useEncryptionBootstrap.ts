@@ -2,15 +2,15 @@ import { createContext, useContext, useState, useEffect, useRef, useCallback } f
 import {
   fetchEncryptionConfig,
   fetchTransitServerKeys,
-  memoryTransitKeyStore,
   registerTransitKey,
 } from '../crypto/transit.js';
 import type { EncryptionConfig } from '../crypto/transit.js';
-import { TransitKeyring } from '../crypto/keyring.js';
+import { TransitKeyring, TransitKeyUnavailableError } from '../crypto/keyring.js';
 import type { TransitKeyStore } from '../crypto/keyring.js';
 import { decryptionCache } from '../crypto/decryption-cache.js';
 import { refreshClientManifest, clearClientManifest, setClientManifestKeyring } from '../crypto/client-manifest.js';
 import { consoleLogger, Event } from '../logger/index.js';
+import type { Logger } from '../logger/index.js';
 
 export type { EncryptionConfig };
 
@@ -43,8 +43,10 @@ export interface EncryptionBootstrapScope {
 }
 
 export interface EncryptionBootstrapOptions {
-  /** Where the client's transit key pair is kept; defaults to one pair per page load. */
-  keyStore?: TransitKeyStore;
+  /** The device's one transit key store (see TransitKeyStore). */
+  keyStore: TransitKeyStore;
+  /** Where a failed setup is reported, at error level; the console by default. */
+  logger?: Logger;
 }
 
 interface ScopedBootstrapState {
@@ -96,13 +98,25 @@ async function performBootstrap(keyStore: TransitKeyStore): Promise<EncryptionBo
   return { config, keyring, isReady: true, error: null };
 }
 
+/** A failed setup leaves Zero closed until it is retried, so it is never only a warning. */
+function logBootstrapFailure(logger: Logger, err: unknown): void {
+  logger.error(Event.ENCRYPTION_KEY_REGISTRATION_FAILED, {
+    message: '[encryptionlog] Encryption setup failed',
+    stage: err instanceof TransitKeyUnavailableError ? 'key_store' : 'registration',
+    storage: err instanceof TransitKeyUnavailableError ? err.storage : undefined,
+    error: err instanceof Error ? err.message : String(err),
+  });
+}
+
 export function useEncryptionBootstrapInit(
   scope: EncryptionBootstrapScope,
-  options: EncryptionBootstrapOptions = {},
+  options: EncryptionBootstrapOptions,
 ): EncryptionBootstrapContextValue {
   const scopeKey = JSON.stringify([scope.workspaceId, scope.userId]);
-  const keyStore = useRef(options.keyStore ?? memoryTransitKeyStore);
-  keyStore.current = options.keyStore ?? memoryTransitKeyStore;
+  const keyStore = useRef(options.keyStore);
+  keyStore.current = options.keyStore;
+  const logger = useRef(options.logger ?? consoleLogger);
+  logger.current = options.logger ?? consoleLogger;
   const [bootstrapVersion, setBootstrapVersion] = useState(0);
   const [scopedState, setScopedState] = useState<ScopedBootstrapState>(() => ({
     scopeKey,
@@ -134,7 +148,10 @@ export function useEncryptionBootstrapInit(
     );
 
     if (!globalFetch || globalFetch.scopeKey !== scopeKey) {
-      globalFetch = { scopeKey, promise: performBootstrap(keyStore.current) };
+      const promise = performBootstrap(keyStore.current);
+      // Once per attempt, however many components wait on it.
+      promise.catch((err: unknown) => logBootstrapFailure(logger.current, err));
+      globalFetch = { scopeKey, promise };
     }
 
     globalFetch.promise

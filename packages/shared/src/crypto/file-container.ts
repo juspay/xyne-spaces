@@ -1,4 +1,6 @@
 import { parseTransitKeyId, type TransitKeyring } from './keyring.js';
+import type { TransitAesKey } from './transit-crypto.js';
+import { getTransitPlatform } from './transit-platform.js';
 
 /**
  * Chunked encrypted file container, the format of every encrypted file in object storage and
@@ -191,12 +193,15 @@ export function filePlaintextLength(headerLength: number, chunkSize: number, con
   return full * chunkSize + rest - FILE_CHUNK_OVERHEAD;
 }
 
-async function sealChunk(key: CryptoKey, header: Uint8Array, index: number, last: boolean, plaintext: Uint8Array<ArrayBuffer>): Promise<Uint8Array> {
+// AES-GCM through the transit platform, as for fields, so a host without WebCrypto (React Native,
+// where the key is raw bytes) can encrypt and decrypt files too.
+async function sealChunk(key: TransitAesKey, header: Uint8Array, index: number, last: boolean, plaintext: Uint8Array<ArrayBuffer>): Promise<Uint8Array> {
   const iv = crypto.getRandomValues(new Uint8Array(FILE_CHUNK_IV_LENGTH));
-  const sealed = await crypto.subtle.encrypt(
-    { name: 'AES-GCM', iv, additionalData: fileChunkAad(header, index, last) },
+  const sealed = await getTransitPlatform().crypto.encrypt(
     key,
+    iv,
     plaintext,
+    fileChunkAad(header, index, last),
   );
   const out = new Uint8Array(FILE_CHUNK_IV_LENGTH + sealed.byteLength);
   out.set(iv, 0);
@@ -237,14 +242,11 @@ export async function decryptDownloadedFile(container: Uint8Array, keyring: Tran
   for (let i = 0; at < container.length; i++) {
     const end = Math.min(at + record, container.length);
     const last = end === container.length;
-    const plain = await crypto.subtle.decrypt(
-      {
-        name: 'AES-GCM',
-        iv: container.slice(at, at + FILE_CHUNK_IV_LENGTH),
-        additionalData: fileChunkAad(header.bytes, i, last),
-      },
+    const plain = await getTransitPlatform().crypto.decrypt(
       key,
+      container.slice(at, at + FILE_CHUNK_IV_LENGTH),
       container.slice(at + FILE_CHUNK_IV_LENGTH, end),
+      fileChunkAad(header.bytes, i, last),
     );
     out.set(new Uint8Array(plain), written);
     written += plain.byteLength;

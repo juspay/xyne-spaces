@@ -1,4 +1,5 @@
 export { encryptField, decryptField, isCiphertextValue, isEncryptedField } from './field-decrypt.js';
+export { decryptTransitFields } from './decrypt-transit-fields.js';
 export { decryptionCache } from './decryption-cache.js';
 export { decryptPokeMessage, createDecryptingWebSocket, installSyncDecryption, SYNC_DECRYPTED_TABLES } from './sync-decrypt.js';
 export { getCryptoLogger, setCryptoLogger } from './crypto-logger.js';
@@ -6,17 +7,21 @@ export {
   fetchEncryptionConfig,
   registerTransitKey,
   fetchTransitServerKeys,
-  memoryTransitKeyStore,
 } from './transit.js';
 export type { EncryptionConfig } from './transit.js';
 export {
   TransitKeyring,
+  TransitKeyUnavailableError,
   generateTransitKeyPair,
+  webCryptoTransitKeyPair,
   deriveTransitKey,
   transitKeyId,
   parseTransitKeyId,
+  toBase64,
+  fromBase64,
 } from './keyring.js';
 export type { TransitKeyPair, TransitKeyStore, TransitServerKey, TransitServerKeys } from './keyring.js';
+export { indexedDbTransitKeyStore } from './transit-key-stores.js';
 export {
   getClientManifest,
   refreshClientManifest,
@@ -60,3 +65,7 @@ export {
   decryptDownloadedFile,
 } from './file-container.js';
 export type { FileContainerHeader } from './file-container.js';
+export { webCryptoTransitCrypto } from './transit-crypto.js';
+export type { TransitCrypto, TransitAesKey } from './transit-crypto.js';
+export { setTransitPlatform, getTransitPlatform } from './transit-platform.js';
+export type { TransitPlatform, TransitHttp, TransitResponse } from './transit-platform.js';

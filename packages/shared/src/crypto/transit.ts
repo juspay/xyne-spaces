@@ -1,7 +1,6 @@
-import { API_BASE_URL } from '../config.js';
 import type { EncryptedTableConfig } from '../zero/query-validation.js';
-import { generateTransitKeyPair } from './keyring.js';
-import type { TransitKeyPair, TransitKeyStore, TransitServerKeys } from './keyring.js';
+import type { TransitServerKeys } from './keyring.js';
+import { getTransitPlatform } from './transit-platform.js';
 
 export interface EncryptionConfig {
   encryptedFields: Record<string, EncryptedTableConfig>;
@@ -12,9 +11,7 @@ export interface EncryptionConfig {
 }
 
 export async function fetchEncryptionConfig(): Promise<EncryptionConfig> {
-  const response = await fetch(`${API_BASE_URL}/transit/config`, {
-    credentials: 'include',
-  });
+  const response = await getTransitPlatform().http.request('/transit/config');
   if (!response.ok) {
     throw new Error(`Encryption configuration request failed with status ${response.status}`);
   }
@@ -46,11 +43,9 @@ function parseServerKeys(data: unknown): TransitServerKeys {
  * the other half of every transit key derivation.
  */
 export async function registerTransitKey(publicKey: string): Promise<TransitServerKeys> {
-  const response = await fetch(`${API_BASE_URL}/transit/register`, {
+  const response = await getTransitPlatform().http.request('/transit/register', {
     method: 'POST',
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ publicKey }),
+    body: { publicKey },
   });
   if (!response.ok) {
     throw new Error(`Transit key registration failed with status ${response.status}`);
@@ -60,26 +55,9 @@ export async function registerTransitKey(publicKey: string): Promise<TransitServ
 
 /** The server's current public keys, for a key id the keyring has not seen (a rotated key). */
 export async function fetchTransitServerKeys(): Promise<TransitServerKeys> {
-  const response = await fetch(`${API_BASE_URL}/transit/server-keys`, {
-    credentials: 'include',
-  });
+  const response = await getTransitPlatform().http.request('/transit/server-keys');
   if (!response.ok) {
     throw new Error(`Transit server keys request failed with status ${response.status}`);
   }
   return parseServerKeys(await response.json());
 }
-
-let memoryPair: Promise<TransitKeyPair> | null = null;
-
-/** One key pair per page load, for hosts without a persistent store. */
-export const memoryTransitKeyStore: TransitKeyStore = {
-  getOrCreate(): Promise<TransitKeyPair> {
-    if (!memoryPair) {
-      memoryPair = generateTransitKeyPair();
-      memoryPair.catch(() => {
-        memoryPair = null;
-      });
-    }
-    return memoryPair;
-  },
-};
