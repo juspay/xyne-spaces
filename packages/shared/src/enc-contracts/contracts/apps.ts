@@ -20,6 +20,8 @@ export const appsChatPostMessageClient = defineRequestContract({
     conversationId: z.string().optional(),
     text: z.string().optional(),
     markdownText: z.string().optional(),
+    // The handler's ContentFormat enum; plaintext, it picks how the content is processed.
+    contentFormat: z.string().optional(),
     flow: z.unknown().optional(),
     attachments: z.array(z.unknown()).optional(),
   }),
@@ -40,6 +42,7 @@ export const appsChatUpdateMessageClient = defineRequestContract({
     channelName: z.string().optional(),
     text: z.string().optional(),
     markdownText: z.string().optional(),
+    contentFormat: z.string().optional(),
     flowJSON: z.unknown().optional(),
     attachments: z.array(z.unknown()).optional(),
   }),

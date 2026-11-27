@@ -119,8 +119,11 @@ function transformRequest(options: EncryptedRouteOptions) {
       return decryptRequestBody(req, next);
     }
     // The response comes back from the DEK as transit ciphertext for the caller, so the
-    // caller's transit public key must be known before the handler writes anything.
-    const caller = transitCaller(req);
+    // caller's transit public key must be known before the handler writes anything. The
+    // encryption service finds it from the access token's session: the `xk` cookie key is
+    // not sent along as a fallback.
+    const { proxyClient, authToken } = transitCaller(req);
+    const caller: TransitCaller = proxyClient ? { proxyClient } : authToken ? { authToken } : {};
     if (!hasTransitCaller(caller)) {
       getCryptoOperations().add(1, {
         operation: 'transform_request_body',
