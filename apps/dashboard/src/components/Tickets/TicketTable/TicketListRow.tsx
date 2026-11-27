@@ -1,3 +1,4 @@
+import { TicketDependencyBadge } from '../Dependencies/TicketDependencyBadge';
 import React from 'react';
 import type { Ticket, TicketTag } from '@xyne/shared';
 import { CheckTickSingle as Check, Subtask } from '@xyne/icons';
@@ -174,6 +175,7 @@ const TicketListRowBase: React.FC<TicketListRowProps> = ({
       >
         {ticket.title}
       </span>
+      <TicketDependencyBadge ticketId={ticket.id} compact />
 
       {subProgress &&
         subProgress.total > 0 &&

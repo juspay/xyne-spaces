@@ -8,6 +8,7 @@ import { useTicketNoun } from '../../../../contexts/TicketNounContext';
 
 export function DayTicketsModal({
   isOpen,
+  dateMode = 'created',
   onClose,
   date,
   tickets,
@@ -35,7 +36,8 @@ export function DayTicketsModal({
                 {format(date, 'EEEE, MMMM d, yyyy')}
               </Dialog.Title>
               <Dialog.Description className='text-sm text-muted-foreground mt-0.5'>
-                {tickets.length} ticket{tickets.length !== 1 ? 's' : ''} created
+                {tickets.length} ticket{tickets.length !== 1 ? 's' : ''}{' '}
+                {dateMode === 'eta' ? 'due' : 'created'}
               </Dialog.Description>
             </div>
             <Dialog.Close asChild>
@@ -64,7 +66,9 @@ export function DayTicketsModal({
               </div>
             ) : (
               <div className='flex flex-col items-center justify-center py-12 text-muted-foreground bg-background rounded-xl border border-dashed border-border'>
-                <p className='text-sm'>No {noun.plural} created on this day</p>
+                <p className='text-sm'>
+                  No {noun.plural} {dateMode === 'eta' ? 'due' : 'created'} on this day
+                </p>
               </div>
             )}
           </div>

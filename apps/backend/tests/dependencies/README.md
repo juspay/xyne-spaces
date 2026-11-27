@@ -42,7 +42,7 @@ Required flag evaluation uses OpenFeature details. Errors and default fallbacks 
 - prove real Prisma and Zero authorization, live revocation, board-administrator grant scope and concurrent edits
 - bound workspace graph scans and evaluate bulk moves against their atomic final state
 - finish richer transition and ETA context, merge repointing, cancellation and deletion behavior, idempotent notifications and risk watching
-- implement policy settings, dependency editors, restricted badges, gate dialogs, activity rendering, filters and calendar behavior
+- complete policy settings, gate dialogs, activity rendering, filters, highlighting and shared calendar saved-view definitions; the dashboard dependency editor, shared badges and Created/ETA grouping now have focused tests, not browser acceptance
 - finish Jira mapping, export and MCP compatibility
 - complete real application end-to-end acceptance; command footage and isolated SQL tests do not count
 

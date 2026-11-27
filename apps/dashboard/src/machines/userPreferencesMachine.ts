@@ -3,6 +3,7 @@ import { setup, assign, createActor } from 'xstate';
 import { indexedDBService } from '../services/indexedDBService';
 
 export interface UserPreferences {
+  ticketCalendarDateModes: Record<string, 'created' | 'eta'>;
   sdlcSidebarCollapsed: boolean;
   sdlcSidebarWidth: number;
   /** Which tabs a folder page has open, per folder. The active one lives in the
@@ -65,6 +66,7 @@ export interface UserPreferences {
 }
 
 export const DEFAULT_USER_PREFERENCES: UserPreferences = {
+  ticketCalendarDateModes: {},
   sdlcSidebarCollapsed: false,
   sdlcSidebarWidth: 280,
   sdlcFolderTabs: {},

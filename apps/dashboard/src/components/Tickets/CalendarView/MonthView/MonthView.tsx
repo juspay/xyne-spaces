@@ -16,6 +16,7 @@ import type { MonthViewProps } from './types';
 
 export function MonthView({
   currentDate,
+  dateMode = 'created',
   tickets,
   onTicketClick,
 }: MonthViewProps): React.ReactElement {
@@ -26,7 +27,7 @@ export function MonthView({
   const startDate = startOfWeek(monthStart);
   const endDate = endOfWeek(monthEnd);
   const days = eachDayOfInterval({ start: startDate, end: endDate });
-  const ticketsByDate = useMemo(() => groupTicketsByDate(tickets), [tickets]);
+  const ticketsByDate = useMemo(() => groupTicketsByDate(tickets, dateMode), [tickets, dateMode]);
 
   const weekDays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
@@ -60,8 +61,18 @@ export function MonthView({
               const hasTickets = dayTickets.length > 0;
 
               return (
-                <button
-                  type='button'
+                <div
+                  role='button'
+                  tabIndex={0}
+                  onKeyDown={event => {
+                    if (
+                      event.target === event.currentTarget &&
+                      (event.key === 'Enter' || event.key === ' ')
+                    ) {
+                      event.preventDefault();
+                      event.currentTarget.click();
+                    }
+                  }}
                   key={dateKey}
                   onClick={() => hasTickets && setSelectedDate(day)}
                   className={`min-h-[120px] p-3 border-r border-b border-border last:border-r-0 text-left transition-all duration-200 hover:bg-muted/50 ${
@@ -112,7 +123,7 @@ export function MonthView({
                       </div>
                     )}
                   </div>
-                </button>
+                </div>
               );
             })}
           </div>
@@ -125,6 +136,7 @@ export function MonthView({
           onClose={() => setSelectedDate(null)}
           date={selectedDate}
           tickets={selectedDateTickets}
+          dateMode={dateMode}
           onTicketClick={onTicketClick}
         />
       )}

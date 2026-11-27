@@ -4680,6 +4680,7 @@ const KanbanBoardScreenContent: React.FC<Omit<BoardKanbanScreenProps, 'noun'>> =
       {layoutView === 'calendar' ? (
         <div className='flex-1 overflow-hidden bg-background'>
           <CalendarView
+            viewKey={viewId ?? selectedViewId ?? layoutStorageKey}
             tickets={filteredTickets ?? []}
             onTicketClick={(ticket: Ticket) =>
               handleTicketClick({} as React.MouseEvent, ticket, 'calendar')

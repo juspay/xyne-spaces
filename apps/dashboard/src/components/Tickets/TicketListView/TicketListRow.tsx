@@ -1,3 +1,4 @@
+import { TicketDependencyBadge } from '../Dependencies/TicketDependencyBadge';
 import { Fragment, MouseEvent, ReactElement, ReactNode, useMemo } from 'react';
 import { Wand2 } from 'lucide-react';
 import { SparkleAi02 as Sparkles, PencilEdit as Pencil, Spinner as Loader2 } from '@xyne/icons';
@@ -222,6 +223,7 @@ export const TicketListRow = ({
                 {ticket.title}
               </span>
             </TruncatedTooltip>
+            <TicketDependencyBadge ticketId={ticket.id} compact />
             {/* Disabled (LLM) */}
             {/*
             {ticket.aiCategory && (

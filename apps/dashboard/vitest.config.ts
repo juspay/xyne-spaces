@@ -4,6 +4,7 @@ import { defineConfig } from 'vitest/config';
 // pulls in the full plugin chain (onnxruntime copy, model fetch), which a unit run does
 // not need, so the test config is deliberately standalone.
 export default defineConfig({
+  esbuild: { jsx: 'automatic' },
   test: {
     environment: 'node',
     include: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
