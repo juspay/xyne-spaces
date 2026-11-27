@@ -1,38 +1,8 @@
 import https from 'node:https';
 import { logger } from '@/utils/logger';
+import { ozonetelConfigService } from './ozonetelConfigService';
 
 export class OzonetelError extends Error {}
-
-/** What the Ozonetel APIs need from a connection's credentials. */
-export interface OzonetelApiCredentials {
-  apiKey: string;
-  apiUser: string;
-  baseUrl: string;
-}
-
-export function isAllowedOzonetelBaseUrl(raw: string): boolean {
-  try {
-    const url = new URL(raw);
-    return url.protocol === 'https:' && /(^|\.)ozonetel\.com$/i.test(url.hostname);
-  } catch {
-    return false;
-  }
-}
-
-// The API key goes in a header, so never send a request to a host that isn't Ozonetel's.
-function assertAllowedBaseUrl(baseUrl: string): void {
-  if (!isAllowedOzonetelBaseUrl(baseUrl)) {
-    throw new OzonetelError('Ozonetel base URL must be an https ozonetel.com host');
-  }
-}
-
-function hostOf(baseUrl: string): string {
-  try {
-    return new URL(baseUrl).host;
-  } catch {
-    return '';
-  }
-}
 
 function getSubscribeBaseUrl(apiBaseUrl: string): string {
   const normalized = apiBaseUrl.toLowerCase();
@@ -93,19 +63,23 @@ async function sendJsonGetWithBody(
 }
 
 export const ozonetelService = {
-  async subscribeEvents(
-    credentials: OzonetelApiCredentials,
-    callEventsURL: string,
-  ): Promise<{ ok: true; message: string; subscribeBaseUrl: string }> {
-    assertAllowedBaseUrl(credentials.baseUrl);
+  async subscribeEvents({
+    workspaceId,
+    callEventsURL,
+  }: {
+    workspaceId: string;
+    callEventsURL: string;
+  }): Promise<{ ok: true; message: string; subscribeBaseUrl: string }> {
+    const cfg = await ozonetelConfigService.getConfig(workspaceId);
+    if (!cfg) throw new OzonetelError('Ozonetel not configured for workspace');
 
-    const subscribeBaseUrl = getSubscribeBaseUrl(credentials.baseUrl);
+    const subscribeBaseUrl = getSubscribeBaseUrl(cfg.baseUrl);
     const res = await fetch(`${subscribeBaseUrl}/events/subscribe`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        api_key: credentials.apiKey,
-        username: credentials.apiUser,
+        api_key: cfg.apiKey,
+        username: cfg.apiUser,
       },
       body: JSON.stringify({ callEventsURL }),
     });
@@ -116,15 +90,15 @@ export const ozonetelService = {
         status: res.status,
         text,
         subscribeBaseUrl,
-        host: hostOf(credentials.baseUrl),
+        workspaceId,
       });
       throw new OzonetelError(`Ozonetel subscribe failed: ${res.status}`);
     }
 
-    // callEventsURL carries the webhook secret, so it is not logged.
     logger.info('[ozonetel] subscribe_api_success', {
+      workspaceId,
       subscribeBaseUrl,
-      host: hostOf(credentials.baseUrl),
+      callEventsURL,
       responseText: text,
     });
 
@@ -135,20 +109,23 @@ export const ozonetelService = {
     };
   },
 
-  async listAvailableCampaigns(
-    credentials: OzonetelApiCredentials,
-  ): Promise<{ ok: true; data: unknown; campaigns: string[] }> {
-    assertAllowedBaseUrl(credentials.baseUrl);
+  async listAvailableCampaigns({
+    workspaceId,
+  }: {
+    workspaceId: string;
+  }): Promise<{ ok: true; data: unknown; campaigns: string[] }> {
+    const cfg = await ozonetelConfigService.getConfig(workspaceId);
+    if (!cfg) throw new OzonetelError('Ozonetel not configured for workspace');
 
     const result = await sendJsonGetWithBody(
-      `${credentials.baseUrl}/ca_apis/getAvailableCampaigns`,
+      `${cfg.baseUrl}/ca_apis/getAvailableCampaigns`,
       {
         accept: 'application/json',
-        apiKey: credentials.apiKey,
+        apiKey: cfg.apiKey,
         'Content-Type': 'application/json',
       },
       {
-        userName: credentials.apiUser,
+        userName: cfg.apiUser,
       },
     );
     const data = result.data;
@@ -156,7 +133,7 @@ export const ozonetelService = {
       logger.error('[ozonetel] list_campaigns_api_error', {
         status: result.status,
         data,
-        host: hostOf(credentials.baseUrl),
+        workspaceId,
       });
       throw new OzonetelError(`Ozonetel campaigns list failed: ${result.status}`);
     }
@@ -168,7 +145,7 @@ export const ozonetelService = {
     ).sort((left, right) => left.localeCompare(right));
 
     logger.info('[ozonetel] list_campaigns_api_success', {
-      host: hostOf(credentials.baseUrl),
+      workspaceId,
       campaignsCount: campaigns.length,
     });
 
@@ -180,28 +157,28 @@ export const ozonetelService = {
   },
 
   /** fromDate and toDate are IST "YYYY-MM-DD HH:MM:SS" on the same day, within the last 15 days. */
-  async fetchCallDetails(
-    credentials: OzonetelApiCredentials,
-    {
-      fromDate,
-      toDate,
-      campaignName,
-    }: {
-      fromDate: string;
-      toDate: string;
-      campaignName?: string;
-    },
-  ): Promise<Record<string, unknown>[]> {
-    assertAllowedBaseUrl(credentials.baseUrl);
+  async fetchCallDetails({
+    workspaceId,
+    fromDate,
+    toDate,
+    campaignName,
+  }: {
+    workspaceId: string;
+    fromDate: string;
+    toDate: string;
+    campaignName?: string;
+  }): Promise<Record<string, unknown>[]> {
+    const cfg = await ozonetelConfigService.getConfig(workspaceId);
+    if (!cfg) throw new OzonetelError('Ozonetel not configured for workspace');
 
     const result = await sendJsonGetWithBody(
-      `${credentials.baseUrl}/ca_reports/fetchCDRDetails`,
+      `${cfg.baseUrl}/ca_reports/fetchCDRDetails`,
       {
         accept: 'application/json',
-        apiKey: credentials.apiKey,
+        apiKey: cfg.apiKey,
         'Content-Type': 'application/json',
       },
-      { fromDate, toDate, userName: credentials.apiUser, ...(campaignName ? { campaignName } : {}) },
+      { fromDate, toDate, userName: cfg.apiUser, ...(campaignName ? { campaignName } : {}) },
       // Call ids arrive as bare integers beyond 2^53; keep them as strings so they don't round.
       text => text.replace(/("(?:UCID|CallID|monitorUCID)"\s*:\s*)(\d+)/g, '$1"$2"'),
     );
@@ -216,7 +193,7 @@ export const ozonetelService = {
       logger.error('[ozonetel] fetch_cdr_api_error', {
         status: result.status,
         data,
-        host: hostOf(credentials.baseUrl),
+        workspaceId,
         fromDate,
         toDate,
         campaignName,
@@ -228,7 +205,7 @@ export const ozonetelService = {
 
     const details = Array.isArray(data?.details) ? data.details : [];
     logger.info('[ozonetel] fetch_cdr_api_success', {
-      host: hostOf(credentials.baseUrl),
+      workspaceId,
       fromDate,
       toDate,
       campaignName,

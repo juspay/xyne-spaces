@@ -75,9 +75,6 @@ import { ensureDmConversationAuthorParticipant } from '@/utils/dmConversationPar
 import { groupDmParticipantService } from '@/services/groupDmParticipantService';
 import { AppError } from '@/middleware/errorHandler';
 import { sendForwardedMessageTx } from '@/bypassAcl/transactions/channelController';
-import { callConnectionService } from '@/services/telephony/callConnectionService';
-import { CallConfigError } from '@/services/telephony/callProvider';
-import { deskCallSettingsService } from '@/services/telephony/deskCallSettingsService';
 
 export class ChannelController {
   channelRepository: ChannelRepository;
@@ -801,9 +798,6 @@ export class ChannelController {
         slackChannelId,
         installedAppId,
         boardId,
-        callConnectionId,
-        callRoutingKeys,
-        callIsDefault,
       }: {
         scopeType: ChannelScopeType;
         scopeId?: string;
@@ -819,9 +813,6 @@ export class ChannelController {
         slackChannelId?: string;
         installedAppId?: string;
         boardId?: string;
-        callConnectionId?: string;
-        callRoutingKeys?: string[];
-        callIsDefault?: boolean;
       } = req.body;
 
       const userId = req.user!.id;
@@ -916,40 +907,6 @@ export class ChannelController {
         if (!deskType || deskType !== DeskType.CALL) {
           res.status(400).json({ error: 'deskType CALL is required for CALL channels' });
           return;
-        }
-        // Optional: a call desk can also get its connection later in Desk Settings.
-        if (callConnectionId !== undefined) {
-          const validRoutingKeys =
-            callRoutingKeys === undefined ||
-            (Array.isArray(callRoutingKeys) && callRoutingKeys.every(key => typeof key === 'string'));
-          if (
-            typeof callConnectionId !== 'string' ||
-            !validRoutingKeys ||
-            (callIsDefault !== undefined && typeof callIsDefault !== 'boolean')
-          ) {
-            res.status(400).json({ error: 'Invalid call connection settings' });
-            return;
-          }
-          const callConnection = await callConnectionService.get(req.user!.workspaceId!, callConnectionId);
-          if (!callConnection) {
-            res.status(400).json({ error: 'Call connection not found' });
-            return;
-          }
-          // A taken campaign or default is rejected before the desk is created.
-          try {
-            await deskCallSettingsService.assertNewDeskRoutingFree(
-              req.user!.workspaceId!,
-              callConnection.id,
-              { routingKeys: callRoutingKeys ?? [], isDefault: callIsDefault === true },
-              callConnection.provider.routingKeyLabel,
-            );
-          } catch (error) {
-            if (error instanceof CallConfigError) {
-              res.status(error.statusCode).json({ error: error.message });
-              return;
-            }
-            throw error;
-          }
         }
       }
 
@@ -1232,25 +1189,11 @@ export class ChannelController {
             emailMergeMode: EmailMergeMode.DISABLED,
             ...(assigneeUserGroupId && { assigneeUserGroupId }),
           });
-
-          if (callConnectionId) {
-            await deskCallSettingsService.save(req.user!.workspaceId!, channel.id, {
-              connectionId: callConnectionId,
-              routingKeys: callRoutingKeys ?? [],
-              isDefault: callIsDefault === true,
-            });
-          }
         } catch (error) {
           logger.error('Failed to create call desk resources, rolling back channel', error);
-          await db.emailChannelPreference.deleteMany({ where: { channelId: channel.id } }).catch(() => {});
           await db.channel.delete({ where: { id: channel.id } }).catch(err => {
             logger.error(`Channel rollback failed for ${channel.id}`, err);
           });
-          // e.g. a campaign another desk already routes: tell the user why.
-          if (error instanceof CallConfigError) {
-            res.status(error.statusCode).json({ error: error.message });
-            return;
-          }
           res.status(500).json({ error: 'Failed to create call desk' });
           return;
         }
