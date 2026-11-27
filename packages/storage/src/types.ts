@@ -99,6 +99,8 @@ export interface ObjectInfo {
   lastModified?: Date;
   /** The object's custom metadata. */
   metadata?: Record<string, string>;
+  /** Base64 SHA-256 of the customer-supplied key the object is encrypted with (GCS only). */
+  keySha256?: string;
 }
 
 /** One object's metadata plus a readable stream of its content. */

@@ -17,6 +17,7 @@ import {
 import { mentionServerSpec, whiteboardServerSpec } from 'blocknote-layout-server-utils';
 import { config } from '@/config/env.js';
 import { logger } from '@/utils/logger.js';
+import { prepareYSweetDocKey } from '@/services/ysweetDocKeys.js';
 import { citationServerSpec } from '@/utils/canvasCitationSpec.js';
 import {
   diagramServerSpec,
@@ -214,7 +215,20 @@ export async function ysweetCreateDoc(docId: string): Promise<void> {
   await ysweetJson(config.ysweet.url, 'doc/new', docId, { docId });
 }
 
-export function ysweetGetClientToken(docId: string, auth: YSweetAuthRequest): Promise<ClientToken> {
+export async function ysweetGetClientToken(docId: string, auth: YSweetAuthRequest): Promise<ClientToken> {
+  // Before y-sweet can load the doc: it gets a key only for a doc opened here.
+  try {
+    await prepareYSweetDocKey(docId);
+  } catch (error) {
+    // An already loaded doc needs no key; one that is not loaded fails in y-sweet instead.
+    // 503: canvas doc keys are not configured in the encryption service (y-sweet still on CSEK).
+    const status = (error as { status?: number }).status;
+    logger[status === 503 ? 'debug' : 'warn']('[YSweet] Could not prepare the doc key', {
+      docId,
+      status,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
   return ysweetJson<ClientToken>(config.ysweet.url, `doc/${encodeURIComponent(docId)}/auth`, docId, auth);
 }
 

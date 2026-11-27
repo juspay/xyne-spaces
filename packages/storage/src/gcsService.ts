@@ -424,6 +424,7 @@ export class GCSService {
     etag?: string;
     updated?: string;
     metadata?: Record<string, string | number | boolean | null>;
+    customerEncryption?: { keySha256?: string };
   }): ObjectInfo {
     const info: ObjectInfo = {};
     const size = typeof metadata.size === 'string' ? Number(metadata.size) : metadata.size;
@@ -443,6 +444,9 @@ export class GCSService {
       info.metadata = Object.fromEntries(
         Object.entries(metadata.metadata).flatMap(([k, v]) => (v == null ? [] : [[k, String(v)]])),
       );
+    }
+    if (metadata.customerEncryption?.keySha256) {
+      info.keySha256 = metadata.customerEncryption.keySha256;
     }
     return info;
   }
