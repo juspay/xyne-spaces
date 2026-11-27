@@ -20,7 +20,7 @@ import { keepMentionsWithin } from '@/utils/mentionParser';
 import { ConversationParticipantRepository } from '@/database/repositories/conversationParticipantRepository';
 import { UserRepository } from '@/database/repositories/users';
 import { Conversation, Message } from '@prisma/client';
-import { ConversationParticipation, MessageType, AttachmentEntityType, ChannelScopeType, ChannelRole, VespaInsertionStatus, VespaOperationType, WorkspaceRole, buildInitialMessageMd } from '@xyne/shared';
+import { ConversationParticipation, MessageType, AttachmentEntityType, ChannelScopeType, ChannelRole, VespaInsertionStatus, VespaOperationType, WorkspaceRole } from '@xyne/shared';
 import { uploadFiles, UploadedFileResult } from '@/services/fileUploadService';
 import { websocketService } from './websocketService';
 import { redisService } from './redisService';
@@ -451,28 +451,31 @@ export class ConversationService {
       createdAt: messageCreatedAt,
     };
 
+    const initialMessage = {
+      messageId,
+      conversationId,
+      workspaceId: channel.workspaceId,
+      senderId: userId,
+      content: (resolvedMessageMetadata as { contentFormat?: string } | null | undefined)?.contentFormat === 'markdown'
+        ? sanitizeMessageContent(messageContent)
+        : messageContent,
+      msgType: resolvedMsgType,
+      hasAttachment: processedFiles.length > 0,
+      createdAt: messageCreatedAt.getTime(),
+      metadata: resolvedMessageMetadata,
+      // Mirror the messages column defaults the insert below relies on, so the
+      // snapshot matches the row it describes.
+      isSent: true,
+      nudgeCount: 0,
+    };
+    const initialMessageMd = await messageMetadataService.composeNewInitialMessageMd(initialMessage, channel.workspaceId);
+
     const conversationData: CreateConversationInput = {
       conversationId,
       channelId,
       createdBy: userId,
       initialMessageId: messageId,
-      initial_message_md: buildInitialMessageMd({
-        messageId,
-        conversationId,
-        workspaceId: channel.workspaceId,
-        senderId: userId,
-        content: (resolvedMessageMetadata as { contentFormat?: string } | null | undefined)?.contentFormat === 'markdown'
-          ? sanitizeMessageContent(messageContent)
-          : messageContent,
-        msgType: resolvedMsgType,
-        hasAttachment: processedFiles.length > 0,
-        createdAt: messageCreatedAt.getTime(),
-        metadata: resolvedMessageMetadata,
-        // Mirror the messages column defaults the insert below relies on, so the
-        // snapshot matches the row it describes.
-        isSent: true,
-        nudgeCount: 0,
-      }),
+      initial_message_md: initialMessageMd,
       metadata,
       pinned: pinned || false,
       ...(createdAt && { createdAt }),
@@ -818,22 +821,25 @@ export class ConversationService {
 
     // Create child conversation if replyBroadcast is true (similar to mutator logic)
     if (replyBroadcast && childConversationId) {
-      // Create a new conversation for this message in the channel
+      // Both mds composed first, so the child is created complete in one insert.
+      const [initialMd, parentMd] = await Promise.all([
+        messageMetadataService.composeNewInitialMessageMd(
+          { ...message, createdAt: message.createdAt.getTime() },
+          conversation.workspaceId,
+        ),
+        messageMetadataService.composeNewParentMessageMd(conversation.initialMessageId, conversation.workspaceId),
+      ]);
       await this.conversationRepository.create({
         conversationId: childConversationId,
         channelId: conversation.channelId,
         createdBy: userId,
         createdAt: message.createdAt,
         initialMessageId: message.messageId,
-        initial_message_md: buildInitialMessageMd({
-          ...message,
-          msgType: message.msgType as MessageType,
-          createdAt: message.createdAt.getTime(),
-        }),
+        initial_message_md: initialMd,
         parentMessageId: conversation.initialMessageId,
+        parent_message_md: parentMd,
         pinned: false,
       });
-      await messageMetadataService.syncParentMessageMd(childConversationId);
     }
 
     // Single conversations write: replyCount, lastActivityAt and replies_md were
@@ -843,10 +849,7 @@ export class ConversationService {
     const replyAppliedAt = new Date();
     await this.conversationRepository.applyThreadReply({
       conversationId,
-      repliesMd: messageMetadataService.buildRepliesMdAfterReply(
-        await this.conversationRepository.findRepliesMd(conversationId),
-        userId,
-      ),
+      repliesMd: await messageMetadataService.composeRepliesMdAfterReply(conversationId, userId),
       lastActivityAt: lastActivityAt ?? replyAppliedAt,
       replyCreatedAt: createdAt === undefined ? replyAppliedAt : message.createdAt,
       markParticipantsRead,

@@ -9,71 +9,23 @@ import {
 } from '@xyne/shared';
 import type { Schema } from '@xyne/shared';
 import { compose } from '@/services/encryption/compose';
+import { seal, storedInputs } from '@/services/encryption/mdCompose';
 import { zql } from '../queries';
 import { unreadableTransaction } from '../unreadableTransaction';
 
 // Md columns made from a message's text (and a sub-ticket's anchor), built by compose so ciphertext
 // never ends up inside an md and they are stored already encrypted.
 
-/** A message row as a sync handler reads it: content and link_preview_md as stored. */
-type StoredMessage = {
-  messageId: string;
-  conversationId: string;
-  workspaceId?: string | null;
-  senderId: string;
-  content: string;
-  msgType: string;
-  createdAt: number;
-  hasAttachment?: boolean;
-  edited?: boolean;
-  isDeleted?: boolean;
-  showInChannel?: boolean;
-  visibleTo?: string | null;
-  metadata?: unknown;
-  nudgeCount?: number | null;
-  isSent?: boolean;
-  reactions_md?: string | null;
-  link_preview_md?: string | null;
-  childConversationId?: string | null;
-};
-
 type TargetConversation = { conversationId: string; workspaceId: string };
-
-function seal(value: string | null | undefined): UnreadableString | null | undefined {
-  return value === null || value === undefined ? value : UnreadableString.make(value);
-}
 
 /** Rebuilds `conversation.initial_message_md` from `message`; writes it only when it changed. */
 export async function composeInitialMessageMd(
   tx: Transaction<Schema>,
-  message: StoredMessage,
+  message: object,
   conversation: TargetConversation & { initial_message_md: string | null },
 ): Promise<void> {
   const result = await compose(
-    {
-      template: initialMessageMdTemplate,
-      inputs: {
-        messageId: message.messageId,
-        conversationId: message.conversationId,
-        workspaceId: message.workspaceId,
-        senderId: message.senderId,
-        content: UnreadableString.make(message.content),
-        msgType: message.msgType,
-        createdAt: message.createdAt,
-        hasAttachment: message.hasAttachment,
-        edited: message.edited,
-        isDeleted: message.isDeleted,
-        showInChannel: message.showInChannel,
-        visibleTo: message.visibleTo,
-        metadata: message.metadata,
-        nudgeCount: message.nudgeCount,
-        isSent: message.isSent,
-        reactions_md: message.reactions_md,
-        link_preview_md: seal(message.link_preview_md),
-        childConversationId: message.childConversationId,
-      },
-      current: seal(conversation.initial_message_md),
-    },
+    { template: initialMessageMdTemplate, inputs: storedInputs(initialMessageMdTemplate, message), current: seal(conversation.initial_message_md) },
     { workspaceId: conversation.workspaceId },
   );
   if (result.unchanged) return;
@@ -87,22 +39,11 @@ export async function composeInitialMessageMd(
 /** Rebuilds `conversation.parent_message_md` from its parent `message`; writes it only when it changed. */
 export async function composeParentMessageMd(
   tx: Transaction<Schema>,
-  message: Pick<StoredMessage, 'messageId' | 'conversationId' | 'senderId' | 'content' | 'msgType' | 'createdAt'>,
+  message: object,
   conversation: TargetConversation & { parent_message_md: string | null },
 ): Promise<void> {
   const result = await compose(
-    {
-      template: parentMessageMdTemplate,
-      inputs: {
-        messageId: message.messageId,
-        conversationId: message.conversationId,
-        senderId: message.senderId,
-        content: UnreadableString.make(message.content),
-        msgType: message.msgType,
-        createdAt: message.createdAt,
-      },
-      current: seal(conversation.parent_message_md),
-    },
+    { template: parentMessageMdTemplate, inputs: storedInputs(parentMessageMdTemplate, message), current: seal(conversation.parent_message_md) },
     { workspaceId: conversation.workspaceId },
   );
   if (result.unchanged) return;

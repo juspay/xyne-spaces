@@ -17,6 +17,8 @@ export interface CreateConversationInput {
    */
   initial_message_md?: string | null;
   parentMessageId?: string;
+  /** The parent message's md, composed before the insert (a thread reply sent to the channel). */
+  parent_message_md?: string | null;
   pinned?: boolean;
   doNotPostToChannel?: boolean;
   metadata?: Record<string, any>;
@@ -83,6 +85,7 @@ export class ConversationRepository extends BaseRepository<Conversation, CreateC
           initial_message_md: data.initial_message_md,
         }),
         parentMessageId: data.parentMessageId,
+        ...(data.parent_message_md !== undefined && { parent_message_md: data.parent_message_md }),
         pinned: data.pinned || false,
         ...(data.doNotPostToChannel !== undefined && {
           doNotPostToChannel: data.doNotPostToChannel,
@@ -228,17 +231,10 @@ export class ConversationRepository extends BaseRepository<Conversation, CreateC
    * previous read-then-write, which also removes a lost-update race between
    * concurrent replies.
    */
-  async findRepliesMd(conversationId: string): Promise<string | null> {
-    const row = await this.db.conversation.findUnique({
-      where: { conversationId },
-      select: { replies_md: true },
-    });
-    return row?.replies_md ?? null;
-  }
-
   async applyThreadReply(params: {
     conversationId: string;
-    repliesMd: string | null;
+    /** The new replies_md (from compose, already encrypted); undefined leaves it as it is. */
+    repliesMd?: string;
     lastActivityAt: Date;
     replyCreatedAt?: Date | null;
     markParticipantsRead?: boolean;
@@ -251,7 +247,7 @@ export class ConversationRepository extends BaseRepository<Conversation, CreateC
       data: {
         replyCount: { increment: 1 },
         lastActivityAt,
-        replies_md: repliesMd,
+        ...(repliesMd !== undefined && { replies_md: repliesMd }),
       },
     });
 
