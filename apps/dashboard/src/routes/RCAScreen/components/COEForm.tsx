@@ -6,7 +6,6 @@ import { v4 as uuidv4 } from 'uuid';
 import { Button } from '../../../components/ui/Button';
 import Textarea from '../../../components/ui/Textarea';
 import { Combobox } from '../../../components/ui/Combobox/Combobox';
-import { cn } from '../../../utils/classNames';
 import { toast } from 'sonner';
 import { COEStatus, RCAStatus } from '@xyne/shared';
 import { coeSchema } from '../schemas';
@@ -625,11 +624,6 @@ export const COEForm = ({
               placeholder='Describe the action to address the RCA...'
               rows={4}
               aria-invalid={showErrors && !data.action.trim()}
-              className={cn(
-                showErrors &&
-                  !data.action.trim() &&
-                  'aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive',
-              )}
             />
             {renderFieldError(errors.action ?? null, showErrors)}
           </div>

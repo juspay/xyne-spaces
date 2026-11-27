@@ -111,7 +111,7 @@ const CanvasCreationFallback = ({
       <div className='flex items-center gap-2'>
         <button
           onClick={onRetry}
-          className='px-4 py-2 text-sm font-medium rounded-lg bg-action-primary text-action-primary-foreground hover:bg-action-primary/90 transition-colors'
+          className='px-4 py-2 text-sm font-medium rounded-lg bg-action-primary text-action-primary-foreground transition-colors'
           data-track-category='RecordingsScreen'
           data-track-name='retry_create_canvas'
         >

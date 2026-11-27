@@ -392,7 +392,7 @@ function JobCard({
 }): React.JSX.Element {
   const isDm = job.type === 'DM';
   return (
-    <div className='rounded-xl border border-border bg-card p-4 shadow-xs'>
+    <div className='rounded-xl border border-border bg-card p-4'>
       <div className='flex items-start justify-between gap-3'>
         <div className='flex items-center gap-2.5'>
           <span
@@ -553,7 +553,7 @@ function RailCard({
   children: React.ReactNode;
 }): React.JSX.Element {
   return (
-    <div className='rounded-xl border border-border bg-card p-4 shadow-xs'>
+    <div className='rounded-xl border border-border bg-card p-4'>
       <h3 className='mb-3 flex items-center gap-2 text-sm font-semibold text-foreground'>
         <span className='text-muted-foreground'>{icon}</span>
         {title}
@@ -946,7 +946,7 @@ export default function SlackMigration(): React.JSX.Element {
               )}
 
               {/* Start a migration */}
-              <div className='rounded-xl border border-border bg-card p-4 shadow-xs sm:p-5'>
+              <div className='rounded-xl border border-border bg-card p-4 sm:p-5'>
                 <div className='mb-4 inline-flex rounded-lg bg-muted p-0.5'>
                   {(['dm', 'channel'] as const).map(k => (
                     <button
@@ -957,7 +957,7 @@ export default function SlackMigration(): React.JSX.Element {
                       className={cn(
                         'rounded-md px-3 py-1.5 text-sm font-medium transition-colors',
                         tab === k
-                          ? 'bg-background text-foreground shadow-xs'
+                          ? 'bg-background text-foreground '
                           : 'text-muted-foreground hover:text-foreground',
                       )}
                     >
@@ -1188,7 +1188,7 @@ function IngestionControl({
 }): React.JSX.Element {
   const t = TONE[status.running ? 'green' : 'orange'];
   return (
-    <div className='flex flex-wrap items-center gap-3 rounded-xl border border-border bg-card p-4 shadow-xs'>
+    <div className='flex flex-wrap items-center gap-3 rounded-xl border border-border bg-card p-4'>
       <span className={cn('flex size-8 items-center justify-center rounded-lg', t.pill)}>
         {status.running ? <Play className='size-4' /> : <Square className='size-4' />}
       </span>

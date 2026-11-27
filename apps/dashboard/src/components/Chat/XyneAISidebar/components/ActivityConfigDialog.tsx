@@ -227,7 +227,7 @@ export const ActivityConfigDialog = ({
             data-ph-capture-attribute-track-id='save_activity_config'
             data-track-category='XYNE_AI_SIDEBAR'
             data-track-name='SAVE_ACTIVITY_CONFIG'
-            className='px-4 py-2 text-sm font-medium text-action-primary-foreground bg-action-primary rounded-md hover:bg-action-primary/90 transition-colors'
+            className='px-4 py-2 text-sm font-medium text-action-primary-foreground bg-action-primary rounded-md transition-colors'
             type='button'
           >
             {hasExistingAlias ? 'Update' : 'Save'}

@@ -51,7 +51,7 @@ export const DetailToggle = ({
     >
       <span
         className={cn(
-          'absolute top-0.5 h-3 w-3 rounded-full bg-background shadow-[0_1px_2px_rgba(20,22,26,0.25)] transition-[left] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)]',
+          'absolute top-0.5 h-3 w-3 rounded-full bg-background shadow-[0_1px_2px_rgba(20,22,26,0.25)] transition-[left] duration-150 ',
           checked ? 'left-[14px]' : 'left-0.5',
         )}
       />
@@ -95,7 +95,7 @@ export const DetailSection = ({
           <ChevronRight
             size={12}
             className={cn(
-              'w-3 shrink-0 text-muted-foreground/70 transition-transform duration-150 ease-[cubic-bezier(0.23,1,0.32,1)]',
+              'w-3 shrink-0 text-muted-foreground/70 transition-transform duration-150 ',
               open && 'rotate-90',
             )}
           />

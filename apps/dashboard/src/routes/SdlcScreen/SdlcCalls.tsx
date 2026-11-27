@@ -232,9 +232,7 @@ function CallRow(props: {
       <span
         className={cn(
           'relative flex size-8 shrink-0 items-center justify-center rounded-full',
-          phase === 'LIVE'
-            ? 'bg-status-success/15 text-status-success'
-            : 'bg-muted text-muted-foreground',
+          phase === 'LIVE' ? 'text-status-success' : 'bg-muted text-muted-foreground',
         )}
         aria-hidden='true'
       >

@@ -63,7 +63,7 @@ export const DeskInsightsPanel = ({
         className='flex w-56 shrink-0 flex-col rounded-l-[16px] border border-r-0 border-desk-border bg-muted pr-5 shadow-2xl dark:border-border'
       >
         <div className='flex items-center gap-2 px-3.5 py-3'>
-          <span className='flex h-6 w-6 items-center justify-center rounded-[8px] bg-desk-accent/10 text-desk-accent'>
+          <span className='flex h-6 w-6 items-center justify-center rounded-[8px] text-desk-accent'>
             <SparkleAi02 size={14} />
           </span>
           <span className='text-sm font-semibold text-foreground'>Insights</span>
@@ -90,7 +90,7 @@ export const DeskInsightsPanel = ({
                     className={cn(
                       'flex h-6 w-6 shrink-0 items-center justify-center rounded-[6px]',
                       isActive
-                        ? 'bg-desk-accent/10 text-desk-accent'
+                        ? 'text-desk-accent'
                         : 'bg-background text-muted-foreground group-hover:text-foreground',
                     )}
                   >

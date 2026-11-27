@@ -270,7 +270,7 @@ export const DeskReportPanel: React.FC<DeskReportPanelProps> = ({
               </div>
             ) : !report ? (
               <div className='flex h-full flex-col items-center justify-center gap-3 text-center px-6'>
-                <FileText size={28} className='text-desk-muted/70' />
+                <FileText size={28} />
                 <p className='text-sm font-medium text-foreground'>
                   No report generated yet for this desk
                 </p>

@@ -555,7 +555,7 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
                 }}
                 trackId='save_user_status'
                 disabled={!selectedEmoji && !statusText.trim()}
-                className='ml-auto px-6 bg-action-primary text-action-primary-foreground hover:bg-action-primary/90 disabled:opacity-50 disabled:cursor-not-allowed'
+                className='ml-auto px-6 bg-action-primary text-action-primary-foreground disabled:opacity-50 disabled:cursor-not-allowed'
                 data-track-category='Update_User_Status_Modal'
                 data-track-name='Save_Status'
                 data-track-metadata={JSON.stringify({ statusText, expiryOption })}

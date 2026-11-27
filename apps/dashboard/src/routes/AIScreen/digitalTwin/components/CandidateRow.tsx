@@ -20,7 +20,7 @@ import { SUBSYSTEM_ICONS, subsystemLabel } from './subsystems';
 
 const TONE_CLASS: Record<'default' | 'success' | 'danger', string> = {
   default: 'text-muted-foreground hover:text-foreground',
-  success: 'text-muted-foreground hover:bg-status-success/10 hover:text-status-success',
+  success: 'text-muted-foreground hover:text-status-success',
   danger: 'text-muted-foreground hover:bg-destructive/10 hover:text-destructive',
 };
 

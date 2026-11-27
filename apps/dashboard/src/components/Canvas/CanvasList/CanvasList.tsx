@@ -816,7 +816,7 @@ const ChannelScopeFolderGroupSection: React.FC<{
         {isOver => (
           <div
             className={cn(
-              'flex w-full min-w-0 items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-sidebar-foreground/85 transition-colors hover:bg-sidebar-accent',
+              'flex w-full min-w-0 items-center gap-1.5 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-sidebar-accent',
               isOver && 'bg-sidebar-accent',
             )}
           >
@@ -832,22 +832,22 @@ const ChannelScopeFolderGroupSection: React.FC<{
               })}
             >
               {isCollapsed ? (
-                <ChevronRight className='size-3.5 shrink-0 text-sidebar-foreground/55' />
+                <ChevronRight className='size-3.5 shrink-0' />
               ) : (
-                <ChevronDown className='size-3.5 shrink-0 text-sidebar-foreground/55' />
+                <ChevronDown className='size-3.5 shrink-0' />
               )}
-              <Folder className='size-3.5 shrink-0 text-sidebar-foreground/55' />
+              <Folder className='size-3.5 shrink-0' />
               <span className='min-w-0 flex-1 truncate text-[13px] font-semibold'>
                 {folder.name}
               </span>
-              <span className='text-[12px] text-sidebar-foreground/45'>
+              <span className='text-[12px]'>
                 {isFolderLoading ? '...' : visibleFolderCanvases.length}
               </span>
             </button>
             {onCreateCanvasInFolder && (
               <button
                 type='button'
-                className='flex size-6 shrink-0 items-center justify-center rounded-md text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground'
+                className='flex size-6 shrink-0 items-center justify-center rounded-md hover:bg-sidebar-accent hover:text-sidebar-foreground'
                 onClick={() => void onCreateCanvasInFolder(folder)}
                 aria-label={`Create canvas in ${folder.name}`}
                 title='Create canvas in folder'
@@ -1992,7 +1992,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
             side='top'
             align='start'
           >
-            <div className='flex size-5 items-center justify-center text-sidebar-foreground/70'>
+            <div className='flex size-5 items-center justify-center'>
               {isBotGeneratedCanvas ? (
                 <Bot className='size-4' strokeWidth={2.1} />
               ) : canvas.visibility === CanvasVisibility.PUBLIC ? (
@@ -2028,14 +2028,14 @@ export const CanvasList: React.FC<CanvasListProps> = ({
                   'truncate text-[13px] font-semibold leading-4',
                   isSelected
                     ? 'text-sidebar-accent-foreground'
-                    : 'text-sidebar-foreground/80 group-hover:text-sidebar-accent-foreground',
+                    : 'group-hover:text-sidebar-accent-foreground',
                 )}
               >
                 {canvas.title || 'Untitled Canvas'}
               </h3>
             </Tooltip>
             {canvas.visibility !== CanvasVisibility.PUBLIC && (
-              <Lock className='size-3 shrink-0 text-sidebar-foreground/40' strokeWidth={2.1} />
+              <Lock className='size-3 shrink-0' strokeWidth={2.1} />
             )}
             {canvas.isArchived && (
               <span className='inline-flex h-4 shrink-0 items-center rounded border border-amber-200 bg-amber-50 px-1 text-[10px] font-medium leading-none text-amber-700'>
@@ -2044,7 +2044,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
             )}
           </div>
 
-          <div className='truncate text-[12px] leading-4 text-sidebar-foreground/60'>
+          <div className='truncate text-[12px] leading-4'>
             Edited {formatCanvasEditedTime(activityTime)} by {editorName}
           </div>
 
@@ -2053,7 +2053,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
               {labels.slice(0, 3).map(label => (
                 <span
                   key={label.id}
-                  className='inline-flex h-5 max-w-full items-center gap-1 rounded-md border border-sidebar-border-muted bg-sidebar px-1.5 text-[11px] leading-none text-sidebar-foreground/75'
+                  className='inline-flex h-5 max-w-full items-center gap-1 rounded-md border border-sidebar-border-muted bg-sidebar px-1.5 text-[11px] leading-none'
                 >
                   <span
                     className={`size-1.5 shrink-0 rounded-full ${getCanvasLabelDotClassName(
@@ -2081,7 +2081,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
             <DropdownMenuTrigger asChild>
               <button
                 onClick={e => e.stopPropagation()}
-                className='flex size-6 items-center justify-center rounded-md text-sidebar-foreground/70 hover:bg-sidebar hover:text-sidebar-accent-foreground'
+                className='flex size-6 items-center justify-center rounded-md hover:bg-sidebar hover:text-sidebar-accent-foreground'
                 data-track-category='CANVAS'
                 data-track-name='Open_Canvas_Menu'
                 data-track-metadata={JSON.stringify({ canvasId: canvas.id })}
@@ -2112,7 +2112,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
       <div className='pb-1'>
         {shouldShowSection && (
           <div
-            className={`px-2 pb-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-sidebar-foreground/50 ${
+            className={`px-2 pb-1 text-[11px] font-semibold uppercase tracking-[0.08em] ${
               index === 0 ? 'pt-1' : 'pt-5'
             }`}
           >
@@ -2176,7 +2176,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
             {isOver => (
               <div
                 className={cn(
-                  'flex min-h-8 items-center gap-2 rounded-md px-2 text-xs text-sidebar-foreground/55',
+                  'flex min-h-8 items-center gap-2 rounded-md px-2 text-xs ',
                   isOver && 'bg-sidebar-accent text-sidebar-foreground',
                 )}
               >
@@ -2264,7 +2264,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
       <div className='px-0 pb-2'>
         <div className='flex flex-col gap-2'>
           <div className='relative w-full'>
-            <Search className='absolute left-3 top-1/2 size-4 -translate-y-1/2 text-sidebar-foreground/55' />
+            <Search className='absolute left-3 top-1/2 size-4 -translate-y-1/2' />
             <Input
               ref={searchInputRef}
               type='text'
@@ -2277,7 +2277,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
               <DropdownMenuTrigger asChild>
                 <button
                   type='button'
-                  className='absolute right-1 top-1/2 inline-flex h-6 -translate-y-1/2 items-center gap-0.5 rounded-md border-l border-sidebar-border-muted px-1.5 text-sidebar-foreground/65 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
+                  className='absolute right-1 top-1/2 inline-flex h-6 -translate-y-1/2 items-center gap-0.5 rounded-md border-l border-sidebar-border-muted px-1.5 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
                   aria-label='Canvas search scope'
                   data-testid='canvas-search-scope-trigger'
                   data-track-category='CANVAS'
@@ -2301,10 +2301,10 @@ export const CanvasList: React.FC<CanvasListProps> = ({
               >
                 {scopeMenuView === 'channels' ? (
                   <div className='flex max-h-[318px] flex-col'>
-                    <div className='mb-1 flex h-8 items-center gap-1 px-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-sidebar-foreground/55'>
+                    <div className='mb-1 flex h-8 items-center gap-1 px-1 text-[11px] font-semibold uppercase tracking-[0.14em]'>
                       <button
                         type='button'
-                        className='flex size-6 items-center justify-center rounded-md text-sidebar-foreground/65 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
+                        className='flex size-6 items-center justify-center rounded-md hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
                         onClick={event => {
                           event.preventDefault();
                           event.stopPropagation();
@@ -2319,7 +2319,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
                       Via channel
                     </div>
                     <div className='relative mb-1'>
-                      <Search className='absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-sidebar-foreground/45' />
+                      <Search className='absolute left-3 top-1/2 size-3.5 -translate-y-1/2' />
                       <Input
                         autoFocus={!isMobile}
                         type='text'
@@ -2351,7 +2351,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
                         data-track-category='CANVAS'
                         data-track-name='SET_CANVAS_SEARCH_SCOPE_ALL_CHANNELS'
                       >
-                        <Hash className='size-3.5 shrink-0 text-sidebar-foreground/45' />
+                        <Hash className='size-3.5 shrink-0' />
                         <span className='min-w-0 flex-1 truncate'>All channels</span>
                       </DropdownMenuItem>
                       {filteredScopeChannels.map(channel => (
@@ -2370,7 +2370,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
                           data-track-name='SET_CANVAS_SEARCH_SCOPE_CHANNEL'
                           data-track-metadata={JSON.stringify({ channelId: channel.id })}
                         >
-                          <Hash className='size-3.5 shrink-0 text-sidebar-foreground/45' />
+                          <Hash className='size-3.5 shrink-0' />
                           <span className='min-w-0 flex-1 truncate'>{channel.name}</span>
                         </DropdownMenuItem>
                       ))}
@@ -2394,7 +2394,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
                       data-track-category='CANVAS'
                       data-track-name='SET_CANVAS_SEARCH_SCOPE_DIRECT'
                     >
-                      <AtSign className='size-3.5 shrink-0 text-sidebar-foreground/45' />
+                      <AtSign className='size-3.5 shrink-0' />
                       <span className='min-w-0 flex-1 truncate'>Shared directly with me</span>
                       {searchScope === 'direct' && (
                         <Check className='size-3.5 shrink-0' strokeWidth={2.3} />
@@ -2413,20 +2413,14 @@ export const CanvasList: React.FC<CanvasListProps> = ({
                       data-track-category='CANVAS'
                       data-track-name='OPEN_CANVAS_SEARCH_SCOPE_CHANNELS'
                     >
-                      <Hash className='size-3.5 shrink-0 text-sidebar-foreground/45' />
+                      <Hash className='size-3.5 shrink-0' />
                       <span className='max-w-[76px] shrink truncate' title='Shared via channel'>
                         Shared via channel
                       </span>
-                      <span
-                        className='min-w-0 flex-1 truncate text-sidebar-foreground/55'
-                        title={selectedScopeChannelLabel}
-                      >
+                      <span className='min-w-0 flex-1 truncate' title={selectedScopeChannelLabel}>
                         {selectedScopeChannelLabel}
                       </span>
-                      <ChevronRight
-                        className='size-3.5 shrink-0 text-sidebar-foreground/45'
-                        strokeWidth={2.2}
-                      />
+                      <ChevronRight className='size-3.5 shrink-0' strokeWidth={2.2} />
                     </DropdownMenuItem>
                     <DropdownMenuItem
                       className='h-8 gap-2 rounded-md px-2 text-[13px]'
@@ -2439,7 +2433,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
                       data-track-category='CANVAS'
                       data-track-name='SET_CANVAS_SEARCH_SCOPE_ALL'
                     >
-                      <Layers className='size-3.5 shrink-0 text-sidebar-foreground/45' />
+                      <Layers className='size-3.5 shrink-0' />
                       <span className='min-w-0 flex-1 truncate'>All canvases</span>
                       {searchScope === 'all' && (
                         <Check className='size-3.5 shrink-0' strokeWidth={2.3} />
@@ -2458,7 +2452,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
                 className={`h-6 rounded-md px-2.5 text-[12px] font-medium leading-none transition-colors ${
                   activeFilter === 'all'
                     ? 'bg-background text-sidebar-accent-foreground shadow-xs'
-                    : 'text-sidebar-foreground/55 hover:text-sidebar-accent-foreground'
+                    : 'hover:text-sidebar-accent-foreground'
                 }`}
                 data-testid='canvas-filter-all'
                 data-track-category='CANVAS'
@@ -2475,7 +2469,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
                 className={`h-6 rounded-md px-2.5 text-[12px] font-medium leading-none transition-colors ${
                   activeFilter === 'created_by_me'
                     ? 'bg-background text-sidebar-accent-foreground shadow-xs'
-                    : 'text-sidebar-foreground/55 hover:text-sidebar-accent-foreground'
+                    : 'hover:text-sidebar-accent-foreground'
                 }`}
                 data-testid='canvas-filter-created-by-me'
                 data-track-category='CANVAS'
@@ -2502,7 +2496,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
                     className={`inline-flex h-6 items-center gap-1 rounded-md px-2.5 text-[12px] font-medium leading-none transition-colors ${
                       activeFilter === 'shared'
                         ? 'bg-background text-sidebar-accent-foreground shadow-xs'
-                        : 'text-sidebar-foreground/55 hover:text-sidebar-accent-foreground'
+                        : 'hover:text-sidebar-accent-foreground'
                     }`}
                     data-testid='canvas-filter-shared'
                     data-track-category='CANVAS'
@@ -2614,7 +2608,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
                   data-track-category='CANVAS'
                   data-track-name='OPEN_CANVAS_LABEL_FILTER'
                 >
-                  <Tag className='size-3.5 text-sidebar-foreground/70' strokeWidth={2.1} />
+                  <Tag className='size-3.5' strokeWidth={2.1} />
                   Label
                 </button>
               </DropdownMenuTrigger>
@@ -2677,7 +2671,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
 
       {shouldShowStarredSection && (
         <div className='shrink-0 px-2.5 pt-1'>
-          <div className='px-2 pb-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-sidebar-foreground/50'>
+          <div className='px-2 pb-1 text-[11px] font-semibold uppercase tracking-[0.08em]'>
             Starred
           </div>
           {visibleStarredCanvases.map(canvas => (
@@ -2687,7 +2681,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
             <button
               type='button'
               onClick={() => setIsStarredSectionExpanded(true)}
-              className='flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[12px] font-medium text-sidebar-foreground/60 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
+              className='flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[12px] font-medium transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
               data-track-category='CANVAS'
               data-track-name='SHOW_MORE_STARRED_CANVASES'
             >
@@ -2699,7 +2693,7 @@ export const CanvasList: React.FC<CanvasListProps> = ({
             <button
               type='button'
               onClick={() => setIsStarredSectionExpanded(false)}
-              className='flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[12px] font-medium text-sidebar-foreground/60 transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
+              className='flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[12px] font-medium transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground'
               data-track-category='CANVAS'
               data-track-name='SHOW_LESS_STARRED_CANVASES'
             >

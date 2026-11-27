@@ -162,7 +162,7 @@ function WikiFolderNode(props: {
           data-track-name='WikiFolderToggled'
           data-track-metadata={JSON.stringify({ path: props.node.path, open: !open })}
         >
-          <Chevron size={13} className='shrink-0 text-sidebar-foreground/60' />
+          <Chevron size={13} className='shrink-0' />
           <span className='min-w-0 flex-1 truncate' title={props.node.name}>
             {props.node.name}
           </span>
@@ -207,11 +207,7 @@ function WikiFolderNode(props: {
                   >
                     {page.title}
                   </span>
-                  {page.archived && (
-                    <span className='shrink-0 text-[11px] text-sidebar-foreground/70'>
-                      Archived
-                    </span>
-                  )}
+                  {page.archived && <span className='shrink-0 text-[11px]'>Archived</span>}
                 </button>
                 {props.onArchivePage && (
                   <SdlcArchiveMenu
@@ -339,13 +335,13 @@ export function SdlcWikiExplorer(props: {
       <div className={cn('relative', props.pages.length === 0 && 'hidden')}>
         <Search
           size={14}
-          className='pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-sidebar-foreground/60'
+          className='pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2'
         />
         <input
           value={query}
           onChange={event => setQuery(event.target.value)}
           placeholder='Search pages'
-          className='h-8 w-full rounded-lg border border-transparent bg-sidebar-accent pl-8 pr-2 text-[13px] outline-hidden placeholder:text-sidebar-foreground/60 focus:border-sidebar-border focus-visible:ring-1 focus-visible:ring-sidebar-accent-ring'
+          className='h-8 w-full rounded-lg border border-transparent bg-sidebar-accent pl-8 pr-2 text-[13px] outline-hidden focus:border-sidebar-border focus-visible:ring-1 focus-visible:ring-sidebar-accent-ring'
           aria-label='Search research pages'
           data-track-category='SdlcHub'
           data-track-name='WikiSearched'
@@ -356,7 +352,7 @@ export function SdlcWikiExplorer(props: {
         className='no-scrollbar mt-1 min-h-0 flex-1 overflow-y-auto pb-2'
       >
         {visiblePages.length === 0 ? (
-          <p className='px-2 py-3 text-[13px] text-sidebar-foreground/70'>
+          <p className='px-2 py-3 text-[13px]'>
             {props.pages.length === 0 ? 'No pages yet' : 'No matching pages'}
           </p>
         ) : (
@@ -387,7 +383,7 @@ export function SdlcWikiExplorer(props: {
         )}
         <div className='px-1.5'>
           <Checkbox
-            labelClassName='text-xs text-sidebar-foreground/80'
+            labelClassName='text-xs'
             label='Show archived'
             checked={props.showArchived}
             onChange={props.onShowArchivedChange}

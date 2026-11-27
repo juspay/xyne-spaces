@@ -71,7 +71,7 @@ export const ActivityChannelPicker = ({
 
   return (
     <div
-      className='flex flex-col p-1 animate-in slide-in-from-right-2 duration-200 ease-[cubic-bezier(0.23,1,0.32,1)] motion-reduce:animate-none'
+      className='flex flex-col p-1 animate-in slide-in-from-right-2 duration-200 motion-reduce:animate-none'
       data-testid='activity-channel-picker'
     >
       <div className='flex items-center justify-between gap-2'>
@@ -160,7 +160,7 @@ export const ActivityChannelPicker = ({
                   viewBox='0 0 10 8'
                   fill='none'
                   className={cn(
-                    'h-2 w-2.5 transition-[opacity,transform,filter] duration-200 ease-[cubic-bezier(0.2,0,0,1)]',
+                    'h-2 w-2.5 transition-[opacity,transform,filter] duration-200 ',
                     isSelected
                       ? 'scale-100 opacity-100 blur-none'
                       : 'scale-[0.25] opacity-0 blur-xs',

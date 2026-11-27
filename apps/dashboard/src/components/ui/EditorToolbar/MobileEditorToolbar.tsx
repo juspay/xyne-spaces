@@ -171,7 +171,7 @@ export const MobileEditorToolbar: React.FC<MobileEditorToolbarProps> = ({
         onClick={onClose}
         data-track-category='MOBILE_EDITOR_TOOLBAR'
         data-track-name='CLOSE_TOOLBAR'
-        className='p-2 rounded-full bg-action-primary text-action-primary-foreground hover:bg-action-primary/90 transition-colors flex items-center justify-center shrink-0 mr-1'
+        className='p-2 rounded-full bg-action-primary text-action-primary-foreground transition-colors flex items-center justify-center shrink-0 mr-1'
         aria-label='Close formatting toolbar'
         onMouseDown={e => e.preventDefault()}
       >

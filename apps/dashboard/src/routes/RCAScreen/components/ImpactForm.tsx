@@ -5,7 +5,6 @@ import { useZero } from '../../../hooks/useZero';
 import { X, Plus, Trash2 } from 'lucide-react';
 import { Button } from '../../../components/ui/Button';
 import Textarea from '../../../components/ui/Textarea';
-import { cn } from '../../../utils/classNames';
 import { toast } from 'sonner';
 import { RCAStatus } from '@xyne/shared';
 import { impactSchema } from '../schemas';
@@ -598,11 +597,6 @@ export const ImpactForm = ({
               placeholder='Describe the impact...'
               rows={4}
               aria-invalid={showErrors && !data.impact.trim()}
-              className={cn(
-                showErrors &&
-                  !data.impact.trim() &&
-                  'aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive',
-              )}
             />
             {renderFieldError(errors.impact ?? null, showErrors)}
           </div>

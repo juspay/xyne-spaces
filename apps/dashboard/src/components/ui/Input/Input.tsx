@@ -8,12 +8,11 @@ const inputVariants = cva(
     'file:inline-flex file:h-7 file:border-0 file:bg-transparent file:px-1.5 file:py-px file:text-sm file:font-medium',
     'disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 md:text-sm',
     'focus-visible:border-ring focus-visible:ring-ring/10 focus-visible:ring-2',
-    'aria-invalid:ring-destructive/20 aria-invalid:border-destructive',
   ),
   {
     variants: {
       variant: {
-        default: 'rounded-md border-input bg-transparent shadow-xs',
+        default: 'rounded-md border-input bg-transparent ',
         flat: 'rounded-[10px] border-border bg-background',
       },
     },

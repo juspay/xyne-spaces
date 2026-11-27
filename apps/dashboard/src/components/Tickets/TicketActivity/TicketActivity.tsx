@@ -856,7 +856,7 @@ export const TicketActivity = ({
           <ChevronRight
             size={12}
             className={cn(
-              'w-3 shrink-0 text-muted-foreground/70 transition-transform duration-150 ease-[cubic-bezier(0.23,1,0.32,1)]',
+              'w-3 shrink-0 text-muted-foreground/70 transition-transform duration-150 ',
               isOpen && 'rotate-90',
             )}
           />

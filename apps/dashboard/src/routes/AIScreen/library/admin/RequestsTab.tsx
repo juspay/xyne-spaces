@@ -675,7 +675,7 @@ export function RequestsTab({
                         aria-label={row.approveLabel}
                         disabled={busy || row.approveDisabled}
                         onClick={row.onApprove}
-                        className='size-7 text-muted-foreground hover:bg-status-success/10 hover:text-status-success'
+                        className='size-7 text-muted-foreground hover:text-status-success'
                         data-track-category='Claw Admin'
                         data-track-name={`Approve ${row.kind} request`}
                       >

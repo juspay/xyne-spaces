@@ -46,7 +46,7 @@ const candidateKey = (type: string, id: string): string => `${type}:${id}`;
 const CHANNEL_TYPE: string = ViewAccessEntityType.CHANNEL;
 
 const actionLabelClass =
-  'col-start-1 row-start-1 transition-[opacity,transform,filter] duration-200 ease-[cubic-bezier(0.23,1,0.32,1)]';
+  'col-start-1 row-start-1 transition-[opacity,transform,filter] duration-200 ';
 
 const easeOut = [0.23, 1, 0.32, 1] as const;
 

@@ -65,7 +65,7 @@ export function ChipArrayField({
             className={cn(
               'ml-0.5 rounded-full p-0.5 text-muted-foreground',
               'hover:bg-accent hover:text-foreground',
-              'focus:outline-hidden focus:ring-2 focus:ring-ring',
+              'focus:ring-2 focus:ring-ring',
             )}
             aria-label={`Remove ${item}`}
           >

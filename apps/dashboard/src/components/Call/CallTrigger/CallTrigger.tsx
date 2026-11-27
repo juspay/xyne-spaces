@@ -154,7 +154,7 @@ export const CallTrigger: React.FC<CallTriggerProps> = ({
               usesCustomTriggerStyle &&
               'h-full w-full p-2 border border-border rounded-lg bg-background hover:bg-muted',
             // Mobile: floating rounded button
-            isMobile && 'h-full w-8.5 p-2 border',
+            isMobile && 'h-full p-2 border',
             isMobile &&
               (usesCustomTriggerStyle
                 ? 'w-full rounded-full'

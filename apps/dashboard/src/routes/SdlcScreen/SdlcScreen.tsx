@@ -3747,7 +3747,7 @@ export default function SdlcScreen(): ReactElement {
                           <button
                             type='button'
                             onClick={() => setShowClosedTracks(!showClosedTracks)}
-                            className='flex h-8 w-full items-center rounded-[10px] px-3 text-left text-xs text-sidebar-foreground/60 transition-colors hover:text-sidebar-accent-foreground'
+                            className='flex h-8 w-full items-center rounded-[10px] px-3 text-left text-xs transition-colors hover:text-sidebar-accent-foreground'
                             data-track-category='SdlcHub'
                             data-track-name='ClosedTracksToggled'
                           >
@@ -3857,7 +3857,7 @@ export default function SdlcScreen(): ReactElement {
                                     setRenameTypeId(folder.id);
                                     setRenameTypeName(folder.name);
                                   }}
-                                  className='absolute right-2 top-1/2 hidden size-6 -translate-y-1/2 items-center justify-center rounded-md text-sidebar-foreground/70 hover:bg-sidebar-border hover:text-sidebar-accent-foreground group-hover:flex'
+                                  className='absolute right-2 top-1/2 hidden size-6 -translate-y-1/2 items-center justify-center rounded-md hover:bg-sidebar-border hover:text-sidebar-accent-foreground group-hover:flex'
                                   data-track-category='SdlcHub'
                                   data-track-name='ArtifactTypeRenameStarted'
                                 >
@@ -3920,7 +3920,7 @@ export default function SdlcScreen(): ReactElement {
               )}
               {railOpen && !wikiExplorerShown && (
                 // Titled as the hub sidebar's groups are.
-                <div className='flex h-8 shrink-0 items-center pl-3 text-[13px] font-semibold text-sidebar-foreground/70'>
+                <div className='flex h-8 shrink-0 items-center pl-3 text-[13px] font-semibold'>
                   Explorer
                 </div>
               )}

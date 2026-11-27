@@ -1583,10 +1583,7 @@ export function SdlcFileList(props: {
                       aria-label={`Discussions about ${row.name}`}
                       aria-pressed={discussing}
                       onClick={() => discussRow(row)}
-                      className={cn(
-                        ROW_ACTION,
-                        discussing && 'bg-background text-foreground shadow-xs',
-                      )}
+                      className={cn(ROW_ACTION, discussing && 'bg-background text-foreground ')}
                       data-track-category='SdlcHub'
                       data-track-name='FilesRowChatOpened'
                       data-track-metadata={JSON.stringify({ kind: row.kind })}

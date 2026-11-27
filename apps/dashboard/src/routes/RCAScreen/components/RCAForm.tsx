@@ -3,7 +3,6 @@ import { useForm, type Path, type PathValue } from 'react-hook-form';
 import { Button } from '../../../components/ui/Button';
 import Textarea from '../../../components/ui/Textarea';
 import { Combobox } from '../../../components/ui/Combobox/Combobox';
-import { cn } from '../../../utils/classNames';
 import { useZero } from '../../../hooks/useZero';
 import { usePlatform } from '../../../hooks/usePlatform';
 import { toast } from 'sonner';
@@ -393,11 +392,6 @@ export const RCAForm = ({
               rows={3}
               readOnly={!isRcaEditable}
               aria-invalid={showErrors && !!getFieldError('summary')}
-              className={cn(
-                showErrors &&
-                  !!getFieldError('summary') &&
-                  'aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive',
-              )}
             />
             {renderFieldError(getFieldError('summary'), showErrors || isTouched('summary'))}
           </div>
@@ -417,11 +411,6 @@ export const RCAForm = ({
                 rows={4}
                 readOnly={!isRcaEditable}
                 aria-invalid={showErrors && !!getFieldError('rootCause')}
-                className={cn(
-                  showErrors &&
-                    !!getFieldError('rootCause') &&
-                    'aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive',
-                )}
               />
               {renderFieldError(getFieldError('rootCause'), showErrors || isTouched('rootCause'))}
             </div>

@@ -179,7 +179,7 @@ export const DeskLabelsSidebar = ({
 
       <div>
         {list.length === 0 ? (
-          <div className='px-3 py-1 text-xs text-sidebar-foreground/60 italic'>No labels yet</div>
+          <div className='px-3 py-1 text-xs italic'>No labels yet</div>
         ) : (
           list.map(label => {
             const color = label.color ?? colorForName(label.name);
@@ -219,7 +219,7 @@ export const DeskLabelsSidebar = ({
                     {label.name}
                   </span>
                   {showUnread && (
-                    <span className='shrink-0 min-w-4 px-1 rounded-full text-center text-[10px] font-semibold leading-4 bg-sidebar-accent-foreground/10 text-sidebar-accent-foreground'>
+                    <span className='shrink-0 min-w-4 px-1 rounded-full text-center text-[10px] font-semibold leading-4 text-sidebar-accent-foreground'>
                       {count > 99 ? '99+' : count}
                     </span>
                   )}

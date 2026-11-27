@@ -3378,7 +3378,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     return (
       <div
         key={reference.id}
-        className='group flex h-11 items-center gap-3 rounded-[11px] border border-border bg-background px-3 transition-[border-color,box-shadow] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] hover:border-muted-foreground/40 hover:shadow-[0_1px_3px_rgba(20,22,26,0.06)]'
+        className='group flex h-11 items-center gap-3 rounded-[11px] border border-border bg-background px-3 transition-[border-color,box-shadow] duration-150 hover:border-muted-foreground/40 hover:shadow-[0_1px_3px_rgba(20,22,26,0.06)]'
       >
         {allowEdit ? (
           <div className='relative inline-flex shrink-0 items-center'>
@@ -3607,7 +3607,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
             mappedTicketId: subTicket.mappedTicketId,
             depth: node.depth,
           })}
-          className='flex h-11 cursor-pointer items-center justify-between gap-3 rounded-[11px] border border-border bg-background px-3 transition-[border-color,box-shadow] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] hover:border-muted-foreground/40 hover:shadow-[0_1px_3px_rgba(20,22,26,0.06)] focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring'
+          className='flex h-11 cursor-pointer items-center justify-between gap-3 rounded-[11px] border border-border bg-background px-3 transition-[border-color,box-shadow] duration-150 hover:border-muted-foreground/40 hover:shadow-[0_1px_3px_rgba(20,22,26,0.06)] focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring'
           style={{ marginLeft: node.depth * 18 }}
         >
           <div className='flex items-center gap-2 flex-1 min-w-0'>
@@ -3784,7 +3784,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
           }
         }}
         data-testid={`parent-ticket-item-${parentTicket.id}`}
-        className='flex h-11 cursor-pointer items-center justify-between gap-3 rounded-[11px] border border-border bg-background px-3 transition-[border-color,box-shadow] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)] hover:border-muted-foreground/40 hover:shadow-[0_1px_3px_rgba(20,22,26,0.06)] focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring'
+        className='flex h-11 cursor-pointer items-center justify-between gap-3 rounded-[11px] border border-border bg-background px-3 transition-[border-color,box-shadow] duration-150 hover:border-muted-foreground/40 hover:shadow-[0_1px_3px_rgba(20,22,26,0.06)] focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring'
         data-track-category='Tickets'
         data-track-name='ViewParentTicket'
         data-track-metadata={JSON.stringify({ parentTicketId: parentTicket.id })}
@@ -5607,7 +5607,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                   <ChevronRight
                     size={12}
                     className={cn(
-                      'w-3 shrink-0 text-muted-foreground/70 transition-transform duration-150 ease-[cubic-bezier(0.23,1,0.32,1)]',
+                      'w-3 shrink-0 text-muted-foreground/70 transition-transform duration-150 ',
                       relationshipsOpen && 'rotate-90',
                     )}
                   />

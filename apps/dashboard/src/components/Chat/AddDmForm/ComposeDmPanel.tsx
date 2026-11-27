@@ -481,10 +481,7 @@ export const ComposeDmPanel: React.FC = () => {
                       emojiPicker: true,
                     }}
                     sendDisabled={field.state.meta.errors.length > 0 || selectedUsers.length === 0}
-                    className={cn(
-                      field.state.meta.errors.length > 0 &&
-                        'border-destructive aria-invalid:ring-destructive/20 aria-invalid:border-destructive',
-                    )}
+                    className={cn(field.state.meta.errors.length > 0 && 'border-destructive ')}
                   />
                   <div className='h-2 px-1'>
                     {field.state.meta.errors.length > 0 && field.state.meta.errors[0] && (

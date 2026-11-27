@@ -134,7 +134,7 @@ export function ThreadAssistDock({
   const bodyOpen = !collapsed && !editing;
   const fused = attached && !bodyOpen;
   const mutedHeader = collapsed && !editing;
-  const ease = 'duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]';
+  const ease = 'duration-300 ';
 
   return (
     <motion.div

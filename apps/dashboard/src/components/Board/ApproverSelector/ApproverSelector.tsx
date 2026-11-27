@@ -170,7 +170,7 @@ export const ApproverSelector = ({
                     data-track-category='board_config'
                     data-track-name='select_approver_role'
                   >
-                    <div className='flex items-center justify-center w-8 h-8 rounded-full bg-action-primary/10 text-action-primary shrink-0'>
+                    <div className='flex items-center justify-center w-8 h-8 rounded-full text-action-primary shrink-0'>
                       <ShieldCheck className='w-4 h-4' />
                     </div>
                     <div className='flex flex-col min-w-0 flex-1'>

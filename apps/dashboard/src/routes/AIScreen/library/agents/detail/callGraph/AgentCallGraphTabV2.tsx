@@ -157,7 +157,7 @@ export function AgentCallGraphTabV2({ agent }: { agent: Agent }): ReactElement {
                         aria-label='Approve request'
                         disabled={busyId !== null}
                         onClick={() => void decide(grant, true)}
-                        className='size-7 text-muted-foreground hover:bg-status-success/10 hover:text-status-success'
+                        className='size-7 text-muted-foreground hover:text-status-success'
                         data-track-category='Claw Agents'
                         data-track-name='ApproveDelegation'
                       >

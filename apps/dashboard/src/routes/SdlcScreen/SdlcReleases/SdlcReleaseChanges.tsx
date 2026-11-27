@@ -301,7 +301,7 @@ function CodeViewer({ row }: { row: ReleaseChangeRow }): ReactElement {
               className={cn(
                 'flex min-h-[19px] text-[12.5px] leading-[19px] hover:bg-muted/40',
                 line.number === null &&
-                  'bg-[color-mix(in_srgb,var(--status-failure)_8%,transparent)] line-through decoration-status-failure/60',
+                  'bg-[color-mix(in_srgb,var(--status-failure)_8%,transparent)] line-through ',
               )}
             >
               <span className='w-12 shrink-0 select-none pr-4 text-right font-code text-muted-foreground/60'>

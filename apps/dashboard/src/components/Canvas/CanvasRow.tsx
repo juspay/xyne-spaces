@@ -163,7 +163,7 @@ export const CanvasRow: React.FC<CanvasRowProps> = ({
                 {visibleLabels.map(label => (
                   <span
                     key={label.id}
-                    className='inline-flex h-5 max-w-[96px] items-center gap-1 rounded-md border border-sidebar-border-muted bg-sidebar px-1.5 text-[11px] leading-none text-sidebar-foreground/70'
+                    className='inline-flex h-5 max-w-[96px] items-center gap-1 rounded-md border border-sidebar-border-muted bg-sidebar px-1.5 text-[11px] leading-none'
                   >
                     <span
                       className={`size-1.5 shrink-0 rounded-full ${getCanvasLabelDotClassName(
@@ -173,11 +173,7 @@ export const CanvasRow: React.FC<CanvasRowProps> = ({
                     <span className='truncate'>{label.name}</span>
                   </span>
                 ))}
-                {hiddenLabelCount > 0 && (
-                  <span className='text-[11px] text-sidebar-foreground/50'>
-                    +{hiddenLabelCount}
-                  </span>
-                )}
+                {hiddenLabelCount > 0 && <span className='text-[11px]'>+{hiddenLabelCount}</span>}
               </span>
             )}
           </button>

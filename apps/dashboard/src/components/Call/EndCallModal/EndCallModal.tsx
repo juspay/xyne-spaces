@@ -70,7 +70,7 @@ export function EndCallModal({
         {
           label: submitting ? 'Ending…' : 'Just leave the call',
           onClick: onEndForSelf,
-          className: 'bg-action-primary hover:bg-action-primary/90 text-action-primary-foreground',
+          className: 'bg-action-primary text-action-primary-foreground',
           disabled: submitting,
           trackName: 'END_CALL_LEAVE_SELF',
           trackMetadata: { ...trackMetadata, endScope: 'self' },

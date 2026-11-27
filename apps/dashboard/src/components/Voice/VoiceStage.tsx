@@ -108,7 +108,7 @@ export function VoiceStage({ studioMode, messages, chatTitle }: VoiceStageProps)
             {PHASE_LABEL[phase]}
           </p>
           {studioMode && (
-            <span className='inline-flex items-center gap-1 rounded-full bg-claw-ai-fg/10 px-2.5 py-1 text-xs font-semibold text-claw-ai-fg'>
+            <span className='inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold text-claw-ai-fg'>
               <Sparkles className='h-3 w-3' aria-hidden />
               {studioMode} mode
             </span>

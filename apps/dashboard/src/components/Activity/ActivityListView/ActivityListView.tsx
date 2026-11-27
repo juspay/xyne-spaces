@@ -1109,7 +1109,7 @@ const ActivityListView = (): ReactElement => {
                 <span
                   aria-hidden='true'
                   className={cn(
-                    'absolute right-1 top-1 size-1.5 rounded-full bg-primary transition-[opacity,transform,filter] duration-300 ease-[cubic-bezier(0.2,0,0,1)]',
+                    'absolute right-1 top-1 size-1.5 rounded-full bg-primary transition-[opacity,transform,filter] duration-300 ',
                     channelFilter.length > 0
                       ? 'scale-100 opacity-100 blur-none'
                       : 'scale-[0.25] opacity-0 blur-xs',
@@ -1285,7 +1285,7 @@ const ActivityListView = (): ReactElement => {
                         data-track-metadata={JSON.stringify({ tab: tab.value })}
                         className={cn(
                           'group px-2 py-2 flex items-center transition-all duration-300 ease-in-out cursor-pointer select-none sm:px-3 justify-start rounded-lg hover:bg-foreground/6 focus-visible:bg-foreground/6 focus-visible:outline-hidden',
-                          activeTab === tab.value ? 'bg-foreground/6' : 'bg-transparent',
+                          activeTab === tab.value && 'bg-foreground/6',
                         )}
                       >
                         {IconComponent && (

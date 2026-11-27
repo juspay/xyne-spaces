@@ -208,7 +208,7 @@ export const ManageSectionChannelsDialog = ({
           onClick={handleSave}
           data-track-category='CHAT_SIDEBAR'
           data-track-name='SAVE_MANAGE_SECTION_CHANNELS'
-          className='bg-action-primary text-action-primary-foreground hover:bg-action-primary/90'
+          className='bg-action-primary text-action-primary-foreground'
         >
           Save
         </Button>

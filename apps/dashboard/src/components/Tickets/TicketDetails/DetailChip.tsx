@@ -3,7 +3,7 @@ import { cn } from '../../../utils/classNames';
 
 const baseChipClass =
   'relative inline-flex h-[27px] shrink-0 items-center gap-2 rounded-full border text-[12.5px] font-medium whitespace-nowrap ' +
-  'transition-[border-color,box-shadow,background-color,transform] duration-150 ease-[cubic-bezier(0.23,1,0.32,1)]';
+  'transition-[border-color,box-shadow,background-color,transform] duration-150 ';
 
 const chipToneClass = (dashed: boolean): string =>
   dashed

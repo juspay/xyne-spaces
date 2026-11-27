@@ -201,7 +201,7 @@ export const CallCard = ({
           <div
             className={cn(
               'size-9 flex items-center justify-center rounded-lg',
-              isHighlighted ? 'bg-background' : isMissedCall ? 'bg-status-failure/10' : 'bg-border',
+              isHighlighted ? 'bg-background' : isMissedCall ? '' : 'bg-border',
             )}
           >
             <CallIcon

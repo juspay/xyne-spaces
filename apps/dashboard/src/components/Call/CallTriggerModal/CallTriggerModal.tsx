@@ -136,7 +136,7 @@ export const CallTriggerModal: React.FC<CallTriggerModalProps> = ({
     <button
       disabled={disabled}
       className={cn(
-        'h-full transition-colors rounded-lg w-8.5 p-2!',
+        'h-full transition-colors rounded-lg p-2!',
         usesCustomTriggerStyle && 'w-full',
         !usesCustomTriggerStyle && 'bg-primary',
         'flex items-center justify-center gap-2',

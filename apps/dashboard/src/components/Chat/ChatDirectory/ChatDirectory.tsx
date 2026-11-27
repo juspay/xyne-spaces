@@ -1338,7 +1338,7 @@ const ChatDirectory = ({
               trigger={
                 <button
                   type='button'
-                  className='flex items-center justify-start gap-3 w-full px-3 py-2 text-sm font-medium tracking-[-0.14px] rounded-[10px] border border-dashed border-transparent text-sidebar-foreground/60 transition-colors hover:bg-sidebar-accent hover:border-sidebar-border hover:text-sidebar-accent-foreground'
+                  className='flex items-center justify-start gap-3 w-full px-3 py-2 text-sm font-medium tracking-[-0.14px] rounded-[10px] border border-dashed border-transparent transition-colors hover:bg-sidebar-accent hover:border-sidebar-border hover:text-sidebar-accent-foreground'
                   data-testid='chat-nav-add'
                   data-track-category='CHAT_SIDEBAR'
                   data-track-name='OPEN_ADD_MENU'
@@ -1415,9 +1415,7 @@ const ChatDirectory = ({
                     <Accordion.Content>
                       <div className='min-h-[4px]'>
                         {starredDisplayChannels.length === 0 ? (
-                          <div className='px-2 py-1 text-xs text-sidebar-foreground/60 italic'>
-                            Drop here to star
-                          </div>
+                          <div className='px-2 py-1 text-xs italic'>Drop here to star</div>
                         ) : (
                           starredDisplayChannels.map(channel => (
                             <SortableChannelItem

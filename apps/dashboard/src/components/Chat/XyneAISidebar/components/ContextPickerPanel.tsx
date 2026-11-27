@@ -883,7 +883,7 @@ export const ContextPickerPanel = ({
           <button
             onClick={handleConfirm}
             disabled={totalSelected === 0}
-            className='px-3 py-1.5 text-xs font-medium bg-action-primary text-action-primary-foreground rounded-lg hover:bg-action-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors'
+            className='px-3 py-1.5 text-xs font-medium bg-action-primary text-action-primary-foreground rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-colors'
             data-track-category='XyneAI'
             data-track-name='CONTEXT_PICKER_CONFIRM'
             data-track-metadata={JSON.stringify({ itemCount: totalSelected })}

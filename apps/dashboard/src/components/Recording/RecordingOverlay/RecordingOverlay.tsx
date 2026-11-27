@@ -332,7 +332,7 @@ export function RecordingOverlay(): React.ReactElement | null {
             </Button>
             <Button
               aria-label='Go to recordings'
-              className='w-8 bg-action-primary hover:bg-action-primary/80 text-primary-foreground hover:text-primary-foreground transition-colors rounded-lg'
+              className='w-8 bg-action-primary text-primary-foreground hover:text-primary-foreground transition-colors rounded-lg'
               variant='outline'
               size='sm'
               onClick={() => void navigate('/recordings')}

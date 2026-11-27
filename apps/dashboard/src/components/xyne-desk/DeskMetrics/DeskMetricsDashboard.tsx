@@ -758,7 +758,7 @@ const MetricsAgentTable = ({
       <div className='overflow-x-auto'>
         <table className='w-full text-sm'>
           <thead>
-            <tr className='border-b border-desk-border/60 text-left dark:border-border/60'>
+            <tr className='border-b text-left dark:border-border/60'>
               {agentColumns.map(col => (
                 <th
                   key={col.key}
@@ -800,7 +800,7 @@ const MetricsAgentTable = ({
                 <tr
                   key={row.assigneeId ?? '__unassigned__'}
                   className={cn(
-                    'border-b border-desk-border/40 last:border-b-0 dark:border-border/40',
+                    'border-b last:border-b-0 dark:border-border/40',
                     i % 2 !== 0 && 'bg-muted/20',
                   )}
                 >
@@ -998,7 +998,7 @@ const MetricsTicketTable = ({
           )}
         >
           <thead>
-            <tr className='border-b border-desk-border/60 text-left dark:border-border/60'>
+            <tr className='border-b text-left dark:border-border/60'>
               <th className='px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground'>
                 ID
               </th>
@@ -1057,7 +1057,7 @@ const MetricsTicketTable = ({
               <tr
                 key={row.ticketId}
                 className={cn(
-                  'border-b border-desk-border/40 last:border-b-0 dark:border-border/40',
+                  'border-b last:border-b-0 dark:border-border/40',
                   i % 2 !== 0 && 'bg-muted/20',
                 )}
               >
@@ -1355,7 +1355,7 @@ const AgentAverageTable = ({
       <div className='max-h-[320px] overflow-y-auto'>
         <table className='w-full text-sm'>
           <thead className='sticky top-0 z-10 bg-background'>
-            <tr className='border-b border-desk-border/60 text-left dark:border-border/60'>
+            <tr className='border-b text-left dark:border-border/60'>
               <th className='px-4 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground'>
                 Agent
               </th>
@@ -1375,7 +1375,7 @@ const AgentAverageTable = ({
               <tr
                 key={row.id}
                 className={cn(
-                  'border-b border-desk-border/40 last:border-b-0 dark:border-border/40',
+                  'border-b last:border-b-0 dark:border-border/40',
                   i % 2 !== 0 && 'bg-muted/20',
                 )}
               >
@@ -3103,7 +3103,7 @@ export const DeskMetricsDashboard: React.FC<DeskMetricsDashboardProps> = ({
                       {data.counts.stageCounts.map(s => (
                         <div
                           key={s.stageName}
-                          className='flex items-center gap-2 rounded-[8px] border border-desk-border/60 bg-muted/30 px-3 py-1.5 dark:border-border/60'
+                          className='flex items-center gap-2 rounded-[8px] border bg-muted/30 px-3 py-1.5 dark:border-border/60'
                         >
                           <span className='text-xs text-muted-foreground'>{s.stageName}</span>
                           <span className='font-mono text-sm font-semibold tabular-nums text-foreground'>

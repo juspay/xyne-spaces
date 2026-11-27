@@ -1424,7 +1424,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
           >
             <Heading className='h-4 w-4 shrink-0' />
             <span
-              className={`grid transition-[grid-template-columns] duration-260 ease-[cubic-bezier(0.2,0,0,1)] motion-reduce:transition-none ${
+              className={`grid transition-[grid-template-columns] duration-260 motion-reduce:transition-none ${
                 titleOffered ? 'grid-cols-[1fr]' : 'grid-cols-[0fr]'
               }`}
             >
@@ -1553,7 +1553,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
                     <div
                       ref={titleRowRef}
                       inert={!titleShown}
-                      className={`grid transition-[grid-template-rows,margin] duration-200 ease-[cubic-bezier(0.2,0,0,1)] motion-reduce:transition-none ${
+                      className={`grid transition-[grid-template-rows,margin] duration-200 motion-reduce:transition-none ${
                         titleShown ? '-mb-2 grid-rows-[1fr]' : 'grid-rows-[0fr]'
                       }`}
                     >
@@ -1597,7 +1597,7 @@ const ChatInputInner = forwardRef<InputBoxHandle, ChatInputProps>(
                           aria-label='Discussion title'
                           data-track-category='CHAT_INPUT'
                           data-track-name='DISCUSSION_TITLE'
-                          className={`w-full bg-transparent px-3 pb-0.5 pt-2.5 text-[14px] font-semibold text-foreground outline-hidden placeholder:font-medium placeholder:text-muted-foreground/70 transition-[opacity,transform,filter] duration-200 ease-[cubic-bezier(0.2,0,0,1)] motion-reduce:transition-none ${
+                          className={`w-full bg-transparent px-3 pb-0.5 pt-2.5 text-[14px] font-semibold text-foreground outline-hidden placeholder:font-medium placeholder:text-muted-foreground/70 transition-[opacity,transform,filter] duration-200 motion-reduce:transition-none ${
                             titleShown
                               ? 'translate-y-0 opacity-100 blur-none delay-40'
                               : 'translate-y-1 opacity-0 blur-[2px]'

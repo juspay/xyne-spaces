@@ -1897,7 +1897,7 @@ function InlineEditableText({
         data-track-category='automation-builder'
         data-track-name='inline-edit-input'
         className={cn(
-          'placeholder:text-muted-foreground w-full min-w-0 rounded-md border bg-transparent px-3 py-1 text-base text-foreground shadow-xs transition-[color,box-shadow] outline-hidden md:text-sm',
+          'placeholder:text-muted-foreground w-full min-w-0 rounded-md border bg-transparent px-3 py-1 text-base text-foreground transition-[color,box-shadow] outline-hidden md:text-sm',
           'h-8 px-2',
           invalid
             ? 'border-red-500 focus-visible:border-red-500 focus-visible:ring-red-500/20 focus-visible:ring-2 placeholder:text-red-500/70'

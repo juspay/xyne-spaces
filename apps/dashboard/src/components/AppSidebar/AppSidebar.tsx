@@ -1050,7 +1050,7 @@ const SidebarMoreMenu = ({
     <li
       data-more-slot
       aria-hidden
-      className='relative h-0 overflow-hidden transition-[height] duration-200 ease-[cubic-bezier(0.23,1,0.32,1)]'
+      className='relative h-0 overflow-hidden transition-[height] duration-200'
     >
       <span className='absolute inset-0 rounded-md border-[1.5px] border-dashed border-foreground/15 bg-foreground/2' />
     </li>

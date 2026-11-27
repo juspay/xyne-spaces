@@ -499,7 +499,6 @@ function TreeRow(
           isActive
             ? 'border-sidebar-border bg-sidebar-accent font-medium text-sidebar-accent-foreground'
             : 'text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground has-focus-visible:bg-sidebar-accent has-focus-visible:text-sidebar-accent-foreground',
-          props.cursorId === node.id && !isActive && 'bg-sidebar-accent/70',
           dragOver && 'bg-primary/15',
           props.cutIds.has(node.id) && 'opacity-50',
         )}
@@ -510,7 +509,7 @@ function TreeRow(
             {isFolder ? (
               <ChevronRight
                 className={cn(
-                  'size-3.5 shrink-0 text-sidebar-foreground/60 transition-transform duration-200',
+                  'size-3.5 shrink-0 transition-transform duration-200',
                   isOpen && 'rotate-90',
                 )}
               />
@@ -560,7 +559,7 @@ function TreeRow(
             {isFolder ? (
               <ChevronRight
                 className={cn(
-                  'size-3.5 shrink-0 text-sidebar-foreground/60 transition-transform duration-200',
+                  'size-3.5 shrink-0 transition-transform duration-200',
                   isOpen && 'rotate-90',
                 )}
               />
@@ -602,8 +601,8 @@ function TreeRow(
           className={cn(
             'outline-hidden flex size-6 shrink-0 items-center justify-center rounded-md transition-opacity hover:bg-sidebar-border focus-visible:bg-sidebar-border hover:text-sidebar-accent-foreground focus-visible:text-sidebar-accent-foreground',
             props.discussingId === node.id
-              ? 'bg-sidebar-border/70 text-sidebar-accent-foreground opacity-100'
-              : 'text-sidebar-foreground/70 opacity-0 focus:opacity-100 group-hover/row:opacity-100',
+              ? 'text-sidebar-accent-foreground opacity-100'
+              : 'opacity-0 focus:opacity-100 group-hover/row:opacity-100',
           )}
           data-track-category='SdlcHub'
           data-track-name='FolderTreeItemDiscussed'
@@ -654,7 +653,7 @@ function TreeLevel(
   if (nodes.length === 0) {
     return (
       <p
-        className='flex h-8 items-center text-xs text-sidebar-foreground/50'
+        className='flex h-8 items-center text-xs'
         style={{ paddingLeft: 8 + props.depth * 16 + 22 }}
       >
         Empty
@@ -708,7 +707,7 @@ function AddMenu(props: {
           type='button'
           title='Add to this folder'
           aria-label='Add to this folder'
-          className='outline-hidden flex size-6 shrink-0 items-center justify-center rounded-md text-sidebar-foreground/70 transition-colors hover:bg-sidebar-border focus-visible:bg-sidebar-border hover:text-sidebar-accent-foreground focus-visible:text-sidebar-accent-foreground'
+          className='outline-hidden flex size-6 shrink-0 items-center justify-center rounded-md transition-colors hover:bg-sidebar-border focus-visible:bg-sidebar-border hover:text-sidebar-accent-foreground focus-visible:text-sidebar-accent-foreground'
           data-track-category='SdlcHub'
           data-track-name='FolderPageAddOpened'
         >
@@ -1957,7 +1956,7 @@ export function SdlcFolderPage(props: {
                 data-track-category='SdlcHub'
                 data-track-name='ExplorerPinnedFolderRevealed'
               >
-                <ChevronRight className='size-3.5 shrink-0 rotate-90 text-sidebar-foreground/60' />
+                <ChevronRight className='size-3.5 shrink-0 rotate-90' />
                 {folder.icon ? (
                   <AppIcon name={folder.icon} size={16} className='shrink-0' aria-hidden='true' />
                 ) : (
@@ -2019,7 +2018,7 @@ export function SdlcFolderPage(props: {
       ) : (
         <aside
           className={cn(
-            'flex shrink-0 flex-col border-r border-border bg-sidebar/40 transition-[width]',
+            'flex shrink-0 flex-col border-r border-border transition-[width]',
             explorerCollapsed ? 'w-[38px]' : 'w-[250px]',
           )}
         >

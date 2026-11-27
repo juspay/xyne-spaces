@@ -345,7 +345,7 @@ export const UserActivityPanel = ({
             onClick={handleAddToChat}
             data-track-category='XYNE_AI_SIDEBAR'
             data-track-name='ADD_ACTIVITY_TO_CHAT'
-            className='w-full py-2.5 px-4 bg-action-primary hover:bg-action-primary/90 text-action-primary-foreground text-sm font-medium rounded-lg transition-colors'
+            className='w-full py-2.5 px-4 bg-action-primary text-action-primary-foreground text-sm font-medium rounded-lg transition-colors'
           >
             Add {selectedCount} {selectedCount === 1 ? 'activity' : 'activities'} to chat
           </button>

@@ -35,7 +35,7 @@ export function LoadingBar(props: { loading: boolean }): ReactElement | null {
       <div
         className={cn(
           'relative h-full overflow-hidden bg-primary motion-reduce:transition-none',
-          phase === 'run' && 'transition-[width] duration-8000 ease-[cubic-bezier(0.1,0.7,0.2,1)]',
+          phase === 'run' && 'transition-[width] duration-8000 ',
           phase === 'done' &&
             'opacity-0 transition-[width,opacity] duration-200 [transition-delay:0ms,180ms]',
         )}

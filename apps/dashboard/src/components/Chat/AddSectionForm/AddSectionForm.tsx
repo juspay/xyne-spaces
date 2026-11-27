@@ -139,7 +139,7 @@ export const AddSectionForm = ({
               trackId='save_section'
               disabled={!!nameError}
               className={cn(
-                'bg-action-primary text-action-primary-foreground hover:bg-action-primary/90',
+                'bg-action-primary text-action-primary-foreground ',
                 !!nameError && 'pointer-events-none',
               )}
             >

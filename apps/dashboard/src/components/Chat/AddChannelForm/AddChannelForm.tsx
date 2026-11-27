@@ -1611,7 +1611,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
               type='submit'
               disabled={isSubmitDisabled}
               className={cn(
-                'bg-action-primary text-action-primary-foreground hover:bg-action-primary/90 disabled:opacity-50',
+                'bg-action-primary text-action-primary-foreground disabled:opacity-50',
                 isSubmitDisabled && 'pointer-events-none',
               )}
               data-testid='create-channel-button'

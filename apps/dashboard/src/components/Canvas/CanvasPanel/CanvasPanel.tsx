@@ -443,10 +443,10 @@ const CanvasPanel = (): ReactElement => {
                     data-track-category='CANVAS'
                     data-track-name='TOGGLE_ONLY_BOT_GENERATED_CANVASES'
                   >
-                    <Bot size={15} className='mt-0.5 shrink-0 text-sidebar-foreground/55' />
+                    <Bot size={15} className='mt-0.5 shrink-0' />
                     <span className='min-w-0 flex-1'>
                       <span className='block leading-5'>Only bot-generated</span>
-                      <span className='block max-w-[170px] text-xs leading-4 text-sidebar-foreground/50'>
+                      <span className='block max-w-[170px] text-xs leading-4'>
                         Call notes and workflow docs Oats writes for you
                       </span>
                     </span>
@@ -467,10 +467,10 @@ const CanvasPanel = (): ReactElement => {
                     data-track-category='CANVAS'
                     data-track-name='TOGGLE_ONLY_RECORDING_GENERATED_CANVASES'
                   >
-                    <Bot size={15} className='mt-0.5 shrink-0 text-sidebar-foreground/55' />
+                    <Bot size={15} className='mt-0.5 shrink-0' />
                     <span className='min-w-0 flex-1'>
                       <span className='block leading-5'>Only recording-generated</span>
-                      <span className='block max-w-[170px] text-xs leading-4 text-sidebar-foreground/50'>
+                      <span className='block max-w-[170px] text-xs leading-4'>
                         Notes and summaries from your recordings
                       </span>
                     </span>
@@ -491,10 +491,10 @@ const CanvasPanel = (): ReactElement => {
                     data-track-category='CANVAS'
                     data-track-name='TOGGLE_ONLY_ARCHIVED_CANVASES'
                   >
-                    <Archive size={15} className='mt-0.5 shrink-0 text-sidebar-foreground/55' />
+                    <Archive size={15} className='mt-0.5 shrink-0' />
                     <span className='min-w-0 flex-1'>
                       <span className='block leading-5'>Only archived</span>
-                      <span className='block max-w-[170px] text-xs leading-4 text-sidebar-foreground/50'>
+                      <span className='block max-w-[170px] text-xs leading-4'>
                         Show archived canvases only
                       </span>
                     </span>

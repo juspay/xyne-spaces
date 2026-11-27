@@ -513,7 +513,7 @@ export const KbContentsPanel: React.FC<KbContentsPanelProps> = ({
                 />
               ))
             ) : (
-              <p className='px-1.5 py-1 text-[13px] text-sidebar-foreground/60'>
+              <p className='px-1.5 py-1 text-[13px]'>
                 {isSearchActive
                   ? `No collections match “${searchQuery.trim()}”`
                   : 'No collections yet'}
@@ -547,7 +547,7 @@ export const KbContentsPanel: React.FC<KbContentsPanelProps> = ({
                   ))}
                 </GuideRail>
               ) : isSearchActive ? (
-                <p className='px-1.5 py-1 text-[13px] text-sidebar-foreground/60'>
+                <p className='px-1.5 py-1 text-[13px]'>
                   No files or folders match &ldquo;{searchQuery.trim()}&rdquo;
                 </p>
               ) : null}
