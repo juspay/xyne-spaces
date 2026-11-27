@@ -337,7 +337,7 @@ export const WorkspaceSwitcher: React.FC = () => {
       {isOpen && (
         <div
           ref={popoverRef}
-          className='absolute left-full top-0 ml-2 z-[60] w-64 rounded-xl border border-border bg-background shadow-xl'
+          className='absolute left-full top-0 ml-2 z-60 w-64 rounded-xl border border-border bg-background shadow-xl'
         >
           {/* Header */}
           <div className='px-3 pt-3 pb-1'>
@@ -502,7 +502,7 @@ export const WorkspaceSwitcher: React.FC = () => {
                   onChange={e => setWorkspaceName(e.target.value)}
                   data-track-category='Workspace_Switcher'
                   data-track-name='Workspace_Name_Input'
-                  className='w-full px-2 py-1.5 text-sm border border-border rounded-md bg-background focus:outline-none focus:ring-1 focus:ring-ring'
+                  className='w-full px-2 py-1.5 text-sm border border-border rounded-md bg-background focus:outline-hidden focus:ring-1 focus:ring-ring'
                   required
                   // eslint-disable-next-line jsx-a11y/no-autofocus
                   autoFocus

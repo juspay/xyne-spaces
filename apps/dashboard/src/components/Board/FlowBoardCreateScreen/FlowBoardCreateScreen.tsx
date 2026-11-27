@@ -290,7 +290,7 @@ export const FlowBoardCreateScreen: React.FC<FlowBoardCreateScreenProps> = ({
             />
           </div>
 
-          <aside className='w-[320px] flex-shrink-0 flex flex-col gap-5 p-6 overflow-y-auto'>
+          <aside className='w-[320px] shrink-0 flex flex-col gap-5 p-6 overflow-y-auto'>
             <div>
               <h2 className='text-[15px] font-semibold text-foreground'>Board details</h2>
               <p className='text-[12px] text-muted-foreground mt-1 leading-[18px]'>

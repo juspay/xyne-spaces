@@ -301,7 +301,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
       LinkExtension.extend({ inclusive: false }).configure({
         openOnClick: false,
         HTMLAttributes: {
-          class: 'text-[color:var(--link-color)] underline cursor-text',
+          class: 'text-(--link-color) underline cursor-text',
           rel: 'noopener noreferrer',
         },
       }),
@@ -332,7 +332,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
     editorProps: {
       /* eslint-disable @typescript-eslint/naming-convention -- DOM attribute names */
       attributes: {
-        class: 'composer-editor outline-none',
+        class: 'composer-editor outline-hidden',
         role: 'textbox',
         'aria-multiline': 'true',
         'aria-label': 'Message',
@@ -745,7 +745,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
               editor={editor}
               className={cn(
                 'max-h-[220px] min-h-[44px] overflow-y-auto text-[15px] leading-6 text-foreground',
-                '[&_.ProseMirror]:min-h-[44px] [&_.ProseMirror]:outline-none [&_.ProseMirror_p]:m-0',
+                '[&_.ProseMirror]:min-h-[44px] [&_.ProseMirror]:outline-hidden [&_.ProseMirror_p]:m-0',
                 voice.isRecording && isEmpty && 'invisible',
               )}
             />
@@ -761,7 +761,7 @@ export const Composer = forwardRef<ComposerHandle, ComposerProps>(function Compo
                     <div
                       key={delay}
                       // Grey here; the shared class is orange for the channel composer.
-                      className='voice-wave-bar !bg-muted-foreground'
+                      className='voice-wave-bar bg-muted-foreground!'
                       style={{ height: [9, 16, 12, 16, 9][i], animationDelay: `${delay}ms` }}
                     />
                   ))}

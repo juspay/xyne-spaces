@@ -488,7 +488,7 @@ export const WorkspaceInviteDialog = ({
                 value={contactsSearch}
                 onChange={event => setContactsSearch(event.target.value)}
                 placeholder='Search contacts'
-                className='h-9 w-44 rounded-[10px] border border-border bg-background px-3 text-[14px] text-foreground outline-none transition-colors placeholder:text-muted-foreground/70 focus:border-muted-foreground/60'
+                className='h-9 w-44 rounded-[10px] border border-border bg-background px-3 text-[14px] text-foreground outline-hidden transition-colors placeholder:text-muted-foreground/70 focus:border-muted-foreground/60'
                 data-track-category='WorkspaceInviteDialog'
                 data-track-name='ContactsSearch'
               />
@@ -610,7 +610,7 @@ export const WorkspaceInviteDialog = ({
                   onChange={event => setEmailsInput(event.target.value)}
                   placeholder='jane@acme.com, jhon@acme.com'
                   disabled={isInviting}
-                  className='h-10 min-w-0 flex-1 rounded-[13px] border border-border bg-background px-3.5 text-[15px] font-medium text-foreground shadow-none outline-none transition-colors placeholder:text-muted-foreground/70 focus:border-muted-foreground/60 focus:ring-2 focus:ring-ring/10 disabled:cursor-not-allowed disabled:opacity-60'
+                  className='h-10 min-w-0 flex-1 rounded-[13px] border border-border bg-background px-3.5 text-[15px] font-medium text-foreground shadow-none outline-hidden transition-colors placeholder:text-muted-foreground/70 focus:border-muted-foreground/60 focus:ring-2 focus:ring-ring/10 disabled:cursor-not-allowed disabled:opacity-60'
                   data-track-category='WorkspaceInviteDialog'
                   data-track-name='EmailsInput'
                 />

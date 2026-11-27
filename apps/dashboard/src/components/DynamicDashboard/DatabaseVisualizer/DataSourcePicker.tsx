@@ -85,7 +85,7 @@ export function DataSourcePicker({
               aria-label='Search databases'
               data-track-category='DYNAMIC_DASHBOARD'
               data-track-name='Db_Viz_Source_Search'
-              className='w-full h-8 pl-7 pr-2 text-[13px] bg-background border border-input rounded-md text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring'
+              className='w-full h-8 pl-7 pr-2 text-[13px] bg-background border border-input rounded-md text-foreground placeholder:text-muted-foreground focus:outline-hidden focus:ring-2 focus:ring-ring'
             />
           </div>
         )}

@@ -141,7 +141,7 @@ export const ManageSectionChannelsDialog = ({
           autoComplete='off'
           data-track-category='CHAT_SIDEBAR'
           data-track-name='MANAGE_SECTION_FILTER_CHANNELS'
-          className='flex-1 border-0 bg-transparent py-2 text-sm text-foreground outline-none placeholder:text-muted-foreground'
+          className='flex-1 border-0 bg-transparent py-2 text-sm text-foreground outline-hidden placeholder:text-muted-foreground'
         />
         {filter && (
           <button
@@ -208,7 +208,7 @@ export const ManageSectionChannelsDialog = ({
           onClick={handleSave}
           data-track-category='CHAT_SIDEBAR'
           data-track-name='SAVE_MANAGE_SECTION_CHANNELS'
-          className='bg-action-primary text-action-primary-foreground hover:bg-action-primary/90'
+          className='bg-action-primary text-action-primary-foreground'
         >
           Save
         </Button>

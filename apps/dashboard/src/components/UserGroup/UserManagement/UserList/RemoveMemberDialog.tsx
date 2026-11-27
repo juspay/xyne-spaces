@@ -40,7 +40,7 @@ export const RemoveMemberDialog = ({
         if (!open && !isRemoving) onCancel();
       }}
       title='Remove member from group?'
-      zIndexClassName='z-[60]'
+      zIndexClassName='z-60'
       className='max-w-md rounded-xl border border-border'
       mobileVariant='dialog'
       testId='remove-member-confirm'
@@ -49,7 +49,7 @@ export const RemoveMemberDialog = ({
         <h2 className='mb-1.5 text-[15px] font-semibold text-foreground'>
           Remove member from group?
         </h2>
-        <p className='text-[13px] leading-[1.5] text-muted-foreground'>
+        <p className='text-[13px] leading-normal text-muted-foreground'>
           {user ? getUserDisplayName(user) : 'This member'} will stop receiving new tickets from
           this group.
         </p>
@@ -67,7 +67,7 @@ export const RemoveMemberDialog = ({
             </p>
           </div>
         ) : (
-          <p className='mt-4 text-[13px] leading-[1.5] text-muted-foreground'>
+          <p className='mt-4 text-[13px] leading-normal text-muted-foreground'>
             Their open tickets stay assigned to them. Turn on existing-ticket reassignment in
             Assignment Configuration to hand tickets off on removal.
           </p>

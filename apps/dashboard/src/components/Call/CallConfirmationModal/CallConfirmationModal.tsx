@@ -43,7 +43,7 @@ export const CallConfirmationModal: React.FC<CallConfirmationModalProps> = ({
           label: 'Okay',
           onClick: onConfirm,
           trackName: 'CONFIRM_START_CALL',
-          className: 'bg-action-primary hover:bg-action-primary/90 text-action-primary-foreground',
+          className: 'bg-action-primary text-action-primary-foreground',
           testId: 'confirm-call-button',
         },
       ]}

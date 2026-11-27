@@ -51,7 +51,7 @@ export function SaveTitleModal({
   };
 
   return (
-    <div className='fixed inset-0 z-[70] flex items-center justify-center'>
+    <div className='fixed inset-0 z-70 flex items-center justify-center'>
       {/* Backdrop */}
       <div className='absolute inset-0 bg-black/50 animate-in fade-in duration-200' />
 
@@ -85,7 +85,7 @@ export function SaveTitleModal({
           onKeyDown={handleKeyDown}
           placeholder='Recording title'
           disabled={isSaving}
-          className='w-full px-4 py-3 text-base bg-muted dark:bg-gray-900 border border-input dark:border-gray-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent text-foreground dark:text-gray-100 placeholder-gray-400 disabled:opacity-50'
+          className='w-full px-4 py-3 text-base bg-muted dark:bg-gray-900 border border-input dark:border-gray-600 rounded-lg focus:outline-hidden focus:ring-2 focus:ring-blue-500 focus:border-transparent text-foreground dark:text-gray-100 placeholder-gray-400 disabled:opacity-50'
           data-track-category='SaveTitleModal'
           data-track-name='recording_title_input'
         />

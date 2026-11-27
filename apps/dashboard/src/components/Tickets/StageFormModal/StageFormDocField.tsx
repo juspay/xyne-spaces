@@ -97,7 +97,7 @@ export const StageFormDocField: React.FC<StageFormDocFieldProps> = ({
       <div className='space-y-2'>
         <button
           type='button'
-          className='w-full text-left p-3 bg-card hover:bg-accent rounded-xl border border-border shadow-sm transition cursor-pointer'
+          className='w-full text-left p-3 bg-card hover:bg-accent rounded-xl border border-border shadow-xs transition cursor-pointer'
           onClick={() => setLocalViewerOpen(true)}
           data-track-category='Tickets'
           data-track-name='StageFormDocFieldOpenLocalPreview'
@@ -162,7 +162,7 @@ export const StageFormDocField: React.FC<StageFormDocFieldProps> = ({
       <div className='space-y-2'>
         <button
           type='button'
-          className='w-full text-left p-3 bg-card hover:bg-accent rounded-xl border border-border shadow-sm transition cursor-pointer'
+          className='w-full text-left p-3 bg-card hover:bg-accent rounded-xl border border-border shadow-xs transition cursor-pointer'
           onClick={() => handlePreviewClick(existingAttachment)}
           data-track-category='Tickets'
           data-track-name='StageFormDocFieldOpenPreview'
@@ -216,7 +216,7 @@ export const StageFormDocField: React.FC<StageFormDocFieldProps> = ({
   if (existingAttachmentId) {
     return (
       <div className='space-y-2'>
-        <div className='w-full rounded-xl border border-border bg-card p-3 text-left shadow-sm'>
+        <div className='w-full rounded-xl border border-border bg-card p-3 text-left shadow-xs'>
           <div className='flex items-center gap-3'>
             <FileText size={18} className='shrink-0 text-muted-foreground' />
             <div className='flex min-w-0 flex-col'>

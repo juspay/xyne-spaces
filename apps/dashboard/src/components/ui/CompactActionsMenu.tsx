@@ -46,7 +46,7 @@ const CompactActionsMenu = ({
       </DropdownMenuTrigger>
       <DropdownMenuContent
         align={contentAlign}
-        className='min-w-[14rem]'
+        className='min-w-56'
         {...(onCloseAutoFocus ? { onCloseAutoFocus } : {})}
         {...(forceDarkTheme ? { 'data-theme': 'midnight' } : {})}
       >

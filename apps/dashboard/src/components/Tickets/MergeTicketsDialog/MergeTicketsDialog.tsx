@@ -207,11 +207,11 @@ export const MergeTicketsDialog: React.FC<MergeTicketsDialogProps> = ({
                     value={ticket.id}
                     className={cn(
                       'relative flex w-full flex-col gap-1.5 rounded-md border py-2.5 pl-4 pr-3 text-left',
-                      'shadow-sm transition-all outline-none',
+                      'shadow-xs transition-all outline-hidden',
                       'focus-visible:ring-2 focus-visible:ring-ring/50',
                       isParent
-                        ? 'border-primary/40 bg-primary/[0.04]'
-                        : 'border-border bg-card hover:border-input hover:shadow',
+                        ? 'border-primary/40 bg-primary/4'
+                        : 'border-border bg-card hover:border-input hover:shadow-sm',
                     )}
                     data-track-category='Support'
                     data-track-name='SelectMergeParent'
@@ -226,7 +226,7 @@ export const MergeTicketsDialog: React.FC<MergeTicketsDialogProps> = ({
                         e.stopPropagation();
                         handleRemoveTicket(ticket.id);
                       }}
-                      className='absolute -left-1.5 -top-1.5 flex size-4 items-center justify-center rounded-full border border-border bg-background text-muted-foreground shadow-sm hover:text-foreground hover:border-input'
+                      className='absolute -left-1.5 -top-1.5 flex size-4 items-center justify-center rounded-full border border-border bg-background text-muted-foreground shadow-xs hover:text-foreground hover:border-input'
                       aria-label={`Remove ${plainTitle || 'ticket'} from merge`}
                       data-track-category='Support'
                       data-track-name='RemoveTicketFromMerge'

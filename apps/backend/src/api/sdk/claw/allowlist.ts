@@ -1,5 +1,5 @@
 /**
- * Which claw-auth routes the SDK may reach through `/api/sdk/v2/claw/api/*`.
+ * Which claw-auth routes the SDK may reach through `/api/sdk/v3/claw/api/*`.
  *
  * Deny by default. A path is matched against the part after claw-auth's
  * `/claw/api/v1` prefix; denies are checked before allows, so a deny carves an

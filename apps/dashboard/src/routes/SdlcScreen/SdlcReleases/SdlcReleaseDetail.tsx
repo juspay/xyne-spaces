@@ -332,7 +332,7 @@ function ReleaseTitle({
   }, [editing]);
 
   const headingClass =
-    'mb-2 mt-3 break-words text-[30px] font-bold tracking-[-0.02em] text-foreground';
+    'mb-2 mt-3 wrap-break-word text-[30px] font-bold tracking-[-0.02em] text-foreground';
   const lineClass = '-mx-2 rounded-lg px-2';
 
   const headingText = (
@@ -375,7 +375,7 @@ function ReleaseTitle({
             if (e.key === 'Escape') cancel();
           }}
           aria-label='Release title'
-          className='min-w-0 flex-1 bg-transparent outline-none'
+          className='min-w-0 flex-1 bg-transparent outline-hidden'
           data-track-category={TRACK_CATEGORY}
           data-track-name='EditReleaseTitle'
         />
@@ -438,7 +438,7 @@ function ReleaseDescription({
 
   if (!canManage) {
     return summary ? (
-      <p className='whitespace-pre-wrap break-words text-[15px] leading-normal text-muted-foreground'>
+      <p className='whitespace-pre-wrap wrap-break-word text-[15px] leading-normal text-muted-foreground'>
         {summary}
       </p>
     ) : null;
@@ -461,7 +461,7 @@ function ReleaseDescription({
             }
           }}
           placeholder='Add description'
-          className='min-h-[96px] w-full resize-none overflow-y-auto bg-transparent px-2.5 py-2 text-[15px] leading-normal text-foreground outline-none placeholder:text-muted-foreground'
+          className='min-h-[96px] w-full resize-none overflow-y-auto bg-transparent px-2.5 py-2 text-[15px] leading-normal text-foreground outline-hidden placeholder:text-muted-foreground'
           data-track-category={TRACK_CATEGORY}
           data-track-name='EditReleaseDescription'
         />
@@ -512,7 +512,7 @@ function ReleaseDescription({
       data-track-name='StartEditReleaseDescription'
     >
       {summary ? (
-        <p className='whitespace-pre-wrap break-words text-[15px] leading-normal text-muted-foreground'>
+        <p className='whitespace-pre-wrap wrap-break-word text-[15px] leading-normal text-muted-foreground'>
           {summary}
         </p>
       ) : (

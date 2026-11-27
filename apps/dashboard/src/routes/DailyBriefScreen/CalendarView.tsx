@@ -87,9 +87,9 @@ export function CalendarView({
             week: 'flex w-full',
             day: 'flex-1 p-0 text-center',
             day_button:
-              'flex h-8 w-full items-center justify-center rounded-[8px] text-[13px] font-normal text-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none disabled:pointer-events-none disabled:text-muted-foreground/30',
+              'flex h-8 w-full items-center justify-center rounded-[8px] text-[13px] font-normal text-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-hidden disabled:pointer-events-none disabled:text-muted-foreground/30',
             selected:
-              '[&_button]:bg-primary [&_button]:text-white [&_button]:hover:bg-primary [&_button]:hover:text-white',
+              '[&_button]:bg-primary [&_button]:text-white hover:[&_button]:bg-primary hover:[&_button]:text-white',
             today: '[&_button]:font-semibold',
             outside: '[&_button]:text-muted-foreground/40',
             disabled: '[&_button]:text-muted-foreground/30',

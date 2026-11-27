@@ -177,58 +177,8 @@ export class TicketStageTransitionService {
     const bypassApproval = isAutomation && (transition?.bypassApprovalForAutomation ?? false);
 
     if (transition?.requiresApproval && !bypassApproval) {
-      // Check if the requesting user is a listed transition approver (self-approve path).
-      // A user qualifies if they are listed as a USER approver OR they hold any role listed
-      // as a ROLE approver (via user_role_mappings). Legacy rows with NULL approverType are
-      // treated as USER.
-      const isTransitionApprover = await prisma.stageApprovers.findFirst({
-        // userId is populated only for USER-type approvers, so matching transitionId+userId
-        // already identifies a USER self-approver — including legacy rows whose approverType
-        // is NULL (treated as USER). No approverType filter needed.
-        where: {
-          transitionId: transition.id,
-          userId,
-        },
-      });
-
-      let isRoleApprover = false;
-      if (!isTransitionApprover) {
-        const roleApproverRows = await prisma.stageApprovers.findMany({
-          where: {
-            transitionId: transition.id,
-            approverType: ApproverType.ROLE,
-            roleId: { not: null },
-          },
-          select: { roleId: true },
-        });
-        const roleIds = roleApproverRows
-          .map(r => r.roleId)
-          .filter((id): id is string => id !== null);
-        // Only live roles confer approval rights; a deactivated role must not.
-        const activeRoleIds = roleIds.length
-          ? (
-              await prisma.role.findMany({
-                where: { id: { in: roleIds }, isActive: true },
-                select: { id: true },
-              })
-            ).map(r => r.id)
-          : [];
-        if (activeRoleIds.length > 0) {
-          const membership = await prisma.userRoleMapping.findFirst({
-            where: { userId, roleId: { in: activeRoleIds } },
-          });
-          if (!membership) {
-            const groupMembership = await prisma.userGroupMapping.findFirst({
-              where: { userId, roleId: { in: activeRoleIds } },
-            });
-            isRoleApprover = !!groupMembership;
-          } else {
-            isRoleApprover = true;
-          }
-        }
-      }
-
-      if (isTransitionApprover || isRoleApprover) {
+      // Self-approve path: a listed approver's request is approved on the spot.
+      if (await isStageTransitionApprover(transition.id, userId)) {
         // User is an approver — record approval and fall through to execute the transition
         await prisma.ticketStageRequest.upsert({
           where: { ticketId_stageId: { ticketId, stageId: targetStage.id } },
@@ -339,6 +289,58 @@ export class TicketStageTransitionService {
       newVisitIndex: result.newVisitIndex,
     };
   }
+}
+
+/**
+ * Whether the user is a listed approver of the transition: listed as a USER approver, or holding
+ * any active role listed as a ROLE approver (via user_role_mappings or user_group_mappings).
+ * Legacy rows with NULL approverType are treated as USER.
+ */
+export async function isStageTransitionApprover(
+  transitionId: string,
+  userId: string,
+): Promise<boolean> {
+  const userApprover = await prisma.stageApprovers.findFirst({
+    // userId is populated only for USER-type approvers, so matching transitionId+userId
+    // already identifies a USER self-approver — including legacy rows whose approverType
+    // is NULL (treated as USER). No approverType filter needed.
+    where: {
+      transitionId,
+      userId,
+    },
+  });
+  if (userApprover) return true;
+
+  const roleApproverRows = await prisma.stageApprovers.findMany({
+    where: {
+      transitionId,
+      approverType: ApproverType.ROLE,
+      roleId: { not: null },
+    },
+    select: { roleId: true },
+  });
+  const roleIds = roleApproverRows
+    .map(r => r.roleId)
+    .filter((id): id is string => id !== null);
+  // Only live roles confer approval rights; a deactivated role must not.
+  const activeRoleIds = roleIds.length
+    ? (
+        await prisma.role.findMany({
+          where: { id: { in: roleIds }, isActive: true },
+          select: { id: true },
+        })
+      ).map(r => r.id)
+    : [];
+  if (activeRoleIds.length === 0) return false;
+
+  const membership = await prisma.userRoleMapping.findFirst({
+    where: { userId, roleId: { in: activeRoleIds } },
+  });
+  if (membership) return true;
+  const groupMembership = await prisma.userGroupMapping.findFirst({
+    where: { userId, roleId: { in: activeRoleIds } },
+  });
+  return !!groupMembership;
 }
 
 // Singleton export

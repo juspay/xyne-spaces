@@ -351,7 +351,7 @@ export const FeatureMock = ({ visualKey, title }: FeatureMockProps): ReactElemen
                 },
               ].map(t => (
                 <div key={t.ch} className='border border-border rounded-lg p-1.5 space-y-0.5'>
-                  <span className='text-[9px] font-semibold text-[#57ab02]'>{t.ch}</span>
+                  <span className='block text-[9px] font-semibold text-[#57ab02]'>{t.ch}</span>
                   <p className='text-[10px] text-foreground/90 leading-tight'>{t.snippet}</p>
                   <span className='text-[9px] text-muted-foreground'>
                     {t.replies} replies · {t.time}
@@ -909,7 +909,7 @@ export const FeatureMock = ({ visualKey, title }: FeatureMockProps): ReactElemen
                   { col: 'Done', cards: ['Auth refactor', 'Fix checkout bug'] },
                 ].map(({ col, cards }) => (
                   <div key={col} className='rounded-md bg-muted/40 p-1.5 space-y-1'>
-                    <span className='text-[9px] font-semibold text-muted-foreground uppercase tracking-wide'>
+                    <span className='block text-[9px] font-semibold text-muted-foreground uppercase tracking-wide'>
                       {col}
                     </span>
                     {cards.map(card => (
@@ -1344,7 +1344,7 @@ export const FeatureMock = ({ visualKey, title }: FeatureMockProps): ReactElemen
       return (
         <MockFrame title={title}>
           <div className='p-2'>
-            <div className='rounded-xl border border-border bg-card p-3 space-y-2 shadow-sm'>
+            <div className='rounded-xl border border-border bg-card p-3 space-y-2 shadow-xs'>
               <div className='flex items-center gap-2'>
                 <div className='h-9 w-9 rounded-md bg-violet-500 flex items-center justify-center text-white text-[12px] font-bold shrink-0'>
                   AC

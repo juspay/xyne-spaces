@@ -89,7 +89,7 @@ export const SocialMediaReplyComposer = ({
           placeholder={placeholder}
           aria-label={placeholder}
           rows={3}
-          className='block min-h-20 max-h-48 w-full resize-y bg-transparent px-3 py-2 text-sm text-foreground outline-none placeholder:text-muted-foreground'
+          className='block min-h-20 max-h-48 w-full resize-y bg-transparent px-3 py-2 text-sm text-foreground outline-hidden placeholder:text-muted-foreground'
           data-track-category={trackingCategory}
           data-track-name='compose-reply'
         />

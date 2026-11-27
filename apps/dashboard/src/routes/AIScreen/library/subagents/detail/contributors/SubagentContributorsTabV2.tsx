@@ -172,7 +172,7 @@ export function SubagentContributorsTabV2({
                 aria-label='Filter contributors'
                 data-track-category='Claw Agents'
                 data-track-name='Subagent detail v2: filter contributors'
-                className='h-9 w-full rounded-[10px] border border-border bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring'
+                className='h-9 w-full rounded-[10px] border border-border bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-hidden focus:ring-1 focus:ring-ring'
               />
             </div>
           )}

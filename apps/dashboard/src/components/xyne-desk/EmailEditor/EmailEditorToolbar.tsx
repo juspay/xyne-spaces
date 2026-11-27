@@ -719,7 +719,7 @@ export const EmailEditorToolbar: React.FC<EmailEditorToolbarProps> = ({
               onChange={e => setLinkText(e.target.value)}
               placeholder='Link text'
               autoFocus // eslint-disable-line jsx-a11y/no-autofocus
-              className='w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring'
+              className='w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-hidden focus:ring-2 focus:ring-ring'
               data-track-category='email-editor'
               data-track-name='edit-link-text'
             />
@@ -732,7 +732,7 @@ export const EmailEditorToolbar: React.FC<EmailEditorToolbarProps> = ({
               onChange={e => setLinkUrl(e.target.value)}
               onKeyDown={e => e.key === 'Enter' && applyLink()}
               placeholder='https://example.com'
-              className='w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring'
+              className='w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-hidden focus:ring-2 focus:ring-ring'
               data-track-category='email-editor'
               data-track-name='edit-link-url'
             />

@@ -41,7 +41,7 @@ function ArtifactRow({ artifact, onOpen, onPatch }: ArtifactRowProps): ReactElem
         stale && 'opacity-50',
       )}
     >
-      <span className='grid h-7 w-7 flex-shrink-0 place-items-center rounded-md bg-muted text-muted-foreground'>
+      <span className='grid h-7 w-7 shrink-0 place-items-center rounded-md bg-muted text-muted-foreground'>
         {artifactKindIcon(artifact.kind, 'h-3.5 w-3.5')}
       </span>
 
@@ -63,7 +63,7 @@ function ArtifactRow({ artifact, onOpen, onPatch }: ArtifactRowProps): ReactElem
                 setEditing(false);
               }
             }}
-            className='w-full rounded border border-border bg-background px-1 py-0.5 text-[13px] text-foreground outline-none'
+            className='w-full rounded border border-border bg-background px-1 py-0.5 text-[13px] text-foreground outline-hidden'
             data-track-category='AskAI'
             data-track-name='workspace-artifact-rename-input'
           />
@@ -102,7 +102,7 @@ function ArtifactRow({ artifact, onOpen, onPatch }: ArtifactRowProps): ReactElem
         title={artifact.pinned ? 'Unpin' : 'Pin'}
         onClick={() => onPatch(artifact.id, { pinned: !artifact.pinned })}
         className={cn(
-          'grid h-7 w-7 flex-shrink-0 place-items-center rounded text-muted-foreground hover:bg-foreground/10 hover:text-foreground',
+          'grid h-7 w-7 shrink-0 place-items-center rounded text-muted-foreground hover:bg-foreground/10 hover:text-foreground',
           !artifact.pinned && 'opacity-0 group-hover:opacity-100 focus:opacity-100',
         )}
         data-track-category='AskAI'
@@ -119,7 +119,7 @@ function ArtifactRow({ artifact, onOpen, onPatch }: ArtifactRowProps): ReactElem
           setDraft(artifact.title);
           setEditing(true);
         }}
-        className='grid h-7 w-7 flex-shrink-0 place-items-center rounded text-muted-foreground opacity-0 hover:bg-foreground/10 hover:text-foreground focus:opacity-100 group-hover:opacity-100'
+        className='grid h-7 w-7 shrink-0 place-items-center rounded text-muted-foreground opacity-0 hover:bg-foreground/10 hover:text-foreground focus:opacity-100 group-hover:opacity-100'
         data-track-category='AskAI'
         data-track-name='workspace-artifact-rename'
       >

@@ -83,7 +83,7 @@ export function VariableAwareInput({
     editorProps: {
       attributes: {
         class: cn(
-          'flex-1 min-w-0 outline-none whitespace-pre-wrap break-words text-sm text-foreground',
+          'flex-1 min-w-0 outline-hidden whitespace-pre-wrap wrap-break-word text-sm text-foreground',
           '[&_p]:m-0',
         ),
       },
@@ -115,9 +115,8 @@ export function VariableAwareInput({
         aria-invalid={ariaInvalid ?? undefined}
         className={cn(
           // Mirror ui/Input/Input.tsx baseline styling so swaps are 1-line.
-          'border-input flex h-9 w-full min-w-0 items-center gap-1 rounded-md border bg-transparent px-3 py-1 shadow-xs transition-[color,box-shadow]',
-          'focus-within:border-ring focus-within:ring-ring/10 focus-within:ring-[2px]',
-          'aria-invalid:ring-destructive/20 aria-invalid:border-destructive',
+          'border-input flex h-9 w-full min-w-0 items-center gap-1 rounded-md border bg-transparent px-3 py-1 transition-[color,box-shadow]',
+          'focus-within:border-ring focus-within:ring-ring/10 focus-within:ring-2',
           disabled && 'pointer-events-none cursor-not-allowed opacity-50',
           className,
         )}

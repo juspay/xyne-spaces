@@ -43,7 +43,7 @@ function VersionSelect({
       onChange={event => onChange(Number(event.target.value))}
       data-track-category='Claw Agents'
       data-track-name='Agent detail v2: pick diff version'
-      className='h-7 rounded-lg border border-border bg-card px-2 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring'
+      className='h-7 rounded-lg border border-border bg-card px-2 text-xs text-foreground focus:outline-hidden focus:ring-1 focus:ring-ring'
     >
       {versions.map(entry => (
         <option key={entry.id} value={entry.version}>
@@ -195,7 +195,7 @@ export function AgentPromptVersions({
                         <span
                           key={`${row.type}-${index}`}
                           className={cn(
-                            'whitespace-pre-wrap break-words px-1',
+                            'whitespace-pre-wrap wrap-break-word px-1',
                             row.type === 'add' &&
                               'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300',
                             row.type === 'del' && 'bg-destructive/10 text-destructive',
@@ -289,7 +289,7 @@ export function AgentPromptVersions({
                             className='border-0 bg-transparent p-0'
                             resetKeys={[entry.id]}
                           >
-                            <p className='whitespace-pre-wrap break-words text-sm font-normal leading-5 tracking-[-0.28px] text-foreground'>
+                            <p className='whitespace-pre-wrap wrap-break-word text-sm font-normal leading-5 tracking-[-0.28px] text-foreground'>
                               {entry.systemPrompt}
                             </p>
                           </ScrollFadeBox>

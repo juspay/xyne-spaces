@@ -1,4 +1,6 @@
 import { waitFor } from 'xstate';
+import { getTransitPlatform } from '@xyne/shared';
+import type { TransitAesKey } from '@xyne/shared';
 import { encryptionActor, getEncryptionState } from '../../machines/encryptionMachine';
 import type { YSweetAuthToken } from './canvasService';
 
@@ -24,14 +26,15 @@ class EncryptedWebSocket {
   onerror: ((ev: Event) => void) | null = null;
 
   private readonly ws: WebSocket;
-  private readonly key: CryptoKey;
+  private readonly key: TransitAesKey;
   private sendCounter = 0n;
   private recvCounter = 0n;
-  // WebCrypto is async. Both chains keep frames, and their counters, in order.
+  // AES-GCM runs through the transit platform (WebCrypto here) and is async. Both chains keep
+  // frames, and their counters, in order.
   private sendChain = Promise.resolve();
   private recvChain = Promise.resolve();
 
-  constructor(url: string | URL, key: CryptoKey) {
+  constructor(url: string | URL, key: TransitAesKey) {
     this.ws = new WebSocket(url);
     this.ws.binaryType = 'arraybuffer';
     this.key = key;
@@ -41,8 +44,12 @@ class EncryptedWebSocket {
       const iv = nonce(SERVER_TO_CLIENT, this.recvCounter++);
       this.recvChain = this.recvChain
         .then(async () => {
-          const data = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, this.key, ev.data);
-          this.onmessage?.(new MessageEvent('message', { data }));
+          const plain = await getTransitPlatform().crypto.decrypt(
+            this.key,
+            iv,
+            new Uint8Array(ev.data),
+          );
+          this.onmessage?.(new MessageEvent('message', { data: plain.slice().buffer }));
         })
         .catch(() => this.ws.close());
     };
@@ -58,7 +65,7 @@ class EncryptedWebSocket {
     const iv = nonce(CLIENT_TO_SERVER, this.sendCounter++);
     this.sendChain = this.sendChain
       .then(async () => {
-        const frame = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, this.key, data);
+        const frame = await getTransitPlatform().crypto.encrypt(this.key, iv, data);
         if (this.ws.readyState === OPEN) this.ws.send(frame);
       })
       .catch(() => this.ws.close());
@@ -78,7 +85,7 @@ export function withFrameEncryption(getTicket: () => Promise<YSweetAuthToken>): 
   getAuthToken: () => Promise<YSweetAuthToken>;
   WebSocketPolyfill: typeof WebSocket;
 } {
-  const keys = new Map<string, CryptoKey>();
+  const keys = new Map<string, TransitAesKey>();
 
   // @y-sweet/client calls `new WebSocketPolyfill(url)` with the ticket that getAuthToken returned.
   function WebSocketPolyfill(url: string | URL): unknown {

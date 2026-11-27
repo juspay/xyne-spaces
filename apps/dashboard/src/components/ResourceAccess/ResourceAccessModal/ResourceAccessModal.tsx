@@ -475,7 +475,7 @@ export const ResourceAccessModal = ({
 
         {/* Confirmation Dialog */}
         {showConfirmDialog && (
-          <div className='fixed inset-0 z-[60] flex items-center justify-center bg-black/50'>
+          <div className='fixed inset-0 z-60 flex items-center justify-center bg-black/50'>
             <div className='bg-background rounded-lg shadow-xl w-full max-w-sm p-6'>
               <h3 className='text-lg font-semibold text-foreground mb-2'>
                 {pendingAction === 'activate' ? 'Activate User?' : 'Deactivate User?'}

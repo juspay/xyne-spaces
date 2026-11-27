@@ -40,7 +40,7 @@ export function HolidaysField({
       <Popover
         align='start'
         collisionPadding={8}
-        className='max-h-[var(--radix-popover-content-available-height)] w-[min(640px,calc(100vw-2rem))] overflow-y-auto p-2'
+        className='max-h-(--radix-popover-content-available-height) w-[min(640px,calc(100vw-2rem))] overflow-y-auto p-2'
         trigger={
           <button
             type='button'
@@ -74,7 +74,7 @@ export function HolidaysField({
             weekday:
               'flex h-5 flex-1 items-center justify-center text-[10px] font-normal text-muted-foreground',
             day_button:
-              'h-6 w-full p-0 inline-flex items-center justify-center rounded-md text-[11px] transition-colors focus-visible:outline-none hover:bg-muted hover:text-foreground',
+              'h-6 w-full p-0 inline-flex items-center justify-center rounded-md text-[11px] transition-colors focus-visible:outline-hidden hover:bg-muted hover:text-foreground',
           }}
         />
       </Popover>

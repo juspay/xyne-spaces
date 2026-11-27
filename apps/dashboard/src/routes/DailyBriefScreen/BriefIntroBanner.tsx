@@ -24,7 +24,7 @@ export function BriefIntroBanner({
       className={cn(
         'isolate relative mb-8 overflow-hidden rounded-[16px] border border-border px-6 py-5 bg-white/5 ~bg-gradient-to-r ~from-primary/25 ~via-primary/10 ~to-primary/30',
         'shadow-[0px_43px_26px_0px_rgba(0,0,0,0.01),0px_19px_19px_0px_rgba(0,0,0,0.02),0px_5px_10px_0px_rgba(0,0,0,0.02)]',
-        'before:pointer-events-none before:-z-10 before:absolute before:-inset-x-[12%] before:h-[550%] before:bottom-full before:translate-y-[9%] before:bg-[radial-gradient(50%_50%_at_50%_50%,hsl(var(--primary))_54%,transparent)] before:blur-2xl',
+        'before:pointer-events-none before:-z-10 before:absolute before:inset-x-[-12%] before:h-[550%] before:bottom-full before:translate-y-[9%] before:bg-[radial-gradient(50%_50%_at_50%_50%,hsl(var(--primary))_54%,transparent)] before:blur-2xl',
       )}
     >
       <button
@@ -57,7 +57,7 @@ export function BriefIntroBanner({
               disabled={enabling}
               data-track-category='DailyBrief'
               data-track-name='daily-brief-intro-enable'
-              className='flex h-7 items-center rounded-[8px] bg-foreground px-2.5 text-[14px] font-semibold leading-[20px] text-background shadow-sm transition-opacity hover:opacity-90 disabled:opacity-50'
+              className='flex h-7 items-center rounded-[8px] bg-foreground px-2.5 text-[14px] font-semibold leading-[20px] text-background shadow-xs transition-opacity hover:opacity-90 disabled:opacity-50'
             >
               {enabling ? 'Turning on…' : 'Turn on morning brief'}
             </button>
@@ -67,7 +67,7 @@ export function BriefIntroBanner({
             onClick={onSeeMore}
             data-track-category='DailyBrief'
             data-track-name='daily-brief-intro-see-more'
-            className='flex h-7 items-center rounded-[8px] border border-border bg-background px-2.5 text-[14px] font-semibold leading-[20px] text-foreground shadow-sm transition-colors hover:bg-accent'
+            className='flex h-7 items-center rounded-[8px] border border-border bg-background px-2.5 text-[14px] font-semibold leading-[20px] text-foreground shadow-xs transition-colors hover:bg-accent'
           >
             Learn more
           </button>

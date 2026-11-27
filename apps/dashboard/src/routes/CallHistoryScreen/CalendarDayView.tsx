@@ -122,7 +122,7 @@ function DayViewCallCard({
           title={call.title ?? 'Call'}
           data-track-category='CALLS'
           data-track-name='calendar-day-call-card'
-          className='group absolute left-2 right-2 rounded overflow-hidden text-left z-[5] focus:outline-none'
+          className='group absolute left-2 right-2 rounded overflow-hidden text-left z-5 focus:outline-hidden'
           style={{
             top,
             height,
@@ -731,7 +731,7 @@ const CalendarDayView = ({
                             details={slot}
                             open={openCallId === id}
                             onOpenChange={open => setOpenCallId(open ? id : null)}
-                            zClass='z-[5]'
+                            zClass='z-5'
                           />
                         );
                       })}

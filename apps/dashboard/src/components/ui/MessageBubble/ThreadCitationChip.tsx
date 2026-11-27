@@ -50,7 +50,7 @@ export function ThreadCitationChip({
   const chipClass =
     'claw-citation-chip ' +
     'inline-flex items-center gap-1 align-middle ' +
-    'px-1.5 h-[1.25rem] max-w-[180px] mx-[2px] rounded-xl ' +
+    'px-1.5 h-5 max-w-[180px] mx-[2px] rounded-xl ' +
     'text-[10px] font-medium leading-none ' +
     'bg-muted border border-border/50 ' +
     'hover:bg-accent hover:border-border ' +

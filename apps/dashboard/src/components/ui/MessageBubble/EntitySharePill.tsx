@@ -34,7 +34,7 @@ export const EntitySharePill: React.FC<EntitySharePillProps> = ({
       onOpen?.();
     }}
     disabled={!onOpen}
-    className='group flex w-full max-w-lg items-center gap-2.5 rounded-lg border border-border bg-card px-3 py-1.5 text-left shadow-sm disabled:cursor-default'
+    className='group flex w-full max-w-lg items-center gap-2.5 rounded-lg border border-border bg-card px-3 py-1.5 text-left shadow-xs disabled:cursor-default'
     aria-label={ariaLabel}
     data-track-category='MESSAGE'
     data-track-name={trackName}

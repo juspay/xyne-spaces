@@ -153,7 +153,7 @@ export const AppPickerDialog = ({
                           'flex min-w-0 flex-1 items-center gap-3 px-3 py-2 text-left transition-colors',
                           disabled
                             ? 'cursor-not-allowed opacity-50'
-                            : 'hover:bg-accent focus-visible:bg-accent focus-visible:outline-none',
+                            : 'hover:bg-accent focus-visible:bg-accent focus-visible:outline-hidden',
                         )}
                         data-track-category={trackCategory}
                         data-track-name={added ? 'UnpickApp' : 'PickApp'}

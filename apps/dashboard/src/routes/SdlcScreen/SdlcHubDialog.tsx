@@ -141,7 +141,7 @@ export function SdlcHubDialog({
                   <button
                     type='button'
                     aria-labelledby='sdlc-hub-project-label'
-                    className='flex h-10 w-full items-center gap-2 rounded-md border border-input bg-transparent px-3 text-left text-sm shadow-xs transition-[color,box-shadow] outline-none focus-visible:border-ring focus-visible:ring-[2px] focus-visible:ring-ring/10'
+                    className='flex h-10 w-full items-center gap-2 rounded-md border border-input bg-transparent px-3 text-left text-sm shadow-xs transition-[color,box-shadow] outline-hidden focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/10'
                     data-track-category='SdlcHub'
                     data-track-name='HubProjectPickerOpened'
                   >

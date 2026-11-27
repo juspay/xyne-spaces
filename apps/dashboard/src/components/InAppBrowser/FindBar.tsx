@@ -27,7 +27,7 @@ export function FindBar(props: {
   return (
     <div
       role='search'
-      className='mr-1 flex h-8 w-[300px] max-w-[45%] shrink-0 items-center gap-1 rounded-lg border border-border bg-background pl-2.5 pr-1 shadow-sm'
+      className='mr-1 flex h-8 w-[300px] max-w-[45%] shrink-0 items-center gap-1 rounded-lg border border-border bg-background pl-2.5 pr-1 shadow-xs'
     >
       <Search className='size-3.5 shrink-0 text-muted-foreground' />
       <input
@@ -46,7 +46,7 @@ export function FindBar(props: {
         placeholder='Find in page'
         aria-label='Find in page'
         spellCheck={false}
-        className='h-full min-w-0 flex-1 bg-transparent text-[12.5px] text-foreground outline-none placeholder:text-muted-foreground'
+        className='h-full min-w-0 flex-1 bg-transparent text-[12.5px] text-foreground outline-hidden placeholder:text-muted-foreground'
         data-track-category={props.trackCategory}
         data-track-name='EmbeddedPageFindTyped'
       />

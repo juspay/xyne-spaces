@@ -33,7 +33,7 @@ const UserAvatarItem: React.FC<{ item: MentionResult }> = ({ item }) => {
             {item.name}
           </span>
           {hasValidStatus && !isDeactivated && (
-            <span className='inline-flex flex-shrink-0'>{renderEmoji(status.emoji)}</span>
+            <span className='inline-flex shrink-0'>{renderEmoji(status.emoji)}</span>
           )}
           {statusText && !isDeactivated && (
             <span className='text-sm text-muted-foreground whitespace-nowrap overflow-hidden text-ellipsis'>
@@ -178,7 +178,7 @@ export const MentionSelector: React.FC<MentionSelectorProps> = ({
           {/* Channel mentions (triggered by #) */}
           {triggerChar === '#' && item.type === 'channel' ? (
             <>
-              <div className='w-8 h-8 flex items-center justify-center flex-shrink-0'>
+              <div className='w-8 h-8 flex items-center justify-center shrink-0'>
                 {item.isPrivate ? (
                   <Lock className='h-3.5 w-3.5 text-muted-foreground' />
                 ) : (
@@ -193,7 +193,7 @@ export const MentionSelector: React.FC<MentionSelectorProps> = ({
             </>
           ) : item.isSpecial ? (
             <>
-              <div className='w-8 h-8 flex items-center justify-center bg-orange-50 rounded-full border border-orange-200 flex-shrink-0'>
+              <div className='w-8 h-8 flex items-center justify-center bg-orange-50 rounded-full border border-orange-200 shrink-0'>
                 <span className='text-base leading-none'>
                   {item.type === 'channel' ? '📢' : '👋'}
                 </span>
@@ -210,7 +210,7 @@ export const MentionSelector: React.FC<MentionSelectorProps> = ({
           ) : item.type === 'group' ? (
             <>
               <div
-                className={`w-8 h-8 flex items-center justify-center rounded-full border flex-shrink-0 ${
+                className={`w-8 h-8 flex items-center justify-center rounded-full border shrink-0 ${
                   item.isDeactivated
                     ? 'bg-muted border-muted-foreground/30'
                     : 'bg-green-50 border-green-200'

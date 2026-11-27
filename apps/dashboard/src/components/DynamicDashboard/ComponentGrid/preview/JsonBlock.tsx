@@ -27,7 +27,7 @@ const JsonBlock = ({ value, title, subtitle }: JsonBlockProps): ReactElement => 
   return (
     <div className='flex flex-col h-full min-h-0'>
       <div className='flex items-center justify-between px-3.5 py-2 border-b border-xyne-gray-100 bg-xyne-gray-50/60'>
-        <div className='flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.1em] text-xyne-gray-500'>
+        <div className='flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-widest text-xyne-gray-500'>
           <Braces size={13} />
           {title}
           {subtitle && (
@@ -57,7 +57,7 @@ const JsonBlock = ({ value, title, subtitle }: JsonBlockProps): ReactElement => 
       <pre
         // eslint-disable-next-line react/no-danger
         dangerouslySetInnerHTML={{ __html: html }}
-        className='flex-1 min-h-0 overflow-auto px-4 py-3.5 text-[12.5px] leading-[1.65] font-mono text-xyne-gray-700 whitespace-pre-wrap break-words'
+        className='flex-1 min-h-0 overflow-auto px-4 py-3.5 text-[12.5px] leading-[1.65] font-mono text-xyne-gray-700 whitespace-pre-wrap wrap-break-word'
       />
     </div>
   );

@@ -229,16 +229,16 @@ export function CanvasToolbarAttachedActions({
             <DropdownMenu.Content
               sideOffset={6}
               align='end'
-              className='z-[1000] min-w-44 rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md'
+              className='z-1000 min-w-44 rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-md'
             >
               <DropdownMenu.Item
-                className='cursor-pointer rounded px-2 py-1.5 text-sm outline-none hover:bg-accent focus:bg-accent'
+                className='cursor-pointer rounded px-2 py-1.5 text-sm outline-hidden hover:bg-accent focus:bg-accent'
                 onSelect={handleCreateTicket}
               >
                 Create new ticket
               </DropdownMenu.Item>
               <DropdownMenu.Item
-                className='cursor-pointer rounded px-2 py-1.5 text-sm outline-none hover:bg-accent focus:bg-accent'
+                className='cursor-pointer rounded px-2 py-1.5 text-sm outline-hidden hover:bg-accent focus:bg-accent'
                 onSelect={handleLinkTicket}
               >
                 Link existing ticket

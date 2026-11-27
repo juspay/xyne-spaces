@@ -1,5 +1,5 @@
 import { type ReactElement, useEffect } from 'react';
-import { Image, StyleSheet, Text, View } from 'react-native';
+import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, {
   Easing,
   useAnimatedStyle,
@@ -17,11 +17,14 @@ const clampProgress = (progress: number): number => Math.max(0.08, Math.min(prog
 type ProtectedStartupScreenProps = {
   label: string;
   progress: number;
+  /** A button under the label, e.g. to retry a failed step. */
+  action?: { label: string; onPress: () => void };
 };
 
 export function ProtectedStartupScreen({
   label,
   progress: progressValue,
+  action,
 }: ProtectedStartupScreenProps): ReactElement {
   const backgroundColor = (useCSSVariable('--color-background') as string) || '#171717';
   const foregroundColor = (useCSSVariable('--color-foreground') as string) || '#F8FAFC';
@@ -81,6 +84,15 @@ export function ProtectedStartupScreen({
         <Text numberOfLines={1} style={[styles.label, { color: foregroundColor }]}>
           {label}
         </Text>
+        {action ? (
+          <Pressable
+            accessibilityRole='button'
+            onPress={action.onPress}
+            style={[styles.action, { borderColor }]}
+          >
+            <Text style={[styles.actionLabel, { color: foregroundColor }]}>{action.label}</Text>
+          </Pressable>
+        ) : null}
       </View>
     </View>
   );
@@ -128,5 +140,16 @@ const styles = StyleSheet.create({
     marginTop: 14,
     maxWidth: 280,
     textAlign: 'center',
+  },
+  action: {
+    borderRadius: 999,
+    borderWidth: 1,
+    marginTop: 18,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+  },
+  actionLabel: {
+    fontSize: 14,
+    fontWeight: '600',
   },
 });

@@ -168,7 +168,7 @@ export const ImageNode: React.FC<ImageNodeProps> = ({ node }) => {
       )}
       {xyne_file_id && !isMobile && (
         <div className='absolute top-2 right-2 z-10 opacity-0 group-hover/attachment:opacity-100 transition-opacity duration-200'>
-          <div className='flex items-center gap-0.5 bg-background/90 backdrop-blur-sm rounded-lg p-1 shadow-lg border border-border'>
+          <div className='flex items-center gap-0.5 bg-background/90 backdrop-blur-xs rounded-lg p-1 shadow-lg border border-border'>
             {imageBlobUrl && (
               <button
                 onClick={e => {

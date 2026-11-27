@@ -133,7 +133,7 @@ function CallDetailHeader({
         aria-label={`Back to ${dayLabel}`}
         data-track-category='Calendar'
         data-track-name='CALL_DETAIL_BACK'
-        className='h-7 min-w-0 gap-0.5 rounded-lg !pl-1 text-sm font-semibold text-foreground'
+        className='h-7 min-w-0 gap-0.5 rounded-lg pl-1! text-sm font-semibold text-foreground'
       >
         <ChevronLeft className='size-5' aria-hidden='true' />
         {dayLabel}
@@ -377,7 +377,7 @@ function CallLocationSection({
         Where
       </h2>
 
-      <div className='mt-2 flex flex-col gap-2.5 rounded-xl border border-border bg-card p-3 shadow-sm'>
+      <div className='mt-2 flex flex-col gap-2.5 rounded-xl border border-border bg-card p-3 shadow-xs'>
         <div className='flex items-center gap-2'>
           <span className='flex size-4 shrink-0 items-center justify-center text-muted-foreground'>
             {originIcon}
@@ -392,7 +392,7 @@ function CallLocationSection({
               onClick={handleCopyLink}
               data-track-category='Calendar'
               data-track-name='CALL_DETAIL_COPY_LINK'
-              className='!w-24 h-7 shrink-0 rounded-lg border-border bg-background px-2.5 text-xs font-semibold text-foreground shadow-none hover:bg-muted'
+              className='w-24! h-7 shrink-0 rounded-lg border-border bg-background px-2.5 text-xs font-semibold text-foreground shadow-none hover:bg-muted'
             >
               <span className='relative flex size-3.5 shrink-0 items-center justify-center'>
                 <CopyDefault
@@ -429,7 +429,7 @@ function CallLocationSection({
                 aria-hidden='true'
               />
             )}
-            <span className='min-w-0 flex-1 whitespace-normal break-words text-sm font-medium leading-relaxed text-muted-foreground'>
+            <span className='min-w-0 flex-1 whitespace-normal wrap-break-word text-sm font-medium leading-relaxed text-muted-foreground'>
               {channel.label}
             </span>
           </div>
@@ -477,6 +477,7 @@ const CallDetailSidebarView = ({
   onEditCall,
   onDeleteCall,
 }: CallDetailSidebarViewProps): ReactElement => {
+  const navigate = useNavigate();
   const callDetails = call as CallWithDetails;
 
   const isGoogleCalendar = isGoogleCalendarCall(call);
@@ -690,6 +691,23 @@ const CallDetailSidebarView = ({
           </a>
         )}
 
+        {/* A calendar meeting's own page: shows its Google Meet transcript once Xyne has fetched it. */}
+        {isExternalCalendar && (
+          <Button
+            variant='outline'
+            onClick={() =>
+              void navigate(
+                `/calls/${encodeURIComponent(call.externalId)}/detail${call.transcript ? '?lang=original' : ''}`,
+              )
+            }
+            data-track-category='Calendar'
+            data-track-name='CALL_DETAIL_VIEW_EXTERNAL'
+            className='mt-2 h-8 w-full rounded-lg text-xs font-medium'
+          >
+            View
+          </Button>
+        )}
+
         {/* ── Ended call resources ── */}
         {isEnded && onOpenCallThread && (
           <Button
@@ -718,7 +736,7 @@ const CallDetailSidebarView = ({
 
         {/* ── RSVP ── */}
         {canRsvp && (
-          <section className='mt-4 rounded-xl border border-border bg-card px-3 py-3 shadow-sm'>
+          <section className='mt-4 rounded-xl border border-border bg-card px-3 py-3 shadow-xs'>
             <h2 className='text-sm font-semibold text-card-foreground'>You&apos;re going</h2>
             <div className='mt-2 flex gap-1.5'>
               <RsvpButton

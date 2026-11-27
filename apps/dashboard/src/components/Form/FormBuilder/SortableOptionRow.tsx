@@ -60,7 +60,7 @@ export const SortableOptionRow = ({
           {...listeners}
           disabled={disabled}
           aria-label='Reorder option'
-          className='flex shrink-0 cursor-grab items-center text-muted-foreground outline-none active:cursor-grabbing disabled:cursor-not-allowed disabled:opacity-50 focus-visible:rounded-sm focus-visible:ring-2 focus-visible:ring-ring'
+          className='flex shrink-0 cursor-grab items-center text-muted-foreground outline-hidden active:cursor-grabbing disabled:cursor-not-allowed disabled:opacity-50 focus-visible:rounded-sm focus-visible:ring-2 focus-visible:ring-ring'
         >
           <GripVertical size={14} />
         </button>
@@ -71,7 +71,7 @@ export const SortableOptionRow = ({
           placeholder={placeholder}
           disabled={disabled}
           aria-invalid={error ? true : undefined}
-          className='min-w-0 flex-1 text-[13px] text-foreground bg-transparent border-0 focus:outline-none focus:ring-0 p-0 disabled:cursor-not-allowed disabled:opacity-50'
+          className='min-w-0 flex-1 text-[13px] text-foreground bg-transparent border-0 focus:outline-hidden focus:ring-0 p-0 disabled:cursor-not-allowed disabled:opacity-50'
           data-track-category={trackingCategory}
           data-track-name='edit_option'
         />

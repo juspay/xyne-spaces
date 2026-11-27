@@ -365,7 +365,7 @@ const interiorFor = (fmt: string): ReactNode => {
 export const FileCardPreviewV2: React.FC<FileCardPreviewV2Props> = ({ format, size = 'md' }) => {
   const fmt = format.toLowerCase();
   const banner = BANNER[fmt] ?? 'bg-zinc-500 text-white';
-  const dims = size === 'sm' ? 'w-9 h-[3rem] p-1.5 space-y-2' : 'w-14 h-[4.5rem] p-2 space-y-3';
+  const dims = size === 'sm' ? 'w-9 h-12 p-1.5 space-y-2' : 'w-14 h-18 p-2 space-y-3';
   // Top-right, not bottom-right — bottom-right is reserved for the
   // ingestion status badge (FileFailedBadgeV2 in FileCardV2.tsx), which sits
   // there to match FolderCardV2's CollectionStatusBadgeV2 corner.
@@ -378,7 +378,7 @@ export const FileCardPreviewV2: React.FC<FileCardPreviewV2Props> = ({ format, si
     <div aria-hidden className='relative size-fit'>
       <div
         className={cn(
-          'absolute z-[2] rounded font-medium uppercase tracking-wide',
+          'absolute z-2 rounded font-medium uppercase tracking-wide',
           bannerPos,
           banner,
         )}
@@ -387,7 +387,7 @@ export const FileCardPreviewV2: React.FC<FileCardPreviewV2Props> = ({ format, si
       </div>
       <div
         className={cn(
-          'relative z-[1] overflow-hidden rounded-md bg-white ring-1 ring-gray-200',
+          'relative z-1 overflow-hidden rounded-md bg-white ring-1 ring-gray-200',
           dims,
         )}
       >

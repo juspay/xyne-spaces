@@ -52,12 +52,12 @@ export const WorkspaceChannelEmailCard = (): ReactElement => {
 
         {isLoading ? (
           <div className='flex items-center gap-2 text-sm text-muted-foreground'>
-            <Loader2 size={14} className='animate-spin flex-shrink-0' />
+            <Loader2 size={14} className='animate-spin shrink-0' />
             <span className='text-xs'>Loading...</span>
           </div>
         ) : isConfigured ? (
           <div className='flex items-center gap-2 text-sm text-muted-foreground'>
-            <Mail size={14} className='flex-shrink-0' />
+            <Mail size={14} className='shrink-0' />
             <span className='truncate font-mono text-xs' title={status?.displayName ?? ''}>
               {status?.displayName}
             </span>

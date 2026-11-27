@@ -96,7 +96,7 @@ export function EmojiSelector({
           isSelected ? 'text-accent-foreground' : 'text-foreground'
         }`}
       >
-        <span className='text-lg w-6 text-center flex-shrink-0'>
+        <span className='text-lg w-6 text-center shrink-0'>
           {emoji.isCustom && emoji.customImgUrl ? (
             <img
               src={emoji.customImgUrl}

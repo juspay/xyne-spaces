@@ -1005,7 +1005,7 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
         </h2>
         <button
           type='button'
-          className='rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring/40 focus:ring-offset-2'
+          className='rounded-sm opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-hidden focus:ring-2 focus:ring-ring/40 focus:ring-offset-2'
           onClick={onCancel}
           data-track-category='FORWARD_MESSAGE_MODAL'
           data-track-name='CLOSE_FORWARD_MODAL'
@@ -1257,7 +1257,7 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
                 <div className='flex flex-col gap-2'>
                   {preview.turns.map((turn, index) => (
                     <div key={`${turn.role}-${index}`} className='flex gap-3'>
-                      <div className='flex-shrink-0'>
+                      <div className='shrink-0'>
                         {turn.userId ? (
                           <Avatar userId={turn.userId} size='md' />
                         ) : (
@@ -1298,7 +1298,7 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
               </span>
               <div className='bg-muted rounded-md p-3 border border-border max-h-[200px] overflow-y-auto'>
                 <div className='flex gap-3'>
-                  <div className='flex-shrink-0'>
+                  <div className='shrink-0'>
                     {isCallMessage ? (
                       <div className='w-10 h-10 rounded-md flex items-center justify-center bg-accent'>
                         <PhoneDefault color='hsl(var(--muted-foreground))' size={20} />
@@ -1322,7 +1322,7 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
                         className='flex min-w-0 flex-col gap-1'
                         renderNote={noteHtml => (
                           <div
-                            className={`text-foreground whitespace-pre-wrap break-words ${getEmojiFontSizeClass(noteHtml)}`}
+                            className={`text-foreground whitespace-pre-wrap wrap-break-word ${getEmojiFontSizeClass(noteHtml)}`}
                           >
                             <RenderMessageWithHTML message={noteHtml} />
                           </div>
@@ -1330,7 +1330,7 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
                       />
                     ) : previewContent ? (
                       <div
-                        className={`text-foreground whitespace-pre-wrap break-words ${getEmojiFontSizeClass(previewContent)}`}
+                        className={`text-foreground whitespace-pre-wrap wrap-break-word ${getEmojiFontSizeClass(previewContent)}`}
                       >
                         <RenderMessageWithHTML message={previewContent} />
                       </div>
@@ -1340,7 +1340,7 @@ export const ForwardMessageForm: React.FC<ForwardMessageFormProps> = ({
                       <div className='mt-2'>
                         <div className='flex flex-wrap gap-2'>
                           {message.attachments.map(attachment => (
-                            <div key={attachment.id} className='flex-shrink-0'>
+                            <div key={attachment.id} className='shrink-0'>
                               <MessageAttachment attachment={attachment} compact />
                             </div>
                           ))}

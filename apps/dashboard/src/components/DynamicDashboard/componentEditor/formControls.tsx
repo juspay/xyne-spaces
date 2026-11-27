@@ -29,7 +29,7 @@ export const Select = ({
     disabled={disabled}
     data-track-category='COMPONENT_EDITOR'
     data-track-name={trackName}
-    className={`text-sm px-2 py-1.5 bg-background border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-ring text-foreground disabled:opacity-60 disabled:cursor-not-allowed ${
+    className={`text-sm px-2 py-1.5 bg-background border border-border rounded-md focus:outline-hidden focus:ring-2 focus:ring-ring text-foreground disabled:opacity-60 disabled:cursor-not-allowed ${
       className ?? ''
     }`}
   >

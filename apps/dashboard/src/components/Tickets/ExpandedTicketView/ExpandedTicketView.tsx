@@ -24,7 +24,7 @@ export const ExpandedTicketView = ({
         />
       </Panel>
       <Separator className='w-1 hover:bg-sidebar-divider active:bg-sidebar-divider transition-colors duration-200 cursor-col-resize flex items-center justify-center group'>
-        <div id='panel-resize-divider' className='w-[1px] h-full bg-border'></div>
+        <div id='panel-resize-divider' className='w-px h-full bg-border'></div>
       </Separator>
       <Panel minSize='40%'>
         <ThreadMessages

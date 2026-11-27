@@ -800,7 +800,7 @@ export const ContextPickerPanel = ({
       </div>
 
       {canPickFolder && (
-        <div className='flex-shrink-0 border-t border-border px-3 py-2'>
+        <div className='shrink-0 border-t border-border px-3 py-2'>
           <div className='flex items-center justify-between gap-2'>
             <span className='text-[11px] font-medium uppercase tracking-wide text-muted-foreground'>
               Local folder
@@ -808,7 +808,7 @@ export const ContextPickerPanel = ({
             <button
               type='button'
               onClick={chooseFolder}
-              className='flex h-6 flex-shrink-0 items-center gap-1 rounded-md border border-border px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground'
+              className='flex h-6 shrink-0 items-center gap-1 rounded-md border border-border px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground'
               data-track-category='XyneAI'
               data-track-name='CONTEXT_PICKER_CHOOSE_LOCAL_FOLDER'
             >
@@ -826,14 +826,14 @@ export const ContextPickerPanel = ({
                 {selectedLocalFolder.name}
               </span>
               {selectedLocalFolder.branch && (
-                <span className='flex-shrink-0 text-[11px] text-muted-foreground'>
+                <span className='shrink-0 text-[11px] text-muted-foreground'>
                   {selectedLocalFolder.branch}
                 </span>
               )}
               <button
                 type='button'
                 onClick={() => setSelectedLocalFolder(null)}
-                className='ml-auto flex-shrink-0 rounded px-1 text-[11px] text-muted-foreground hover:bg-secondary hover:text-foreground'
+                className='ml-auto shrink-0 rounded px-1 text-[11px] text-muted-foreground hover:bg-secondary hover:text-foreground'
                 aria-label='Remove local folder'
                 data-track-category='XyneAI'
                 data-track-name='CONTEXT_PICKER_REMOVE_LOCAL_FOLDER'
@@ -865,7 +865,7 @@ export const ContextPickerPanel = ({
       )}
 
       {/* Confirm footer */}
-      <div className='flex-shrink-0 border-t border-border px-4 py-2 flex items-center justify-between bg-muted/50 rounded-b-2xl'>
+      <div className='shrink-0 border-t border-border px-4 py-2 flex items-center justify-between bg-muted/50 rounded-b-2xl'>
         <span className='text-xs text-muted-foreground'>
           {totalSelected > 0
             ? `${totalSelected} item${totalSelected === 1 ? '' : 's'} selected`
@@ -883,7 +883,7 @@ export const ContextPickerPanel = ({
           <button
             onClick={handleConfirm}
             disabled={totalSelected === 0}
-            className='px-3 py-1.5 text-xs font-medium bg-action-primary text-action-primary-foreground rounded-lg hover:bg-action-primary/90 disabled:opacity-50 disabled:cursor-not-allowed transition-colors'
+            className='px-3 py-1.5 text-xs font-medium bg-action-primary text-action-primary-foreground rounded-lg disabled:opacity-50 disabled:cursor-not-allowed transition-colors'
             data-track-category='XyneAI'
             data-track-name='CONTEXT_PICKER_CONFIRM'
             data-track-metadata={JSON.stringify({ itemCount: totalSelected })}

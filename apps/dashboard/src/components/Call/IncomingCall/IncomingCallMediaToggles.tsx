@@ -16,8 +16,8 @@ interface IncomingCallMediaTogglesProps extends Omit<IncomingCallMediaState, 'pr
 
 const TOGGLE =
   'flex h-10 w-10 cursor-pointer items-center justify-center rounded-full border-none p-0 ' +
-  'transition-colors duration-[120ms] ease-out ' +
-  'ring-1 ring-border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring';
+  'transition-colors duration-120 ease-out ' +
+  'ring-1 ring-border focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring';
 
 const ON = 'bg-muted text-foreground hover:bg-accent';
 const OFF = 'bg-transparent text-muted-foreground hover:bg-muted';

@@ -42,7 +42,7 @@ export const SearchFieldV2: React.FC<SearchFieldV2Props> = ({
         }}
         placeholder={placeholder}
         aria-label={ariaLabel ?? placeholder}
-        className='h-8 w-full rounded-full border border-border bg-secondary pl-7 pr-7 text-[12.5px] text-foreground placeholder:text-muted-foreground focus:border-ring focus:bg-background focus:outline-none [&::-webkit-search-cancel-button]:hidden [&::-webkit-search-decoration]:hidden'
+        className='h-8 w-full rounded-full border border-border bg-secondary pl-7 pr-7 text-[12.5px] text-foreground placeholder:text-muted-foreground focus:border-ring focus:bg-background focus:outline-hidden [&::-webkit-search-cancel-button]:hidden [&::-webkit-search-decoration]:hidden'
         data-track-category='knowledge-base'
         data-track-name='search-files'
       />

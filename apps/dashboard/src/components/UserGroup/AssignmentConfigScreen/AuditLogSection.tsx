@@ -138,7 +138,7 @@ const AuditValueText = ({
       sideOffset={6}
       openDelay={150}
       closeDelay={100}
-      className='z-[60] w-80 rounded-lg p-3'
+      className='z-60 w-80 rounded-lg p-3'
     >
       <span className='block max-h-48 overflow-y-auto break-all font-mono text-[11px] leading-relaxed text-popover-foreground'>
         {value}

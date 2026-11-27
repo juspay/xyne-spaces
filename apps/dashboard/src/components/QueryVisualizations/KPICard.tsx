@@ -55,15 +55,15 @@ export const KPICard: React.FC<KPICardProps> = ({
   return (
     <div
       className={cn(
-        'rounded-xl border border-border/40 bg-gradient-to-br from-background to-background/95 overflow-hidden',
+        'rounded-xl border border-border/40 bg-linear-to-br from-background to-background/95 overflow-hidden',
         'shadow-lg hover:shadow-xl transition-all duration-300 hover:scale-105',
-        'backdrop-blur-sm',
+        'backdrop-blur-xs',
         className,
       )}
     >
       <div className='flex items-stretch'>
         {/* Accent bar - gradient */}
-        <div className={cn('w-1.5 shrink-0 bg-gradient-to-b', accent.bg)} />
+        <div className={cn('w-1.5 shrink-0 bg-linear-to-b', accent.bg)} />
 
         <div className='flex-1 px-5 py-4'>
           {/* Title row */}
@@ -73,7 +73,7 @@ export const KPICard: React.FC<KPICardProps> = ({
 
           {/* Value row */}
           <div className='flex items-baseline gap-2 flex-wrap'>
-            <span className='text-3xl font-black bg-gradient-to-r from-foreground to-foreground/80 bg-clip-text text-transparent tracking-tight'>
+            <span className='text-3xl font-black bg-linear-to-r from-foreground to-foreground/80 bg-clip-text text-transparent tracking-tight'>
               {value}
             </span>
             {unit && <span className='text-xs font-semibold text-muted-foreground'>{unit}</span>}

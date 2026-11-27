@@ -9,14 +9,14 @@ import { cn } from '../../utils/classNames';
 export const CARD_CHROME =
   'border border-border bg-background shadow-[0px_3px_6px_0px_rgba(0,0,0,0.04)]';
 const BRIEF_BODY = 'w-[380px] px-5 pb-6 pt-5';
-const LABEL = 'w-[80px] shrink-0 text-[8px] font-semibold leading-[1.5] text-foreground';
-const BODY = 'text-[8px] leading-[1.5] text-muted-foreground';
+const LABEL = 'w-[80px] shrink-0 text-[8px] font-semibold leading-normal text-foreground';
+const BODY = 'text-[8px] leading-normal text-muted-foreground';
 
 const Em = ({ children }: { children: ReactNode }): ReactElement => (
   <b className='font-semibold text-foreground'>{children}</b>
 );
 const Mention = ({ children }: { children: ReactNode }): ReactElement => (
-  <span className='text-[color:var(--mention-color)]'>{children}</span>
+  <span className='text-(--mention-color)'>{children}</span>
 );
 
 interface MiniSectionSpec {
@@ -116,7 +116,7 @@ export function MiniBriefCard({ regenerated = false }: { regenerated?: boolean }
         <div className='flex w-full items-start gap-2'>
           <p className={LABEL}>Today&apos;s schedule</p>
           <div className='min-w-0 flex-1 border-l-2 border-xyne-orange-500 pl-2'>
-            <p className='text-[8px] font-semibold leading-[1.5] text-foreground'>
+            <p className='text-[8px] font-semibold leading-normal text-foreground'>
               Auth flow design review, 10:00 AM
             </p>
           </div>

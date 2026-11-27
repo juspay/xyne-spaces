@@ -42,12 +42,12 @@ export const SectionEmojiPicker = ({
         aria-label='Section emoji'
         data-track-category='CHAT_SIDEBAR'
         data-track-name={trackName}
-        className='flex w-7 items-center justify-center rounded text-base text-muted-foreground outline-none hover:text-foreground'
+        className='flex w-7 items-center justify-center rounded text-base text-muted-foreground outline-hidden hover:text-foreground'
       >
         {value ? renderEmoji(value) : <Smile className='size-4' />}
       </button>
       {open && (
-        <div className='absolute left-0 top-full z-[60] mt-1 overflow-hidden rounded-lg shadow-lg'>
+        <div className='absolute left-0 top-full z-60 mt-1 overflow-hidden rounded-lg shadow-lg'>
           <EmojiPicker
             emojiStyle={EmojiStyle.NATIVE}
             theme={pickerTheme}

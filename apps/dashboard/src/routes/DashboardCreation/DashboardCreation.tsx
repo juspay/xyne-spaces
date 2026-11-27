@@ -53,7 +53,7 @@ export const DashboardCreation: React.FC = () => {
   const dashboardList = dashboards || [];
 
   return (
-    <div className='flex h-full bg-background md:rounded-2xl shadow-sm overflow-hidden'>
+    <div className='flex h-full bg-background md:rounded-2xl shadow-xs overflow-hidden'>
       {/* Left Panel - Create Dashboard Form */}
       <div className='w-80 border-r border-border bg-muted flex flex-col'>
         <div className='p-4 border-b border-border'>
@@ -119,7 +119,7 @@ export const DashboardCreation: React.FC = () => {
           </div>
         ) : (
           <div className='space-y-4'>
-            <h3 className='text-md font-medium text-foreground mb-3 flex items-center gap-2'>
+            <h3 className='text-md font-medium text-foreground flex items-center gap-2'>
               <span className='w-2 h-2 bg-blue-500 rounded-full' />
               All Dashboards
               <span className='text-sm text-muted-foreground font-normal'>

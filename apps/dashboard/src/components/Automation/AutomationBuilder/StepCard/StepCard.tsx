@@ -28,6 +28,7 @@ import { ReplyOnMessageStepForm } from './ReplyOnMessageStepForm';
 import { NotifyStepForm } from './NotifyStepForm';
 import { ApplyConversationLabelStepForm } from './ApplyConversationLabelStepForm';
 import { DelayStepForm } from './DelayStepForm';
+import { ChangeStageStepForm } from './ChangeStageStepForm';
 import type { StepCardProps } from './StepCard.types';
 
 export function StepCard({
@@ -67,7 +68,7 @@ export function StepCard({
           data-track-name='step-card-toggle-collapse'
           className={cn(
             'flex flex-1 items-start gap-3 rounded-md text-left',
-            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/40',
+            'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-foreground/40',
           )}
           onClick={() => setCollapsed(prev => !prev)}
         >
@@ -101,7 +102,7 @@ export function StepCard({
             data-track-name='step-card-move-up'
             className={cn(
               'flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/40',
+              'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-foreground/40',
               index === 1
                 ? 'opacity-40 cursor-not-allowed'
                 : 'hover:text-foreground hover:bg-accent/40',
@@ -118,7 +119,7 @@ export function StepCard({
             data-track-name='step-card-move-down'
             className={cn(
               'flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground',
-              'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/40',
+              'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-foreground/40',
               index === total
                 ? 'opacity-40 cursor-not-allowed'
                 : 'hover:text-foreground hover:bg-accent/40',
@@ -142,7 +143,7 @@ export function StepCard({
                 className={cn(
                   'flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground',
                   'hover:text-foreground hover:bg-accent/40',
-                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/40',
+                  'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-foreground/40',
                 )}
               >
                 <MoreVertical className='size-4' aria-hidden='true' />
@@ -264,6 +265,15 @@ export function StepCard({
                   pathPrefix={pathPrefix}
                   variableSources={variableSources}
                 />
+              ) : step.type === 'CHANGE_STAGE' ? (
+                <ChangeStageStepForm
+                  schema={schema.configSchema}
+                  value={step.config}
+                  onChange={onConfigChange}
+                  issues={issues ?? null}
+                  pathPrefix={pathPrefix}
+                  variableSources={variableSources}
+                />
               ) : step.type === 'DELAY' || step.type === 'IS_OUTSIDE_BUSINESS_HOURS' ? (
                 <DelayStepForm
                   schema={schema.configSchema}
@@ -353,7 +363,7 @@ function PeekColumn({
               className='flex items-center justify-between gap-2 text-[11px] text-foreground'
             >
               <span className='truncate font-mono'>{l.path}</span>
-              <span className='flex-shrink-0 rounded border border-border px-1 py-0 text-[10px] font-mono text-muted-foreground'>
+              <span className='shrink-0 rounded border border-border px-1 py-0 text-[10px] font-mono text-muted-foreground'>
                 {l.type}
               </span>
             </li>

@@ -181,7 +181,7 @@ const ChatListItemComponent = ({
         <div
           ref={cardRef}
           onClick={openDiscussion}
-          className='group/card relative cursor-pointer overflow-hidden rounded-xl border border-border/70 bg-card/40 pb-3 pt-1 transition-colors duration-200 ease-out hover:border-border hover:bg-card/70 [&_[data-hovered]]:!bg-transparent [&_.jp-message-html_p:first-child>strong:first-child]:text-[15px] [&_.jp-message-html_p:first-child>strong:first-child]:leading-snug [&_.message-html-root>p:first-child:has(>strong:first-child)+p]:mt-0.5'
+          className='group/card relative cursor-pointer overflow-hidden rounded-xl border border-border/70 bg-card/40 pb-3 pt-1 transition-colors duration-200 ease-out hover:border-border hover:bg-card/70 **:data-hovered:bg-transparent! [&_.jp-message-html_p:first-child>strong:first-child]:text-[15px] [&_.jp-message-html_p:first-child>strong:first-child]:leading-snug [&_.message-html-root>p:first-child:has(>strong:first-child)+p]:mt-0.5'
           data-track-category='SdlcHub'
           data-track-name='DiscussionCardOpened'
         >
@@ -189,7 +189,7 @@ const ChatListItemComponent = ({
           {/* The footer: the replies line when there are replies; else a line of its
               own that starts the conversation, so the actions never cover the message. */}
           {conversation.replyCount === 0 && (
-            <div className='flex h-8 items-center pl-[3.25rem]'>
+            <div className='flex h-8 items-center pl-13'>
               <button
                 type='button'
                 onClick={event => handleOpenThread(conversation.conversationId, event)}
@@ -201,7 +201,7 @@ const ChatListItemComponent = ({
               </button>
             </div>
           )}
-          <div className='absolute bottom-3.5 right-2.5 opacity-0 transition-opacity duration-150 focus-within:opacity-100 group-hover/card:opacity-100 has-[[data-state=open]]:opacity-100'>
+          <div className='absolute bottom-3.5 right-2.5 opacity-0 transition-opacity duration-150 focus-within:opacity-100 group-hover/card:opacity-100 has-data-[state=open]:opacity-100'>
             <DiscussionCardActions card={cardRef} />
           </div>
         </div>

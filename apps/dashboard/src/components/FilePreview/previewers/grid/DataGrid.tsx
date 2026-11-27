@@ -148,10 +148,9 @@ export function DataGrid(props: {
             NUMERIC.test(value) && 'text-right tabular-nums',
             // The find's colours; the current one is bright in both themes, so its
             // text goes dark.
-            isMatch && 'bg-[color:var(--search-result-highlight-bg)]',
-            isCurrentMatch && 'bg-[color:var(--search-result-active-bg)] text-neutral-900',
-            isSelected &&
-              'z-[1] outline outline-2 -outline-offset-2 outline-[color:var(--link-color)]',
+            isMatch && 'bg-(--search-result-highlight-bg)',
+            isCurrentMatch && 'bg-(--search-result-active-bg) text-neutral-900',
+            isSelected && 'z-1 outline-solid outline-2 -outline-offset-2 outline-(--link-color)',
           )}
           style={{ left: gutter + column.start, width: column.size }}
           title={value.length > 24 ? value : undefined}
@@ -164,7 +163,7 @@ export function DataGrid(props: {
   const rowNumber = (rowIndex: number): ReactElement => (
     <div
       className={cn(
-        'sticky left-0 z-[2] h-full shrink-0 border-b border-r border-border bg-muted/60 pr-2 text-right text-[11px] leading-[28px] tabular-nums text-muted-foreground backdrop-blur',
+        'sticky left-0 z-2 h-full shrink-0 border-b border-r border-border bg-muted/60 pr-2 text-right text-[11px] leading-[28px] tabular-nums text-muted-foreground backdrop-blur-sm',
         selected?.row === rowIndex && 'bg-muted font-medium text-foreground',
       )}
       style={{ width: gutter }}
@@ -199,10 +198,10 @@ export function DataGrid(props: {
       >
         <div className='relative' style={{ width, height: top + rowVirtualizer.getTotalSize() }}>
           {/* Column letters, and the first row under them, held at the top. */}
-          <div className='sticky top-0 z-[3] bg-background' style={{ width, height: top }}>
+          <div className='sticky top-0 z-3 bg-background' style={{ width, height: top }}>
             <div className='relative flex' style={{ height: HEADER_HEIGHT }}>
               <div
-                className='sticky left-0 z-[2] shrink-0 border-b border-r border-border bg-muted'
+                className='sticky left-0 z-2 shrink-0 border-b border-r border-border bg-muted'
                 style={{ width: gutter }}
               />
               {columns.map(column => (

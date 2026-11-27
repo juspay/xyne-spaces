@@ -29,7 +29,7 @@ export function IncomingCallContextLine({
   const Icon = ICONS[context.icon];
 
   return (
-    <div className='mx-auto max-w-[320px] text-center text-xs font-medium leading-[1.55] text-muted-foreground [text-wrap:pretty]'>
+    <div className='mx-auto max-w-[320px] text-center text-xs font-medium leading-[1.55] text-muted-foreground text-pretty'>
       <Icon className='mr-1.5 inline-block h-3.5 w-3.5 align-[-2.5px]' />
       {context.text}
     </div>

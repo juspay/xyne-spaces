@@ -338,7 +338,7 @@ const WhatsAppMigrationPanel = (): ReactElement => {
 
   return (
     <div className='space-y-6'>
-      <section className='overflow-hidden rounded-3xl border border-border/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(248,250,252,0.96))] shadow-sm'>
+      <section className='overflow-hidden rounded-3xl border border-border/70 bg-[linear-gradient(180deg,rgba(255,255,255,0.98),rgba(248,250,252,0.96))] shadow-xs'>
         <div className='border-b border-border/70 bg-background/90 px-5 py-4'>
           <div className='flex flex-wrap gap-2'>
             <button
@@ -348,7 +348,7 @@ const WhatsAppMigrationPanel = (): ReactElement => {
               data-track-name='open-import-tab'
               className={`rounded-full px-4 py-2 text-sm font-medium transition ${
                 activeTab === 'import'
-                  ? 'bg-emerald-600 text-white shadow-sm'
+                  ? 'bg-emerald-600 text-white shadow-xs'
                   : 'border border-border/70 bg-background text-muted-foreground hover:text-foreground'
               }`}
             >
@@ -361,7 +361,7 @@ const WhatsAppMigrationPanel = (): ReactElement => {
               data-track-name='open-delete-tab'
               className={`rounded-full px-4 py-2 text-sm font-medium transition ${
                 activeTab === 'delete'
-                  ? 'bg-rose-600 text-white shadow-sm'
+                  ? 'bg-rose-600 text-white shadow-xs'
                   : 'border border-border/70 bg-background text-muted-foreground hover:text-foreground'
               }`}
             >
@@ -380,7 +380,7 @@ const WhatsAppMigrationPanel = (): ReactElement => {
               </p>
             </div>
             <div className='p-5 space-y-5'>
-              <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm'>
+              <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-xs'>
                 <label
                   htmlFor='whatsapp-zip-input'
                   className='mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'
@@ -404,7 +404,7 @@ const WhatsAppMigrationPanel = (): ReactElement => {
               </div>
 
               <div className='grid grid-cols-1 gap-4'>
-                <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm'>
+                <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-xs'>
                   <p className='mb-2 block text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'>
                     Target Channel
                   </p>
@@ -439,7 +439,7 @@ const WhatsAppMigrationPanel = (): ReactElement => {
                 </div>
               </div>
 
-              <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm'>
+              <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-xs'>
                 <label
                   htmlFor='whatsapp-mappings-input'
                   className='mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'
@@ -461,7 +461,7 @@ const WhatsAppMigrationPanel = (): ReactElement => {
                 </p>
               </div>
 
-              <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm'>
+              <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-xs'>
                 <label
                   htmlFor='whatsapp-mapping-csv-input'
                   className='mb-2 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'
@@ -516,7 +516,7 @@ const WhatsAppMigrationPanel = (): ReactElement => {
             </div>
             <div className='p-5 space-y-5'>
               <div className='grid grid-cols-1 gap-4'>
-                <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm'>
+                <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-xs'>
                   <p className='mb-2 block text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'>
                     Target Channel
                   </p>
@@ -552,7 +552,7 @@ const WhatsAppMigrationPanel = (): ReactElement => {
                 </div>
               </div>
 
-              <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm'>
+              <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-xs'>
                 <p className='mb-2 block text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground'>
                   Imported Sources In Channel
                 </p>
@@ -610,7 +610,7 @@ const WhatsAppMigrationPanel = (): ReactElement => {
                 )}
               </div>
 
-              <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-sm space-y-4'>
+              <div className='rounded-2xl border border-border/70 bg-card/80 p-4 shadow-xs space-y-4'>
                 <p className='text-sm text-muted-foreground'>
                   This deletes only the messages imported by the selected WhatsApp source.
                 </p>
@@ -641,7 +641,7 @@ const WhatsAppMigrationPanel = (): ReactElement => {
       </section>
 
       {activeTab === 'import' && preview ? (
-        <section className='rounded-3xl border border-border/70 bg-card/70 p-5 shadow-sm space-y-4'>
+        <section className='rounded-3xl border border-border/70 bg-card/70 p-5 shadow-xs space-y-4'>
           <div className='grid grid-cols-2 gap-3 md:grid-cols-4'>
             <div className='rounded-2xl border border-border/70 bg-background/70 p-3'>
               <div className='text-[11px] uppercase text-muted-foreground'>Chat</div>
@@ -695,14 +695,14 @@ const WhatsAppMigrationPanel = (): ReactElement => {
           {preview.missingMediaRefs.length ? (
             <div className='rounded-2xl border border-amber-200 bg-amber-50/80 p-4 text-sm text-amber-900'>
               <div className='font-semibold'>Missing Media References</div>
-              <div className='mt-2 break-words'>{preview.missingMediaRefs.join(', ')}</div>
+              <div className='mt-2 wrap-break-word'>{preview.missingMediaRefs.join(', ')}</div>
             </div>
           ) : null}
         </section>
       ) : null}
 
       {activeTab === 'delete' && purgePreview ? (
-        <section className='rounded-3xl border border-border/70 bg-card/70 p-5 shadow-sm space-y-4'>
+        <section className='rounded-3xl border border-border/70 bg-card/70 p-5 shadow-xs space-y-4'>
           <div className='grid grid-cols-2 gap-3 md:grid-cols-4'>
             <div className='rounded-2xl border border-border/70 bg-background/70 p-3'>
               <div className='text-[11px] uppercase text-muted-foreground'>Imported Messages</div>
@@ -757,7 +757,7 @@ const WhatsAppMigrationPanel = (): ReactElement => {
       ) : null}
 
       {activeTab === 'import' && jobProgress ? (
-        <section className='rounded-3xl border border-border/70 bg-card/70 p-5 shadow-sm space-y-4'>
+        <section className='rounded-3xl border border-border/70 bg-card/70 p-5 shadow-xs space-y-4'>
           <div className='flex items-center justify-between gap-4'>
             <div>
               <h3 className='text-sm font-semibold text-foreground'>Import Progress</h3>

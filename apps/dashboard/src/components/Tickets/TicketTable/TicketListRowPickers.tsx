@@ -185,7 +185,7 @@ export function LabelPicker({
             data-track-category='Tickets'
             data-track-name='ToggleRowLabel'
           >
-            <span className='h-1.5 w-1.5 flex-shrink-0 rounded-full bg-xyne-purple-400' />
+            <span className='h-1.5 w-1.5 shrink-0 rounded-full bg-xyne-purple-400' />
             <span className='flex-1 truncate text-foreground'>{name}</span>
             {currentNames.has(name) && <Check className='h-3 w-3 text-muted-foreground' />}
           </button>

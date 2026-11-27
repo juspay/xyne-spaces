@@ -140,7 +140,13 @@ const XyneCalendarSidebarComponent = (): ReactElement => {
   useEffect(() => {
     return () => {
       if (isMaxedRef.current && preMaxWidthRef.current !== null) {
-        globalXyneCalendarPanelRef.current?.resize(`${preMaxWidthRef.current}%`);
+        // The panel group may already be unmounted (leaving the calendar), and
+        // react-resizable-panels then throws "Group … not found": nothing left to restore.
+        try {
+          globalXyneCalendarPanelRef.current?.resize(`${preMaxWidthRef.current}%`);
+        } catch {
+          // Panel group already gone.
+        }
       }
     };
   }, []);
@@ -351,7 +357,7 @@ const XyneCalendarSidebarHeader = memo(
           </Button>
         </div>
 
-        <div className='relative z-10 flex h-14 items-center gap-1.5 border-b border-border px-3 shadow-sm '>
+        <div className='relative z-10 flex h-14 items-center gap-1.5 border-b border-border px-3 shadow-xs '>
           <Button
             variant='outline'
             size='iconSm'
@@ -942,7 +948,7 @@ const XyneCalendarDayView = memo(
                   aria-label={`Current time ${format(now, 'h:mm a')}`}
                 >
                   {shouldShowCurrentTimeLabel(now) && (
-                    <span className='absolute right-full mr-3 inline-flex whitespace-nowrap rounded-md bg-primary px-1 py-0.5 font-mono text-xs font-semibold leading-none text-primary-foreground shadow-sm'>
+                    <span className='absolute right-full mr-3 inline-flex whitespace-nowrap rounded-md bg-primary px-1 py-0.5 font-mono text-xs font-semibold leading-none text-primary-foreground shadow-xs'>
                       {format(now, 'h:mm a')}
                     </span>
                   )}
@@ -981,7 +987,7 @@ const XyneCalendarDayView = memo(
                   className={
                     dragCreatePreview
                       ? 'pointer-events-none absolute left-1 right-1 overflow-hidden rounded-lg border border-primary/70 bg-primary px-3 py-1 text-primary-foreground shadow-[0_8px_24px_-8px_hsl(var(--destructive)/0.65)]'
-                      : 'pointer-events-none absolute left-1 right-1 flex items-center rounded-lg border border-primary/60 bg-background px-3 text-primary shadow-sm'
+                      : 'pointer-events-none absolute left-1 right-1 flex items-center rounded-lg border border-primary/60 bg-background px-3 text-primary shadow-xs'
                   }
                   style={{
                     top:

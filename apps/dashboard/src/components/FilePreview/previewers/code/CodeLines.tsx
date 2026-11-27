@@ -151,7 +151,7 @@ export function CodeLines(props: {
             <span
               className={cn(
                 'min-w-0 flex-1 pr-6 font-code text-foreground',
-                props.wrap ? 'whitespace-pre-wrap break-words' : 'whitespace-pre',
+                props.wrap ? 'whitespace-pre-wrap wrap-break-word' : 'whitespace-pre',
               )}
               style={{ minHeight: lineHeight }}
               // highlightLines escapes the text; the markup is highlight.js's own spans

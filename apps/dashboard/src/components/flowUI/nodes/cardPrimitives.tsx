@@ -74,8 +74,7 @@ export const StatusChip: React.FC<{ label: string; tone?: StatusChipTone }> = ({
         'rounded px-1 py-px text-xs font-medium leading-[18px] tracking-[0.2px]',
         tone === 'muted' && 'bg-muted text-muted-foreground',
         tone === 'rejected' && 'bg-destructive/10 text-destructive',
-        tone === 'approved' &&
-          'bg-[var(--plan-chip-approved-bg)] text-[var(--plan-chip-approved-fg)]',
+        tone === 'approved' && 'bg-(--plan-chip-approved-bg) text-(--plan-chip-approved-fg)',
       )}
     >
       {label}
@@ -105,7 +104,7 @@ export const TitleBlock: React.FC<{ title: string; desc?: string | undefined }> 
 }) => (
   <div className='flex flex-col'>
     <p className='text-lg font-medium leading-[1.2] text-foreground'>{title}</p>
-    {desc && <p className='text-sm leading-[1.5] tracking-[-0.15px] text-foreground/80'>{desc}</p>}
+    {desc && <p className='text-sm leading-normal tracking-[-0.15px] text-foreground/80'>{desc}</p>}
   </div>
 );
 

@@ -1792,7 +1792,7 @@ export const FeatureDemo = ({ visualKey, currentStep, title }: FeatureDemoProps)
   const { el, cx, cy } = scenes[idx]!;
 
   return (
-    <div className='rounded-xl border border-border bg-background overflow-hidden shadow-sm'>
+    <div className='rounded-xl border border-border bg-background overflow-hidden shadow-xs'>
       {/* Browser chrome */}
       <div className='h-7 bg-muted/60 border-b border-border flex items-center px-2.5 gap-1.5 shrink-0'>
         <span className='h-2 w-2 rounded-full bg-destructive/60' />

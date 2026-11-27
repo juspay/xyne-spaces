@@ -155,14 +155,14 @@ function WikiFolderNode(props: {
         <button
           type='button'
           onClick={() => props.onToggle(props.node.path)}
-          className='flex h-8 w-full items-center gap-1.5 rounded-lg pr-2 text-left text-[13px] font-medium text-sidebar-foreground transition-colors hover:bg-sidebar-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-sidebar-accent-ring'
+          className='flex h-8 w-full items-center gap-1.5 rounded-lg pr-2 text-left text-[13px] font-medium text-sidebar-foreground transition-colors hover:bg-sidebar-accent focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-sidebar-accent-ring'
           style={{ paddingLeft: `${folderIndent}px` }}
           aria-expanded={open}
           data-track-category='SdlcHub'
           data-track-name='WikiFolderToggled'
           data-track-metadata={JSON.stringify({ path: props.node.path, open: !open })}
         >
-          <Chevron size={13} className='shrink-0 text-sidebar-foreground/60' />
+          <Chevron size={13} className='shrink-0' />
           <span className='min-w-0 flex-1 truncate' title={props.node.name}>
             {props.node.name}
           </span>
@@ -195,7 +195,7 @@ function WikiFolderNode(props: {
                   type='button'
                   onClick={() => props.onOpen(page)}
                   {...(active && { 'aria-current': 'page' as const })}
-                  className='flex h-full min-w-0 flex-1 items-center gap-1.5 rounded-lg text-left text-[13px] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-sidebar-accent-ring'
+                  className='flex h-full min-w-0 flex-1 items-center gap-1.5 rounded-lg text-left text-[13px] focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-sidebar-accent-ring'
                   style={{ paddingLeft: `${pageIndent}px` }}
                   data-track-category='SdlcHub'
                   data-track-name='WikiCanvasOpened'
@@ -207,11 +207,7 @@ function WikiFolderNode(props: {
                   >
                     {page.title}
                   </span>
-                  {page.archived && (
-                    <span className='shrink-0 text-[11px] text-sidebar-foreground/70'>
-                      Archived
-                    </span>
-                  )}
+                  {page.archived && <span className='shrink-0 text-[11px]'>Archived</span>}
                 </button>
                 {props.onArchivePage && (
                   <SdlcArchiveMenu
@@ -339,13 +335,13 @@ export function SdlcWikiExplorer(props: {
       <div className={cn('relative', props.pages.length === 0 && 'hidden')}>
         <Search
           size={14}
-          className='pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-sidebar-foreground/60'
+          className='pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2'
         />
         <input
           value={query}
           onChange={event => setQuery(event.target.value)}
           placeholder='Search pages'
-          className='h-8 w-full rounded-lg border border-transparent bg-sidebar-accent pl-8 pr-2 text-[13px] outline-none placeholder:text-sidebar-foreground/60 focus:border-sidebar-border focus-visible:ring-1 focus-visible:ring-sidebar-accent-ring'
+          className='h-8 w-full rounded-lg border border-transparent bg-sidebar-accent pl-8 pr-2 text-[13px] outline-hidden focus:border-sidebar-border focus-visible:ring-1 focus-visible:ring-sidebar-accent-ring'
           aria-label='Search research pages'
           data-track-category='SdlcHub'
           data-track-name='WikiSearched'
@@ -356,7 +352,7 @@ export function SdlcWikiExplorer(props: {
         className='no-scrollbar mt-1 min-h-0 flex-1 overflow-y-auto pb-2'
       >
         {visiblePages.length === 0 ? (
-          <p className='px-2 py-3 text-[13px] text-sidebar-foreground/70'>
+          <p className='px-2 py-3 text-[13px]'>
             {props.pages.length === 0 ? 'No pages yet' : 'No matching pages'}
           </p>
         ) : (
@@ -377,7 +373,7 @@ export function SdlcWikiExplorer(props: {
           <button
             type='button'
             onClick={props.onCreatePage}
-            className='flex h-8 items-center gap-2 rounded-lg px-1.5 text-left text-[13px] font-medium text-sidebar-foreground transition-colors hover:bg-sidebar-accent focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-sidebar-accent-ring'
+            className='flex h-8 items-center gap-2 rounded-lg px-1.5 text-left text-[13px] font-medium text-sidebar-foreground transition-colors hover:bg-sidebar-accent focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-sidebar-accent-ring'
             data-track-category='SdlcHub'
             data-track-name='WikiPageCreateOpened'
           >
@@ -387,7 +383,7 @@ export function SdlcWikiExplorer(props: {
         )}
         <div className='px-1.5'>
           <Checkbox
-            labelClassName='text-xs text-sidebar-foreground/80'
+            labelClassName='text-xs'
             label='Show archived'
             checked={props.showArchived}
             onChange={props.onShowArchivedChange}
@@ -418,7 +414,7 @@ function RecentList(props: {
             key={page.canvasId}
             type='button'
             onClick={() => props.onOpenPage(page)}
-            className='flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring'
+            className='flex w-full items-center gap-3 px-4 py-2.5 text-left transition-colors hover:bg-muted/40 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring'
             data-track-category='SdlcHub'
             data-track-name={props.trackName}
             data-track-metadata={JSON.stringify({ canvasId: page.canvasId })}
@@ -496,7 +492,7 @@ export function SdlcWikiHome(props: {
           value={query}
           onChange={event => setQuery(event.target.value)}
           placeholder='Search repositories'
-          className='h-10 w-full rounded-lg border bg-background pl-9 pr-3 text-sm outline-none placeholder:text-muted-foreground focus:ring-2 focus:ring-ring'
+          className='h-10 w-full rounded-lg border bg-background pl-9 pr-3 text-sm outline-hidden placeholder:text-muted-foreground focus:ring-2 focus:ring-ring'
           aria-label='Search repositories'
           data-track-category='SdlcHub'
           data-track-name='WikiRepositorySearched'
@@ -512,7 +508,7 @@ export function SdlcWikiHome(props: {
           <button
             type='button'
             onClick={props.onAddRepository}
-            className='group flex min-h-36 flex-col rounded-xl border border-dashed p-5 text-left transition-colors hover:border-primary/40 hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+            className='group flex min-h-36 flex-col rounded-xl border border-dashed p-5 text-left transition-colors hover:border-primary/40 hover:bg-primary/5 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring'
             data-track-category='SdlcHub'
             data-track-name='WikiRepositoryAddOpened'
           >
@@ -533,7 +529,7 @@ export function SdlcWikiHome(props: {
               key={scope.folderId}
               type='button'
               onClick={() => props.onSelectScope(scope.folderId)}
-              className='group flex min-h-36 flex-col rounded-xl border bg-background p-5 text-left transition-[border-color,box-shadow] hover:border-primary/35 hover:shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+              className='group flex min-h-36 flex-col rounded-xl border bg-background p-5 text-left transition-[border-color,box-shadow] hover:border-primary/35 hover:shadow-xs focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring'
               data-track-category='SdlcHub'
               data-track-name='WikiScopeSelected'
               data-track-metadata={JSON.stringify({ hub: scope.hub })}

@@ -45,10 +45,10 @@ export const YouTubeThumbnail: React.FC<YouTubeThumbnailProps> = ({
       role='article'
       aria-label='YouTube video'
     >
-      <div className='absolute top-0 right-0 z-10 flex items-center gap-1 bg-card/80 backdrop-blur-sm rounded-full p-0.5'>
+      <div className='absolute top-0 right-0 z-10 flex items-center gap-1 bg-card/80 backdrop-blur-xs rounded-full p-0.5'>
         <button
           type='button'
-          className='p-1 text-muted-foreground hover:text-foreground focus:outline-none focus:ring-0'
+          className='p-1 text-muted-foreground hover:text-foreground focus:outline-hidden focus:ring-0'
           onClick={handleCopy}
           aria-label='Copy link'
           title='Copy link'
@@ -61,7 +61,7 @@ export const YouTubeThumbnail: React.FC<YouTubeThumbnailProps> = ({
         {onClose && (
           <button
             type='button'
-            className='p-1 text-muted-foreground hover:text-foreground focus:outline-none focus:ring-0'
+            className='p-1 text-muted-foreground hover:text-foreground focus:outline-hidden focus:ring-0'
             onClick={e => {
               e.stopPropagation();
               onClose();
@@ -81,7 +81,7 @@ export const YouTubeThumbnail: React.FC<YouTubeThumbnailProps> = ({
         rel='noopener noreferrer'
         className='flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground hover:underline w-fit'
       >
-        <SiYoutube size={18} className='flex-shrink-0 text-[#FF0000]' aria-hidden />
+        <SiYoutube size={18} className='shrink-0 text-[#FF0000]' aria-hidden />
         <span>YouTube</span>
       </a>
 
@@ -116,13 +116,13 @@ export const YouTubeThumbnail: React.FC<YouTubeThumbnailProps> = ({
               className='absolute inset-0 w-full h-full object-cover'
             />
 
-            <div className='absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-[1]'>
+            <div className='absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-1'>
               <div className='flex items-center gap-1 md:gap-1.5 lg:gap-2 rounded-xl md:rounded-2xl lg:rounded-3xl bg-black/40 shadow-lg p-1.5 md:p-2 lg:py-3 lg:px-6'>
                 <button
                   type='button'
                   onClick={() => setShowPlayer(true)}
                   aria-label='Play video'
-                  className='group flex items-center justify-center h-12 w-12 md:h-14 md:w-14 lg:h-20 lg:w-20 rounded-lg md:rounded-xl lg:rounded-2xl text-muted hover:text-white focus:outline-none focus:ring-0 transition-colors'
+                  className='group flex items-center justify-center h-12 w-12 md:h-14 md:w-14 lg:h-20 lg:w-20 rounded-lg md:rounded-xl lg:rounded-2xl text-muted hover:text-white focus:outline-hidden focus:ring-0 transition-colors'
                   data-track-category='LINK_PREVIEW'
                   data-track-name='PlayYouTubeVideo'
                   data-track-metadata={JSON.stringify({ title, watchUrl })}
@@ -136,7 +136,7 @@ export const YouTubeThumbnail: React.FC<YouTubeThumbnailProps> = ({
                   onClick={(e: React.MouseEvent) => e.stopPropagation()}
                   aria-label='Open on YouTube'
                   title='Open on YouTube'
-                  className='group flex items-center justify-center h-12 w-12 md:h-14 md:w-14 lg:h-20 lg:w-20 rounded-lg md:rounded-xl lg:rounded-2xl text-muted hover:text-white focus:outline-none focus:ring-0 transition-colors'
+                  className='group flex items-center justify-center h-12 w-12 md:h-14 md:w-14 lg:h-20 lg:w-20 rounded-lg md:rounded-xl lg:rounded-2xl text-muted hover:text-white focus:outline-hidden focus:ring-0 transition-colors'
                   data-track-category='LINK_PREVIEW'
                   data-track-name='OpenOnYouTube'
                   data-track-metadata={JSON.stringify({ title, watchUrl })}

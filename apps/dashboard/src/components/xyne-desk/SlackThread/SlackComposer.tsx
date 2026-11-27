@@ -101,7 +101,7 @@ const SlackComposer = ({
     },
     editorProps: {
       attributes: {
-        class: 'tiptap chat-input-editor prose prose-sm focus:outline-none',
+        class: 'tiptap chat-input-editor prose prose-sm focus:outline-hidden',
         style: 'min-height: 20px; max-height: 200px; overflow-y: auto;',
         'aria-label': 'Slack reply input',
         role: 'textbox',
@@ -345,7 +345,7 @@ const SlackComposer = ({
         <div className='relative py-2 px-3'>
           <EditorContent
             editor={editor}
-            className='chat-input-field w-full resize-none border-0 outline-none bg-transparent leading-6 break-words text-foreground placeholder:text-muted-foreground text-sm [&_a]:pointer-events-none'
+            className='chat-input-field w-full resize-none border-0 outline-hidden bg-transparent leading-6 wrap-break-word text-foreground placeholder:text-muted-foreground text-sm [&_a]:pointer-events-none'
           />
         </div>
 

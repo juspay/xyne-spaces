@@ -34,7 +34,7 @@ export function EllipsisText({
           content={text}
           side='bottom'
           delayDuration={200}
-          className='max-w-sm whitespace-normal break-words'
+          className='max-w-sm whitespace-normal wrap-break-word'
         >
           <span aria-hidden className='absolute inset-y-0 right-0 w-[1.25em]' />
         </Tooltip>

@@ -221,7 +221,7 @@ function CallRow(props: {
       }}
       aria-pressed={props.open}
       className={cn(
-        'group flex h-full w-full items-center gap-3 rounded-lg px-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
+        'group flex h-full w-full items-center gap-3 rounded-lg px-3 text-left transition-colors focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring',
         props.open ? 'bg-muted' : 'enabled:hover:bg-muted/60',
       )}
       title={conversationId ? `Open the discussion of ${title}` : title}
@@ -232,9 +232,7 @@ function CallRow(props: {
       <span
         className={cn(
           'relative flex size-8 shrink-0 items-center justify-center rounded-full',
-          phase === 'LIVE'
-            ? 'bg-status-success/15 text-status-success'
-            : 'bg-muted text-muted-foreground',
+          phase === 'LIVE' ? 'text-status-success' : 'bg-muted text-muted-foreground',
         )}
         aria-hidden='true'
       >
@@ -375,7 +373,7 @@ export function SdlcCalls(props: {
       className={cn(
         'rounded-md px-2.5 py-1 text-[12.5px] font-medium transition-colors',
         invitedOnly === value
-          ? 'bg-background text-foreground shadow-sm'
+          ? 'bg-background text-foreground shadow-xs'
           : 'text-muted-foreground hover:text-foreground',
       )}
       data-track-category='SdlcHub'

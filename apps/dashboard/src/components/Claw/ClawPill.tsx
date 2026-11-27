@@ -47,7 +47,7 @@ export function ClawPill({ isOpen, onOpen, onClose }: ClawPillProps): React.Reac
         isOpen
           ? 'h-14 justify-between border-b border-border/50 px-4'
           : cn(
-              'h-full w-full cursor-pointer justify-center focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50',
+              'h-full w-full cursor-pointer justify-center focus-visible:outline-hidden focus-visible:ring-[3px] focus-visible:ring-ring/50',
               isThinking ? 'px-2' : 'px-4',
             ),
       )}

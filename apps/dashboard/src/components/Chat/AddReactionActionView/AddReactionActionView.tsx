@@ -51,7 +51,7 @@ const AddReactionActionView = ({
         customEmojis={customEmojis || []}
         previewConfig={{ showPreview: true }}
         autoFocusSearch={false}
-        className='!w-full !min-h-0 !flex-1 !rounded-[inherit] ![--epr-picker-border-color:transparent]'
+        className='w-full! min-h-0! flex-1! rounded-[inherit]! [--epr-picker-border-color:transparent]!'
       />
     </div>
   );

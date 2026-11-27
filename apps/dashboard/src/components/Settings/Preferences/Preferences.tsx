@@ -118,6 +118,7 @@ import { SettingsSearchInput } from './SettingsSearchInput';
 import { SettingsSearchResults, settingsSearchOptionId } from './SettingsSearchResults';
 import type { PreferenceSection, PreferencesProps, NavItem } from '.';
 import { disconnectCalendar } from '../../../services/clients/calendarApi';
+import { useMeetTranscripts } from '../../../hooks/useMeetTranscripts';
 import { toast } from 'sonner';
 
 // ─── Constants ──────────────────────────────────────────────────────────────
@@ -211,7 +212,7 @@ const QualitySelect: FC<{
               type='button'
               disabled={disabled}
               aria-labelledby={`${id}-label ${id}`}
-              className='flex h-8 min-w-40 items-center justify-between gap-2 rounded-md border border-border bg-background px-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-background'
+              className='flex h-8 min-w-40 items-center justify-between gap-2 rounded-md border border-border bg-background px-2 text-sm text-foreground focus:outline-hidden focus:ring-1 focus:ring-ring disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-background'
               data-track-category='PREFERENCES'
               data-track-name={id}
             >
@@ -361,7 +362,7 @@ const NotificationKeywordsCard: FC = () => {
           }
         }}
         placeholder='Add a keyword and press Enter'
-        className='w-full px-2 py-1.5 text-xs rounded-md border border-border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring'
+        className='w-full px-2 py-1.5 text-xs rounded-md border border-border bg-background text-foreground placeholder:text-muted-foreground focus:outline-hidden focus:ring-1 focus:ring-ring'
         data-track-category='PREFERENCES'
         data-track-name='AddNotificationKeyword'
       />
@@ -509,14 +510,14 @@ const AvailabilitySection: FC<{ state: PreferencesState }> = ({ state }) => (
         >
           {state.isCurrentlyUnavailable ? (
             <div className='flex items-center gap-2 min-w-0 flex-1'>
-              <PauseCircle className='size-4 flex-shrink-0 text-muted-foreground' />
+              <PauseCircle className='size-4 shrink-0 text-muted-foreground' />
               <span className='text-sm font-medium text-foreground'>
                 Paused from ticket assignment
               </span>
             </div>
           ) : (
             <div className='flex items-center gap-2 text-muted-foreground'>
-              <PauseCircle className='size-4 flex-shrink-0' />
+              <PauseCircle className='size-4 shrink-0' />
               <span className='text-sm'>Pause from ticket assignment</span>
             </div>
           )}
@@ -524,7 +525,7 @@ const AvailabilitySection: FC<{ state: PreferencesState }> = ({ state }) => (
             <Button
               variant='ghost'
               size='lg'
-              className='flex-shrink-0 p-1 h-auto hover:bg-accent'
+              className='shrink-0 p-1 h-auto hover:bg-accent'
               title='Resume assignment'
               aria-label='Resume assignment'
               onClick={state.resumeAssignment}
@@ -584,6 +585,39 @@ const VoiceSection: FC<{ state: PreferencesState }> = ({ state }) => (
 );
 
 // ─── Calls ──────────────────────────────────────────────────────────────────
+
+/**
+ * Google Meet's own transcript for the meetings I organise, fetched by Xyne (no bot
+ * joins). Opt-in, and hidden unless the feature is switched on.
+ */
+const MeetTranscriptsToggle: FC = () => {
+  const { available, meetTranscripts, setMeetTranscripts, error } = useMeetTranscripts();
+  if (!available) return null;
+  return (
+    <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
+      <div>
+        <p className='text-sm font-medium text-foreground'>Google Meet transcripts</p>
+        <p className='text-xs text-muted-foreground mt-0.5'>
+          For Google Meet meetings you organize, Xyne turns on Meet&apos;s transcription and adds
+          the transcript to the call afterwards. Everyone in the meeting sees that it is being
+          transcribed. If you connected your calendar before turning this on, disconnect and connect
+          it again to grant access.
+        </p>
+        {error && (
+          <p role='alert' className='text-xs text-destructive mt-1.5'>
+            {error}
+          </p>
+        )}
+      </div>
+      <Switch
+        id='meet-transcripts'
+        aria-label='Google Meet transcripts'
+        checked={meetTranscripts}
+        onCheckedChange={setMeetTranscripts}
+      />
+    </div>
+  );
+};
 
 const CallsSection: FC<{ state: PreferencesState }> = ({ state }) => {
   const [isDisconnecting, setIsDisconnecting] = useState(false);
@@ -713,6 +747,7 @@ const CallsSection: FC<{ state: PreferencesState }> = ({ state }) => {
           Disconnect to revoke access and reconnect with updated permissions.
         </p>
       </div>
+      <MeetTranscriptsToggle />
       <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
         <div>
           <p className='text-sm font-medium text-foreground'>Disconnect Calendar</p>
@@ -835,7 +870,7 @@ const DefaultSummaryTemplateSelect: FC<{
             type='button'
             disabled={isLoading}
             aria-labelledby='default-summary-template-label default-summary-template'
-            className='flex h-8 min-w-48 max-w-72 items-center justify-between gap-2 rounded-md border border-border bg-background px-2 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-ring'
+            className='flex h-8 min-w-48 max-w-72 items-center justify-between gap-2 rounded-md border border-border bg-background px-2 text-sm text-foreground focus:outline-hidden focus:ring-1 focus:ring-ring'
             data-track-category='PREFERENCES'
             data-track-name='default-summary-template'
           >
@@ -1156,7 +1191,7 @@ const PasswordSection: FC = () => {
               placeholder='Current password'
               value={currentPassword}
               onChange={e => setCurrentPassword(e.target.value)}
-              className='w-full px-3 py-2 pr-10 text-sm border border-border rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring'
+              className='w-full px-3 py-2 pr-10 text-sm border border-border rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-hidden focus:ring-2 focus:ring-ring'
               data-track-category='PREFERENCES'
               data-track-name='CurrentPasswordInput'
             />
@@ -1178,7 +1213,7 @@ const PasswordSection: FC = () => {
               placeholder='New password (min 8 characters)'
               value={newPassword}
               onChange={e => setNewPassword(e.target.value)}
-              className='w-full px-3 py-2 pr-10 text-sm border border-border rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring'
+              className='w-full px-3 py-2 pr-10 text-sm border border-border rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-hidden focus:ring-2 focus:ring-ring'
               data-track-category='PREFERENCES'
               data-track-name='NewPasswordInput'
             />
@@ -1200,7 +1235,7 @@ const PasswordSection: FC = () => {
               placeholder='Confirm new password'
               value={confirmPassword}
               onChange={e => setConfirmPassword(e.target.value)}
-              className='w-full px-3 py-2 pr-10 text-sm border border-border rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring'
+              className='w-full px-3 py-2 pr-10 text-sm border border-border rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-hidden focus:ring-2 focus:ring-ring'
               data-track-category='PREFERENCES'
               data-track-name='ConfirmPasswordInput'
             />
@@ -1428,7 +1463,7 @@ const ChannelSelect: FC<{
         side='bottom'
         align='start'
         sideOffset={6}
-        className='w-[var(--radix-popover-trigger-width)] rounded-xl p-1.5'
+        className='w-(--radix-popover-trigger-width) rounded-xl p-1.5'
         trigger={
           <button
             type='button'
@@ -1760,7 +1795,7 @@ const Preferences = ({ open, onClose, initialSection }: PreferencesProps): React
                 variant='ghost'
                 size='sm'
                 onClick={onClose}
-                className='!p-2 border border-border rounded-md hover:bg-accent'
+                className='p-2! border border-border rounded-md hover:bg-accent'
                 title='Close'
                 aria-label='Close'
                 data-track-category='PREFERENCES'
@@ -1803,13 +1838,13 @@ const Preferences = ({ open, onClose, initialSection }: PreferencesProps): React
                       data-track-category='PREFERENCES'
                       data-track-name={`Open_${item.id}`}
                     >
-                      <div className='flex items-center justify-center w-8 h-8 rounded-md bg-muted border border-border flex-shrink-0 text-muted-foreground'>
+                      <div className='flex items-center justify-center w-8 h-8 rounded-md bg-muted border border-border shrink-0 text-muted-foreground'>
                         {item.icon}
                       </div>
                       <div className='flex-1 min-w-0'>
                         <p className='text-sm font-medium text-foreground'>{item.label}</p>
                       </div>
-                      <ChevronRight className='size-4 text-muted-foreground flex-shrink-0' />
+                      <ChevronRight className='size-4 text-muted-foreground shrink-0' />
                     </button>
                   ))
                 )}

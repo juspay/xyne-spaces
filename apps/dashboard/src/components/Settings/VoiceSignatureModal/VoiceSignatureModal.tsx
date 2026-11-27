@@ -167,7 +167,7 @@ export const VoiceSignatureModal: React.FC<VoiceSignatureModalProps> = ({
       <DialogPrimitive.Portal>
         <DialogPrimitive.Overlay
           className={cn(
-            'fixed inset-0 bg-black/50 backdrop-blur-sm z-50',
+            'fixed inset-0 bg-black/50 backdrop-blur-xs z-50',
             'data-[state=open]:animate-in data-[state=closed]:animate-out',
             'data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
           )}
@@ -178,7 +178,7 @@ export const VoiceSignatureModal: React.FC<VoiceSignatureModalProps> = ({
             'fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-50',
             'w-full max-w-md',
             'bg-popover rounded-xl shadow-xl border border-border',
-            'focus:outline-none',
+            'focus:outline-hidden',
             'data-[state=open]:animate-in data-[state=closed]:animate-out',
             'data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0',
             'data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95',
@@ -221,7 +221,7 @@ export const VoiceSignatureModal: React.FC<VoiceSignatureModalProps> = ({
             {hasVoiceSignature && !isProcessing && (
               <div className='flex items-center justify-between px-3 py-2.5 rounded-lg bg-green-500/10 border border-green-500/20'>
                 <div className='flex items-center gap-2'>
-                  <CheckCircle2 className='size-4 text-green-500 flex-shrink-0' />
+                  <CheckCircle2 className='size-4 text-green-500 shrink-0' />
                   <p className='text-xs font-medium text-foreground'>Voice signature stored</p>
                 </div>
                 <button
@@ -266,7 +266,7 @@ export const VoiceSignatureModal: React.FC<VoiceSignatureModalProps> = ({
                       className={cn(
                         'flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all',
                         activeTab === tab
-                          ? 'bg-background text-foreground shadow-sm'
+                          ? 'bg-background text-foreground shadow-xs'
                           : 'text-muted-foreground hover:text-foreground',
                       )}
                     >
@@ -291,7 +291,7 @@ export const VoiceSignatureModal: React.FC<VoiceSignatureModalProps> = ({
                     {/* Script to read aloud */}
                     <div className='rounded-lg border border-border bg-muted/40 overflow-hidden'>
                       <div className='flex items-center gap-1.5 px-3 py-2 border-b border-border bg-muted/60'>
-                        <Quote className='size-3 text-muted-foreground flex-shrink-0' />
+                        <Quote className='size-3 text-muted-foreground shrink-0' />
                         <p className='text-[10px] font-medium text-muted-foreground uppercase tracking-wide'>
                           Read this aloud while recording
                         </p>
@@ -377,7 +377,7 @@ export const VoiceSignatureModal: React.FC<VoiceSignatureModalProps> = ({
 
                     {/* Tips */}
                     <div className='flex gap-2 px-3 py-2.5 rounded-lg bg-muted/50 border border-border'>
-                      <AlertCircle className='size-3.5 text-muted-foreground flex-shrink-0 mt-0.5' />
+                      <AlertCircle className='size-3.5 text-muted-foreground shrink-0 mt-0.5' />
                       <p className='text-[11px] text-muted-foreground leading-relaxed'>
                         Read the script above in a quiet environment. Speak at a natural pace —
                         accuracy improves with more varied speech.

@@ -83,7 +83,7 @@ export const FileBubble: React.FC<FileBubbleProps> = ({
       <button
         type='button'
         className='w-full text-left p-3 bg-card hover:bg-accent
-           rounded-xl border border-border shadow-sm transition cursor-pointer'
+           rounded-xl border border-border shadow-xs transition cursor-pointer'
         onClick={handleClick}
         data-track-category='MESSAGE'
         data-track-name='OPEN_FILE_BUBBLE'

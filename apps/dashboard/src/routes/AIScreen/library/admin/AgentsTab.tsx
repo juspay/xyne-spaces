@@ -362,7 +362,7 @@ export function AgentsTab({
           <DropdownMenuItem
             disabled={registered}
             onSelect={() => registration.start(agent)}
-            className='data-[disabled]:pointer-events-auto data-[disabled]:cursor-not-allowed'
+            className='data-disabled:pointer-events-auto data-disabled:cursor-not-allowed'
           >
             <SurfaceLogo surface='spaces' label='' className='mr-2 size-4' />
             {hasApp && !registered ? 'Spaces (resume setup)' : 'Spaces'}
@@ -370,7 +370,7 @@ export function AgentsTab({
           <DropdownMenuItem
             disabled={!slack.isReady || slackActions.busySlug === agent.slug}
             onSelect={() => onSlackConnect(agent)}
-            className='data-[disabled]:pointer-events-auto data-[disabled]:cursor-not-allowed'
+            className='data-disabled:pointer-events-auto data-disabled:cursor-not-allowed'
           >
             <SurfaceLogo surface='slack' label='' className='mr-2 size-4' />
             {slackLabel(slack.byAgentId[agent.id], slack.isReady)}

@@ -552,11 +552,11 @@ export const ShareCollectionModal = ({
                   }
                   data-track-category='knowledge-base'
                   data-track-name='share-collection-search-input'
-                  className='w-full rounded-md border border-border bg-background pl-9 pr-3 py-2 text-sm text-foreground outline-none focus:border-ring focus:ring-1 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50'
+                  className='w-full rounded-md border border-border bg-background pl-9 pr-3 py-2 text-sm text-foreground outline-hidden focus:border-ring focus:ring-1 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50'
                 />
               </div>
               {query.trim() && (
-                <div className='absolute left-0 right-0 top-[calc(100%+4px)] z-[60] max-h-64 overflow-y-auto rounded-md border border-border bg-popover shadow-md p-1'>
+                <div className='absolute left-0 right-0 top-[calc(100%+4px)] z-60 max-h-64 overflow-y-auto rounded-md border border-border bg-popover shadow-md p-1'>
                   {results.length > 0 ? (
                     results.map(c => (
                       <button
@@ -573,7 +573,7 @@ export const ShareCollectionModal = ({
                         {c.kind === 'user' ? (
                           <Avatar userId={c.id} size='sm' />
                         ) : (
-                          <span className='flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-muted'>
+                          <span className='flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted'>
                             {searchCandidateIcon(c.kind)}
                           </span>
                         )}
@@ -618,7 +618,7 @@ export const ShareCollectionModal = ({
                       className='flex items-center justify-between p-3 gap-3 border border-border rounded-md bg-muted/40'
                     >
                       <div className='flex items-center gap-3 flex-1 min-w-0'>
-                        <div className='flex-shrink-0'>
+                        <div className='shrink-0'>
                           <div className='w-8 h-8 rounded-full bg-blue-100 dark:bg-blue-500/20 flex items-center justify-center text-blue-600 dark:text-blue-300 font-medium text-sm'>
                             {user.name?.[0]?.toUpperCase() || user.email?.[0]?.toUpperCase() || '?'}
                           </div>
@@ -630,7 +630,7 @@ export const ShareCollectionModal = ({
                           <div className='text-xs text-muted-foreground truncate'>{user.email}</div>
                         </div>
                       </div>
-                      <div className='flex items-center gap-2 flex-shrink-0'>
+                      <div className='flex items-center gap-2 shrink-0'>
                         {allowedRoles.includes('VIEWER') && (
                           <button
                             type='button'
@@ -711,7 +711,7 @@ export const ShareCollectionModal = ({
                       className='flex items-center justify-between p-3 gap-3 border border-border rounded-md bg-muted/40'
                     >
                       <div className='flex items-center gap-3 flex-1 min-w-0'>
-                        <div className='flex-shrink-0'>
+                        <div className='shrink-0'>
                           <div className='w-8 h-8 rounded-full bg-muted flex items-center justify-center text-muted-foreground'>
                             <UsersRound size={16} />
                           </div>
@@ -723,7 +723,7 @@ export const ShareCollectionModal = ({
                           <div className='text-xs text-muted-foreground truncate'>Group</div>
                         </div>
                       </div>
-                      <div className='flex items-center gap-2 flex-shrink-0'>
+                      <div className='flex items-center gap-2 shrink-0'>
                         {allowedRoles.includes('VIEWER') && (
                           <button
                             type='button'
@@ -784,7 +784,7 @@ export const ShareCollectionModal = ({
                       className='flex items-center justify-between p-3 gap-3 border border-border rounded-md bg-muted/40'
                     >
                       <div className='flex items-center gap-3 flex-1 min-w-0'>
-                        <div className='flex-shrink-0'>
+                        <div className='shrink-0'>
                           <div className='w-8 h-8 rounded-full bg-muted flex items-center justify-center text-muted-foreground'>
                             <Hash size={16} />
                           </div>
@@ -796,7 +796,7 @@ export const ShareCollectionModal = ({
                           <div className='text-xs text-muted-foreground truncate'>Channel</div>
                         </div>
                       </div>
-                      <div className='flex items-center gap-2 flex-shrink-0'>
+                      <div className='flex items-center gap-2 shrink-0'>
                         <span className='px-3 py-1.5 text-xs font-medium text-muted-foreground'>
                           Viewer
                         </span>
@@ -864,11 +864,11 @@ export const ShareCollectionModal = ({
                       className='flex items-center gap-3 px-1 py-1.5 rounded-lg hover:bg-muted/60'
                     >
                       {row.channelId ? (
-                        <div className='flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground'>
+                        <div className='flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground'>
                           <Hash size={16} />
                         </div>
                       ) : row.userGroupId ? (
-                        <div className='flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground'>
+                        <div className='flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground'>
                           <UsersRound size={16} />
                         </div>
                       ) : (
@@ -992,7 +992,7 @@ export const ShareCollectionModal = ({
           <div className='mb-6'>
             <div className='block text-sm font-medium text-foreground mb-2'>General access</div>
             <div className='flex items-center gap-3 rounded-md border border-border bg-muted/40 p-3'>
-              <div className='flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-background ring-1 ring-border text-muted-foreground'>
+              <div className='flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-background ring-1 ring-border text-muted-foreground'>
                 {visibility === 'public' ? <Globe size={16} /> : <Lock size={16} />}
               </div>
               <div className='flex-1 min-w-0'>
@@ -1019,7 +1019,7 @@ export const ShareCollectionModal = ({
                       data-track-name='SET_COLLECTION_PUBLIC'
                       className='flex items-start gap-2 cursor-pointer'
                     >
-                      <Globe size={16} className='mt-0.5 text-muted-foreground flex-shrink-0' />
+                      <Globe size={16} className='mt-0.5 text-muted-foreground shrink-0' />
                       <div className='flex-1 min-w-0'>
                         <div className='flex items-center gap-2'>
                           <span className='text-sm font-medium'>Public</span>
@@ -1038,7 +1038,7 @@ export const ShareCollectionModal = ({
                       data-track-name='SET_COLLECTION_PRIVATE'
                       className='flex items-start gap-2 cursor-pointer'
                     >
-                      <Lock size={16} className='mt-0.5 text-muted-foreground flex-shrink-0' />
+                      <Lock size={16} className='mt-0.5 text-muted-foreground shrink-0' />
                       <div className='flex-1 min-w-0'>
                         <div className='flex items-center gap-2'>
                           <span className='text-sm font-medium'>Private</span>

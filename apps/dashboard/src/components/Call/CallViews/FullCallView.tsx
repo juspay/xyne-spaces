@@ -658,7 +658,7 @@ export function FullCallView({
       {showQualityToast && (
         <div
           className={cn(
-            'fixed top-4 left-1/2 -translate-x-1/2 z-[70] flex items-center gap-2 px-3 py-2 rounded-full text-xs font-semibold text-white shadow-lg pointer-events-none animate-in slide-in-from-top-2 duration-300',
+            'fixed top-4 left-1/2 -translate-x-1/2 z-70 flex items-center gap-2 px-3 py-2 rounded-full text-xs font-semibold text-white shadow-lg pointer-events-none animate-in slide-in-from-top-2 duration-300',
             networkQuality === ConnectionQuality.Lost ? 'bg-red-600' : 'bg-amber-500',
           )}
           role='alert'
@@ -679,7 +679,7 @@ export function FullCallView({
         className={cn(
           'relative flex shrink-0 items-center justify-between gap-3 pr-3 sm:pr-4',
           isElectron && isMac
-            ? 'h-14 pl-24 [[data-fs]_&]:pl-3 sm:[[data-fs]_&]:pl-4'
+            ? 'h-14 pl-24 in-data-fs:pl-3 sm:in-data-fs:pl-4'
             : 'h-16 pl-3 pt-4 sm:pl-4',
         )}
       >
@@ -749,7 +749,7 @@ export function FullCallView({
             <button
               type='button'
               onClick={onMinimize}
-              className='flex h-10 items-center gap-2 rounded-full bg-[#333537] px-3 text-sm font-medium text-[#e3e3e3] outline-none transition-colors hover:bg-[#404245] focus-visible:ring-2 focus-visible:ring-[#a8c7fa] focus-visible:ring-offset-2 focus-visible:ring-offset-[#131314] sm:pl-3 sm:pr-4'
+              className='flex h-10 items-center gap-2 rounded-full bg-[#333537] px-3 text-sm font-medium text-[#e3e3e3] outline-hidden transition-colors hover:bg-[#404245] focus-visible:ring-2 focus-visible:ring-[#a8c7fa] focus-visible:ring-offset-2 focus-visible:ring-offset-[#131314] sm:pl-3 sm:pr-4'
               title='Minimize to a floating window'
               aria-label='Minimize call'
               data-track-category='CALLS'
@@ -770,7 +770,7 @@ export function FullCallView({
           {/* Side panel — docked card beside the stage (the stage shrinks rather
               than being covered); full-screen sheet on small screens. */}
           {activePanel && (
-            <aside className='fixed inset-0 z-[60] overflow-hidden bg-background shadow-2xl animate-in fade-in slide-in-from-right-4 duration-200 md:static md:z-auto md:my-4 md:mr-4 md:w-[360px] md:shrink-0 md:rounded-2xl lg:w-[400px]'>
+            <aside className='fixed inset-0 z-60 overflow-hidden bg-background shadow-2xl animate-in fade-in slide-in-from-right-4 duration-200 md:static md:z-auto md:my-4 md:mr-4 md:w-[360px] md:shrink-0 md:rounded-2xl lg:w-[400px]'>
               {renderPanel()}
             </aside>
           )}

@@ -50,7 +50,7 @@ function ClawMarkdownLink({
 
 const components: Components = {
   p: ({ children }: { children?: ReactNode } & ExtraProps): ReactElement => (
-    <p className='mb-2 whitespace-pre-wrap break-words last:mb-0'>{children}</p>
+    <p className='mb-2 whitespace-pre-wrap wrap-break-word last:mb-0'>{children}</p>
   ),
   ul: ({ children }: { children?: ReactNode } & ExtraProps): ReactElement => (
     <ul className='mb-2 list-disc space-y-1 pl-5 last:mb-0'>{children}</ul>
@@ -74,23 +74,19 @@ const components: Components = {
 
   table: ({ children }: { children?: ReactNode } & ExtraProps): ReactElement => (
     <div className='mb-2 overflow-x-auto last:mb-0'>
-      <table className='w-full border-collapse border-current/20 text-xs'>{children}</table>
+      <table className='w-full border-collapse text-xs'>{children}</table>
     </div>
   ),
 
   code: ({ className, children }: HTMLAttributes<HTMLElement> & ExtraProps): ReactElement => {
     const isBlock = Boolean(className);
     if (!isBlock) {
-      return (
-        <code className='rounded bg-current/10 px-1 py-0.5 font-mono text-[0.85em]'>
-          {children}
-        </code>
-      );
+      return <code className='rounded px-1 py-0.5 font-mono text-[0.85em]'>{children}</code>;
     }
     return <code className={cn('font-mono text-xs', className)}>{children}</code>;
   },
   pre: ({ children }: { children?: ReactNode } & ExtraProps): ReactElement => (
-    <pre className='mb-2 overflow-x-auto rounded-lg border border-current/20 bg-current/10 p-3 text-xs leading-relaxed last:mb-0'>
+    <pre className='mb-2 overflow-x-auto rounded-lg border p-3 text-xs leading-relaxed last:mb-0'>
       {children}
     </pre>
   ),
@@ -127,7 +123,7 @@ function ClawCitationLink({
       </>
     );
     const className =
-      'inline-flex h-5 max-w-[180px] items-center gap-1 rounded-xl border border-current/20 px-1.5 align-middle text-[10px] font-medium no-underline transition-colors hover:bg-current/10';
+      'inline-flex h-5 max-w-[180px] items-center gap-1 rounded-xl border px-1.5 align-middle text-[10px] font-medium no-underline transition-colors ';
 
     return url ? (
       <a href={url} title={label} className={className}>

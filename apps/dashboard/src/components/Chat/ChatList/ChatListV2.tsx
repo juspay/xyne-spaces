@@ -558,7 +558,7 @@ const ChatListV2: React.FC<ChatListProps> = ({
               {isNewMessageBoundary && (
                 <div className='relative py-3'>
                   <div className='absolute left-0 right-0 top-1/2 h-px bg-destructive z-0'></div>
-                  <div className='relative z-5 flex items-center justify-center'>
+                  <div className='relative flex items-center justify-center'>
                     <span className='text-xs text-destructive bg-background px-2 font-medium'>
                       New Messages
                     </span>

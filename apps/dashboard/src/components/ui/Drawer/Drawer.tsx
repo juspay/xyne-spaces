@@ -64,7 +64,7 @@ export const Drawer = ({
 
       <DrawerPrimitive.Portal>
         <DrawerPrimitive.Overlay
-          className={cn('fixed inset-0 bg-black/50 backdrop-blur-sm z-50')}
+          className={cn('fixed inset-0 bg-black/50 backdrop-blur-xs z-50')}
         />
 
         <DrawerPrimitive.Content
@@ -72,7 +72,7 @@ export const Drawer = ({
             'fixed z-50 flex flex-col',
             'bottom-0 left-0 right-0 max-h-[96%] rounded-t-[20px] ',
             'bg-background',
-            'focus:outline-none',
+            'focus:outline-hidden',
           )}
         >
           {/* Drag handle */}

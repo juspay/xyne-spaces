@@ -17,7 +17,7 @@ export function BrailleLoader(): ReactElement {
   return (
     <span
       aria-hidden
-      className='inline-flex h-3.5 w-3.5 flex-shrink-0 items-center justify-center font-mono text-[14px] leading-none text-foreground/70'
+      className='inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center font-mono text-[14px] leading-none text-foreground/70'
     >
       {BRAILLE_FRAMES[frame]}
     </span>

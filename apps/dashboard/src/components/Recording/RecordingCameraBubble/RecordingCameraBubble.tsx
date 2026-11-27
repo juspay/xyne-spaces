@@ -115,7 +115,7 @@ export function RecordingCameraBubble(): ReactElement | null {
         onTouchStart={event => event.stopPropagation()}
         onClick={() => setIsMaximized(maximized => !maximized)}
         className={cn(
-          'absolute flex items-center justify-center rounded-lg bg-black/60 text-white backdrop-blur-sm transition-opacity hover:bg-black/80 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70',
+          'absolute flex items-center justify-center rounded-lg bg-black/60 text-white backdrop-blur-xs transition-opacity hover:bg-black/80 focus-visible:opacity-100 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-white/70',
           isMaximized
             ? 'right-4 top-4 size-10'
             : 'right-2 top-2 size-7 min-[700px]:opacity-0 min-[700px]:group-hover:opacity-100',

@@ -319,7 +319,7 @@ export const EmailEditor = ({
       scrollMargin: 16,
       attributes: {
         class:
-          'tiptap email-composer-editor prose prose-sm dark:prose-invert max-w-none focus:outline-none px-4 py-3 min-h-full',
+          'tiptap email-composer-editor prose prose-sm dark:prose-invert max-w-none focus:outline-hidden px-4 py-3 min-h-full',
       },
       handlePaste: (_view, event) => {
         const files = Array.from(event.clipboardData?.files ?? []);
@@ -432,7 +432,7 @@ export const EmailEditor = ({
             type='button'
             onMouseDown={e => e.preventDefault()}
             onClick={handleRefineSelection}
-            className='inline-flex items-center gap-2 rounded-full border border-border bg-background/95 px-3 py-1.5 text-xs font-medium text-foreground shadow-lg backdrop-blur hover:bg-muted transition-colors'
+            className='inline-flex items-center gap-2 rounded-full border border-border bg-background/95 px-3 py-1.5 text-xs font-medium text-foreground shadow-lg backdrop-blur-sm hover:bg-muted transition-colors'
             data-track-category='YourDraft'
             data-track-name='RefineSelection'
           >
@@ -444,7 +444,7 @@ export const EmailEditor = ({
       {bubbleToolbar ? (
         <EmailEditorToolbar editor={editor} rightSlot={toolbarRightSlot} bubble />
       ) : (
-        <div className='flex-shrink-0 border-b border-border px-2 py-1 bg-muted/30'>
+        <div className='shrink-0 border-b border-border px-2 py-1 bg-muted/30'>
           <EmailEditorToolbar editor={editor} rightSlot={toolbarRightSlot} />
         </div>
       )}

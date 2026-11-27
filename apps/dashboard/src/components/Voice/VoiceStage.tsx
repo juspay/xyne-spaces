@@ -83,14 +83,14 @@ export function VoiceStage({ studioMode, messages, chatTitle }: VoiceStageProps)
       ref={stageRef}
       tabIndex={-1}
       aria-label='Voice mode'
-      className='flex min-h-0 flex-1 flex-col items-center px-4 pb-3 pt-4 outline-none'
+      className='flex min-h-0 flex-1 flex-col items-center px-4 pb-3 pt-4 outline-hidden'
     >
       {chatTitle && (
         <p className='w-full truncate text-center text-xs text-muted-foreground'>
           In: <span className='font-medium text-foreground'>{chatTitle}</span>
         </p>
       )}
-      <div className='flex min-h-0 w-full flex-[3] flex-col items-center justify-center'>
+      <div className='flex min-h-0 w-full flex-3 flex-col items-center justify-center'>
         <VoiceOrbButton
           phase={phase}
           scope={stageRef}
@@ -108,7 +108,7 @@ export function VoiceStage({ studioMode, messages, chatTitle }: VoiceStageProps)
             {PHASE_LABEL[phase]}
           </p>
           {studioMode && (
-            <span className='inline-flex items-center gap-1 rounded-full bg-claw-ai-fg/10 px-2.5 py-1 text-xs font-semibold text-claw-ai-fg'>
+            <span className='inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold text-claw-ai-fg'>
               <Sparkles className='h-3 w-3' aria-hidden />
               {studioMode} mode
             </span>
@@ -125,7 +125,7 @@ export function VoiceStage({ studioMode, messages, chatTitle }: VoiceStageProps)
       </div>
 
       {panel === 'diagnose' && (
-        <div className='mt-2 flex min-h-0 w-full flex-[2] flex-col'>
+        <div className='mt-2 flex min-h-0 w-full flex-2 flex-col'>
           <DiagnosePanel phase={phase} />
         </div>
       )}
@@ -133,7 +133,7 @@ export function VoiceStage({ studioMode, messages, chatTitle }: VoiceStageProps)
         <div
           aria-label='Conversation'
           // Scrolls without a bar, and lines leaving at the top fade instead of being cut.
-          className='no-scrollbar mt-2 flex min-h-0 w-full flex-[2] flex-col gap-2 overflow-y-auto pt-4 [mask-image:linear-gradient(to_bottom,transparent,black_1.5rem)]'
+          className='no-scrollbar mt-2 flex min-h-0 w-full flex-2 flex-col gap-2 overflow-y-auto pt-4 mask-[linear-gradient(to_bottom,transparent,black_1.5rem)]'
         >
           {lines.length === 0 && (
             <p className='m-auto text-center text-xs text-muted-foreground'>

@@ -116,14 +116,14 @@ export function WorkspaceSurface({
   return (
     <div className='flex h-full min-h-0 w-full min-w-0'>
       {explorer ? (
-        <div className='flex h-full w-60 min-w-0 flex-shrink-0 flex-col overflow-hidden border-r border-border'>
+        <div className='flex h-full w-60 min-w-0 shrink-0 flex-col overflow-hidden border-r border-border'>
           {explorer}
         </div>
       ) : null}
 
       <div className='flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden'>
         {open.length > 0 ? (
-          <div className='flex h-9 flex-shrink-0 items-center gap-1 overflow-hidden border-b border-border px-1'>
+          <div className='flex h-9 shrink-0 items-center gap-1 overflow-hidden border-b border-border px-1'>
             <QuickSwitch
               items={items}
               tabs={tabs}
@@ -147,7 +147,7 @@ export function WorkspaceSurface({
               trackNames={{ select: 'tab-activate', close: 'tab-close' }}
             />
             {active ? (
-              <span className='ml-auto flex flex-shrink-0 items-center gap-1 pr-1'>
+              <span className='ml-auto flex shrink-0 items-center gap-1 pr-1'>
                 {actionsFor?.(active)}
                 {commentStoreFor(active) ? (
                   <button

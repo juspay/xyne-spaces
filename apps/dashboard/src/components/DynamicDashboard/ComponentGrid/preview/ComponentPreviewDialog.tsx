@@ -188,7 +188,7 @@ const ComponentPreviewDialog = ({
               params={sqlQuery.data?.params ?? []}
             />
           ) : (
-            <div className='flex-1 min-h-0 rounded-xl border border-xyne-gray-200 bg-white shadow-sm overflow-hidden'>
+            <div className='flex-1 min-h-0 rounded-xl border border-xyne-gray-200 bg-white shadow-xs overflow-hidden'>
               {!dataSourceId ? (
                 <EmptyState
                   icon={Database}
@@ -339,7 +339,7 @@ interface QuerySurfaceProps {
 }
 
 const panelClass =
-  'flex-1 min-h-0 rounded-xl border border-xyne-gray-200 bg-white shadow-sm overflow-hidden';
+  'flex-1 min-h-0 rounded-xl border border-xyne-gray-200 bg-white shadow-xs overflow-hidden';
 
 const QuerySurface = ({
   plan,

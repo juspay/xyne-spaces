@@ -37,7 +37,7 @@ export function McpLogo({
     return (
       <div
         className={cn(
-          'flex shrink-0 items-center justify-center border border-border font-semibold text-muted-foreground shadow-sm',
+          'flex shrink-0 items-center justify-center border border-border font-semibold text-muted-foreground shadow-xs',
           SIZE[size],
           background,
         )}
@@ -56,7 +56,7 @@ export function McpLogo({
       aria-hidden='true'
       onError={() => setAttempt(next => next + 1)}
       className={cn(
-        'shrink-0 border border-border object-contain shadow-sm',
+        'shrink-0 border border-border object-contain shadow-xs',
         SIZE[size],
         background,
       )}

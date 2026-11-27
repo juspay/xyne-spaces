@@ -1,12 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import axios from 'axios';
 import {
-  submitCSRWithToken,
-  validateEnrollmentQrPayload,
+  EnrollmentFlowError,
+  buildCsrQrData,
+  parseCertificateQrPayload,
 } from '../../../src/services/EnrollmentAPIService';
-
-const ENROLLMENT = { trustedOrigins: new Set(['https://auth.example.org']) };
 
 const certificatePem = [
   '-----BEGIN CERTIFICATE-----',
@@ -14,107 +12,65 @@ const certificatePem = [
   '-----END CERTIFICATE-----',
 ].join('\n');
 
-test('validates the laptop enrollment QR payload', () => {
+const device = {
+  device_name: 'Test device',
+  platform: 'MOBILE' as const,
+  os_type: 'test-os',
+  os_version: '1.0',
+  device_fingerprint: 'test-fingerprint',
+};
+
+function assertRejected(rawData: string, reason: string): void {
+  assert.throws(
+    () => parseCertificateQrPayload(rawData),
+    (error: unknown) => error instanceof EnrollmentFlowError && error.reason === reason,
+  );
+}
+
+test('builds the CSR QR the enrollment page scans', () => {
+  assert.deepEqual(JSON.parse(buildCsrQrData({ csr: 'csr-pem', deviceInfo: device })), {
+    csr_pem: 'csr-pem',
+    device,
+  });
+});
+
+test('reads the signed certificate QR', () => {
+  assert.deepEqual(parseCertificateQrPayload(JSON.stringify({ pem: `${certificatePem}\n` })), {
+    certificate: certificatePem,
+    caChain: null,
+  });
+});
+
+test('reads a certificate QR with a CA chain', () => {
+  const caChainPem = certificatePem.replace('certificate', 'ca');
   assert.deepEqual(
-    validateEnrollmentQrPayload(
-      JSON.stringify({
-        url: 'https://auth.example.org/api/enrollment/claim',
-        token: 'enrollment-token',
-      }),
-      ENROLLMENT,
+    parseCertificateQrPayload(
+      JSON.stringify({ certificate: certificatePem, ca_chain: caChainPem }),
     ),
-    {
-      url: 'https://auth.example.org/api/enrollment/claim',
-      token: 'enrollment-token',
-    },
+    { certificate: certificatePem, caChain: caChainPem },
   );
 });
 
-test('rejects an enrollment URL without an absolute origin', () => {
-  assert.throws(
-    () =>
-      validateEnrollmentQrPayload(
-        JSON.stringify({ url: '/api/enrollment/claim', token: 'enrollment-token' }),
-        ENROLLMENT,
-      ),
-    /enrollment URL is malformed/,
+test('ignores a CA chain that is not a certificate', () => {
+  assert.equal(
+    parseCertificateQrPayload(JSON.stringify({ pem: certificatePem, ca_chain: 'not-a-chain' }))
+      .caChain,
+    null,
   );
 });
 
-test('rejects an enrollment QR from an untrusted origin', () => {
-  assert.throws(
-    () =>
-      validateEnrollmentQrPayload(
-        JSON.stringify({ url: 'https://example.com/enrollment', token: 'token' }),
-        ENROLLMENT,
-      ),
-    /Unsupported enrollment URL/,
+test('rejects a single-QR enrollment token as an unsupported flow', () => {
+  assertRejected(
+    JSON.stringify({ url: 'https://auth.example.org/api/enrollment/claim', token: 'token' }),
+    'unsupported_flow',
   );
 });
 
-test('rejects a non-HTTPS enrollment URL', () => {
-  assert.throws(
-    () =>
-      validateEnrollmentQrPayload(
-        JSON.stringify({ url: 'http://127.0.0.1:3443/api/enrollment/claim', token: 'token' }),
-        ENROLLMENT,
-      ),
-    /HTTPS is required/,
-  );
-});
-
-test('submits the CSR and token using the single-QR contract', async () => {
-  const originalPost = axios.post;
-  let request:
-    | {
-        url: string;
-        data: unknown;
-        config: unknown;
-      }
-    | undefined;
-
-  axios.post = (async (url, data, config) => {
-    request = { url: String(url), data, config };
-    return {
-      status: 200,
-      data: { certificate: certificatePem, ca_chain: 'ca-chain' },
-    } as never;
-  }) as typeof axios.post;
-
-  try {
-    const response = await submitCSRWithToken(
-      'https://auth.example.org/api/enrollment/claim',
-      'enrollment-token',
-      'csr-pem',
-      {
-        device_name: 'Test device',
-        platform: 'MOBILE',
-        os_type: 'test-os',
-        os_version: '1.0',
-        device_fingerprint: 'test-fingerprint',
-      },
-      ENROLLMENT,
-    );
-
-    assert.deepEqual(response, { certificate: certificatePem, ca_chain: 'ca-chain' });
-    assert.equal(request?.url, 'https://auth.example.org/api/enrollment/claim');
-    assert.equal(
-      request?.config &&
-        (request.config as { headers?: Record<string, string> }).headers?.['Authorization'],
-      'Bearer enrollment-token',
-    );
-    assert.deepEqual(request?.data, {
-      token: 'enrollment-token',
-      csr_pem: 'csr-pem',
-      device: {
-        device_name: 'Test device',
-        platform: 'MOBILE',
-        os_type: 'test-os',
-        os_version: '1.0',
-        device_fingerprint: 'test-fingerprint',
-      },
-    });
-  } finally {
-    axios.post = originalPost;
-  }
+test('rejects a QR that is not a certificate', () => {
+  assertRejected('not json', 'invalid_qr');
+  assertRejected('"just a string"', 'invalid_qr');
+  assertRejected(JSON.stringify({ pem: 'not a certificate' }), 'invalid_qr');
+  assertRejected(JSON.stringify({ pem: 42 }), 'invalid_qr');
+  assertRejected(JSON.stringify({ url: 'https://auth.example.org/claim' }), 'invalid_qr');
+  assertRejected(JSON.stringify({}), 'invalid_qr');
 });

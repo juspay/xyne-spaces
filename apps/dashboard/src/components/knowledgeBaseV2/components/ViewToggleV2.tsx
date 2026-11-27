@@ -24,7 +24,7 @@ export const ViewToggleV2: React.FC<ViewToggleV2Props> = ({ value, onChange }) =
         }}
         className={
           value === 'grid'
-            ? 'inline-flex h-7 w-7 items-center justify-center rounded-full bg-background text-foreground shadow-sm'
+            ? 'inline-flex h-7 w-7 items-center justify-center rounded-full bg-background text-foreground shadow-xs'
             : 'inline-flex h-7 w-7 items-center justify-center rounded-full text-muted-foreground transition hover:text-foreground'
         }
         data-track-category='knowledge-base'
@@ -41,7 +41,7 @@ export const ViewToggleV2: React.FC<ViewToggleV2Props> = ({ value, onChange }) =
         }}
         className={
           value === 'list'
-            ? 'inline-flex h-7 w-7 items-center justify-center rounded-full bg-background text-foreground shadow-sm'
+            ? 'inline-flex h-7 w-7 items-center justify-center rounded-full bg-background text-foreground shadow-xs'
             : 'inline-flex h-7 w-7 items-center justify-center rounded-full text-muted-foreground transition hover:text-foreground'
         }
         data-track-category='knowledge-base'

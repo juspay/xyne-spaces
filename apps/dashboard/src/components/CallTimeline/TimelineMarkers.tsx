@@ -42,7 +42,7 @@ export const MARKER_NOUN: Record<MarkedItemType, string> = {
 const NO_RECORDED_KINDS: ReadonlySet<RecordedSpanKind> = new Set();
 
 const MARKER_INTERACTIVE =
-  "cursor-pointer transition-transform hover:scale-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring after:absolute after:-inset-2 after:content-[''] motion-reduce:transform-none";
+  "cursor-pointer transition-transform hover:scale-110 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring after:absolute after:-inset-2 after:content-[''] motion-reduce:transform-none";
 
 interface MomentFlagProps {
   percent: number;

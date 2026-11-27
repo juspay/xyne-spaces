@@ -178,7 +178,7 @@ export function UpcomingCallRowV2({
           className={cn(
             'flex size-8 items-center justify-center rounded-lg border transition-colors',
             isCopied
-              ? 'border-status-success/30 text-status-success'
+              ? 'text-status-success'
               : 'border-border text-muted-foreground hover:bg-accent hover:text-foreground',
           )}
         >
@@ -200,7 +200,7 @@ export function UpcomingCallRowV2({
             className={cn(
               'h-8 shrink-0 rounded-lg px-3.5 py-0 text-xs font-semibold disabled:cursor-not-allowed disabled:opacity-60',
               isActive
-                ? 'bg-status-success text-background hover:bg-status-success/90'
+                ? 'bg-status-success text-background '
                 : 'border border-border bg-background text-foreground hover:bg-accent',
             )}
           >
@@ -222,7 +222,7 @@ export function UpcomingCallRowV2({
                 <ThreeDotsMenuHorizontal className='size-4' />
               </Button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align='end' className='rounded-xl p-1.5 w-44 shadow-sm'>
+            <DropdownMenuContent align='end' className='rounded-xl p-1.5 w-44 shadow-xs'>
               {canEdit && onEditCall && (
                 <DropdownMenuItem
                   onClick={e => {

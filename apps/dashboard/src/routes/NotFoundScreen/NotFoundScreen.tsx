@@ -46,7 +46,7 @@ const NotFoundScreen = ({ fallbackPath }: NotFoundScreenProps = {}): ReactElemen
       <main className='flex flex-1 flex-col items-center justify-center gap-[58px] overflow-y-auto px-6 py-10'>
         <div
           aria-hidden='true'
-          className='not-found-illustration aspect-[692/390] w-full max-w-[692px] shrink-0'
+          className='not-found-illustration aspect-692/390 w-full max-w-[692px] shrink-0'
         />
 
         <div className='flex flex-col items-center gap-3'>
@@ -57,7 +57,7 @@ const NotFoundScreen = ({ fallbackPath }: NotFoundScreenProps = {}): ReactElemen
           <Button
             variant='outline'
             onClick={handleGoBack}
-            className='h-auto gap-1.5 rounded-lg border-[0.5px] bg-foreground/[6%] px-[15.5px] py-[8.5px] text-base'
+            className='h-auto gap-1.5 rounded-lg border-[0.5px] bg-foreground/6 px-[15.5px] py-[8.5px] text-base'
             data-track-category='NOT_FOUND'
             data-track-name='GO_BACK'
           >

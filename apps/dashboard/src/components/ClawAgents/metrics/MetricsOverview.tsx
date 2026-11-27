@@ -28,7 +28,7 @@ export const Hero = ({
   delta?: MetricDelta | null | undefined;
   action?: ReactNode;
 }): ReactElement => (
-  <div className='rounded-xl border border-border bg-card px-5 py-4 shadow-sm'>
+  <div className='rounded-xl border border-border bg-card px-5 py-4 shadow-xs'>
     <div className='flex min-h-5 items-center justify-between gap-2'>
       <p className='text-xs font-medium uppercase tracking-wide text-muted-foreground'>{label}</p>
       {action}
@@ -54,7 +54,7 @@ export const Tile = ({
   detail: string;
   tone?: MetricDelta['tone'];
 }): ReactElement => (
-  <div className='rounded-xl border border-border bg-card px-4 py-3 shadow-sm'>
+  <div className='rounded-xl border border-border bg-card px-4 py-3 shadow-xs'>
     <p className='text-[11px] font-medium uppercase tracking-wide text-muted-foreground'>{label}</p>
     <p className='mt-1 text-xl font-semibold tabular-nums text-foreground'>{value}</p>
     <p className={cn('mt-0.5 text-[11px]', toneClass(tone))}>{detail}</p>

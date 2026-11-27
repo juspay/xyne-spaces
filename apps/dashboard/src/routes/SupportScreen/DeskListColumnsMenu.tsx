@@ -63,7 +63,7 @@ const SortableColumnRow = ({
         {...attributes}
         {...listeners}
         aria-label={`Reorder ${column.label}`}
-        className='flex size-6 shrink-0 cursor-grab items-center justify-center rounded text-muted-foreground outline-none active:cursor-grabbing focus-visible:ring-2 focus-visible:ring-ring'
+        className='flex size-6 shrink-0 cursor-grab items-center justify-center rounded text-muted-foreground outline-hidden active:cursor-grabbing focus-visible:ring-2 focus-visible:ring-ring'
         data-track-category='Support'
         data-track-name='ReorderListColumn'
       >

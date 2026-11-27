@@ -154,7 +154,7 @@ export function AgentBehaviourTabV2({
               placeholder="eg. Always respond in the user's language"
               data-track-category='Claw Agents'
               data-track-name='Agent detail v2: reminders'
-              className='h-[86px] w-full resize-y rounded-2xl border border-border bg-card p-4 text-sm leading-5 text-foreground placeholder:text-muted-foreground read-only:opacity-70 focus:outline-none focus:ring-1 focus:ring-ring'
+              className='h-[86px] w-full resize-y rounded-2xl border border-border bg-card p-4 text-sm leading-5 text-foreground placeholder:text-muted-foreground read-only:opacity-70 focus:outline-hidden focus:ring-1 focus:ring-ring'
             />
             {editable && remindersDirty && (
               <div className='flex items-center justify-end gap-3'>

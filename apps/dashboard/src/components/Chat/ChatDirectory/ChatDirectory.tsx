@@ -226,7 +226,7 @@ const GroupSettingsMenu = ({
       <DropdownMenuTrigger asChild>
         <button
           className={cn(
-            'group/child flex items-center justify-center rounded-md p-1 shrink-0 text-sidebar-foreground hover:text-sidebar-accent-foreground hover:bg-sidebar-accent transition-opacity ease-in-out duration-300 focus:outline-none',
+            'group/child flex items-center justify-center rounded-md p-1 shrink-0 text-sidebar-foreground hover:text-sidebar-accent-foreground hover:bg-sidebar-accent transition-opacity ease-in-out duration-300 focus:outline-hidden',
             alwaysVisible || menuOpen ? 'opacity-100' : 'opacity-0 group-hover:opacity-100',
           )}
           onClick={(e: React.MouseEvent<HTMLButtonElement>) => {
@@ -1255,7 +1255,7 @@ const ChatDirectory = ({
           tabIndex={0}
           role='region'
           aria-label='Channels and direct messages'
-          className='flex-1 h-full overflow-y-scroll no-scrollbar pb-[calc(2.5rem+env(safe-area-inset-bottom))] px-0.5 pt-1 outline-none'
+          className='flex-1 h-full overflow-y-scroll no-scrollbar pb-[calc(2.5rem+env(safe-area-inset-bottom))] px-0.5 pt-1 outline-hidden'
         >
           <div className='hidden md:block'>
             <SortableBar store={inboxItemsStore} ids={inboxNavIds} direction='vertical'>
@@ -1318,7 +1318,7 @@ const ChatDirectory = ({
                         <span className='size-5 flex items-center justify-center shrink-0'>
                           <Badge
                             variant='success'
-                            className='text-xs h-[18px] px-[6px] py-[1px] bg-sidebar-primary border border-sidebar-accent-ring text-sidebar-primary-foreground'
+                            className='text-xs h-[18px] px-[6px] py-px bg-sidebar-primary border border-sidebar-accent-ring text-sidebar-primary-foreground'
                           >
                             {badgeCount > 10 ? '10+' : badgeCount}
                           </Badge>
@@ -1338,7 +1338,7 @@ const ChatDirectory = ({
               trigger={
                 <button
                   type='button'
-                  className='flex items-center justify-start gap-3 w-full px-3 py-2 text-sm font-medium tracking-[-0.14px] rounded-[10px] border border-dashed border-transparent text-sidebar-foreground/60 transition-colors hover:bg-sidebar-accent hover:border-sidebar-border hover:text-sidebar-accent-foreground'
+                  className='flex items-center justify-start gap-3 w-full px-3 py-2 text-sm font-medium tracking-[-0.14px] rounded-[10px] border border-dashed border-transparent transition-colors hover:bg-sidebar-accent hover:border-sidebar-border hover:text-sidebar-accent-foreground'
                   data-testid='chat-nav-add'
                   data-track-category='CHAT_SIDEBAR'
                   data-track-name='OPEN_ADD_MENU'
@@ -1415,9 +1415,7 @@ const ChatDirectory = ({
                     <Accordion.Content>
                       <div className='min-h-[4px]'>
                         {starredDisplayChannels.length === 0 ? (
-                          <div className='px-2 py-1 text-xs text-sidebar-foreground/60 italic'>
-                            Drop here to star
-                          </div>
+                          <div className='px-2 py-1 text-xs italic'>Drop here to star</div>
                         ) : (
                           starredDisplayChannels.map(channel => (
                             <SortableChannelItem
@@ -2059,13 +2057,13 @@ const ChatDirectory = ({
       <div className='h-full overflow-scroll no-scrollbar px-3 relative bg-rsed-300'>
         {/* Mobile  */}
         {/* <div className='sticky top-0 z-50 pt-4  block min-[500px]:hidden'>
-          <div className='absolute top-0 left-0 right-0 h-20 touch-none bg-gradient-to-b from-white to-transparent z-10'></div>
+          <div className='absolute top-0 left-0 right-0 h-20 touch-none bg-linear-to-b from-white to-transparent z-10'></div>
           <div className='flex items-center justify-between gap-2'>
             <button
               onClick={() => void navigate('/chat')}
               data-track-category='CHAT_SIDEBAR'
               data-track-name='BACK_TO_CHAT'
-              className='h-8 px-4 flex items-center justify-center rounded-[999px] border border-[#FFF] bg-[linear-gradient(180deg,_#FFF_0%,_#FAFAFA_100%)] shadow-[inset_0_4px_6px_0_#F5F5F5,0_0_12px_0_#E5E5E5] min-[500px]:hidden z-30 '
+              className='h-8 px-4 flex items-center justify-center rounded-[999px] border border-white bg-[linear-gradient(180deg,#FFF_0%,#FAFAFA_100%)] shadow-[inset_0_4px_6px_0_#F5F5F5,0_0_12px_0_#E5E5E5] min-[500px]:hidden z-30 '
             >
               Chat
             </button>
@@ -2074,7 +2072,7 @@ const ChatDirectory = ({
                 onClick={() => setIsCommandMenuOpen(true)}
                 data-track-category='CHAT_SIDEBAR'
                 data-track-name='OPEN_COMMAND_MENU'
-                className='h-8 px-2 flex items-center justify-center rounded-[999px] border border-[#FFF] bg-[linear-gradient(180deg,_#FFF_0%,_#FAFAFA_100%)] shadow-[inset_0_4px_6px_0_#F5F5F5,0_0_12px_0_#E5E5E5] min-[500px]:hidden z-30'
+                className='h-8 px-2 flex items-center justify-center rounded-[999px] border border-white bg-[linear-gradient(180deg,#FFF_0%,#FAFAFA_100%)] shadow-[inset_0_4px_6px_0_#F5F5F5,0_0_12px_0_#E5E5E5] min-[500px]:hidden z-30'
               >
                 <SearchDefault size={16} />
               </button>

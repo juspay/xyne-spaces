@@ -103,7 +103,7 @@ export const CallLayout: React.FC<CallLayoutProps> = ({ callId }) => {
             {callDuration && (
               <>
                 {!isMobile && <span className='w-1 h-1 rounded-full shrink-0 bg-background/50' />}
-                <span className='text-sm shrink-0 tabular-nums min-w-[4.5rem] text-right text-white/90'>
+                <span className='text-sm shrink-0 tabular-nums min-w-18 text-right text-white/90'>
                   {callDuration}
                 </span>
               </>

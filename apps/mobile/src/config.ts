@@ -172,8 +172,8 @@ export const ALTERNATE_PUBLIC_DEEP_LINK_ORIGINS: readonly string[] = Array.from(
 ).filter(origin => origin !== PUBLIC_DEEP_LINK_ORIGIN);
 
 /**
- * HTTPS origins allowed to issue device-enrollment QR codes (`ENROLLMENT_ORIGINS`,
- * comma-separated). Empty when unset, so enrollment fails closed.
+ * HTTPS origins of the device-enrollment portal (`ENROLLMENT_ORIGINS`, comma-separated).
+ * The two-QR enrollment sends no requests to them; the first is shown in the enrollment steps.
  */
 export const ENROLLMENT_ORIGINS: ReadonlySet<string> = new Set(
   parseHttpsOrigins(xs.lotusEnrollmentOrigins),

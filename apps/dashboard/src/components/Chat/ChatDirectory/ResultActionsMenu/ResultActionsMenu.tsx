@@ -137,7 +137,7 @@ export const ResultActionsMenu: React.FC<ResultActionsMenuProps> = ({
             // Surface uses ui/Select's popover tokens (rounded-md, border) but a stronger shadow so
             // this floating menu reads as an elevated layer over the palette instead of bleeding into
             // it. Narrow width since there's no header. Stays a DropdownMenu for menu semantics.
-            'z-[10051] w-52 overflow-hidden rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-2xl outline-none',
+            'z-10051 w-52 overflow-hidden rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-2xl outline-hidden',
             // Same open/close fade+zoom and side-slide as SelectContent.
             'data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95',
             'data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95',
@@ -160,8 +160,8 @@ export const ResultActionsMenu: React.FC<ResultActionsMenuProps> = ({
                 }}
                 className={cn(
                   // Row shape mirrors ui/Select's SelectItem (minus the value checkmark / pr-8).
-                  'flex cursor-pointer select-none items-center gap-2 rounded-sm px-2 py-1.5 text-sm text-foreground outline-none',
-                  'data-[highlighted]:bg-accent data-[highlighted]:text-accent-foreground',
+                  'flex cursor-pointer select-none items-center gap-2 rounded-sm px-2 py-1.5 text-sm text-foreground outline-hidden',
+                  'data-highlighted:bg-accent data-highlighted:text-accent-foreground',
                 )}
               >
                 <Icon className='h-4 w-4 shrink-0' />

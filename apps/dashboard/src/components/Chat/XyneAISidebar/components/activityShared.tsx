@@ -302,7 +302,7 @@ export function LiveReasoning({
         const el = e.currentTarget;
         stuckToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 28;
       }}
-      className='animate-fade-in-up overflow-y-auto whitespace-pre-wrap break-words text-[11px] italic leading-relaxed text-muted-foreground/70 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden'
+      className='animate-fade-in-up overflow-y-auto whitespace-pre-wrap wrap-break-word text-[11px] italic leading-relaxed text-muted-foreground/70 scrollbar-none [&::-webkit-scrollbar]:hidden'
       style={{ maxHeight: `${(lines * 1.7).toFixed(2)}em`, ...PANE_FADE }}
     >
       {settled}

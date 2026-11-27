@@ -205,7 +205,7 @@ export const RSVP_BADGE_BASE_CLASS =
   'absolute -bottom-0.5 -right-0.5 flex items-center justify-center size-4 rounded-full border-2 border-background';
 
 export const POPOVER_CONTENT_CLASS =
-  'z-[60] bg-background rounded-xl border border-border shadow-xl w-[400px] max-w-[calc(100vw-32px)] outline-none ' +
+  'z-60 bg-background rounded-xl border border-border shadow-xl w-[400px] max-w-[calc(100vw-32px)] outline-hidden ' +
   'data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 ' +
   'data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 ' +
   'data-[side=bottom]:slide-in-from-top-2 data-[side=top]:slide-in-from-bottom-2 ' +

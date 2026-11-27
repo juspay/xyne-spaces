@@ -78,7 +78,7 @@ export const LocalHarnessStepPanel = ({
   };
 
   return (
-    <div className='flex-1 flex flex-col justify-center max-w-[520px] w-full md:absolute md:left-12 lg:left-16 md:top-[276px] md:bottom-[38px] md:w-[calc(100%_-_96px)] md:max-w-[600px] md:justify-start'>
+    <div className='flex-1 flex flex-col justify-center max-w-[520px] w-full md:absolute md:left-12 lg:left-16 md:top-[276px] md:bottom-[38px] md:w-[calc(100%-96px)] md:max-w-[600px] md:justify-start'>
       <h1 className='text-[28px] leading-[34px] font-bold text-[#242936]'>
         This {noun} can run your agents
       </h1>
@@ -252,7 +252,7 @@ export const LocalHarnessStepPreview = ({
             className={`absolute inset-0 transition-colors duration-500 ${
               connected
                 ? 'bg-[#5C9E7A]'
-                : 'bg-[linear-gradient(180deg,#D4DAE4_50%,transparent_50%)] bg-[length:1px_6px]'
+                : 'bg-[linear-gradient(180deg,#D4DAE4_50%,transparent_50%)] bg-size-[1px_6px]'
             }`}
           />
           {!connected && (
@@ -261,7 +261,7 @@ export const LocalHarnessStepPreview = ({
         </div>
 
         <div className='flex items-center gap-3'>
-          <div className='flex size-[42px] shrink-0 items-center justify-center rounded-[12px] bg-gradient-to-b from-[#FF8C8C] to-[#FF4F4F] shadow-[0_8px_18px_rgba(255,79,79,0.24)]'>
+          <div className='flex size-[42px] shrink-0 items-center justify-center rounded-[12px] bg-linear-to-b from-[#FF8C8C] to-[#FF4F4F] shadow-[0_8px_18px_rgba(255,79,79,0.24)]'>
             <img src='/svgs/icons/genius-star-white.svg' alt='' className='size-[22px]' />
           </div>
           <div className='min-w-0'>

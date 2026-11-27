@@ -20,7 +20,7 @@ export const SwitchLoadingOverlay = (): ReactElement | null => {
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           transition={{ duration: 0.2, ease: 'easeOut' }}
-          className='fixed inset-0 z-[2000] flex flex-col items-center justify-center gap-6 backdrop-blur-lg'
+          className='fixed inset-0 z-2000 flex flex-col items-center justify-center gap-6 backdrop-blur-lg'
           style={{ background: 'rgba(15, 15, 20, 0.35)' }}
         >
           <img

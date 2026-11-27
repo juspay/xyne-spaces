@@ -80,7 +80,7 @@ export const ShortcutPickerModal: React.FC<ShortcutPickerModalProps> = ({
 
   return (
     <div
-      className='fixed inset-0 z-[100] flex items-center justify-center'
+      className='fixed inset-0 z-100 flex items-center justify-center'
       role='button'
       tabIndex={0}
       aria-label='Close shortcuts modal'
@@ -139,7 +139,7 @@ export const ShortcutPickerModal: React.FC<ShortcutPickerModalProps> = ({
               onChange={e => setSearch(e.target.value)}
               data-track-category='shortcut-picker'
               data-track-name='search-shortcuts'
-              className='w-full pl-8 pr-3 py-1.5 text-sm rounded-md border border-border bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring'
+              className='w-full pl-8 pr-3 py-1.5 text-sm rounded-md border border-border bg-background text-foreground placeholder:text-muted-foreground focus:outline-hidden focus:ring-1 focus:ring-ring'
             />
           </div>
         </div>
@@ -165,7 +165,7 @@ export const ShortcutPickerModal: React.FC<ShortcutPickerModalProps> = ({
                     data-track-name='run-shortcut'
                     className='w-full h-auto flex items-start justify-start gap-3 px-2 py-2 rounded-md hover:bg-accent transition-colors text-left disabled:opacity-50'
                   >
-                    <div className='flex-shrink-0 w-7 h-7 rounded bg-primary/10 flex items-center justify-center mt-0.5'>
+                    <div className='shrink-0 w-7 h-7 rounded bg-primary/10 flex items-center justify-center mt-0.5'>
                       <Zap className='w-3.5 h-3.5 text-primary' />
                     </div>
                     <div className='flex-1 min-w-0'>

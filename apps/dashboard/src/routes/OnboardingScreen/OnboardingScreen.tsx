@@ -159,7 +159,7 @@ const OnboardingScreen: React.FC = () => {
       case 'welcome':
         return (
           <div className='w-full h-screen relative bg-background overflow-hidden flex items-center justify-center p-4 animate-in fade-in duration-500'>
-            <div className='absolute inset-0 opacity-20 bg-gradient-to-br from-orange-100 to-orange-200 blur-3xl animate-pulse-slow' />
+            <div className='absolute inset-0 opacity-20 bg-linear-to-br from-orange-100 to-orange-200 blur-3xl animate-pulse-slow' />
             <div className='relative z-10 w-full max-w-4xl mx-auto text-center'>
               <h1 className='text-center text-foreground font-medium text-lg sm:text-xl md:text-2xl lg:text-3xl leading-relaxed'>
                 Welcome to a smarter workspace made
@@ -171,7 +171,7 @@ const OnboardingScreen: React.FC = () => {
                   <img
                     src='/images/onboarding/crissCrossVector.svg'
                     alt=''
-                    className='absolute top-[0.2em] -right-[0.05em] w-[1.2em] pointer-events-none'
+                    className='absolute top-[0.2em] right-[-0.05em] w-[1.2em] pointer-events-none'
                   />
                   {/* GREYCOVER (always below 'for') */}
                   <span
@@ -188,7 +188,7 @@ const OnboardingScreen: React.FC = () => {
     relative
     inline-block
     w-14 sm:w-16 md:w-20
-    aspect-[3/2]
+    aspect-3/2
   '
                     >
                       <img
@@ -212,7 +212,7 @@ const OnboardingScreen: React.FC = () => {
                 you
               </h1>
               <button
-                className='mt-8 md:mt-12 bg-slate-500 hover:bg-slate-600 active:scale-95 text-white font-medium py-3 px-8 rounded-xl inline-flex justify-center items-center gap-2 transition-all duration-300 transform hover:shadow-lg hover:-translate-y-1 focus:outline-none'
+                className='mt-8 md:mt-12 bg-slate-500 hover:bg-slate-600 active:scale-95 text-white font-medium py-3 px-8 rounded-xl inline-flex justify-center items-center gap-2 transition-all duration-300 transform hover:shadow-lg hover:-translate-y-1 focus:outline-hidden'
                 onClick={nextStep}
                 data-track-category='Onboarding'
                 data-track-name='GetStarted'
@@ -244,11 +244,11 @@ const OnboardingScreen: React.FC = () => {
                   migratedChannels?.slice(0, 5).map(channel => (
                     <div key={channel.id} className='w-full flex items-center'>
                       {/* Channel Icon */}
-                      <div className='w-3 h-3 relative overflow-hidden flex-shrink-0'>
-                        <div className='w-2 h-0 left-[2px] top-[4.50px] absolute outline outline-1 outline-offset-[-0.50px] outline-gray-900' />
-                        <div className='w-2 h-0 left-[2px] top-[7.50px] absolute outline outline-1 outline-offset-[-0.50px] outline-gray-900' />
-                        <div className='w-px h-2 left-[4px] top-[1.50px] absolute outline outline-1 outline-offset-[-0.50px] outline-gray-900' />
-                        <div className='w-px h-2 left-[7px] top-[1.50px] absolute outline outline-1 outline-offset-[-0.50px] outline-gray-900' />
+                      <div className='w-3 h-3 relative overflow-hidden shrink-0'>
+                        <div className='w-2 h-0 left-[2px] top-[4.50px] absolute outline-solid outline-1 outline-offset-[-0.50px] outline-gray-900' />
+                        <div className='w-2 h-0 left-[2px] top-[7.50px] absolute outline-solid outline-1 outline-offset-[-0.50px] outline-gray-900' />
+                        <div className='w-px h-2 left-[4px] top-[1.50px] absolute outline-solid outline-1 outline-offset-[-0.50px] outline-gray-900' />
+                        <div className='w-px h-2 left-[7px] top-[1.50px] absolute outline-solid outline-1 outline-offset-[-0.50px] outline-gray-900' />
                       </div>
                       {/* Channel Name */}
                       <div className='flex-1 py-0.5'>
@@ -266,7 +266,7 @@ const OnboardingScreen: React.FC = () => {
                 className='
             w-16 h-16 rounded-full bg-neutral-900/5
             transition hover:bg-neutral-900/10 active:scale-90
-            focus:outline-none
+            focus:outline-hidden
           '
                 data-track-category='Onboarding'
                 data-track-name='ContinueStep'
@@ -295,7 +295,7 @@ const OnboardingScreen: React.FC = () => {
             )}
 
             {/* soft background glow */}
-            <div className='absolute top-[-20rem] left-1/2 -translate-x-1/2 w-[60vw] h-[60vw] bg-background rounded-full blur-[90px] pointer-events-none' />
+            <div className='absolute -top-80 left-1/2 -translate-x-1/2 w-[60vw] h-[60vw] bg-background rounded-full blur-[90px] pointer-events-none' />
 
             <div className='relative w-full mx-auto flex flex-col items-center gap-12'>
               {/* TITLE & BUTTON */}
@@ -311,7 +311,7 @@ const OnboardingScreen: React.FC = () => {
                 <button
                   onClick={handleCompleteOnboarding}
                   disabled={isCompleting}
-                  className='h-10 px-6 rounded-xl bg-slate-500 text-white text-sm font-medium transition hover:bg-slate-600 disabled:opacity-60 inline-flex items-center gap-2 focus:outline-none'
+                  className='h-10 px-6 rounded-xl bg-slate-500 text-white text-sm font-medium transition hover:bg-slate-600 disabled:opacity-60 inline-flex items-center gap-2 focus:outline-hidden'
                   data-track-category='Onboarding'
                   data-track-name='OpenWorkspace'
                 >
@@ -340,7 +340,7 @@ const OnboardingScreen: React.FC = () => {
               }
             `}
                 >
-                  <div className='bg-background/60 backdrop-blur rounded-[30px] shadow-xl overflow-hidden rotate-[-2deg]'>
+                  <div className='bg-background/60 backdrop-blur-sm rounded-[30px] shadow-xl overflow-hidden -rotate-2'>
                     {/* Avatar */}
                     <div className='relative w-full aspect-square overflow-hidden rounded-t-[30px]'>
                       {pictureUrl ? (
@@ -350,7 +350,7 @@ const OnboardingScreen: React.FC = () => {
                           className='w-full h-full object-cover'
                         />
                       ) : (
-                        <div className='w-full h-full flex items-center justify-center bg-gradient-to-br from-purple-400 to-purple-600'>
+                        <div className='w-full h-full flex items-center justify-center bg-linear-to-br from-purple-400 to-purple-600'>
                           <span className='text-6xl font-bold text-white'>
                             {user?.name?.[0]?.toUpperCase() || 'U'}
                           </span>
@@ -358,7 +358,7 @@ const OnboardingScreen: React.FC = () => {
                       )}
 
                       {/* Joined badge */}
-                      <div className='absolute top-4 right-4 px-3 py-1 bg-background/70 backdrop-blur rounded-full text-xs font-medium text-foreground'>
+                      <div className='absolute top-4 right-4 px-3 py-1 bg-background/70 backdrop-blur-sm rounded-full text-xs font-medium text-foreground'>
                         {user?.createdAt
                           ? `Joined ${new Date(user.createdAt).toLocaleDateString('en-US', {
                               month: 'short',
@@ -408,7 +408,7 @@ const OnboardingScreen: React.FC = () => {
                 className='
             w-16 h-16 rounded-full bg-neutral-900/5
             transition hover:bg-neutral-900/10 active:scale-90
-            focus:outline-none
+            focus:outline-hidden
           '
                 data-track-category='Onboarding'
                 data-track-name='ContinueDefaultStep'

@@ -114,7 +114,7 @@ function OptionsChecklist<T extends string>({
             placeholder={search.placeholder}
             data-track-category='automations-list'
             data-track-name={`filter-search-${search.name}`}
-            className='w-full rounded bg-transparent py-1 pl-7 pr-2 text-sm text-foreground outline-none placeholder:text-muted-foreground'
+            className='w-full rounded bg-transparent py-1 pl-7 pr-2 text-sm text-foreground outline-hidden placeholder:text-muted-foreground'
           />
         </div>
       )}
@@ -141,7 +141,7 @@ function OptionsChecklist<T extends string>({
               data-track-category='automations-list'
               data-track-name={`filter-toggle-${option.value}`}
               className={cn(
-                'flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors outline-none',
+                'flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors outline-hidden',
                 isSelected ? 'bg-accent text-accent-foreground' : 'text-foreground hover:bg-muted',
               )}
             >

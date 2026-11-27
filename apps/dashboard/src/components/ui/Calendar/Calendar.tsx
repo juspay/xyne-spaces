@@ -43,9 +43,9 @@ function Calendar({ className, classNames, showOutsideDays = true, ...props }: C
         weekday:
           'text-muted-foreground flex-1 font-normal text-xs flex items-center justify-center h-8',
         week: 'flex w-full',
-        day: 'relative flex-1 p-0 text-center text-sm focus-within:relative focus-within:z-20 [&:has([aria-selected])]:bg-accent [&:has([aria-selected].day-outside)]:bg-accent/50 [&:has([aria-selected].day-range-end)]:rounded-r-md',
+        day: 'relative flex-1 p-0 text-center text-sm focus-within:relative focus-within:z-20 has-aria-[selected]:bg-accent [&:has([aria-selected].day-outside)]:bg-accent/50 [&:has([aria-selected].day-range-end)]:rounded-r-md',
         day_button:
-          'h-8 w-full p-0 font-normal aria-selected:opacity-100 inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm transition-colors focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50 hover:bg-muted hover:text-foreground',
+          'h-8 w-full p-0 font-normal aria-selected:opacity-100 inline-flex items-center justify-center whitespace-nowrap rounded-md text-sm transition-colors focus-visible:outline-hidden disabled:pointer-events-none disabled:opacity-50 hover:bg-muted hover:text-foreground',
         range_start: 'day-range-start',
         range_end: 'day-range-end',
         selected:

@@ -115,7 +115,7 @@ export const PptxViewer: React.FC<PptxViewerProps> = ({
         {/* Title bar */}
         <div className='flex items-center justify-between px-3 py-2 border-b border-border'>
           <div className='flex items-center gap-2 min-w-0'>
-            <Presentation size={14} className='text-muted-foreground flex-shrink-0' />
+            <Presentation size={14} className='text-muted-foreground shrink-0' />
             <span
               className="text-xs font-semibold text-foreground font-['Inter'] truncate"
               title={title}
@@ -123,7 +123,7 @@ export const PptxViewer: React.FC<PptxViewerProps> = ({
               {displayTitle}
             </span>
           </div>
-          <div className='flex items-center gap-2 ml-2 flex-shrink-0'>
+          <div className='flex items-center gap-2 ml-2 shrink-0'>
             <button
               onClick={enterPresent}
               className='flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors'
@@ -173,7 +173,7 @@ export const PptxViewer: React.FC<PptxViewerProps> = ({
             // Show PowerPoint icon when no slide data
             <button
               onClick={enterPresent}
-              className='w-full relative overflow-hidden rounded bg-gradient-to-br from-orange-50 to-orange-100 border border-border flex items-center justify-center hover:opacity-90 transition-opacity'
+              className='w-full relative overflow-hidden rounded bg-linear-to-br from-orange-50 to-orange-100 border border-border flex items-center justify-center hover:opacity-90 transition-opacity'
               style={{ aspectRatio: '16/9', maxHeight: '200px' }}
               data-track-category='XyneAI'
               data-track-name='PPTX_ICON_PREVIEW'
@@ -221,7 +221,7 @@ export const PptxViewer: React.FC<PptxViewerProps> = ({
             }}
           >
             <div className='flex items-center gap-2 min-w-0'>
-              <Presentation size={16} className='text-orange-400 flex-shrink-0' />
+              <Presentation size={16} className='text-orange-400 shrink-0' />
               <span
                 style={{
                   color: '#fff',

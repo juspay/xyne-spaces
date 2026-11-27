@@ -1328,7 +1328,7 @@ export const ThreadMessages = ({
                 Suppressed entirely in a deactivated 1:1 DM archive — the whole
                 thread is read-only there. */}
             {isDmReadOnly ? null : isUserMember || channel?.isArchived ? (
-              <div className='pb-3 bg-background shrink-0 px-[var(--composer-px)] [--composer-px:0.75rem]'>
+              <div className='pb-3 bg-background shrink-0 px-(--composer-px) [--composer-px:0.75rem]'>
                 <ChatInput
                   ref={inputRef}
                   channelId={derivedChannelId}
@@ -1627,11 +1627,13 @@ export const ThreadMessages = ({
         {showHeader && (
           <div className='flex gap-2 items-center justify-between w-full pl-2 pr-3 pt-3'>
             <div className='flex gap-2 items-center min-w-0 px-0.5'>
-              <ArrowTurnDownRight size={16} className='flex-shrink-0' />
+              <ArrowTurnDownRight size={16} className='shrink-0' />
               <h3
                 className={cn(
                   'text-[17px] font-semibold overflow-hidden min-w-0',
-                  headerShowsTitle ? 'line-clamp-3 break-words' : 'whitespace-nowrap text-ellipsis',
+                  headerShowsTitle
+                    ? 'line-clamp-3 wrap-break-word'
+                    : 'whitespace-nowrap text-ellipsis',
                 )}
                 {...(headerShowsTitle && { title: discussionTitle })}
               >
@@ -1665,7 +1667,7 @@ export const ThreadMessages = ({
                   aria-label={`Copy ticket ID ${ticket.xyneId}`}
                   data-track-category='THREAD_PANEL'
                   data-track-name='COPY_TICKET_ID'
-                  className='text-xs font-medium text-muted-foreground bg-muted hover:bg-muted/70 px-2 py-0.5 rounded flex-shrink-0 cursor-pointer select-text transition-colors'
+                  className='text-xs font-medium text-muted-foreground bg-muted hover:bg-muted/70 px-2 py-0.5 rounded shrink-0 cursor-pointer select-text transition-colors'
                 >
                   {ticket.xyneId}
                 </button>
@@ -1988,7 +1990,7 @@ export const ThreadMessages = ({
                   {isDmReadOnly ? null : isUserMember || channel?.isArchived ? (
                     <div
                       className={cn(
-                        'pb-3 bg-background shrink-0 px-[var(--composer-px)] [--composer-px:0.75rem]',
+                        'pb-3 bg-background shrink-0 px-(--composer-px) [--composer-px:0.75rem]',
                         deskView && 'mt-auto',
                       )}
                     >
@@ -2120,7 +2122,7 @@ export const ThreadMessages = ({
                     className={cn(
                       'text-[17px] font-semibold overflow-hidden min-w-0 text-foreground first:ml-1.5',
                       headerShowsTitle
-                        ? 'line-clamp-3 break-words'
+                        ? 'line-clamp-3 wrap-break-word'
                         : 'whitespace-nowrap text-ellipsis',
                     )}
                     {...(headerShowsTitle && { title: discussionTitle })}
@@ -2185,7 +2187,7 @@ export const ThreadMessages = ({
                 {isDmReadOnly ? null : isUserMember || channel?.isArchived ? (
                   <div
                     className={cn(
-                      'pb-3 bg-background shrink-0 px-[var(--composer-px)] [--composer-px:0.75rem]',
+                      'pb-3 bg-background shrink-0 px-(--composer-px) [--composer-px:0.75rem]',
                       deskView && 'mt-auto',
                     )}
                   >

@@ -565,7 +565,7 @@ export const FormBuilder = ({
                 aria-label='Form title'
                 maxLength={Math.max(FORM_NAME_MAX_LENGTH, formName.length)}
                 disabled={inputsDisabled || !allowRename}
-                className='w-full text-[17px] font-semibold text-foreground bg-transparent border-0 focus:outline-none focus:ring-0 p-0 placeholder:text-muted-foreground/50 disabled:cursor-not-allowed'
+                className='w-full text-[17px] font-semibold text-foreground bg-transparent border-0 focus:outline-hidden focus:ring-0 p-0 placeholder:text-muted-foreground/50 disabled:cursor-not-allowed'
                 data-track-category={trackingCategory}
                 data-track-name='form_title_input'
               />
@@ -580,7 +580,7 @@ export const FormBuilder = ({
                 aria-label='Form description'
                 rows={2}
                 disabled={inputsDisabled}
-                className='w-full text-[14px] text-foreground bg-transparent border-0 focus:outline-none focus:ring-0 p-0 mt-1 resize-none placeholder:text-muted-foreground/50'
+                className='w-full text-[14px] text-foreground bg-transparent border-0 focus:outline-hidden focus:ring-0 p-0 mt-1 resize-none placeholder:text-muted-foreground/50'
                 data-track-category={trackingCategory}
                 data-track-name='form_description_input'
               />

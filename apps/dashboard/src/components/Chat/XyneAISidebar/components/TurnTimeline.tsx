@@ -218,7 +218,7 @@ function StepGroup({
         disabled={!canOpen}
         aria-expanded={open}
         aria-controls={bodyId}
-        className='-ml-1 inline-flex max-w-full items-center gap-1.5 rounded-md px-1 py-0.5 text-left text-muted-foreground/70 transition-colors hover:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default disabled:hover:text-muted-foreground/70'
+        className='-ml-1 inline-flex max-w-full items-center gap-1.5 rounded-md px-1 py-0.5 text-left text-muted-foreground/70 transition-colors hover:text-muted-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-default disabled:hover:text-muted-foreground/70'
         data-track-category='XyneAI'
         data-track-name='TOGGLE_TURN_STEPS'
       >
@@ -293,12 +293,12 @@ function ThinkingStep({ part }: { part: AssistantReasoningPart }): ReactElement 
         type='button'
         onClick={() => setOpen(value => !value)}
         aria-expanded={open}
-        className='group/row flex w-full items-start gap-2 px-3 py-1 text-left text-[13px] leading-5 text-muted-foreground/70 transition-colors hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:outline-none'
+        className='group/row flex w-full items-start gap-2 px-3 py-1 text-left text-[13px] leading-5 text-muted-foreground/70 transition-colors hover:bg-muted/40 focus-visible:bg-muted/40 focus-visible:outline-hidden'
         data-track-category='XyneAI'
         data-track-name='TOGGLE_THINKING_STEP'
       >
         <span className='flex min-w-0 items-start gap-1.5'>
-          <span className={cn('min-w-0 break-words', !open && 'truncate')}>
+          <span className={cn('min-w-0 wrap-break-word', !open && 'truncate')}>
             {firstLine || 'Thinking…'}
           </span>
           <ChevronRight
@@ -322,7 +322,7 @@ function ThinkingStep({ part }: { part: AssistantReasoningPart }): ReactElement 
       </button>
       {rest && (
         <Reveal open={open}>
-          <p className='max-h-80 overflow-y-auto whitespace-pre-wrap break-words px-3 pb-2 text-xs leading-5 text-muted-foreground/70'>
+          <p className='max-h-80 overflow-y-auto whitespace-pre-wrap wrap-break-word px-3 pb-2 text-xs leading-5 text-muted-foreground/70'>
             {rest}
           </p>
         </Reveal>

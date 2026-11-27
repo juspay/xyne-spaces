@@ -116,7 +116,7 @@ const XyneCalendarCallPillComponent = ({
         getCallPillVariantClasses(variant),
         maybe && 'border-foreground/50',
         isPast && variant !== 'past' && 'opacity-60 hover:opacity-90',
-        'hover:shadow-sm',
+        'hover:shadow-xs',
         continuesFromPreviousDay && 'rounded-t-none border-t-0',
         continuesToNextDay && 'rounded-b-none border-b-0',
         className,

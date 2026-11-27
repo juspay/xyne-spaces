@@ -266,7 +266,7 @@ export function AgentActivityTabV2({
                   aria-label='Filter schedules'
                   data-track-category='Claw Agents'
                   data-track-name='Agent detail v2: filter schedules'
-                  className='h-9 w-full rounded-[10px] border border-border bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring'
+                  className='h-9 w-full rounded-[10px] border border-border bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-hidden focus:ring-1 focus:ring-ring'
                 />
               </div>
             )}
@@ -351,7 +351,7 @@ export function AgentActivityTabV2({
                 aria-label='Filter runs'
                 data-track-category='Claw Agents'
                 data-track-name='Agent detail v2: filter runs input'
-                className='h-9 w-full rounded-[10px] border border-border bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring'
+                className='h-9 w-full rounded-[10px] border border-border bg-background px-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-hidden focus:ring-1 focus:ring-ring'
               />
             </div>
           )}

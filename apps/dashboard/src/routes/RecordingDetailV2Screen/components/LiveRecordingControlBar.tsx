@@ -339,7 +339,7 @@ const LiveRecordingTimeline = ({
           style={{ left: `${progressPercent}%` }}
         >
           {!isPaused && <span className='absolute inset-0 animate-ping rounded-full bg-primary' />}
-          <span className='absolute inset-0 rounded-full border-2 border-background bg-primary shadow-sm' />
+          <span className='absolute inset-0 rounded-full border-2 border-background bg-primary shadow-xs' />
         </div>
       </div>
     </div>
@@ -549,7 +549,7 @@ const RecordedTimelineBar = ({
           {playback.canSeek && (
             <>
               <span
-                className='absolute top-1/2 size-3 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-background bg-foreground shadow-sm'
+                className='absolute top-1/2 size-3 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-background bg-foreground shadow-xs'
                 style={{ left: `${progressPercent}%` }}
                 aria-hidden='true'
               />
@@ -630,7 +630,7 @@ const PlaybackSpeedControl = ({ rate, onChange }: PlaybackSpeedControlProps): Re
           className={cn(
             'rounded-full px-2.5 py-1 font-mono text-xs transition-colors',
             rate === speed.value
-              ? 'bg-card text-foreground shadow-sm'
+              ? 'bg-card text-foreground shadow-xs'
               : 'text-muted-foreground hover:text-foreground',
           )}
           data-track-category='RecordingDetailV2'

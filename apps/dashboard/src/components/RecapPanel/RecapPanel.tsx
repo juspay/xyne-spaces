@@ -442,7 +442,7 @@ const RecapPanel = (): ReactElement => {
 
       return (
         <div
-          className={`border rounded-xl p-5 bg-card shadow-sm mb-5 transition-all duration-300 hover:shadow-md ${
+          className={`border rounded-xl p-5 bg-card shadow-xs mb-5 transition-all duration-300 hover:shadow-md ${
             isRead
               ? 'border-l-[3px] border-l-green-500 border-border'
               : 'border-l-[3px] border-l-blue-500 border-border'
@@ -454,7 +454,7 @@ const RecapPanel = (): ReactElement => {
               <Link
                 to={`/chat/dir/${card.channelId}`}
                 state={{ trackSource: 'recap' }}
-                className='flex items-center gap-2 rounded hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500'
+                className='flex items-center gap-2 rounded hover:underline focus:outline-hidden focus-visible:ring-2 focus-visible:ring-blue-500'
                 title={`Go to #${card.channelName}`}
                 data-track-category='RECAP_PANEL'
                 data-track-name='OPEN_CHANNEL_FROM_RECAP'
@@ -479,7 +479,7 @@ const RecapPanel = (): ReactElement => {
                     }
                     className={`text-xs px-2 py-0.5 rounded transition-colors ${
                       !isShowingCustom
-                        ? 'bg-background text-foreground shadow-sm'
+                        ? 'bg-background text-foreground shadow-xs'
                         : 'text-muted-foreground hover:text-foreground'
                     }`}
                     data-track-category='RECAP_PANEL'
@@ -497,7 +497,7 @@ const RecapPanel = (): ReactElement => {
                     }
                     className={`text-xs px-2 py-0.5 rounded transition-colors ${
                       isShowingCustom
-                        ? 'bg-background text-foreground shadow-sm'
+                        ? 'bg-background text-foreground shadow-xs'
                         : 'text-muted-foreground hover:text-foreground'
                     }`}
                     data-track-category='RECAP_PANEL'
@@ -620,7 +620,7 @@ const RecapPanel = (): ReactElement => {
     return (
       <div className='h-full flex flex-col overflow-hidden'>
         {/* Header Section - fixed at top */}
-        <div className='text-center p-5 pb-4 flex-shrink-0'>
+        <div className='text-center p-5 pb-4 shrink-0'>
           <h2 className={`${isMobile ? 'text-lg' : 'text-2xl'} font-semibold text-foreground mb-1`}>
             {isHistoricalView ? 'Historical Recap' : greeting}
           </h2>
@@ -686,7 +686,7 @@ const RecapPanel = (): ReactElement => {
           {/* Footer with time saved - enhanced with gradient */}
           {/* Show for both current and historical recaps */}
           {dataToUse.meta.estimatedTimeSavedMinutes > 0 && (
-            <div className='rounded-2xl p-6 text-center bg-gradient-to-r from-green-50 via-emerald-50 to-teal-50 border-2 border-green-200 mb-5 mt-2 shadow-lg'>
+            <div className='rounded-2xl p-6 text-center bg-linear-to-r from-green-50 via-emerald-50 to-teal-50 border-2 border-green-200 mb-5 mt-2 shadow-lg'>
               <h3 className='text-lg font-bold text-gray-900 mb-2'>
                 🎉 <span className='text-green-600'>Rejoice!</span>
               </h3>
@@ -747,7 +747,7 @@ const RecapPanel = (): ReactElement => {
             ${showThreadPanel ? (isMobile ? 'hidden' : 'w-1/2') : 'w-full'}`}
         >
           {/* Header */}
-          <div className='p-4 bg-background border-b border-border flex-shrink-0'>
+          <div className='p-4 bg-background border-b border-border shrink-0'>
             <div className='flex items-center justify-between'>
               <div className='flex items-center gap-2'>
                 {selectedDate && (

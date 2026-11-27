@@ -182,7 +182,7 @@ const ComponentTile = ({
 
   return (
     <div
-      className={`group/tile flex flex-col h-full bg-white border rounded-2xl overflow-hidden transition-shadow ${isSelected ? 'border-xyne-green-500 ring-2 ring-xyne-green-500/20 shadow-md' : 'border-xyne-gray-200 shadow-sm hover:shadow-md'}`}
+      className={`group/tile flex flex-col h-full bg-white border rounded-2xl overflow-hidden transition-shadow ${isSelected ? 'border-xyne-green-500 ring-2 ring-xyne-green-500/20 shadow-md' : 'border-xyne-gray-200 shadow-xs hover:shadow-md'}`}
       {...(onSelect
         ? {
             role: 'button',
@@ -209,7 +209,7 @@ const ComponentTile = ({
         : {})}
     >
       <div className='dashboard-grid-drag-handle flex items-center justify-between gap-2 pl-5 pr-2.5 pt-3.5 pb-1 cursor-move select-none'>
-        <h3 className='text-[11px] uppercase tracking-[0.1em] font-semibold text-xyne-gray-500 truncate'>
+        <h3 className='text-[11px] uppercase tracking-widest font-semibold text-xyne-gray-500 truncate'>
           {component.title || untitledFor(visualType)}
         </h3>
         {isPersisted ? (
@@ -418,7 +418,7 @@ function ErrorState({ message }: { message: string }): ReactElement {
               Technical details
             </button>
             {showRaw && (
-              <pre className='mt-2 text-[10px] font-mono text-muted-foreground whitespace-pre-wrap break-words bg-muted/40 rounded-md p-2.5 max-h-40 overflow-y-auto border border-border/60'>
+              <pre className='mt-2 text-[10px] font-mono text-muted-foreground whitespace-pre-wrap wrap-break-word bg-muted/40 rounded-md p-2.5 max-h-40 overflow-y-auto border border-border/60'>
                 {formatted.raw}
               </pre>
             )}
@@ -426,7 +426,7 @@ function ErrorState({ message }: { message: string }): ReactElement {
         )}
 
         {!wasFormatted && (
-          <pre className='mx-5 mb-3 text-[11px] font-mono text-muted-foreground whitespace-pre-wrap break-words bg-muted/40 rounded-md p-2.5 max-h-40 overflow-y-auto border border-border/60'>
+          <pre className='mx-5 mb-3 text-[11px] font-mono text-muted-foreground whitespace-pre-wrap wrap-break-word bg-muted/40 rounded-md p-2.5 max-h-40 overflow-y-auto border border-border/60'>
             {formatted.raw}
           </pre>
         )}

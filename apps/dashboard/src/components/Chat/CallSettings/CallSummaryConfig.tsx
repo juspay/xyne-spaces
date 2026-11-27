@@ -77,7 +77,7 @@ export const CallSummaryConfig: React.FC<CallSummaryConfigProps> = ({
   }, [aiLoading]);
 
   const aiOverlay = aiLoading ? (
-    <div className='absolute inset-0 z-10 flex items-center justify-center rounded-[10px] bg-background/50 backdrop-blur-sm'>
+    <div className='absolute inset-0 z-10 flex items-center justify-center rounded-[10px] bg-background/50 backdrop-blur-xs'>
       <div className='flex items-center gap-2 text-sm font-medium text-foreground'>
         <Loader2 size={16} className='animate-spin text-primary' />
         <span>{AI_WORDS[aiWordIndex]}…</span>
@@ -180,7 +180,7 @@ export const CallSummaryConfig: React.FC<CallSummaryConfigProps> = ({
           <button
             type='button'
             onClick={() => handleOpenChange(true)}
-            className='absolute bottom-3 right-3 inline-flex items-center gap-2 rounded-[10px] border border-border bg-background px-4 py-2 text-sm font-medium text-foreground shadow-sm hover:bg-muted/40'
+            className='absolute bottom-3 right-3 inline-flex items-center gap-2 rounded-[10px] border border-border bg-background px-4 py-2 text-sm font-medium text-foreground shadow-xs hover:bg-muted/40'
             title='Edit'
             data-track-category='CallSummary'
             data-track-name='OpenCallSummaryEditor'
@@ -225,7 +225,7 @@ export const CallSummaryConfig: React.FC<CallSummaryConfigProps> = ({
                   maxLength={SUMMARY_PROMPT_MAX_LENGTH}
                   spellCheck={false}
                   readOnly={!canManage || aiLoading}
-                  className='thin-scrollbar h-full w-full resize-none rounded-[10px] border border-border bg-background px-3 py-2 font-mono text-[13px] leading-[150%] text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary read-only:cursor-default read-only:bg-muted/40 read-only:focus:ring-0'
+                  className='thin-scrollbar h-full w-full resize-none rounded-[10px] border border-border bg-background px-3 py-2 font-mono text-[13px] leading-[150%] text-foreground placeholder:text-muted-foreground focus:outline-hidden focus:ring-1 focus:ring-primary read-only:cursor-default read-only:bg-muted/40 read-only:focus:ring-0'
                   data-track-category='CallSummary'
                   data-track-name='EditSummaryDraft'
                 />
@@ -268,7 +268,7 @@ export const CallSummaryConfig: React.FC<CallSummaryConfigProps> = ({
                     }}
                     placeholder='Describe what you want to change here'
                     disabled={aiLoading}
-                    className='w-full rounded-[10px] border border-border bg-background py-2 pl-3 pr-10 text-[13px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary disabled:opacity-50'
+                    className='w-full rounded-[10px] border border-border bg-background py-2 pl-3 pr-10 text-[13px] text-foreground placeholder:text-muted-foreground focus:outline-hidden focus:ring-1 focus:ring-primary disabled:opacity-50'
                     data-track-category='CallSummary'
                     data-track-name='EditWithAIInput'
                   />

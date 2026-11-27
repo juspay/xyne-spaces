@@ -407,7 +407,7 @@ function PathTagsInput({
 
   return (
     <Field label={label} htmlFor={id} className='gap-1.5'>
-      <div className='flex min-h-9 flex-wrap items-center gap-1.5 rounded-md border border-input px-1.5 py-1 shadow-xs focus-within:border-ring focus-within:ring-[2px] focus-within:ring-ring/10'>
+      <div className='flex min-h-9 flex-wrap items-center gap-1.5 rounded-md border border-input px-1.5 py-1 shadow-xs focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/10'>
         {values.map(value => (
           <span
             key={value}
@@ -444,7 +444,7 @@ function PathTagsInput({
           }}
           onBlur={() => draft.trim() && commit(draft)}
           placeholder={placeholder}
-          className='h-[26px] min-w-[110px] flex-1 bg-transparent px-1 font-code text-[12.5px] text-foreground outline-none placeholder:text-muted-foreground'
+          className='h-[26px] min-w-[110px] flex-1 bg-transparent px-1 font-code text-[12.5px] text-foreground outline-hidden placeholder:text-muted-foreground'
           data-track-category={TRACK_CATEGORY}
           data-track-name={`${trackName}Added`}
         />

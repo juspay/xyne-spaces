@@ -145,7 +145,7 @@ export const AgentSelector = ({
               value={query}
               onChange={e => setQuery(e.target.value)}
               placeholder='Search agents…'
-              className='flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground/60'
+              className='flex-1 bg-transparent text-sm outline-hidden placeholder:text-muted-foreground/60'
               autoFocus
               data-track-category='XyneAI'
               data-track-name='SearchAgentSelector'

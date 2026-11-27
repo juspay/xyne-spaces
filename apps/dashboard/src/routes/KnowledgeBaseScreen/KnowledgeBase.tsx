@@ -110,7 +110,7 @@ const KnowledgeBaseScreen = (): ReactElement => {
       <div className='flex-1 overflow-auto p-6'>
         <div className='max-w-5xl mx-auto'>
           {/* Project Selector */}
-          <div className='bg-background rounded-lg shadow-sm border p-4 mb-6'>
+          <div className='bg-background rounded-lg shadow-xs border p-4 mb-6'>
             <p className='block text-sm font-medium text-foreground mb-2'>Select Project</p>
             <div className='max-w-md'>
               <SingleSelect
@@ -127,7 +127,7 @@ const KnowledgeBaseScreen = (): ReactElement => {
           {/* Documents Section */}
           {!selectedProjectId ? (
             // No project selected state
-            <div className='bg-background rounded-lg shadow-sm border p-12 text-center'>
+            <div className='bg-background rounded-lg shadow-xs border p-12 text-center'>
               <FolderOpen size={48} className='mx-auto text-muted mb-4' />
               <h2 className='text-lg font-medium text-foreground mb-2'>Select a Project</h2>
               <p className='text-muted-foreground'>
@@ -136,13 +136,13 @@ const KnowledgeBaseScreen = (): ReactElement => {
             </div>
           ) : isLoadingDocuments ? (
             // Loading state
-            <div className='bg-background rounded-lg shadow-sm border p-12 text-center'>
+            <div className='bg-background rounded-lg shadow-xs border p-12 text-center'>
               <Loader2 size={32} className='mx-auto text-blue-500 animate-spin mb-4' />
               <p className='text-muted-foreground'>Loading documents...</p>
             </div>
           ) : documents.length === 0 ? (
             // Empty state
-            <div className='bg-background rounded-lg shadow-sm border p-12 text-center'>
+            <div className='bg-background rounded-lg shadow-xs border p-12 text-center'>
               <FileText size={48} className='mx-auto text-muted mb-4' />
               <h2 className='text-lg font-medium text-foreground mb-2'>No Documents Yet</h2>
               <p className='text-muted-foreground'>
@@ -151,7 +151,7 @@ const KnowledgeBaseScreen = (): ReactElement => {
             </div>
           ) : (
             // Documents list
-            <div className='bg-background rounded-lg shadow-sm border overflow-hidden'>
+            <div className='bg-background rounded-lg shadow-xs border overflow-hidden'>
               <div className='px-4 py-3 border-b ai-kb-section'>
                 <h2 className='font-medium text-foreground'>
                   Knowledge Documents ({documentsData?.total || 0})
@@ -177,7 +177,7 @@ const KnowledgeBaseScreen = (): ReactElement => {
                     <div className='flex items-start justify-between gap-4'>
                       <div className='flex-1 min-w-0'>
                         <div className='flex items-center gap-2 mb-1'>
-                          <FileText size={16} className='text-blue-500 flex-shrink-0' />
+                          <FileText size={16} className='text-blue-500 shrink-0' />
                           <h3 className='font-medium text-foreground truncate'>{doc.title}</h3>
                         </div>
                         <p className='text-sm text-muted-foreground line-clamp-2 mb-2'>

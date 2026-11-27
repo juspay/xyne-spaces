@@ -341,7 +341,7 @@ const ColumnResizeHandle = ({
       className={cn(
         'group/resize relative w-2 shrink-0 self-stretch',
         'cursor-col-resize',
-        'focus-visible:outline-none',
+        'focus-visible:outline-hidden',
         // Paints the pair continuous. Without this the 8px is a window onto the
         // wallpaper, and no amount of squared corners either side will stop two
         // panes with daylight between them reading as two cards.

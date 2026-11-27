@@ -108,7 +108,7 @@ export function DetailRow({
 
 export function DetailProse({ children }: { children: string }): ReactElement {
   return (
-    <p className='whitespace-pre-wrap break-words p-4 text-sm font-normal leading-5 tracking-[-0.28px] text-foreground'>
+    <p className='whitespace-pre-wrap wrap-break-word p-4 text-sm font-normal leading-5 tracking-[-0.28px] text-foreground'>
       {children}
     </p>
   );

@@ -312,10 +312,10 @@ const CreateTicketModal = ({
             .map((field, index, array) => (
               <div
                 key={field.id}
-                className={`bg-background border border-border flex items-center ${index < array.length - 1 ? 'mb-[-1px]' : ''}`}
+                className={`bg-background border border-border flex items-center ${index < array.length - 1 ? '-mb-px' : ''}`}
               >
                 {/* Left column - Label with gray background */}
-                <div className='bg-muted/30 border-r border-border w-[160px] p-[10px] flex gap-[8px] items-center mr-[-1px]'>
+                <div className='bg-muted/30 border-r border-border w-[160px] p-[10px] flex gap-[8px] items-center -mr-px'>
                   <p className='text-[14px] font-medium text-muted-foreground leading-[18px] tracking-[-0.2px]'>
                     {field.label}
                     {field.required && <span className='text-red-500'>*</span>}
@@ -323,7 +323,7 @@ const CreateTicketModal = ({
                 </div>
 
                 {/* Right column - Value */}
-                <div className='flex-1 px-[14px] py-[10px] flex gap-[8px] items-center mr-[-1px]'>
+                <div className='flex-1 px-[14px] py-[10px] flex gap-[8px] items-center -mr-px'>
                   {field.type === 'text' && (
                     <p className='text-[14px] font-medium text-muted-foreground leading-[18px] tracking-[-0.2px]'>
                       Sample {field.label.toLowerCase()} text

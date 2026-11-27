@@ -62,7 +62,7 @@ export const TopicsTreemap = ({
           content={
             <span className='block max-w-[260px]'>
               {/* Wraps rather than truncates: the full name is why this exists. */}
-              <span className='block break-words font-semibold'>{tile.name}</span>
+              <span className='block wrap-break-word font-semibold'>{tile.name}</span>
               <span className='mt-0.5 block text-muted-foreground'>
                 {tile.share ? `${tile.count} · ${tile.share}` : tile.count}
               </span>
@@ -88,7 +88,7 @@ export const TopicsTreemap = ({
             onBlur={() => onHover(null)}
             className={cn(
               'absolute flex min-w-0 flex-col justify-between overflow-hidden rounded-[10px] p-3 text-left',
-              'outline-none transition-[filter] duration-150',
+              'outline-hidden transition-[filter] duration-150',
               // A dashed edge marks a tile that does nothing when clicked: the
               // cursor alone left sighted users to find out by clicking, where
               // the aria-label already says so. Not opacity — fading the tile

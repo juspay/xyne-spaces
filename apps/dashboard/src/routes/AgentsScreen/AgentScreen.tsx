@@ -10,7 +10,7 @@ const AgentsScreen = (): ReactElement => {
 
   return (
     <div className='h-full bg-background rounded-2xl'>
-      <nav className='shadow-sm border-b'>
+      <nav className='shadow-xs border-b'>
         <div className='max-w-7xl mx-auto px-4 sm:px-6 lg:px-8'>
           <div className='flex justify-between h-16'>
             <div className='flex items-center'>
@@ -40,15 +40,15 @@ const AgentsScreen = (): ReactElement => {
                 Configure and manage your AI agents and their capabilities.
               </p>
               <div className='grid grid-cols-1 md:grid-cols-3 gap-4 max-w-2xl'>
-                <div className='bg-background p-6 rounded-lg shadow'>
+                <div className='bg-background p-6 rounded-lg shadow-sm'>
                   <h3 className='font-semibold text-foreground mb-2'>Create Agent</h3>
                   <p className='text-muted-foreground text-sm'>Set up a new AI agent</p>
                 </div>
-                <div className='bg-background p-6 rounded-lg shadow'>
+                <div className='bg-background p-6 rounded-lg shadow-sm'>
                   <h3 className='font-semibold text-foreground mb-2'>Agent Library</h3>
                   <p className='text-muted-foreground text-sm'>Browse available agents</p>
                 </div>
-                <div className='bg-background p-6 rounded-lg shadow'>
+                <div className='bg-background p-6 rounded-lg shadow-sm'>
                   <h3 className='font-semibold text-foreground mb-2'>Training</h3>
                   <p className='text-muted-foreground text-sm'>Train and optimize agents</p>
                 </div>

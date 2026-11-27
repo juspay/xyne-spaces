@@ -597,7 +597,7 @@ export function ExternalLobbyPage() {
                     aria-describedby={nameError ? 'lobby-name-error' : undefined}
                     data-track-category='CALLS'
                     data-track-name='EXTERNAL_NAME_INPUT'
-                    className={`h-14 w-full rounded-lg border bg-transparent px-4 text-base text-[#e3e3e3] placeholder-[#8e918f] outline-none transition-colors focus:border-[#a8c7fa] focus:ring-1 focus:ring-[#a8c7fa] disabled:opacity-60 ${
+                    className={`h-14 w-full rounded-lg border bg-transparent px-4 text-base text-[#e3e3e3] placeholder-[#8e918f] outline-hidden transition-colors focus:border-[#a8c7fa] focus:ring-1 focus:ring-[#a8c7fa] disabled:opacity-60 ${
                       nameError ? 'border-[#f2b8b5]' : 'border-[#8e918f]'
                     }`}
                   />

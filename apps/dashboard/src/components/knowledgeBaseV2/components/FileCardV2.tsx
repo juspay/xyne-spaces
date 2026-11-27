@@ -53,7 +53,7 @@ const InlineName: React.FC<InlineNameProps> = ({ initial, onCommit, onCancel, cl
       data-track-category='knowledge-base'
       data-track-name='rename-card-inline'
       className={cn(
-        'h-6 w-full min-w-0 rounded-md border border-border bg-background px-1.5 text-[13.5px] font-medium text-foreground focus:border-ring focus:outline-none focus:ring-1 focus:ring-ring',
+        'h-6 w-full min-w-0 rounded-md border border-border bg-background px-1.5 text-[13.5px] font-medium text-foreground focus:border-ring focus:outline-hidden focus:ring-1 focus:ring-ring',
         className,
       )}
     />
@@ -85,7 +85,7 @@ const HoverAction: React.FC<HoverActionProps> = ({
     data-track-category='knowledge-base'
     data-track-name={trackName}
     className={cn(
-      'grid h-7 w-7 place-items-center rounded-md bg-background/80 text-muted-foreground opacity-0 shadow-sm ring-1 ring-border backdrop-blur-sm transition group-hover:opacity-100 focus-visible:opacity-100',
+      'grid h-7 w-7 place-items-center rounded-md bg-background/80 text-muted-foreground opacity-0 shadow-xs ring-1 ring-border backdrop-blur-xs transition group-hover:opacity-100 focus-visible:opacity-100',
       intent === 'danger'
         ? 'hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40'
         : 'hover:bg-muted hover:text-foreground',
@@ -293,7 +293,7 @@ export const FolderCardV2: React.FC<FolderCardV2Props> = ({
         {/* Plain outline glyph — same bounding box FileCardPreviewV2 reserves
             so rows line up evenly across mixed folder + file grids. */}
         <div className='pl-1 pt-1'>
-          <div className='relative flex h-[4.5rem] w-14 items-center justify-center'>
+          <div className='relative flex h-18 w-14 items-center justify-center'>
             <Folder className='h-10 w-10 text-muted-foreground' strokeWidth={1.5} />
             <span className='absolute bottom-2 right-0'>
               <CollectionStatusBadgeV2 entry={folder} onOpenStatus={onOpenStatus} />

@@ -288,7 +288,7 @@ export function CallHistorySearchPanel(props: CallHistorySearchPanelProps): Reac
               onOpenAutoFocus={e => e.preventDefault()}
               onInteractOutside={closeCallMentionSearch}
               onEscapeKeyDown={closeCallMentionSearch}
-              className='z-[9999] w-[var(--radix-popover-trigger-width)] overflow-hidden rounded-md border border-border bg-popover shadow-lg'
+              className='z-9999 w-(--radix-popover-trigger-width) overflow-hidden rounded-md border border-border bg-popover shadow-lg'
             >
               {callMentionSearchType === ChipType.USER ? (
                 filteredUserMentionResults.length > 0 ? (

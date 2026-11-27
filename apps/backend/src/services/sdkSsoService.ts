@@ -130,6 +130,16 @@ export interface SdkSsoRefreshGrant {
   refreshExpiresAt: number;
 }
 
+/**
+ * What starting a refresh session hands back: its refresh token, and an access token minted
+ * for the new auth session (with its `sid`), which replaces the one minted at approval.
+ */
+export interface SdkSsoRefreshStart extends SdkSsoRefreshGrant {
+  token: string;
+  /** When `token` expires, in epoch milliseconds */
+  expiresAt: number;
+}
+
 /** What a refresh hands back: a new session and the refresh token that replaces the old one. */
 export type SdkSsoRefreshedSession = SdkSsoSession & SdkSsoRefreshGrant;
 
@@ -393,14 +403,27 @@ class SdkSsoService {
    * Start the auth session a refresh token renews, for a session just handed
    * out by `pollForAuthorization`. It lasts as long as a browser login. One row
    * per approved device flow: the device key is unique to this sign-in.
+   *
+   * The access token minted at approval predates this auth session, so it carries
+   * no `sid`; anything keyed by the session (the transit key a client registers,
+   * `POST /api/transit/register`) would refuse it until the first refresh. A token
+   * for the new session is minted here, as a refresh would, and replaces it.
    */
   async startRefreshSession(
     session: SdkSsoSession,
     origin: DeviceAuthOrigin,
-  ): Promise<SdkSsoRefreshGrant> {
+  ): Promise<SdkSsoRefreshStart> {
     const user = await db.user.findUnique({
       where: { id: session.userId },
-      select: { orgMemberId: true, orgMember: { select: { orgId: true } } },
+      select: {
+        id: true,
+        email: true,
+        name: true,
+        picture: true,
+        workspaceId: true,
+        orgMemberId: true,
+        orgMember: { select: { orgId: true } },
+      },
     });
     if (!user?.orgMember) {
       throw new Error(`SDK SSO: user ${session.userId} has no org membership`);
@@ -432,7 +455,13 @@ class SdkSsoService {
       platform: Platform.WEB,
     });
 
-    return { refreshToken, refreshExpiresAt: refreshTokenExpiry.getTime() };
+    const minted = mintAccessToken({ user, sessionId, refreshTokenExpiry });
+    return {
+      refreshToken,
+      refreshExpiresAt: refreshTokenExpiry.getTime(),
+      token: minted.token,
+      expiresAt: minted.expiresAt,
+    };
   }
 
   /**

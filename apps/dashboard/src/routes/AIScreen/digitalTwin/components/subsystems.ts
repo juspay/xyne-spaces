@@ -53,7 +53,7 @@ export interface CategoryStyle {
 export const CATEGORY_STYLES: Record<string, CategoryStyle> = {
   world: {
     label: 'WORLD',
-    className: 'border-status-success/60 text-status-success',
+    className: 'text-status-success',
   },
   experience: {
     label: 'EXPERIENCE',
@@ -61,7 +61,7 @@ export const CATEGORY_STYLES: Record<string, CategoryStyle> = {
   },
   observation: {
     label: 'OBSERVATION',
-    className: 'border-status-pending/60 text-status-pending',
+    className: 'text-status-pending',
   },
   // eslint-disable-next-line @typescript-eslint/naming-convention -- backend category key
   mental_model: {

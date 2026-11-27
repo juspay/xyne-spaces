@@ -609,7 +609,7 @@ const CallHistoryV2Screen = (): ReactElement => {
       className='bg-background flex flex-col w-full h-full md:rounded-2xl shadow-md relative overflow-y-auto'
     >
       {!isMobile && (
-        <div className='sticky left-0 top-0 z-[60] hidden h-0 w-fit md:block'>
+        <div className='sticky left-0 top-0 z-60 hidden h-0 w-fit md:block'>
           <div className='h-[52px] w-fit'>
             <AppNavigator />
           </div>
@@ -693,7 +693,7 @@ const CallHistoryV2Screen = (): ReactElement => {
                     data-track-name={`show_${tab.value}_calls`}
                   >
                     {recentCallFilter === tab.value && (
-                      <span className='absolute inset-0 -z-10 rounded-lg bg-background shadow-sm' />
+                      <span className='absolute inset-0 -z-10 rounded-lg bg-background shadow-xs' />
                     )}
                     {tab.label}
                   </button>

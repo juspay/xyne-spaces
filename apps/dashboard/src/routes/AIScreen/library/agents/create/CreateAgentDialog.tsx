@@ -13,7 +13,7 @@ import {
 import { V2Dialog } from '../../shared/primitives/V2Dialog';
 
 const FIELD =
-  'w-full rounded-xl border border-border bg-card px-3.5 py-2.5 text-sm leading-5 text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-1 focus:ring-ring';
+  'w-full rounded-xl border border-border bg-card px-3.5 py-2.5 text-sm leading-5 text-foreground placeholder:text-muted-foreground/60 focus:outline-hidden focus:ring-1 focus:ring-ring';
 
 function openingColor(): string {
   return COLORS[Math.floor(Math.random() * COLORS.length)] ?? COLORS[0];
@@ -158,7 +158,7 @@ export function CreateAgentDialog({
             placeholder='Describe the job in a sentence or two.'
             data-track-category='Claw Agents'
             data-track-name='Create agent dialog: prompt'
-            className='h-[132px] w-full resize-none bg-transparent px-3.5 py-2.5 text-sm leading-5 text-foreground placeholder:text-muted-foreground/60 focus:outline-none'
+            className='h-[132px] w-full resize-none bg-transparent px-3.5 py-2.5 text-sm leading-5 text-foreground placeholder:text-muted-foreground/60 focus:outline-hidden'
           />
         </div>
       </div>

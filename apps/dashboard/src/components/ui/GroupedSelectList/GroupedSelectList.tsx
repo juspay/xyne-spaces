@@ -39,7 +39,7 @@ export function GroupedSelectList({
           autoComplete='off'
           data-track-category={trackCategory}
           data-track-name={trackName}
-          className='flex-1 bg-transparent text-[13px] text-foreground outline-none placeholder:text-muted-foreground'
+          className='flex-1 bg-transparent text-[13px] text-foreground outline-hidden placeholder:text-muted-foreground'
         />
       </div>
       <div className={cn('min-h-0 p-1', scrollable && 'max-h-80 overflow-y-auto')}>

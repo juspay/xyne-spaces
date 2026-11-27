@@ -35,11 +35,15 @@
     "native/mic-monitor/mic-monitor"
   ],
   "asarUnpack": [
-    "native/mic-monitor/mic-monitor"
+    "native/mic-monitor/mic-monitor",
+    "native/transit-key/transit-key",
+    "native/transit-key/transit-key.exe"
   ],
+  "beforePack": "scripts/before-pack.js",
   "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
 
   "mac": {
+    "files": ["native/transit-key/transit-key"],
     "icon": "assets/images/xyne.png",
     "category": "public.app-category.productivity",
     "hardenedRuntime": true,
@@ -77,6 +81,7 @@
     }
   },
   "win": {
+    "files": ["native/transit-key/transit-key.exe"],
     "icon": "assets/images/xyne.png",
     "signExecutable": false,
     "target": [

@@ -66,7 +66,7 @@ function EmbedActions({ url, onUnembed, onDelete, editable }: EmbedActionsProps)
   return (
     <div
       contentEditable={false}
-      className='absolute right-2 top-2 z-10 flex items-center gap-0.5 rounded-md border border-border bg-popover/95 p-0.5 opacity-0 shadow-sm backdrop-blur transition-opacity group-hover:opacity-100 focus-within:opacity-100'
+      className='absolute right-2 top-2 z-10 flex items-center gap-0.5 rounded-md border border-border bg-popover/95 p-0.5 opacity-0 shadow-xs backdrop-blur-sm transition-opacity group-hover:opacity-100 focus-within:opacity-100'
     >
       <button
         type='button'
@@ -137,7 +137,7 @@ function GenericEmbedCard({ url }: { url: string }): ReactElement {
         event.preventDefault();
         openInNewTab(url);
       }}
-      className='flex w-full cursor-pointer items-center gap-3 rounded-lg border border-border bg-muted/30 p-3 transition-colors hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+      className='flex w-full cursor-pointer items-center gap-3 rounded-lg border border-border bg-muted/30 p-3 transition-colors hover:bg-muted/60 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring'
     >
       <span className='grid size-9 shrink-0 place-items-center rounded-md bg-background text-muted-foreground'>
         <Link2 size={16} />

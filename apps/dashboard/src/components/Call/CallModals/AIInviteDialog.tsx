@@ -149,7 +149,7 @@ export function AIInviteDialog({
 
         {/* User Selection */}
         <div className='space-y-2'>
-          <span className='text-sm font-medium text-foreground'>Users to Invite</span>
+          <span className='block text-sm font-medium text-foreground'>Users to Invite</span>
           <div
             className='border border-border rounded-lg divide-y divide-border max-h-48 overflow-y-auto'
             role='group'
@@ -195,7 +195,7 @@ export function AIInviteDialog({
 
         {/* Message Input */}
         <div className='space-y-2'>
-          <label htmlFor='invite-message' className='text-sm font-medium text-foreground'>
+          <label htmlFor='invite-message' className='block text-sm font-medium text-foreground'>
             Message (optional)
           </label>
           <textarea
@@ -203,7 +203,7 @@ export function AIInviteDialog({
             value={message}
             onChange={e => setMessage(e.target.value)}
             placeholder='Add a message for the invite...'
-            className='w-full px-3 py-2 text-sm border border-border rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring resize-none'
+            className='w-full px-3 py-2 text-sm border border-border rounded-lg bg-background text-foreground placeholder:text-muted-foreground focus:outline-hidden focus:ring-2 focus:ring-ring resize-none'
             rows={3}
             data-track-event='change'
             data-track-category='CALLS'

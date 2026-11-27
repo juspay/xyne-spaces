@@ -250,7 +250,7 @@ export function MessageCardAttachmentThumbnails({
               key={att.id}
               type='button'
               onClick={openViewer(att.id)}
-              className='h-8 w-8 overflow-hidden rounded border border-border bg-muted shrink-0 focus-visible:outline focus-visible:ring-2 focus-visible:ring-ring'
+              className='h-8 w-8 overflow-hidden rounded border border-border bg-muted shrink-0 focus-visible:outline-solid focus-visible:ring-2 focus-visible:ring-ring'
               aria-label={`View attachment ${att.originalFilename}`}
               data-track-category={trackCategory}
               data-track-name='MESSAGE_CARD_ATTACHMENT_OPEN_IMAGE'
@@ -277,7 +277,7 @@ export function MessageCardAttachmentThumbnails({
               key={att.id}
               type='button'
               onClick={openViewer(att.id)}
-              className='relative h-8 w-8 overflow-hidden rounded border border-border bg-muted shrink-0 flex items-center justify-center focus-visible:outline focus-visible:ring-2 focus-visible:ring-ring'
+              className='relative h-8 w-8 overflow-hidden rounded border border-border bg-muted shrink-0 flex items-center justify-center focus-visible:outline-solid focus-visible:ring-2 focus-visible:ring-ring'
               aria-label={`View video ${att.originalFilename}`}
               data-track-category={trackCategory}
               data-track-name='MESSAGE_CARD_ATTACHMENT_OPEN_VIDEO'
@@ -309,7 +309,7 @@ export function MessageCardAttachmentThumbnails({
             key={att.id}
             type='button'
             onClick={openViewer(att.id)}
-            className='h-9 max-w-[150px] flex items-center gap-2 rounded-lg border border-border bg-background pl-1.5 pr-2.5 shrink-0 text-left hover:bg-muted/40 transition-colors focus-visible:outline focus-visible:ring-2 focus-visible:ring-ring'
+            className='h-9 max-w-[150px] flex items-center gap-2 rounded-lg border border-border bg-background pl-1.5 pr-2.5 shrink-0 text-left hover:bg-muted/40 transition-colors focus-visible:outline-solid focus-visible:ring-2 focus-visible:ring-ring'
             aria-label={`View file ${att.originalFilename}`}
             data-track-category={trackCategory}
             data-track-name='MESSAGE_CARD_ATTACHMENT_OPEN_FILE'
@@ -327,7 +327,7 @@ export function MessageCardAttachmentThumbnails({
             ) : (
               <span
                 className={cn(
-                  'h-5 w-5 rounded-md flex items-center justify-center flex-shrink-0 text-[9px] font-bold',
+                  'h-5 w-5 rounded-md flex items-center justify-center shrink-0 text-[9px] font-bold',
                   badgeClassName,
                 )}
               >

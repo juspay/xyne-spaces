@@ -277,7 +277,7 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
                       userId={user.id}
                       size='sm'
                       showActiveStatus={false}
-                      className='rounded-md flex-shrink-0'
+                      className='rounded-md shrink-0'
                     />
                     <span className='text-sm font-medium text-foreground whitespace-nowrap'>
                       {getUserDisplayName(user)}
@@ -292,7 +292,7 @@ export const InstantCallModal: React.FC<InstantCallModalProps> = ({
                           selectedParticipants.filter(p => p !== valueToRemove),
                         );
                       }}
-                      className='text-muted-foreground hover:text-muted-foreground flex-shrink-0'
+                      className='text-muted-foreground hover:text-muted-foreground shrink-0'
                       data-track-category='CALL_PARTICIPANTS_SELECTION_MODAL'
                       data-track-name='RemoveCallParticipant'
                       data-track-metadata={JSON.stringify({

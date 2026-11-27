@@ -310,7 +310,7 @@ export const AppStoreDeskIntegrationCard = ({
             rows={5}
             spellCheck={false}
             placeholder={'-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----'}
-            className='w-full rounded-md border border-border bg-background px-3 py-2 font-mono text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring'
+            className='w-full rounded-md border border-border bg-background px-3 py-2 font-mono text-xs text-foreground placeholder:text-muted-foreground focus:outline-hidden focus:ring-2 focus:ring-ring'
           />
           <div className='flex justify-end gap-2'>
             <Button type='button' variant='outline' onClick={closeRotateKey}>

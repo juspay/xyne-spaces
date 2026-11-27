@@ -319,6 +319,8 @@ export class MutationEncryptionError extends Error {
   constructor(
     readonly code: string,
     message: string,
+    /** The encryption service's HTTP status, when the verdict came from it. */
+    readonly status?: number,
   ) {
     super(`${code}: ${message}`);
     this.name = 'MutationEncryptionError';
@@ -362,14 +364,18 @@ async function transformMutationArgs(
       entityType: 'WORKSPACE',
     });
   } catch (error) {
-    const verdict = (error as { body?: { code?: unknown; message?: unknown } }).body;
+    const { body: verdict, status } = error as { body?: { code?: unknown; message?: unknown }; status?: unknown };
     getCryptoOperations().add(1, {
       operation: 'transform_mutation',
       status: 'error',
       reason: typeof verdict?.code === 'string' ? verdict.code : 'transform_failed',
     });
     if (typeof verdict?.code === 'string') {
-      throw new MutationEncryptionError(verdict.code, String(verdict.message ?? verdict.code));
+      throw new MutationEncryptionError(
+        verdict.code,
+        String(verdict.message ?? verdict.code),
+        typeof status === 'number' ? status : undefined,
+      );
     }
     logger.error('[encryptedMutation] failed to transform mutation args', {
       mutator: mutatorName,

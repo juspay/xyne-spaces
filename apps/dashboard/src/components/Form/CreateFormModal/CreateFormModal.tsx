@@ -215,7 +215,7 @@ export const CreateFormModal = ({
               <button
                 type='button'
                 aria-label='About the project for new fields'
-                className='text-muted-foreground hover:text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-full'
+                className='text-muted-foreground hover:text-foreground outline-hidden focus-visible:ring-2 focus-visible:ring-ring rounded-full'
               >
                 <CircleHelp className='size-3.5' />
               </button>
@@ -223,7 +223,7 @@ export const CreateFormModal = ({
           </span>
           <Combobox
             // Match the sibling SelectTrigger box in this form
-            className='h-9 rounded-md px-3 shadow-xs bg-transparent transition-[color,box-shadow] focus-within:border-ring focus-within:ring-ring/10 focus-within:ring-[2px]'
+            className='h-9 rounded-md px-3 shadow-xs bg-transparent transition-[color,box-shadow] focus-within:border-ring focus-within:ring-ring/10 focus-within:ring-2'
             queryString={selectedProjectItem?.label ?? projectSearch}
             onInputValueChange={value => {
               if (value === '' && selectedProjectItem) return;
@@ -347,7 +347,7 @@ export const CreateFormModal = ({
                 type='button'
                 onClick={() => setIsEditing(true)}
                 disabled={!areFieldsLoaded}
-                className='flex h-7 items-center justify-center gap-2 rounded-[10px] p-2 text-base leading-[1.2] tracking-[-0.16px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50'
+                className='flex h-7 items-center justify-center gap-2 rounded-[10px] p-2 text-base leading-[1.2] tracking-[-0.16px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground outline-hidden focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50'
                 data-track-category='Forms'
                 data-track-name='EditForm'
                 data-track-metadata={JSON.stringify({ formId: form.id })}
@@ -360,7 +360,7 @@ export const CreateFormModal = ({
               type='button'
               onClick={() => onOpenChange(false)}
               aria-label='Close'
-              className='flex h-7 w-8 shrink-0 items-center justify-center rounded-[10px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring'
+              className='flex h-7 w-8 shrink-0 items-center justify-center rounded-[10px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground outline-hidden focus-visible:ring-2 focus-visible:ring-ring'
               data-track-category='Forms'
               data-track-name='CloseFormModal'
             >

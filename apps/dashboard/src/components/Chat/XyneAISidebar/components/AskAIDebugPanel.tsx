@@ -244,13 +244,13 @@ function JsonPrimitive({ value }: { value: unknown }) {
     // them to a single unreadable `\n`-laden quoted line.
     if (value.includes('\n') || value.length > 120) {
       return (
-        <span className='mt-0.5 block break-words whitespace-pre-wrap text-emerald-700 dark:text-emerald-300'>
+        <span className='mt-0.5 block wrap-break-word whitespace-pre-wrap text-emerald-700 dark:text-emerald-300'>
           {value}
         </span>
       );
     }
     return (
-      <span className='break-words whitespace-pre-wrap text-emerald-700 dark:text-emerald-300'>
+      <span className='wrap-break-word whitespace-pre-wrap text-emerald-700 dark:text-emerald-300'>
         {JSON.stringify(value)}
       </span>
     );
@@ -261,7 +261,7 @@ function JsonPrimitive({ value }: { value: unknown }) {
     return <span className='text-violet-700 dark:text-violet-300'>{String(value)}</span>;
   // Leftover leaf kinds (bigint / symbol / function). Cast away the `unknown`
   // object case so the linter is happy; String() renders them fine at runtime.
-  return <span className='break-words text-xyne-fg-secondary'>{String(value as bigint)}</span>;
+  return <span className='wrap-break-word text-xyne-fg-secondary'>{String(value as bigint)}</span>;
 }
 
 function JsonNode({
@@ -302,7 +302,7 @@ function JsonNode({
         data-track-category='XyneAI'
         data-track-name='DEBUG_JSON_NODE_TOGGLE'
         onClick={() => setExpanded(current => !current)}
-        className='flex w-full min-w-0 items-center gap-1 py-px text-left hover:bg-black/[0.04] dark:hover:bg-white/[0.04]'
+        className='flex w-full min-w-0 items-center gap-1 py-px text-left hover:bg-black/4 dark:hover:bg-white/4'
       >
         <ChevronDown
           size={11}
@@ -396,7 +396,7 @@ function JsonViewerModal({
       // non-modal, and it keeps this usable if it is ever hosted under a modal
       // dialog, which zeroes body pointer-events.
       data-debug-json-modal=''
-      className='pointer-events-auto fixed inset-0 z-[200] flex items-center justify-center bg-black/65 p-3 backdrop-blur-sm'
+      className='pointer-events-auto fixed inset-0 z-200 flex items-center justify-center bg-black/65 p-3 backdrop-blur-xs'
       onMouseDown={event => {
         // Close only on a true backdrop click — clicks inside the dialog don't
         // bubble a close (avoids a stop-propagation handler on the dialog, which
@@ -569,7 +569,7 @@ function ToolResultView({ value }: { value: unknown }) {
             <JsonNode value={parsed} depth={0} defaultExpandedDepth={999} />
           )}
           {activeView === 'raw' && (
-            <pre className='whitespace-pre-wrap break-words font-mono text-[11px] leading-relaxed text-xyne-fg-secondary'>
+            <pre className='whitespace-pre-wrap wrap-break-word font-mono text-[11px] leading-relaxed text-xyne-fg-secondary'>
               {rawText || '(empty)'}
             </pre>
           )}
@@ -675,7 +675,7 @@ function StreamRateGraph({ samples }: { samples: StreamRateSample[] }) {
   const average = samples.reduce((sum, sample) => sum + sample.streamsPerSec, 0) / samples.length;
   const total = samples.at(-1)?.streamsCollected ?? 0;
   return (
-    <div className='overflow-hidden rounded-md border border-xyne-border-subtle bg-xyne-surface/70'>
+    <div className='overflow-hidden rounded-md border border-xyne-border-subtle'>
       <div className='flex items-center gap-3 border-b border-xyne-border-subtle px-2 py-1 text-[9px] text-xyne-fg-muted'>
         <span className='font-semibold uppercase tracking-wide text-xyne-fg-tertiary'>
           Stream rate
@@ -725,7 +725,7 @@ function StreamRateStatus({
 }) {
   const tone = streamRateTone(rate);
   return (
-    <div className='flex shrink-0 items-center gap-2 border-b border-xyne-border-subtle bg-xyne-surface-subtle/60 px-3 py-1.5 text-[10px]'>
+    <div className='flex shrink-0 items-center gap-2 border-b border-xyne-border-subtle px-3 py-1.5 text-[10px]'>
       <span className={`h-2 w-2 rounded-full ${tone.dot} ${live ? 'animate-pulse' : ''}`} />
       <span className='font-semibold text-xyne-fg-secondary'>Streaming</span>
       <span className={`font-mono text-[12px] font-semibold ${tone.text}`}>
@@ -1108,7 +1108,7 @@ function DebugTimelineSection({
           {runWarnings.length > 0 && (
             <div className='space-y-0.5 rounded-md border border-amber-500/30 bg-amber-500/10 px-2 py-1.5 text-[11px] leading-relaxed text-amber-800 dark:text-amber-200'>
               {runWarnings.map((warning, index) => (
-                <p key={`${index}-${warning}`} className='break-words'>
+                <p key={`${index}-${warning}`} className='wrap-break-word'>
                   {warning}
                 </p>
               ))}
@@ -1290,7 +1290,7 @@ function MessageSnapshot({ message }: { message: unknown }) {
       ? 'text-sky-500 dark:text-sky-400'
       : 'text-xyne-fg-tertiary';
   return (
-    <details className='group/msg border-b border-xyne-border-subtle/40 py-2 last:border-b-0'>
+    <details className='group/msg border-b py-2 last:border-b-0'>
       <summary className='cursor-pointer list-none'>
         <div className='flex items-baseline gap-2'>
           <ChevronDown
@@ -1402,10 +1402,7 @@ function AvailableSkillsPanel({ skills }: { skills: SkillEntry[] }) {
       </summary>
       <div className='max-h-72 overflow-y-auto overscroll-contain px-2 pb-2 pt-1'>
         {skills.map(skill => (
-          <div
-            key={skill.name}
-            className='border-b border-xyne-border-subtle/40 py-1 last:border-b-0'
-          >
+          <div key={skill.name} className='border-b py-1 last:border-b-0'>
             <p className='font-mono text-[11.5px] text-xyne-fg-primary'>{skill.name}</p>
             {skill.description && (
               <p className='text-[11.5px] leading-relaxed text-xyne-fg-muted'>
@@ -1445,10 +1442,7 @@ function ToolDefinitionsPanel({ tools }: { tools: ToolEntry[] }) {
       </summary>
       <div className='max-h-96 overflow-y-auto overscroll-contain px-2 pb-2 pt-1'>
         {tools.map(tool => (
-          <details
-            key={tool.name}
-            className='group/tool border-b border-xyne-border-subtle/40 last:border-b-0'
-          >
+          <details key={tool.name} className='group/tool border-b last:border-b-0'>
             <summary className='flex cursor-pointer list-none items-baseline gap-2 py-1'>
               <ChevronDown
                 size={10}
@@ -1570,7 +1564,7 @@ function WarningsNotice({ warnings }: { warnings: string[] }) {
           Partial trace · {warnings.length} warning{warnings.length === 1 ? '' : 's'}
         </p>
         {shown.map((warning, index) => (
-          <p key={`${index}-${warning}`} className='break-words leading-relaxed'>
+          <p key={`${index}-${warning}`} className='wrap-break-word leading-relaxed'>
             {warning}
           </p>
         ))}
@@ -1727,7 +1721,7 @@ function DebugEventItem({
       data-tool-call-id={asString(data['toolCallId']) || asString(event['toolCallId']) || undefined}
       open={expanded}
       onToggle={event => setExpanded(event.currentTarget.open)}
-      className={`group/event border-l-2 ${visual.rail} ${indented ? 'ml-4' : ''} ${selected ? 'bg-xyne-surface-subtle/60' : 'hover:bg-black/[0.015] dark:hover:bg-white/[0.025]'}`}
+      className={`group/event border-l-2 ${visual.rail} ${indented ? 'ml-4' : ''} ${selected ? '' : 'hover:bg-black/1.5 dark:hover:bg-white/2.5'}`}
     >
       <summary
         className='cursor-pointer list-none py-[5px] pl-2 pr-1'
@@ -1787,9 +1781,7 @@ function DebugEventItem({
         )}
       </summary>
       {expanded && (
-        <div
-          className={`pl-[16px] pr-2 pb-3 pt-1 space-y-1.5 ${selected ? 'bg-xyne-surface-subtle/60' : ''}`}
-        >
+        <div className={`pl-[16px] pr-2 pb-3 pt-1 space-y-1.5`}>
           {(kind === 'follow_up_suggestions' ||
             (kind === 'follow_up_generation_end' && typeof data['outcome'] === 'string')) && (
             <FollowUpDiagnosticsSection diagnostic={data as unknown as FollowUpDiagnostic} />

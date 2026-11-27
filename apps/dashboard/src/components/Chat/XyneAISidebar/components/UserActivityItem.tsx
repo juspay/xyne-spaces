@@ -176,7 +176,7 @@ const getRedirection = (
         onClick={handleClick}
         data-track-category='XYNE_AI_SIDEBAR'
         data-track-name='OPEN_ACTIVITY_ITEM'
-        className='flex-shrink-0 p-1 hover:bg-accent rounded transition-colors cursor-pointer'
+        className='shrink-0 p-1 hover:bg-accent rounded transition-colors cursor-pointer'
         title={`Go to ${url}`}
         aria-label={`Go to ${url}`}
       >
@@ -255,7 +255,7 @@ export const UserActivityItem = ({
   return (
     <div
       className={`
-        w-full transition-all outline-none
+        w-full transition-all outline-hidden
         ${isSelected ? 'bg-muted' : 'hover:bg-accent'}
         ${isExpanded ? 'bg-muted' : ''}
       `}
@@ -275,7 +275,7 @@ export const UserActivityItem = ({
           onClick={handleToggleExpand}
           data-track-category='XYNE_AI_SIDEBAR'
           data-track-name='TOGGLE_ACTIVITY_DETAILS'
-          className='flex-shrink-0 p-1.5 hover:bg-accent rounded transition-colors cursor-pointer self-start'
+          className='shrink-0 p-1.5 hover:bg-accent rounded transition-colors cursor-pointer self-start'
           role='button'
           tabIndex={0}
           onKeyDown={e => {

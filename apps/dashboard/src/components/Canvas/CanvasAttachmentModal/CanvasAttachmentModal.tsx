@@ -68,7 +68,7 @@ export const CanvasAttachmentModal: React.FC<CanvasAttachmentModalProps> = ({
       <button
         type='button'
         tabIndex={-1}
-        className='absolute inset-0 bg-black/50 backdrop-blur-sm cursor-default'
+        className='absolute inset-0 bg-black/50 backdrop-blur-xs cursor-default'
         onClick={handleClose}
         onKeyDown={e => {
           if (e.key === 'Enter' || e.key === ' ') {

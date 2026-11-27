@@ -264,7 +264,7 @@ export const TagEditorContent = ({
                                 }
                                 if (e.key === 'Escape') setOpenDropdown(null);
                               }}
-                              className='w-full text-xs bg-background border border-border rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-desk-accent font-mono'
+                              className='w-full text-xs bg-background border border-border rounded px-2 py-1 focus:outline-hidden focus:ring-1 focus:ring-desk-accent font-mono'
                             />
                             <p className='text-[10px] text-muted-foreground mt-1'>Enter to add</p>
                           </div>
@@ -365,7 +365,7 @@ const TagsPopoverShell = ({
     sideOffset={6}
     className='p-4 shadow-lg'
   >
-    <div className='space-y-3 min-w-[13rem] max-w-[22rem]'>
+    <div className='space-y-3 min-w-52 max-w-88'>
       {isLoading ? (
         <div className='text-xs text-muted-foreground'>Loading tags…</div>
       ) : groups.length === 0 ? (

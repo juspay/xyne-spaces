@@ -27,7 +27,7 @@ export function RecordingDetailV2Skeleton(): ReactElement {
 
               <div className='mb-4'>
                 <div className='flex h-9 items-center'>
-                  <Skeleton className='h-7 w-[24rem] max-w-full !rounded-lg' />
+                  <Skeleton className='h-7 w-[24rem] max-w-full rounded-lg!' />
                 </div>
                 {/* The date · duration line */}
                 <div className='mt-2.5 flex h-5 items-center'>
@@ -38,9 +38,9 @@ export function RecordingDetailV2Skeleton(): ReactElement {
               {/* Chips on the left, Ask AI on the right */}
               <div className='flex flex-wrap items-center justify-between gap-3'>
                 <div className='flex flex-wrap items-center gap-2'>
-                  <Skeleton className='h-7 w-16 !rounded-lg' />
-                  <Skeleton className='h-7 w-32 !rounded-lg' />
-                  <Skeleton className='h-7 w-8 !rounded-lg' />
+                  <Skeleton className='h-7 w-16 rounded-lg!' />
+                  <Skeleton className='h-7 w-32 rounded-lg!' />
+                  <Skeleton className='h-7 w-8 rounded-lg!' />
                 </div>
                 <Skeleton className='h-8 w-24 rounded-xl' />
               </div>
@@ -50,14 +50,14 @@ export function RecordingDetailV2Skeleton(): ReactElement {
               {/* Control bar: the real card, with the transport stood in inside it */}
               <div className='mb-6 rounded-2xl border border-border bg-card px-5 py-4'>
                 <div className='flex min-h-11 items-center gap-4'>
-                  <Skeleton className='size-8 shrink-0 !rounded-full' />
+                  <Skeleton className='size-8 shrink-0 rounded-full!' />
                   <Skeleton className='h-3 w-12 shrink-0' />
-                  <Skeleton className='h-1.5 flex-1 !rounded-full' />
+                  <Skeleton className='h-1.5 flex-1 rounded-full!' />
                   <Skeleton className='h-3 w-12 shrink-0' />
                   {/* The visualizer's own bordered well, with its bars at rest */}
                   <div className='inline-flex h-7 w-14 shrink-0 items-center justify-center gap-0.5 rounded-lg border border-border'>
                     {Array.from({ length: 4 }, (_, index) => (
-                      <Skeleton key={index} className='size-1 !rounded-full' />
+                      <Skeleton key={index} className='size-1 rounded-full!' />
                     ))}
                   </div>
                 </div>
@@ -66,8 +66,8 @@ export function RecordingDetailV2Skeleton(): ReactElement {
               {/* Tab strip: the segmented control is one filled pill, so it stands in
                   as one shape; the post/share action sits opposite it. */}
               <div className='mb-4 flex items-center justify-between border-b border-border/70 pb-2'>
-                <Skeleton className='h-10 w-[19rem] max-w-full !rounded-full' />
-                <Skeleton className='h-8 w-40 !rounded-lg' />
+                <Skeleton className='h-10 w-76 max-w-full rounded-full!' />
+                <Skeleton className='h-8 w-40 rounded-lg!' />
               </div>
             </div>
           </div>
@@ -76,7 +76,7 @@ export function RecordingDetailV2Skeleton(): ReactElement {
           <section className='mb-8 max-w-full'>
             <div className='flex items-center justify-between'>
               <Skeleton className='h-4 w-24' />
-              <Skeleton className='size-8 !rounded-lg' />
+              <Skeleton className='size-8 rounded-lg!' />
             </div>
 
             <div className='mt-6 flex flex-col gap-3'>

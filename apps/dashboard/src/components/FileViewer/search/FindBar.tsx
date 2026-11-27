@@ -103,14 +103,14 @@ export const FindBar: React.FC = () => {
         aria-label='Find in file'
         spellCheck={false}
         autoComplete='off'
-        className='w-44 bg-transparent text-sm text-white placeholder:text-white/40 focus:outline-none'
+        className='w-44 bg-transparent text-sm text-white placeholder:text-white/40 focus:outline-hidden'
         data-track-category='FileViewer'
         data-track-name='FindInput'
       />
 
       <span
         className={cn(
-          'min-w-[4.5rem] shrink-0 text-right text-xs tabular-nums',
+          'min-w-18 shrink-0 text-right text-xs tabular-nums',
           hasQuery && !hasResults ? 'text-red-400' : 'text-white/50',
         )}
         aria-live='polite'

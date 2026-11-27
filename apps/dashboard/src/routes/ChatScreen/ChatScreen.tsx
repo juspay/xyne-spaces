@@ -163,13 +163,13 @@ const ChatScreen = ({ shouldStackThread = false }: ChatScreenProps): ReactElemen
             {/* RESIZE HANDLE — hidden on full-screen pages where the sidebar is collapsed */}
             <Separator
               className={cn(
-                'w-[0px] transition-colors cursor-col-resize items-center justify-center group z-10',
+                'w-0 transition-colors cursor-col-resize items-center justify-center group z-10',
                 isFullScreenPage && 'hidden',
               )}
             >
               <div
                 id='panel-resize-divider'
-                className='w-[0px] h-full bg-transparent group-hover:bg-primary group-active:bg-primary outline outline-1 outline-transparent group-hover:outline-primary group-active:outline-primary'
+                className='w-0 h-full bg-transparent group-hover:bg-primary group-active:bg-primary outline-solid outline-1 outline-transparent group-hover:outline-primary group-active:outline-primary'
               ></div>
             </Separator>
 

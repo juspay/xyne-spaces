@@ -808,7 +808,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
       },
       editorProps: {
         attributes: {
-          class: 'tiptap chat-input-editor prose prose-sm focus:outline-none',
+          class: 'tiptap chat-input-editor prose prose-sm focus:outline-hidden',
           style: 'min-height: 20px; max-height: 200px; overflow-y: auto;',
           'aria-label': 'Message input',
           'data-testid': 'message-input',
@@ -1676,7 +1676,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
     );
 
     return (
-      <div className={`flex-shrink-0 relative ${className}`} data-input-id={id}>
+      <div className={`shrink-0 relative ${className}`} data-input-id={id}>
         {features.mentions && (
           <MentionSelector
             editor={editor}
@@ -1717,10 +1717,10 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
             (display-toggled) so its progress subscription isn't torn down on each flip.
             Composers set --composer-px to their own horizontal padding so the bar bleeds back
             out to the full container width; unset (0px) it stays flush with the input box. */}
-        <div className='absolute top-0 -translate-y-full flex items-center left-[calc(var(--composer-px,0px)*-1)] right-[calc(var(--composer-px,0px)*-1)]'>
+        <div className='absolute top-0 -translate-y-full flex items-center -left-(--composer-px,0px) -right-(--composer-px,0px)'>
           {hasTypingActivity && (
             <div
-              className='flex items-center gap-1.5 h-5 bg-background w-full px-[var(--composer-px)]'
+              className='flex items-center gap-1.5 h-5 bg-background w-full px-(--composer-px)'
               style={{ display: typingVisible ? 'flex' : 'none' }}
             >
               <div className='flex items-center -space-x-1'>
@@ -1741,7 +1741,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
             </div>
           )}
           <div
-            className='flex items-center min-w-0 h-5 w-full bg-background px-[var(--composer-px)] pb-0.5'
+            className='flex items-center min-w-0 h-5 w-full bg-background px-(--composer-px) pb-0.5'
             style={{ display: agentVisible ? 'flex' : 'none' }}
           >
             {agentSlot}
@@ -1764,7 +1764,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
           <div
             className={`
             overflow-hidden transition flex flex-col relative
-            ${isMobile ? 'bg-background rounded-[26px] text-foreground shadow-sm' : 'bg-background rounded-2xl border text-foreground shadow-none'}
+            ${isMobile ? 'bg-background rounded-[26px] text-foreground shadow-xs' : 'bg-background rounded-2xl border text-foreground shadow-none'}
             ${
               !isMobile && artifactComposerDefinition
                 ? 'border-orange-500 ring-1 ring-orange-500'
@@ -1890,7 +1890,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                 <EditorContent
                   editor={editor}
                   className={`
-                  chat-input-field w-full resize-none border-0 outline-none bg-transparent leading-6 break-words
+                  chat-input-field w-full resize-none border-0 outline-hidden bg-transparent leading-6 wrap-break-word
                   text-foreground placeholder:text-muted-foreground
                   [&_a]:pointer-events-none
                   [&_p.is-editor-empty:before]:hidden
@@ -2092,7 +2092,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                   <Dialog
                     open={isTranscriptSelectorOpen}
                     onOpenChange={setIsTranscriptSelectorOpen}
-                    className='max-w-[900px] w-full !p-0 border-none bg-transparent shadow-none overflow-visible'
+                    className='max-w-[900px] w-full p-0! border-none bg-transparent shadow-none overflow-visible'
                     {...(overlayZIndex && { zIndexClassName: overlayZIndex })}
                   >
                     <CallTranscriptSelector
@@ -2224,7 +2224,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                         onClick={onCancel}
                         data-track-category='CHAT_INPUT'
                         data-track-name='CANCEL_EDITING'
-                        className='p-2 rounded-md bg-muted text-foreground hover:bg-border transition-all duration-200 ease-in-out focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-2'
+                        className='p-2 rounded-md bg-muted text-foreground hover:bg-border transition-all duration-200 ease-in-out focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-2'
                         aria-label='Cancel editing'
                       >
                         <X className='h-4 w-4' />
@@ -2268,7 +2268,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                               disabled={
                                 disabled || sendDisabled || isSending || !hasSendableContent
                               }
-                              className={`p-2 flex items-center justify-center transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-2 ${
+                              className={`p-2 flex items-center justify-center transition-colors focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-2 ${
                                 hasSendableContent && !sendDisabled
                                   ? 'cursor-pointer hover:bg-background/10'
                                   : 'cursor-not-allowed'
@@ -2294,7 +2294,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                                 type='button'
                                 aria-label='Send options'
                                 disabled={disabled || sendDisabled || isSending}
-                                className={`p-1.5 flex items-center justify-center transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-2 ${
+                                className={`p-1.5 flex items-center justify-center transition-colors focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-2 ${
                                   hasSendableContent && !sendDisabled
                                     ? 'cursor-pointer hover:bg-background/10'
                                     : 'cursor-not-allowed'
@@ -2354,7 +2354,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                               type='button'
                               onClick={() => void handleSend('send_button')}
                               disabled={disabled || isSending || !hasSendableContent}
-                              className={`p-2 flex items-center justify-center transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-2 ${
+                              className={`p-2 flex items-center justify-center transition-colors focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-2 ${
                                 hasSendableContent
                                   ? 'cursor-pointer hover:bg-background/10'
                                   : 'cursor-not-allowed'
@@ -2388,7 +2388,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                                   type='button'
                                   aria-label='Schedule for later'
                                   disabled={disabled || isSending || !hasSendableContent}
-                                  className={`p-1.5 flex items-center justify-center transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-2 ${
+                                  className={`p-1.5 flex items-center justify-center transition-colors focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-2 ${
                                     hasSendableContent
                                       ? 'cursor-pointer hover:bg-background/10'
                                       : 'cursor-not-allowed'
@@ -2455,7 +2455,7 @@ export const InputBox = forwardRef<InputBoxHandle, InputBoxProps>(
                             type='button'
                             onClick={() => void handleSend('send_button')}
                             disabled={disabled || sendDisabled || isSending || !hasSendableContent}
-                            className={`${compact ? 'flex size-8 items-center justify-center rounded-full p-0' : 'rounded-md p-2'} transition-all duration-200 ease-in-out focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-2 ${
+                            className={`${compact ? 'flex size-8 items-center justify-center rounded-full p-0' : 'rounded-md p-2'} transition-all duration-200 ease-in-out focus-visible:outline-solid focus-visible:outline-2 focus-visible:outline-primary focus-visible:outline-offset-2 ${
                               hasSendableContent && !disabled && !sendDisabled
                                 ? 'bg-primary text-primary-foreground hover:bg-primary/90'
                                 : 'bg-muted text-muted-foreground cursor-not-allowed opacity-80'

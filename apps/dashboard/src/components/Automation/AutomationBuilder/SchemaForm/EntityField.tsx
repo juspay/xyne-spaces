@@ -134,7 +134,7 @@ function OpaqueIdField({
       placeholder={placeholder}
       data-track-category='automation-builder'
       data-track-name='entity-opaque-id-input'
-      className='h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground/40'
+      className='h-9 w-full rounded-md border border-input bg-transparent px-3 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-foreground/40'
     />
   );
 }

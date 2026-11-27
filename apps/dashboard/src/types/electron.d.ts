@@ -68,6 +68,14 @@ export type SpacesMcpSignOutResult =
 
 export interface ElectronAPI {
   openExternal: (url: string) => void;
+  /**
+   * The transit encryption key, held by the desktop app's main process (the Secure Enclave on
+   * macOS). Absent on desktop builds that predate it.
+   */
+  transitKey?: {
+    getPublicKey: () => Promise<Uint8Array>;
+    deriveSharedSecret: (serverPoint: Uint8Array) => Promise<Uint8Array>;
+  };
   getWebviewPreloadPath?: () => string;
   // Only exposed by the webview preload (`electron/src/webview-preload.js`),
   // not by the main preload. Presence of this function is used to detect

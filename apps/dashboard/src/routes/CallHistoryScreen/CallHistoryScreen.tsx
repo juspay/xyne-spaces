@@ -815,10 +815,10 @@ const CallHistoryScreen = (): ReactElement => {
       {/* This root is itself the scroll container, so an absolutely positioned
           navigator would scroll away with the list. A zero-height sticky wrapper
           pins it to the top-left instead while contributing no layout height, so
-          the list still starts where it did. z-[60] clears the sticky header's
+          the list still starts where it did. z-60 clears the sticky header's
           z-50 for the widths where the centred column reaches the left edge. */}
       {!isMobile && (
-        <div className='sticky left-0 top-0 z-[60] hidden h-0 w-fit md:block'>
+        <div className='sticky left-0 top-0 z-60 hidden h-0 w-fit md:block'>
           <div className='h-[52px] w-fit'>
             <AppNavigator />
           </div>
@@ -1183,7 +1183,7 @@ const CallHistoryScreen = (): ReactElement => {
                   />
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
-                      <button className='flex items-center gap-1 px-2.5 py-1 text-sm font-medium text-foreground border border-border rounded-lg hover:bg-accent transition-colors focus:outline-none'>
+                      <button className='flex items-center gap-1 px-2.5 py-1 text-sm font-medium text-foreground border border-border rounded-lg hover:bg-accent transition-colors focus:outline-hidden'>
                         {FILTER_LABELS[recentCallFilter]}
                         <ChevronDown className='size-3' />
                       </button>

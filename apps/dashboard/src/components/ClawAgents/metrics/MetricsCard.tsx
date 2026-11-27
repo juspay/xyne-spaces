@@ -12,7 +12,7 @@ export const MetricsCard = ({
   action?: ReactNode;
   children: ReactNode;
 }): ReactElement => (
-  <section className='rounded-xl border border-border bg-card p-5 shadow-sm'>
+  <section className='rounded-xl border border-border bg-card p-5 shadow-xs'>
     <div className='mb-4 flex flex-wrap items-start justify-between gap-3'>
       <div className='min-w-0'>
         <h2 className='text-sm font-semibold text-foreground'>{title}</h2>

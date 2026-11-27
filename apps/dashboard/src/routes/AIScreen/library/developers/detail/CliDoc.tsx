@@ -52,8 +52,13 @@ const COMMANDS: { group: string; rows: { name: string; description: string }[] }
     group: 'Auth and config',
     rows: [
       {
+        name: 'spaces app dev-setup [--yes]',
+        description:
+          'Move an app made before CLI 1.0.3 to SDK 0.3 and local dev with its own Spaces session.',
+      },
+      {
         name: 'spaces token',
-        description: 'Write a Spaces token into .env from your signed-in browser.',
+        description: 'For apps not yet moved by dev-setup: write your browser session into .env.',
       },
       {
         name: 'spaces config set url <host>',
@@ -128,7 +133,9 @@ export function CliDoc(): ReactElement {
       <DocSection eyebrow='Get started' title='Install and ship your first app'>
         <Callout>
           macOS only for now, with Node 22 or later. Sign in to Spaces in Chrome, Brave, Edge, Arc
-          or Firefox first: the CLI reads that browser session, so there is no separate login.
+          or Firefox first: the CLI&apos;s app commands use that browser session, so there is no
+          separate login. Local development signs in on its own: the first time the dev server talks
+          to Spaces, it prints a sign-in link.
         </Callout>
         <div className='flex flex-col'>
           <Step n={1} title='Install from npm'>
@@ -150,8 +157,7 @@ export function CliDoc(): ReactElement {
             <CodeBlock
               code={`spaces app init my-app   # scaffold the template and install
 cd my-app
-spaces token             # fill .env from your browser session
-npm run dev              # develop locally; the badge switches surfaces
+npm run dev              # develop locally; prints a sign-in link the first time
 spaces app publish       # ship it to your workspace`}
               trackName='Spaces CLI: copy quick start'
             />

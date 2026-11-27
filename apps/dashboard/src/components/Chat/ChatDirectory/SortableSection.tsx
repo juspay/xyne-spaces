@@ -214,7 +214,7 @@ const SortableSection = ({
       <Accordion.Content>
         <div className='min-h-[4px]'>
           {channels.length === 0 ? (
-            <div className='px-2 py-1 text-xs text-sidebar-foreground/60'>No channels yet</div>
+            <div className='px-2 py-1 text-xs'>No channels yet</div>
           ) : (
             channels.map(channel => (
               <SortableChannelItem

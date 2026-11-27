@@ -601,7 +601,7 @@ export const BoardForm = ({
           placeholder='Enter board description (optional)'
           disabled={isLoading}
           rows={3}
-          className='w-full px-3 py-2 border border-border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:bg-muted disabled:cursor-not-allowed resize-none'
+          className='w-full px-3 py-2 border border-border rounded-md focus:outline-hidden focus:ring-2 focus:ring-blue-500 disabled:bg-muted disabled:cursor-not-allowed resize-none'
           data-track-category='Board_Form'
           data-track-name='Enter_Description'
         />
@@ -620,7 +620,7 @@ export const BoardForm = ({
             value={projectId}
             onChange={e => setProjectId(e.target.value)}
             disabled={isLoading || loadingProjects || isEdit}
-            className='w-full px-3 py-2 border border-input rounded-md focus:outline-none focus:ring-2 focus:ring-ring disabled:bg-muted disabled:cursor-not-allowed'
+            className='w-full px-3 py-2 border border-input rounded-md focus:outline-hidden focus:ring-2 focus:ring-ring disabled:bg-muted disabled:cursor-not-allowed'
             data-track-event='change'
             data-track-category='Board_Form'
             data-track-name='Select_Project'
@@ -651,7 +651,7 @@ export const BoardForm = ({
                 value={selectedTemplate}
                 onChange={e => setSelectedTemplate(e.target.value as StageTemplateType)}
                 disabled={isLoading}
-                className='px-3 py-1.5 text-sm border border-input rounded-md focus:outline-none focus:ring-2 focus:ring-ring disabled:bg-muted disabled:cursor-not-allowed'
+                className='px-3 py-1.5 text-sm border border-input rounded-md focus:outline-hidden focus:ring-2 focus:ring-ring disabled:bg-muted disabled:cursor-not-allowed'
                 data-track-event='change'
                 data-track-category='Board_Form'
                 data-track-name='Select_Stage_Template'
@@ -677,7 +677,7 @@ export const BoardForm = ({
             return (
               <div key={stage.tempId} className='border rounded-md p-3 border-border bg-muted'>
                 <div className='flex items-start gap-2'>
-                  <div className='flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-sm font-semibold bg-blue-100 text-blue-700'>
+                  <div className='shrink-0 w-8 h-8 rounded-full flex items-center justify-center text-sm font-semibold bg-blue-100 text-blue-700'>
                     {stage.sequenceNumber}
                   </div>
                   <div className='flex-1 space-y-2'>
@@ -759,7 +759,7 @@ export const BoardForm = ({
                           )
                         }
                         disabled={isLoading}
-                        className='w-full px-2 py-1.5 text-sm border border-input rounded-md focus:outline-none focus:ring-1 focus:ring-ring disabled:bg-muted disabled:cursor-not-allowed'
+                        className='w-full px-2 py-1.5 text-sm border border-input rounded-md focus:outline-hidden focus:ring-1 focus:ring-ring disabled:bg-muted disabled:cursor-not-allowed'
                         data-track-event='change'
                         data-track-category='Board_Form'
                         data-track-name='Select_Stage_Status'
@@ -815,7 +815,7 @@ export const BoardForm = ({
                           updateStage(index, 'formId', e.target.value);
                         }}
                         disabled={isLoading || !stageForms}
-                        className='w-full px-2 py-1.5 text-sm border border-input rounded-md focus:outline-none focus:ring-1 focus:ring-ring disabled:bg-muted disabled:cursor-not-allowed'
+                        className='w-full px-2 py-1.5 text-sm border border-input rounded-md focus:outline-hidden focus:ring-1 focus:ring-ring disabled:bg-muted disabled:cursor-not-allowed'
                         data-track-event='change'
                         data-track-category='Board_Form'
                         data-track-name='Select_Stage_Form'
@@ -839,7 +839,7 @@ export const BoardForm = ({
                       aria-label={`Remove stage ${stage.name || index + 1}`}
                       onClick={() => removeStage(index)}
                       disabled={isLoading}
-                      className='flex-shrink-0 text-red-500 hover:text-red-700 p-1'
+                      className='shrink-0 text-red-500 hover:text-red-700 p-1'
                       type='button'
                       data-track-category='Board_Form'
                       data-track-name='Remove_Stage'

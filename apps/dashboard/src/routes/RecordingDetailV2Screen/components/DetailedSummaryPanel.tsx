@@ -30,7 +30,7 @@ export function DetailedSummaryPanel({
           <button
             type='button'
             onClick={onClose}
-            className='inline-flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
+            className='inline-flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring'
             aria-label='Close detailed summary'
             data-track-category='RecordingDetailV2'
             data-track-name='close_detailed_summary'

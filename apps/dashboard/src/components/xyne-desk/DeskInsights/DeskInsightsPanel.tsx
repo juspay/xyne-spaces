@@ -52,8 +52,8 @@ export const DeskInsightsPanel = ({
     title='Insights'
     className={cn(
       'left-auto right-0 top-0 bottom-0 h-screen w-[85vw] max-h-none max-w-none translate-x-0 translate-y-0 rounded-l-[16px] rounded-r-none bg-transparent shadow-none',
-      'data-[state=open]:!zoom-in-100 data-[state=open]:!slide-in-from-top-[0%] data-[state=open]:!slide-in-from-right-full',
-      'data-[state=closed]:!zoom-out-100 data-[state=closed]:!slide-out-to-top-[0%] data-[state=closed]:!slide-out-to-right-full',
+      'data-[state=open]:zoom-in-100! data-[state=open]:slide-in-from-top-[0%]! data-[state=open]:slide-in-from-right-full!',
+      'data-[state=closed]:zoom-out-100! data-[state=closed]:slide-out-to-top-[0%]! data-[state=closed]:slide-out-to-right-full!',
     )}
   >
     <div className='flex h-full w-full'>
@@ -63,7 +63,7 @@ export const DeskInsightsPanel = ({
         className='flex w-56 shrink-0 flex-col rounded-l-[16px] border border-r-0 border-desk-border bg-muted pr-5 shadow-2xl dark:border-border'
       >
         <div className='flex items-center gap-2 px-3.5 py-3'>
-          <span className='flex h-6 w-6 items-center justify-center rounded-[8px] bg-desk-accent/10 text-desk-accent'>
+          <span className='flex h-6 w-6 items-center justify-center rounded-[8px] text-desk-accent'>
             <SparkleAi02 size={14} />
           </span>
           <span className='text-sm font-semibold text-foreground'>Insights</span>
@@ -80,7 +80,7 @@ export const DeskInsightsPanel = ({
                   aria-current={isActive ? 'page' : undefined}
                   className={cn(
                     'group flex w-full items-center gap-2 rounded-[8px] px-2 py-1.5 text-left transition-colors',
-                    isActive ? 'bg-background shadow-sm' : 'hover:bg-accent',
+                    isActive ? 'bg-background shadow-xs' : 'hover:bg-accent',
                   )}
                   data-track-category='Support'
                   data-track-name='SelectDeskInsightsSection'
@@ -90,7 +90,7 @@ export const DeskInsightsPanel = ({
                     className={cn(
                       'flex h-6 w-6 shrink-0 items-center justify-center rounded-[6px]',
                       isActive
-                        ? 'bg-desk-accent/10 text-desk-accent'
+                        ? 'text-desk-accent'
                         : 'bg-background text-muted-foreground group-hover:text-foreground',
                     )}
                   >

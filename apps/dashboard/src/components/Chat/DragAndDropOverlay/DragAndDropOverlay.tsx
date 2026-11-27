@@ -10,7 +10,7 @@ export const DragAndDropOverlay: React.FC<DragAndDropOverlayProps> = ({ isVisibl
 
   return (
     <div
-      className='absolute inset-0 z-50 bg-background/90 backdrop-blur-sm border-2 border-dashed border-border rounded-lg flex items-center justify-center'
+      className='absolute inset-0 z-50 bg-background/90 backdrop-blur-xs border-2 border-dashed border-border rounded-lg flex items-center justify-center'
       data-component='DragAndDropOverlay'
     >
       <div className='text-center p-8'>

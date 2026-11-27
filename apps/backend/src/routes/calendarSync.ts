@@ -13,6 +13,9 @@
  */
 
 import express, { type Response } from 'express';
+import { config } from '@/config/env';
+import { USER_PREFERENCE_NOTIFICATION_DEFAULTS } from '@/constants/userPreferenceDefaults';
+import { db } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { repositories } from '@/database/repositories';
 import { enqueueGoogleCalendarManualSync } from '@/queues/googleCalendarSyncQueue';
@@ -54,6 +57,69 @@ router.get('/provider', async (req, res) => {
   } catch (err) {
     logger.error('[CALENDAR_SYNC][ROUTE] Failed to get provider:', err);
     return res.status(500).json({ success: false, error: 'Failed to determine calendar provider' });
+  }
+});
+
+const CALENDAR_NOT_CONNECTED_MESSAGE = 'Please sync your calendar first';
+
+/** The user has a live Google Calendar connection: what the Meet transcript worker reads with. */
+async function hasGoogleCalendarConnection(userId: string): Promise<boolean> {
+  const source = await repositories.externalSources.findCalendarSourceByOwner(userId, 'GOOGLE');
+  return source?.isActive === true && hasCalendarRefreshToken(source);
+}
+
+// GET /meet-transcripts — the "Google Meet transcripts" setting of the current user.
+// `available`: the feature is on (GOOGLE_MEET_TRANSCRIPTS_ENABLED); `enabled`: they
+// turned it on (services/meetTranscriptService.ts); `calendarConnected`: they have a
+// Google Calendar connection, without which it cannot be turned on.
+router.get('/meet-transcripts', async (req, res) => {
+  try {
+    const userId = req.user!.id;
+    const [preference, calendarConnected] = await Promise.all([
+      db.userPreference.findUnique({ where: { userId }, select: { meetTranscripts: true } }),
+      hasGoogleCalendarConnection(userId),
+    ]);
+    return res.json({
+      success: true,
+      available: config.meetTranscripts.enabled,
+      enabled: preference?.meetTranscripts === true,
+      calendarConnected,
+    });
+  } catch (err) {
+    logger.error('[CALENDAR_SYNC][ROUTE] Failed to read Meet transcripts setting:', err);
+    return res.status(500).json({ success: false, error: 'Failed to read the setting' });
+  }
+});
+
+// PUT /meet-transcripts { enabled } — turns the setting on or off for the current user.
+router.put('/meet-transcripts', async (req, res) => {
+  const userId = req.user!.id;
+  const workspaceId = req.user!.workspaceId;
+  const enabled: unknown = req.body?.enabled;
+  if (typeof enabled !== 'boolean') {
+    return res.status(400).json({ success: false, error: 'enabled must be a boolean' });
+  }
+  if (!workspaceId) {
+    return res.status(400).json({ success: false, error: 'No workspace selected' });
+  }
+  try {
+    // Turning it off is always allowed; turning it on needs a calendar to work with.
+    if (enabled && !(await hasGoogleCalendarConnection(userId))) {
+      return res.status(400).json({
+        success: false,
+        error: 'calendar_not_connected',
+        message: CALENDAR_NOT_CONNECTED_MESSAGE,
+      });
+    }
+    await db.userPreference.upsert({
+      where: { userId },
+      update: { meetTranscripts: enabled },
+      create: { ...USER_PREFERENCE_NOTIFICATION_DEFAULTS, userId, workspaceId, meetTranscripts: enabled },
+    });
+    return res.json({ success: true, enabled });
+  } catch (err) {
+    logger.error('[CALENDAR_SYNC][ROUTE] Failed to save Meet transcripts setting:', err);
+    return res.status(500).json({ success: false, error: 'Failed to save the setting' });
   }
 });
 

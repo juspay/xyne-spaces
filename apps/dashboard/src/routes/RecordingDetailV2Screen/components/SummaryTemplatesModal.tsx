@@ -76,7 +76,7 @@ import {
 // The dialog widens itself while a test panel is open, so callers don't
 // need to track the panel's state.
 export const SUMMARY_TEMPLATES_DIALOG_CLASS =
-  'h-full max-h-[824px] w-full max-w-screen-lg overflow-hidden rounded-2xl p-0 transition-[max-width] has-[[data-test-panel-open]]:max-w-screen-xl';
+  'h-full max-h-[824px] w-full max-w-(--breakpoint-lg) overflow-hidden rounded-2xl p-0 transition-[max-width] has-data-test-panel-open:max-w-(--breakpoint-xl)';
 
 type TemplateGroup = 'PENDING_REVIEW' | 'MY_TEMPLATES' | 'SHARED_WITH_ME' | 'PUBLIC' | 'STARTER';
 
@@ -278,7 +278,7 @@ const SortableTemplateSection = ({
           disabled={!isEditable}
           title={isEditable ? 'Drag to reorder' : undefined}
           aria-label={`Reorder ${section.title.trim() || 'untitled section'}`}
-          className='flex size-4 shrink-0 cursor-grab items-center justify-center text-muted-foreground/60 outline-none active:cursor-grabbing disabled:cursor-default focus-visible:rounded-sm focus-visible:ring-2 focus-visible:ring-ring'
+          className='flex size-4 shrink-0 cursor-grab items-center justify-center text-muted-foreground/60 outline-hidden active:cursor-grabbing disabled:cursor-default focus-visible:rounded-sm focus-visible:ring-2 focus-visible:ring-ring'
         >
           <DragableSixDots className='size-3.5' />
         </button>
@@ -290,7 +290,7 @@ const SortableTemplateSection = ({
           aria-label='Section title'
           aria-invalid={hasReservedTitle}
           className={cn(
-            'w-full bg-transparent text-sm font-semibold outline-none placeholder:text-muted-foreground/60',
+            'w-full bg-transparent text-sm font-semibold outline-hidden placeholder:text-muted-foreground/60',
             hasReservedTitle && 'text-destructive',
           )}
           data-track-category='SummaryTemplates'
@@ -310,7 +310,7 @@ const SortableTemplateSection = ({
           rows={1}
           placeholder='Instructions for this section…'
           aria-label='Section description'
-          className='thin-scrollbar w-full min-h-[1lh] max-h-[3lh] resize-none overflow-y-auto bg-transparent text-sm leading-normal text-muted-foreground outline-none [field-sizing:content] placeholder:text-muted-foreground/60'
+          className='thin-scrollbar w-full min-h-lh max-h-[3lh] resize-none overflow-y-auto bg-transparent text-sm leading-normal text-muted-foreground outline-hidden field-sizing-content placeholder:text-muted-foreground/60'
           data-track-category='SummaryTemplates'
           data-track-name='EditSectionDescription'
         />
@@ -908,7 +908,7 @@ export function SummaryTemplatesModal({
                 value={search}
                 onChange={event => setSearch(event.target.value)}
                 placeholder='Search templates...'
-                className='min-w-0 flex-1 bg-transparent outline-none placeholder:text-muted-foreground'
+                className='min-w-0 flex-1 bg-transparent outline-hidden placeholder:text-muted-foreground'
                 data-track-category='SummaryTemplates'
                 data-track-name='Search'
               />
@@ -947,7 +947,7 @@ export function SummaryTemplatesModal({
                               : null,
                           })}
                         >
-                          <span className='flex size-7 shrink-0 items-center justify-center rounded-lg border border-border bg-background text-sm font-semibold shadow-sm'>
+                          <span className='flex size-7 shrink-0 items-center justify-center rounded-lg border border-border bg-background text-sm font-semibold shadow-xs'>
                             {getTemplateIcon(template.name)}
                           </span>
                           <span className='min-w-0 flex-1'>
@@ -1035,7 +1035,7 @@ export function SummaryTemplatesModal({
                     onChange={event => updateTemplateName(event.target.value)}
                     readOnly={!isEditable}
                     aria-label='Template name'
-                    className='w-full bg-transparent py-0.5 text-2xl font-bold tracking-tight outline-none read-only:cursor-default placeholder:text-muted-foreground/40 placeholder:text-medium'
+                    className='w-full bg-transparent py-0.5 text-2xl font-bold tracking-tight outline-hidden read-only:cursor-default placeholder:text-muted-foreground/40 placeholder:text-medium'
                     data-track-category='SummaryTemplates'
                     data-track-name='EditName'
                   />
@@ -1083,7 +1083,7 @@ export function SummaryTemplatesModal({
                           }
                         }}
                         // Sized for EntityShareModal, which brings its own padding.
-                        className='max-h-[min(36rem,var(--radix-popover-content-available-height))] w-[26rem] max-w-[calc(100vw-2rem)] overflow-y-auto rounded-xl border-border p-0 shadow-xl'
+                        className='max-h-[min(36rem,var(--radix-popover-content-available-height))] w-104 max-w-[calc(100vw-2rem)] overflow-y-auto rounded-xl border-border p-0 shadow-xl'
                         trigger={
                           <Button
                             type='button'
@@ -1194,7 +1194,7 @@ export function SummaryTemplatesModal({
                   readOnly={!isEditable}
                   rows={3}
                   placeholder='Describe the meeting and the summary you want…'
-                  className='min-h-24 w-full resize-y rounded-xl border border-border bg-background px-4 py-3 text-sm leading-relaxed outline-none focus-visible:border-foreground placeholder:text-muted-foreground/60'
+                  className='min-h-24 w-full resize-y rounded-xl border border-border bg-background px-4 py-3 text-sm leading-relaxed outline-hidden focus-visible:border-foreground placeholder:text-muted-foreground/60'
                   data-track-category='SummaryTemplates'
                   data-track-name='EditContext'
                 />
@@ -1266,7 +1266,7 @@ export function SummaryTemplatesModal({
                           : current,
                       )
                     }
-                    className='hover:no-underline gap-1 !px-0 !py-0 text-sm font-medium text-muted-foreground hover:text-primary'
+                    className='hover:no-underline gap-1 px-0! py-0! text-sm font-medium text-muted-foreground hover:text-primary'
                     disabled={editableSections.length >= MAX_EDITABLE_SECTIONS}
                     data-track-category='SummaryTemplates'
                     data-track-name='AddSection'
@@ -1391,7 +1391,7 @@ export function SummaryTemplatesModal({
                   readOnly={!isEditable}
                   rows={4}
                   placeholder='Generate or write the instructions used to create summaries with this template…'
-                  className='min-h-24 w-full resize-y rounded-xl border border-border bg-background px-4 py-3 text-sm leading-relaxed outline-none focus-visible:border-foreground placeholder:text-muted-foreground/60'
+                  className='min-h-24 w-full resize-y rounded-xl border border-border bg-background px-4 py-3 text-sm leading-relaxed outline-hidden focus-visible:border-foreground placeholder:text-muted-foreground/60'
                   data-track-category='SummaryTemplates'
                   data-track-name='EditSystemPrompt'
                 />

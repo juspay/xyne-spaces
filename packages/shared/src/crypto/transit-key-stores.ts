@@ -1,12 +1,14 @@
-import type { TransitKeyPair } from '@xyne/shared';
-import { logger, Event as LogEvent } from '../utils/logger';
+import { toBase64, TransitKeyUnavailableError, webCryptoTransitKeyPair } from './keyring.js';
+import type { TransitKeyPair, TransitKeyStore } from './keyring.js';
 
 /**
- * This browser's transit key pair (ECDH P-256). The private key is generated with
+ * The browser's transit key pair (ECDH P-256). The private key is generated with
  * `extractable: false`, so page JavaScript can only ask the browser to use it, never read it.
  * It is persisted in IndexedDB as a CryptoKey object and reused on later loads, surviving
  * logout: the transit AES keys are derived from it and the encryption service's public keys,
  * so with a persisted pair the server can encrypt for this browser at any time.
+ * This is the browser's store: a page has no secure hardware to use. Desktop builds with the
+ * main-process key never use it (see the dashboard's EncryptionBootstrapProvider).
  */
 
 const DB_NAME = 'xyne-transit-key';
@@ -25,18 +27,6 @@ interface StoredTransitKey {
 }
 
 let dbPromise: Promise<IDBDatabase> | null = null;
-
-function getErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
-function logTransitKeyWarning(message: string, error?: unknown): void {
-  logger.warn(LogEvent.FRONTEND_ERROR, {
-    type: 'transit_key',
-    message: '[TransitKey] ' + message,
-    ...(error !== undefined ? { error: getErrorMessage(error) } : {}),
-  });
-}
 
 function isSupported(): boolean {
   return (
@@ -94,42 +84,55 @@ async function withLock<R>(fn: () => Promise<R>): Promise<R> {
   return fn();
 }
 
-function toBase64(bytes: Uint8Array): string {
-  let binary = '';
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary);
-}
-
 async function createTransitKey(): Promise<StoredTransitKey> {
   // Only the private key honours `extractable: false`; the public key is always exportable.
   const keyPair = await crypto.subtle.generateKey(ALGORITHM, false, ['deriveBits']);
-  const point = new Uint8Array(await crypto.subtle.exportKey('raw', keyPair.publicKey));
+  const point = await crypto.subtle.exportKey('raw', keyPair.publicKey);
   return { keyPair, publicKey: toBase64(point), createdAt: Date.now() };
 }
 
-/**
- * Returns this browser's transit key pair, creating and persisting it on first use. Returns
- * null when WebCrypto or IndexedDB are unavailable (insecure origin, some private modes), so
- * the caller can fall back to an in-memory pair.
- */
-export async function getOrCreateTransitKeyPair(): Promise<TransitKeyPair | null> {
-  if (!isSupported()) {
-    logTransitKeyWarning('WebCrypto or IndexedDB unavailable — using an in-memory transit key');
-    return null;
-  }
-  try {
-    // The lock stops two tabs opened at once from each generating (and overwriting) a pair.
-    return await withLock(async () => {
-      const existing = await idbGet<StoredTransitKey>(PAIR_KEY);
-      if (existing?.keyPair?.privateKey) {
-        return { privateKey: existing.keyPair.privateKey, publicKey: existing.publicKey };
-      }
-      const created = await createTransitKey();
-      await idbPut(PAIR_KEY, created);
-      return { privateKey: created.keyPair.privateKey, publicKey: created.publicKey };
-    });
-  } catch (err: unknown) {
-    logTransitKeyWarning('Failed to get or create the transit key pair', err);
-    return null;
-  }
+function toPair(stored: StoredTransitKey): TransitKeyPair {
+  return webCryptoTransitKeyPair(stored.keyPair.privateKey, stored.publicKey);
 }
+
+/** Login waits on the transit key, so a store that hangs fails after this long. */
+const STORE_TIMEOUT_MS = 6000;
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timedOut = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`Timed out after ${timeoutMs}ms`)), timeoutMs);
+  });
+  return Promise.race([promise, timedOut]).finally(() => clearTimeout(timer));
+}
+
+/**
+ * The persisted browser pair, created on first use. Throws TransitKeyUnavailableError when
+ * WebCrypto or IndexedDB are unavailable (insecure origin, some private modes) or fail: there is
+ * no key for this page load alone, which the next reload would replace.
+ */
+export const indexedDbTransitKeyStore: TransitKeyStore = {
+  async getOrCreate(): Promise<TransitKeyPair> {
+    if (!isSupported()) {
+      throw new TransitKeyUnavailableError('indexeddb', 'WebCrypto or IndexedDB unavailable');
+    }
+    // The lock stops two tabs opened at once from each generating (and overwriting) a pair.
+    try {
+      return await withTimeout(
+        withLock(async () => {
+          const existing = await idbGet<StoredTransitKey>(PAIR_KEY);
+          if (existing?.keyPair?.privateKey) return toPair(existing);
+          const created = await createTransitKey();
+          await idbPut(PAIR_KEY, created);
+          return toPair(created);
+        }),
+        STORE_TIMEOUT_MS,
+      );
+    } catch (error: unknown) {
+      throw new TransitKeyUnavailableError(
+        'indexeddb',
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+  },
+};

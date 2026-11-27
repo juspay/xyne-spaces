@@ -62,7 +62,7 @@ const DetailRow = ({
   return (
     <div className='flex gap-3 text-sm items-start'>
       <span className='text-muted-foreground w-14 shrink-0 pt-0.5'>{label}:</span>
-      <span className='text-foreground break-words flex-1 min-w-0'>{values.join(', ')}</span>
+      <span className='text-foreground wrap-break-word flex-1 min-w-0'>{values.join(', ')}</span>
     </div>
   );
 };
@@ -94,7 +94,7 @@ export const EmailThreadHeader = ({
   else if (fromName) fromValues.push(fromName);
 
   const detailsContent = (
-    <div className='space-y-2 min-w-[18rem] max-w-[28rem]'>
+    <div className='space-y-2 min-w-[18rem] max-w-md'>
       <DetailRow label='from' values={fromValues} />
       <DetailRow label='to' values={to} />
       {cc && cc.length > 0 && <DetailRow label='cc' values={cc} />}

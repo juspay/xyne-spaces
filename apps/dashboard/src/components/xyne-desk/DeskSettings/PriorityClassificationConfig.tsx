@@ -153,7 +153,7 @@ export const PriorityClassificationConfigPanel: React.FC<
           spellCheck={false}
           readOnly={fieldDisabled}
           disabled={fieldDisabled}
-          className='min-h-[240px] w-full resize-y rounded-[10px] border border-border bg-background px-3 py-2 font-mono text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-desk-accent disabled:opacity-50 read-only:cursor-default read-only:bg-muted/40 read-only:focus:ring-0'
+          className='min-h-[240px] w-full resize-y rounded-[10px] border border-border bg-background px-3 py-2 font-mono text-sm text-foreground placeholder:text-muted-foreground focus:outline-hidden focus:ring-1 focus:ring-desk-accent disabled:opacity-50 read-only:cursor-default read-only:bg-muted/40 read-only:focus:ring-0'
           data-track-category='DeskSettings'
           data-track-name='PriorityPrompt'
         />

@@ -89,6 +89,11 @@ export interface TranscriptSidePanelProps {
   selectedLanguage?: string;
   onLanguageChange?: (language: string) => void;
   isTranslating?: boolean;
+  /**
+   * Name the speaker on every line. Defaults to doing so only when the transcript has
+   * more than one speaker (a recording is one person); meetings pass true.
+   */
+  showSpeakers?: boolean;
 }
 
 export function TranscriptSidePanel({
@@ -105,9 +110,15 @@ export function TranscriptSidePanel({
   selectedLanguage = ORIGINAL_TRANSCRIPT_LANGUAGE,
   onLanguageChange,
   isTranslating = false,
+  showSpeakers: showSpeakersProp,
 }: TranscriptSidePanelProps): ReactElement {
   const lineRefs = useRef(new Map<number, HTMLDivElement>());
   const lines = useMemo(() => parseTranscript(transcript), [transcript]);
+  // A recording has one speaker, so naming every line adds nothing; a meeting has several.
+  const showSpeakers = useMemo(
+    () => showSpeakersProp ?? new Set(lines.map(line => line.speaker).filter(Boolean)).size > 1,
+    [lines, showSpeakersProp],
+  );
   const targetIndex = useMemo(
     () => findTargetIndex(lines, target?.segment, target?.timestamp, target?.timestampSeconds),
     [lines, target?.segment, target?.timestamp, target?.timestampSeconds],
@@ -240,7 +251,7 @@ export function TranscriptSidePanel({
               onKeyDown={search.handleKeyDown}
               placeholder='Search transcript...'
               aria-label='Search transcript'
-              className='h-full min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground'
+              className='h-full min-w-0 flex-1 bg-transparent text-sm text-foreground outline-hidden placeholder:text-muted-foreground'
               data-track-category='TranscriptPanel'
               data-track-name='search_transcript'
             />
@@ -307,7 +318,7 @@ export function TranscriptSidePanel({
                 {isTranslating ? (
                   <Spinner
                     size={16}
-                    className='shrink-0 text-muted-foreground !animate-spin'
+                    className='shrink-0 text-muted-foreground animate-spin!'
                     aria-hidden='true'
                   />
                 ) : (
@@ -404,9 +415,18 @@ export function TranscriptSidePanel({
                     index === targetIndex ? targetHighlight : 'hover:bg-muted/40',
                   )}
                 >
-                  {line.timestamp ? (
-                    <span className='mb-0.5 block font-mono text-xs text-muted-foreground'>
-                      {line.timestamp}
+                  {line.timestamp || (showSpeakers && line.speaker) ? (
+                    <span className='mb-0.5 flex items-baseline gap-2'>
+                      {line.timestamp ? (
+                        <span className='font-mono text-xs text-muted-foreground'>
+                          {line.timestamp}
+                        </span>
+                      ) : null}
+                      {showSpeakers && line.speaker ? (
+                        <span className='truncate text-xs font-semibold text-foreground'>
+                          {line.speaker}
+                        </span>
+                      ) : null}
                     </span>
                   ) : null}
                   <p className='text-sm leading-relaxed text-foreground/90'>
@@ -416,8 +436,8 @@ export function TranscriptSidePanel({
                       itemIndex={index}
                       currentMatchIndex={search.currentIndex}
                       matchRefs={search.matchRefs}
-                      currentMatchClassName='bg-primary text-background [[data-theme=midnight]_&]:text-foreground py-0.5'
-                      otherMatchClassName='bg-yellow-200 [[data-theme=midnight]_&]:bg-yellow-300 text-yellow-950 py-0.5'
+                      currentMatchClassName='bg-primary text-background in-data-[theme=midnight]:text-foreground py-0.5'
+                      otherMatchClassName='bg-yellow-200 in-data-[theme=midnight]:bg-yellow-300 text-yellow-950 py-0.5'
                     />
                   </p>
                 </div>

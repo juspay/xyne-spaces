@@ -98,7 +98,7 @@ export const RecipientSuggestionsDropdown = ({
             data-track-category='Support'
             data-track-name='SelectRecipientSuggestion'
           >
-            <span className='flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-[4px] bg-border text-[10px] font-medium text-muted-foreground'>
+            <span className='flex h-6 w-6 shrink-0 items-center justify-center rounded-[4px] bg-border text-[10px] font-medium text-muted-foreground'>
               {initial}
             </span>
             <span className='flex flex-col min-w-0 flex-1'>
@@ -113,7 +113,7 @@ export const RecipientSuggestionsDropdown = ({
                 {s.email}
               </span>
             </span>
-            <span className='text-[10px] text-muted-foreground flex-shrink-0'>
+            <span className='text-[10px] text-muted-foreground shrink-0'>
               {s.source === 'org' ? 'Org' : s.source === 'desk' ? 'Contacts' : 'Recent'}
             </span>
           </button>

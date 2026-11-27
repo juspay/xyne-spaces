@@ -20,7 +20,7 @@ const Card = ({
   children: React.ReactNode;
   className?: string;
 }): ReactElement => (
-  <div className={cn('rounded-xl border border-border bg-card shadow-sm', className)}>
+  <div className={cn('rounded-xl border border-border bg-card shadow-xs', className)}>
     {children}
   </div>
 );
@@ -194,7 +194,7 @@ export const OrganizationsTab = (): ReactElement => {
 
             {/* Organization Name */}
             <div className='space-y-2'>
-              <label htmlFor='org-name' className='text-sm font-medium text-foreground'>
+              <label htmlFor='org-name' className='block text-sm font-medium text-foreground'>
                 Organization Name <span className='text-destructive'>*</span>
               </label>
               <Input
@@ -209,7 +209,10 @@ export const OrganizationsTab = (): ReactElement => {
 
             {/* Organization Description */}
             <div className='space-y-2'>
-              <label htmlFor='org-description' className='text-sm font-medium text-foreground'>
+              <label
+                htmlFor='org-description'
+                className='block text-sm font-medium text-foreground'
+              >
                 Description
               </label>
               <textarea
@@ -224,7 +227,7 @@ export const OrganizationsTab = (): ReactElement => {
                 className={cn(
                   'w-full px-3 py-2 rounded-md border border-input bg-background',
                   'text-sm text-foreground placeholder:text-muted-foreground',
-                  'focus:outline-none focus:ring-2 focus:ring-ring focus:border-ring',
+                  'focus:outline-hidden focus:ring-2 focus:ring-ring focus:border-ring',
                   'resize-none disabled:opacity-50',
                 )}
               />

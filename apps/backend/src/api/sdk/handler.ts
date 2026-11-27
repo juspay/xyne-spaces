@@ -140,7 +140,9 @@ export function errorHandler(
 
   const apiError = err instanceof SdkApiError ? err : toSdkApiError(err);
   const id = req.apiRequestId ?? 'unknown';
-  const isServerError = apiError.status >= 500;
+  // `unavailable` (503) is a deliberate answer whose message tells the caller what to do (upgrade
+  // the SDK); only real failures get the generic text.
+  const isServerError = apiError.status >= 500 && apiError.code !== 'unavailable';
 
   // Logged by `callLog` once the response finishes, alongside the call it failed.
   req.sdkError = apiError;

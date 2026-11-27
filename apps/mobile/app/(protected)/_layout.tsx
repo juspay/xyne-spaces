@@ -15,6 +15,7 @@ import { SafeAreaInsetsProvider } from '@/src/hooks/useRawSafeAreaInsets';
 
 import InitialStateLoader from '@/src/providers/InitialStateLoader';
 import ZeroProvider from '@/src/providers/ZeroProvider';
+import { EncryptionBootstrapProvider } from '@/src/providers/EncryptionBootstrapProvider';
 import { usePresenceSetup } from '@/src/hooks/usePresenceSetup';
 import { useClearExpiredOwnStatus } from '@/src/hooks/useClearExpiredOwnStatus';
 import { OngoingCallBanner } from '@/src/components/call/OngoingCallBanner';
@@ -106,62 +107,64 @@ function NativeShell(): ReactElement {
 
   return (
     <>
-      <ZeroProvider>
-        <ClearExpiredOwnStatusEffect enabled={canRunPostStartupServices} />
-        <InitialStateLoader>
-          <CallBarVisibilityContext.Provider value={callBarVisibility}>
-            <SafeAreaInsetsProvider raw={insets} content={contentInsets}>
-              <Stack
-                screenOptions={{
-                  headerShown: false,
-                  freezeOnBlur: Platform.OS === 'android',
-                  contentStyle: { backgroundColor: stackContentBackground },
-                }}
-              >
-                <Stack.Screen name='(tabs)' />
-                <Stack.Screen name='(spaces)' />
-                <Stack.Screen name='(shortcuts)' />
-                <Stack.Screen
-                  name='call-prejoin'
-                  options={{ presentation: 'fullScreenModal', animation: 'slide_from_bottom' }}
-                />
-                <Stack.Screen name='native-call' />
-                <Stack.Screen name='chat-deeplink' options={{ animation: 'none' }} />
-                <Stack.Screen name='canvas' />
-                <Stack.Screen name='call/[callId]' />
-                <Stack.Screen name='global-search' />
-                <Stack.Screen
-                  name='attachments-viewer'
-                  options={{ presentation: 'fullScreenModal' }}
-                />
-                <Stack.Screen
-                  name='quick-look'
-                  options={{ presentation: 'transparentModal', animation: 'fade' }}
-                />
-                <Stack.Screen
-                  name='create-workspace'
-                  options={{
-                    presentation: 'fullScreenModal',
-                    animation: 'slide_from_bottom',
-                    animationDuration: CREATE_WORKSPACE_TRANSITION_MS,
+      <EncryptionBootstrapProvider>
+        <ZeroProvider>
+          <ClearExpiredOwnStatusEffect enabled={canRunPostStartupServices} />
+          <InitialStateLoader>
+            <CallBarVisibilityContext.Provider value={callBarVisibility}>
+              <SafeAreaInsetsProvider raw={insets} content={contentInsets}>
+                <Stack
+                  screenOptions={{
+                    headerShown: false,
+                    freezeOnBlur: Platform.OS === 'android',
+                    contentStyle: { backgroundColor: stackContentBackground },
                   }}
-                />
-                <Stack.Screen name='settings' />
-                <Stack.Screen name='profile' />
-                <Stack.Screen name='share-target' />
-                <Stack.Screen name='morning-brief' />
-                <Stack.Screen name='guide' />
-                <Stack.Screen name='community-join' />
-              </Stack>
-            </SafeAreaInsetsProvider>
-            <OngoingCallBanner />
-          </CallBarVisibilityContext.Provider>
-          <GuideReturnBar />
-          <IncomingCallSync />
-          <UpdatePromptGate />
-          <RevokedBetaFlagsGate />
-        </InitialStateLoader>
-      </ZeroProvider>
+                >
+                  <Stack.Screen name='(tabs)' />
+                  <Stack.Screen name='(spaces)' />
+                  <Stack.Screen name='(shortcuts)' />
+                  <Stack.Screen
+                    name='call-prejoin'
+                    options={{ presentation: 'fullScreenModal', animation: 'slide_from_bottom' }}
+                  />
+                  <Stack.Screen name='native-call' />
+                  <Stack.Screen name='chat-deeplink' options={{ animation: 'none' }} />
+                  <Stack.Screen name='canvas' />
+                  <Stack.Screen name='call/[callId]' />
+                  <Stack.Screen name='global-search' />
+                  <Stack.Screen
+                    name='attachments-viewer'
+                    options={{ presentation: 'fullScreenModal' }}
+                  />
+                  <Stack.Screen
+                    name='quick-look'
+                    options={{ presentation: 'transparentModal', animation: 'fade' }}
+                  />
+                  <Stack.Screen
+                    name='create-workspace'
+                    options={{
+                      presentation: 'fullScreenModal',
+                      animation: 'slide_from_bottom',
+                      animationDuration: CREATE_WORKSPACE_TRANSITION_MS,
+                    }}
+                  />
+                  <Stack.Screen name='settings' />
+                  <Stack.Screen name='profile' />
+                  <Stack.Screen name='share-target' />
+                  <Stack.Screen name='morning-brief' />
+                  <Stack.Screen name='guide' />
+                  <Stack.Screen name='community-join' />
+                </Stack>
+              </SafeAreaInsetsProvider>
+              <OngoingCallBanner />
+            </CallBarVisibilityContext.Provider>
+            <GuideReturnBar />
+            <IncomingCallSync />
+            <UpdatePromptGate />
+            <RevokedBetaFlagsGate />
+          </InitialStateLoader>
+        </ZeroProvider>
+      </EncryptionBootstrapProvider>
       {/* Safety-critical UI must not wait for Zero or chat/query startup. */}
       <SosAlertHost />
     </>

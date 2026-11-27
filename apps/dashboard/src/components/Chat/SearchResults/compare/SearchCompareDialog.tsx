@@ -61,7 +61,7 @@ export function SearchCompareDialog({
     <AnimatePresence>
       {open && (
         <motion.div
-          className='fixed inset-0 z-[120] flex items-center justify-center p-4 sm:p-6 antialiased'
+          className='fixed inset-0 z-120 flex items-center justify-center p-4 sm:p-6 antialiased'
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
@@ -69,7 +69,7 @@ export function SearchCompareDialog({
         >
           {/* Backdrop */}
           <div
-            className='absolute inset-0 bg-background/70 backdrop-blur-sm'
+            className='absolute inset-0 bg-background/70 backdrop-blur-xs'
             onClick={onClose}
             data-track-category='SEARCH_COMPARE'
             data-track-name='CLOSE_COMPARE_BACKDROP'
@@ -125,7 +125,7 @@ export function SearchCompareDialog({
                   verdict.agree === true &&
                     'border-emerald-500/30 bg-emerald-500/[0.07] text-emerald-700 dark:text-emerald-300',
                   verdict.agree === false &&
-                    'border-amber-500/30 bg-amber-500/[0.08] text-amber-700 dark:text-amber-300',
+                    'border-amber-500/30 bg-amber-500/8 text-amber-700 dark:text-amber-300',
                   verdict.agree === null && 'border-border bg-muted/40 text-muted-foreground',
                 )}
               >
@@ -232,7 +232,7 @@ export function SearchCompareDialog({
                                 key={ordered[i]?.id ?? i}
                                 className={cn(
                                   'border-b border-l border-border/40 px-3 py-2 flex flex-col gap-1.5 justify-center',
-                                  winner && 'bg-emerald-500/[0.06]',
+                                  winner && 'bg-emerald-500/6',
                                 )}
                               >
                                 <div className='flex items-baseline justify-between gap-2'>

@@ -91,7 +91,7 @@ export const TagChipInput: React.FC<TagChipInputProps> = ({
         }}
         placeholder={value.length === 0 ? placeholder : ''}
         disabled={disabled}
-        className='min-w-[80px] flex-1 bg-transparent text-sm text-foreground placeholder:text-desk-helper focus:outline-none disabled:opacity-50'
+        className='min-w-[80px] flex-1 bg-transparent text-sm text-foreground placeholder:text-desk-helper focus:outline-hidden disabled:opacity-50'
         {...trackingProps}
       />
     </div>

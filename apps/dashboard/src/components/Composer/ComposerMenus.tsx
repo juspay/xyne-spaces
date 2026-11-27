@@ -679,7 +679,7 @@ export function CommandList({
         <Command.Group
           key={section ?? 'matches'}
           {...(section ? { heading: COMMAND_SECTION_LABELS[section] } : {})}
-          className='[&_[cmdk-group-heading]]:px-2.5 [&_[cmdk-group-heading]]:pb-1 [&_[cmdk-group-heading]]:pt-2.5 [&_[cmdk-group-heading]]:text-[13px] [&_[cmdk-group-heading]]:text-muted-foreground'
+          className='**:[[cmdk-group-heading]]:px-2.5 **:[[cmdk-group-heading]]:pb-1 **:[[cmdk-group-heading]]:pt-2.5 **:[[cmdk-group-heading]]:text-[13px] **:[[cmdk-group-heading]]:text-muted-foreground'
         >
           {items.map(command => (
             <Command.Item

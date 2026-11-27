@@ -257,7 +257,7 @@ export const SearchUserV2: React.FC<SearchParticipantsProps> = ({
         index={virtual?.index}
         style={virtual?.style}
         className={cn(
-          'flex w-full items-center justify-between gap-2 px-2 py-1.5 rounded-lg text-sm hover:bg-accent data-[highlighted]:bg-accent',
+          'flex w-full items-center justify-between gap-2 px-2 py-1.5 rounded-lg text-sm hover:bg-accent data-highlighted:bg-accent',
         )}
       >
         <Avatar
@@ -306,7 +306,7 @@ export const SearchUserV2: React.FC<SearchParticipantsProps> = ({
       key={`channel:${channel.id}`}
       value={`channel:${channel.id}`}
       className={cn(
-        'flex w-full items-center gap-2 px-2 py-1.5 rounded-lg text-sm hover:bg-accent data-[highlighted]:bg-accent',
+        'flex w-full items-center gap-2 px-2 py-1.5 rounded-lg text-sm hover:bg-accent data-highlighted:bg-accent',
       )}
     >
       {channel.isPrivate ? (
@@ -354,7 +354,7 @@ export const SearchUserV2: React.FC<SearchParticipantsProps> = ({
         <div className='flex items-start gap-0 py-1 relative w-full'>
           <div
             ref={pillsContainerRef}
-            className='flex flex-wrap items-center gap-1.5 absolute left-1 -top-0 z-10 pointer-events-none'
+            className='flex flex-wrap items-center gap-1.5 absolute left-1 top-0 z-10 pointer-events-none'
           >
             {selectedUsers.map((user, i) => (
               <UserPill
@@ -374,7 +374,7 @@ export const SearchUserV2: React.FC<SearchParticipantsProps> = ({
             onKeyDown={handleKeyDown}
             placeholder={selectedUsers.length === 0 ? 'Search user by email or name' : ''}
             className={cn(
-              'w-full text-[14px] min-w-[120px] text-foreground border-none font-normal bg-transparent relative placeholder:text-muted-foreground outline-none focus:outline-none',
+              'w-full text-[14px] min-w-[120px] text-foreground border-none font-normal bg-transparent relative placeholder:text-muted-foreground outline-hidden focus:outline-hidden',
             )}
             style={{
               paddingLeft: `${pillsWidth + 10}px`,
@@ -387,12 +387,12 @@ export const SearchUserV2: React.FC<SearchParticipantsProps> = ({
               sideOffset={8}
               align='start'
               positionMethod='fixed'
-              className='z-[100] pointer-events-none'
+              className='z-100 pointer-events-none'
             >
               <BaseCombobox.Popup
                 data-testid='user-search-results'
                 data-combobox-popup
-                className='border border-border min-w-[var(--anchor-width)] max-h-[14rem] rounded-lg bg-background text-foreground transition duration-100 origin-[var(--transform-origin)] data-[starting-style]:opacity-0 data-[starting-style]:scale-95 data-[ending-style]:opacity-0 data-[ending-style]:scale-95 shadow-lg pointer-events-auto'
+                className='border border-border min-w-(--anchor-width) max-h-56 rounded-lg bg-background text-foreground transition duration-100 origin-(--transform-origin) data-starting-style:opacity-0 data-starting-style:scale-95 data-ending-style:opacity-0 data-ending-style:scale-95 shadow-lg pointer-events-auto'
               >
                 {isEmpty ? (
                   <BaseCombobox.Empty>
@@ -402,8 +402,8 @@ export const SearchUserV2: React.FC<SearchParticipantsProps> = ({
                   <BaseCombobox.List
                     ref={listRef}
                     className={cn(
-                      'overflow-y-auto overscroll-contain py-1 m-1.5 outline-none cursor-pointer',
-                      'max-h-[min(13rem,var(--available-height))] data-[empty]:p-0 space-y-1',
+                      'overflow-y-auto overscroll-contain py-1 m-1.5 outline-hidden cursor-pointer',
+                      'max-h-[min(13rem,var(--available-height))] data-empty:p-0 space-y-1',
                       'no-scrollbar',
                     )}
                   >

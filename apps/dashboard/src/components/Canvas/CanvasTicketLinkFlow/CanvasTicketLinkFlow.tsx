@@ -69,7 +69,7 @@ export function CanvasTicketLinkFlow({
             value={search}
             onChange={event => setSearch(event.target.value)}
             placeholder='Search by ticket ID or title'
-            className='min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground'
+            className='min-w-0 flex-1 bg-transparent text-sm outline-hidden placeholder:text-muted-foreground'
             data-track-category='CANVAS'
             data-track-name='Selection_Link_Ticket_Search'
           />

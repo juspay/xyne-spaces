@@ -168,7 +168,7 @@ export function GoogleDocPreviewModal({
       className='flex max-h-[88vh] w-full flex-col bg-background'
       data-testid='google-doc-preview-modal'
     >
-      <header className='flex flex-shrink-0 items-start gap-3 border-b border-border px-5 py-4'>
+      <header className='flex shrink-0 items-start gap-3 border-b border-border px-5 py-4'>
         <span className='flex size-[34px] shrink-0 items-center justify-center rounded-[9px] border border-border bg-background text-[#1a73e8] dark:text-[#8ab4f8]'>
           <FileIcon className='size-[18px]' aria-hidden='true' />
         </span>
@@ -315,7 +315,7 @@ export function GoogleDocPreviewModal({
         {contextError ? <p className='mt-4 text-sm text-destructive'>{contextError}</p> : null}
       </div>
 
-      <footer className='flex flex-shrink-0 items-center gap-3 border-t border-border bg-muted/30 px-[18px] py-3'>
+      <footer className='flex shrink-0 items-center gap-3 border-t border-border bg-muted/30 px-[18px] py-3'>
         {needsConnection ? (
           <>
             <p className='flex min-w-0 flex-1 items-start gap-2 text-[11.5px] text-amber-700 dark:text-amber-200'>

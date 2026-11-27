@@ -179,7 +179,7 @@ export function RecordingOverlay(): React.ReactElement | null {
       <div
         ref={containerRef}
         className={cn(
-          'fixed z-[60] pointer-events-auto rec-overlay-container',
+          'fixed z-60 pointer-events-auto rec-overlay-container',
           isDragging && 'is-dragging',
         )}
         style={
@@ -202,11 +202,11 @@ export function RecordingOverlay(): React.ReactElement | null {
               className='no-scrollbar overflow-y-auto h-[96px] text-center flex flex-col justify-end rec-overlay-transcript-mask'
             >
               {transcripts.length > 0 ? (
-                <div className='space-y-1 mx-auto flex-shrink-0'>
+                <div className='space-y-1 mx-auto shrink-0'>
                   {transcripts.map(entry => (
                     <p
                       key={entry.id}
-                      className='text-sm leading-snug text-foreground text-center break-words'
+                      className='text-sm leading-snug text-foreground text-center wrap-break-word'
                     >
                       {entry.text}
                     </p>
@@ -332,7 +332,7 @@ export function RecordingOverlay(): React.ReactElement | null {
             </Button>
             <Button
               aria-label='Go to recordings'
-              className='w-8 bg-action-primary hover:bg-action-primary/80 text-primary-foreground hover:text-primary-foreground transition-colors rounded-lg'
+              className='w-8 bg-action-primary text-primary-foreground hover:text-primary-foreground transition-colors rounded-lg'
               variant='outline'
               size='sm'
               onClick={() => void navigate('/recordings')}

@@ -48,7 +48,7 @@ function GrantRow({
         {badge}
       </div>
       {reason && (
-        <p className='break-words rounded-md bg-muted/60 px-2.5 py-1.5 text-xs leading-4 text-muted-foreground'>
+        <p className='wrap-break-word rounded-md bg-muted/60 px-2.5 py-1.5 text-xs leading-4 text-muted-foreground'>
           {reason}
         </p>
       )}
@@ -157,7 +157,7 @@ export function AgentCallGraphTabV2({ agent }: { agent: Agent }): ReactElement {
                         aria-label='Approve request'
                         disabled={busyId !== null}
                         onClick={() => void decide(grant, true)}
-                        className='size-7 text-muted-foreground hover:bg-status-success/10 hover:text-status-success'
+                        className='size-7 text-muted-foreground hover:text-status-success'
                         data-track-category='Claw Agents'
                         data-track-name='ApproveDelegation'
                       >

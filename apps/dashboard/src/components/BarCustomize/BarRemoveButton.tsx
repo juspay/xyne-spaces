@@ -37,7 +37,7 @@ export const BarRemoveButton = ({
         store.remove(id);
       }}
       className={cn(
-        'absolute z-[1] flex items-center justify-center rounded-full border border-border bg-background text-muted-foreground shadow-sm transition-opacity',
+        'absolute z-1 flex items-center justify-center rounded-full border border-border bg-background text-muted-foreground shadow-xs transition-opacity',
         'opacity-0 group-hover:opacity-100 focus-visible:opacity-100 hover:text-foreground',
         className,
       )}

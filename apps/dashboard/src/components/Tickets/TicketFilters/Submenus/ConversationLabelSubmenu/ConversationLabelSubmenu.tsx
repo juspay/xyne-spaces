@@ -116,7 +116,7 @@ export const ConversationLabelSubmenu = ({
                   onClick={() => handleSelect(label.id)}
                   type='button'
                   className={`
-                    w-full flex items-center justify-between px-3 py-2 rounded-md transition-all outline-none
+                    w-full flex items-center justify-between px-3 py-2 rounded-md transition-all outline-hidden
                     ${isSelected ? 'bg-accent text-accent-foreground' : 'hover:bg-muted text-foreground'}
                     focus-visible:ring-2 focus-visible:ring-ring
                   `}

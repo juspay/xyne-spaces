@@ -207,7 +207,7 @@ const ProfileView = ({
     <div className='flex flex-col gap-4 p-6 w-full'>
       {/* User identity section */}
       <div className='flex items-start gap-3'>
-        <div className='flex-shrink-0'>
+        <div className='shrink-0'>
           <div
             className='relative group cursor-pointer'
             onClick={handlePictureClick}
@@ -248,7 +248,7 @@ const ProfileView = ({
           <div className='relative' ref={presenceDropdownRef}>
             <button
               onClick={() => setIsPresenceDropdownOpen(!isPresenceDropdownOpen)}
-              className='flex items-center gap-1.5 hover:bg-muted px-1.5 py-0.5 -ml-1.5 rounded-md transition-colors outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-blue-500'
+              className='flex items-center gap-1.5 hover:bg-muted px-1.5 py-0.5 -ml-1.5 rounded-md transition-colors outline-hidden focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-blue-500'
               data-track-category='PROFILE'
               data-track-name='TogglePresenceDropdown'
               data-track-metadata={JSON.stringify({ isOpen: !isPresenceDropdownOpen })}
@@ -340,7 +340,7 @@ const ProfileView = ({
           {hasValidStatus ? (
             <div className='flex items-center justify-between gap-1 w-full'>
               <div className='flex items-center gap-2 min-w-0 flex-1'>
-                <div className='flex-shrink-0'>
+                <div className='shrink-0'>
                   <StatusIndicator
                     statusEmoji={user?.statusEmoji}
                     statusContent={user?.statusContent}
@@ -360,7 +360,7 @@ const ProfileView = ({
                 trackId='clear_user_status'
                 data-track-category='PROFILE'
                 data-track-name='CLEAR_STATUS'
-                className='flex-shrink-0 p-1 h-auto hover:bg-accent min-w-[20px]'
+                className='shrink-0 p-1 h-auto hover:bg-accent min-w-[20px]'
                 title='Clear status'
                 aria-label='Clear status'
               >
@@ -369,7 +369,7 @@ const ProfileView = ({
             </div>
           ) : (
             <div className='flex items-center p-1 gap-2 text-muted-foreground'>
-              <SmilePlus className='size-4 flex-shrink-0' />
+              <SmilePlus className='size-4 shrink-0' />
               <span className='text-xs truncate'>Set a status</span>
             </div>
           )}
@@ -387,7 +387,7 @@ const ProfileView = ({
           <div className='space-y-1'>
             <div className='px-2 py-1 rounded-lg border border-border bg-transparent w-full flex items-center justify-between gap-2'>
               <div className='flex items-center gap-2 min-w-0 flex-1'>
-                <BellOff className='size-4 flex-shrink-0 text-muted-foreground' />
+                <BellOff className='size-4 shrink-0 text-muted-foreground' />
                 <span className='text-sm font-medium text-foreground truncate'>
                   Notifications paused
                 </span>
@@ -395,7 +395,7 @@ const ProfileView = ({
               <Button
                 variant='ghost'
                 size='lg'
-                className='flex-shrink-0 p-1 h-auto hover:bg-accent min-w-[20px]'
+                className='shrink-0 p-1 h-auto hover:bg-accent min-w-[20px]'
                 title='Resume notifications'
                 aria-label='Resume notifications'
                 onClick={handleResumeNotifications}
@@ -421,7 +421,7 @@ const ProfileView = ({
                 data-track-name='OpenPauseNotificationsMenu'
               >
                 <div className='flex items-center p-1 gap-2 text-muted-foreground'>
-                  <Bell className='size-4 flex-shrink-0' />
+                  <Bell className='size-4 shrink-0' />
                   <span className='text-xs truncate'>Pause notifications for:</span>
                 </div>
                 <ChevronDown className='size-4 text-muted-foreground' />
@@ -491,7 +491,7 @@ const ProfileView = ({
           data-track-category='PROFILE'
           data-track-name='OpenProfile'
         >
-          <User className='size-4 text-muted-foreground flex-shrink-0' />
+          <User className='size-4 text-muted-foreground shrink-0' />
           <span className='text-sm text-foreground'>Profile</span>
         </button>
 
@@ -505,7 +505,7 @@ const ProfileView = ({
           data-track-category='PROFILE'
           data-track-name='OpenPreferences'
         >
-          <Settings2 className='size-4 text-muted-foreground flex-shrink-0' />
+          <Settings2 className='size-4 text-muted-foreground shrink-0' />
           <span className='text-sm text-foreground'>Preferences</span>
         </button>
       </div>
@@ -515,7 +515,7 @@ const ProfileView = ({
       <div className='space-y-2'>
         <Button
           type='button'
-          className='!text-white w-full !bg-destructive rounded-3xl h-[44px] active:scale-[0.97] transition-transform duration-200'
+          className='text-white! w-full bg-destructive! rounded-3xl h-[44px] active:scale-[0.97] transition-transform duration-200'
           onClick={handleLogout}
           trackId='logout'
           data-track-category='PROFILE'

@@ -179,7 +179,7 @@ export function useSlashCommands({
   const setTextRef = useRef<((text: string) => void) | null>(null);
   const { startCall, startChannelCall, hasActiveChannelCall, ensureRoomIdle } = useQuickCall();
   // A `/call` on a channel closes Cmd+K and shows the shared call-confirmation modal. That modal is
-  // z-50 and would sit behind the z-[9999] Cmd+K dialog, so we close first; this state is
+  // z-50 and would sit behind the z-9999 Cmd+K dialog, so we close first; this state is
   // independent of the command lifecycle so it survives that close.
   const [pendingChannelCall, setPendingChannelCall] = useState<{ id: string; name: string } | null>(
     null,

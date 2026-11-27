@@ -182,7 +182,7 @@ const LinkPreviewComponent: React.FC<LinkPreviewProps> = ({ metadata, onClose })
       <div className='absolute top-1 right-1 z-10 flex items-center gap-1'>
         <button
           type='button'
-          className='link-preview__copy-button p-0.5 rounded-full bg-muted hover:bg-accent focus:outline-none focus:ring-2 focus:ring-ring'
+          className='link-preview__copy-button p-0.5 rounded-full bg-muted hover:bg-accent focus:outline-hidden focus:ring-2 focus:ring-ring'
           onClick={handleCopy}
           aria-label='Copy link'
           title='Copy link'
@@ -195,7 +195,7 @@ const LinkPreviewComponent: React.FC<LinkPreviewProps> = ({ metadata, onClose })
         {onClose && (
           <button
             type='button'
-            className='link-preview__close-button p-0.5 rounded-full bg-muted hover:bg-accent focus:outline-none focus:ring-2 focus:ring-ring'
+            className='link-preview__close-button p-0.5 rounded-full bg-muted hover:bg-accent focus:outline-hidden focus:ring-2 focus:ring-ring'
             onClick={handleClose}
             aria-label='Close link preview'
             data-track-category='MESSAGE'
@@ -214,7 +214,7 @@ const LinkPreviewComponent: React.FC<LinkPreviewProps> = ({ metadata, onClose })
         rel='noopener noreferrer'
         className='flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground hover:underline min-w-0 w-fit'
       >
-        <span className='flex-shrink-0 w-3.5 h-3.5 rounded overflow-hidden flex items-center justify-center'>
+        <span className='shrink-0 w-3.5 h-3.5 rounded overflow-hidden flex items-center justify-center'>
           {faviconUrl ? (
             <img
               src={faviconUrl}
@@ -260,7 +260,7 @@ const LinkPreviewComponent: React.FC<LinkPreviewProps> = ({ metadata, onClose })
       {SHOW_PREVIEW_IMAGES && image && !imageError && !isBitbucketUrl(url) && (
         // Fixed 2:1 aspect ratio (OG image standard is 1200×630 ≈ 2:1).
         // Skeleton and image share the same box — no layout shift or flicker.
-        <div className='relative w-full mt-1 rounded-xl overflow-hidden aspect-[2/1]'>
+        <div className='relative w-full mt-1 rounded-xl overflow-hidden aspect-2/1'>
           {!imageLoaded && <div className='absolute inset-0 animate-pulse bg-muted' />}
           {/* Always in DOM with eager loading — opacity hides until ready.
               display:none + loading='lazy' prevents the browser fetching the image. */}

@@ -129,7 +129,7 @@ export const SlashCommandArtifactBanner = (): React.JSX.Element | null => {
         <button
           type='button'
           onClick={() => setIsOpen(open => !open)}
-          className='relative flex size-10 items-center justify-center rounded-xl border border-orange-300 bg-orange-50 text-orange-600 shadow-lg transition-colors hover:bg-orange-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-orange-500 focus-visible:ring-offset-2 dark:border-orange-800 dark:bg-orange-950 dark:text-orange-300 dark:hover:bg-orange-900'
+          className='relative flex size-10 items-center justify-center rounded-xl border border-orange-300 bg-orange-50 text-orange-600 shadow-lg transition-colors hover:bg-orange-100 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-orange-500 focus-visible:ring-offset-2 dark:border-orange-800 dark:bg-orange-950 dark:text-orange-300 dark:hover:bg-orange-900'
           aria-label={`${visibleItems.length} active slash command artifact${visibleItems.length === 1 ? '' : 's'}`}
           aria-expanded={isOpen}
           aria-controls='slash-command-artifact-banner-popover'
@@ -149,7 +149,7 @@ export const SlashCommandArtifactBanner = (): React.JSX.Element | null => {
           id='slash-command-artifact-banner-popover'
           role='dialog'
           aria-label={`${item.definition.badge} alert in ${channelLabel}`}
-          className='fixed bottom-4 left-[58px] z-[100] hidden h-[110px] w-[344px] max-w-[calc(100vw-70px)] flex-col rounded-2xl border border-orange-300 bg-orange-50 p-3 text-orange-800 shadow-2xl sm:flex dark:border-orange-800 dark:bg-orange-950 dark:text-orange-100'
+          className='fixed bottom-4 left-[58px] z-100 hidden h-[110px] w-[344px] max-w-[calc(100vw-70px)] flex-col rounded-2xl border border-orange-300 bg-orange-50 p-3 text-orange-800 shadow-2xl sm:flex dark:border-orange-800 dark:bg-orange-950 dark:text-orange-100'
         >
           <div className='flex min-w-0 items-center gap-2'>
             <span className='relative flex size-2 shrink-0'>

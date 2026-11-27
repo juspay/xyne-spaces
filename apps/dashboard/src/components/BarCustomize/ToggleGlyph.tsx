@@ -19,7 +19,7 @@ export const ToggleGlyph = ({ checked }: { checked: boolean }): ReactElement => 
   >
     <span
       className={cn(
-        'inline-block h-3.5 w-3.5 rounded-full bg-background shadow-sm transition-transform',
+        'inline-block h-3.5 w-3.5 rounded-full bg-background shadow-xs transition-transform',
         checked ? 'translate-x-4' : 'translate-x-0',
       )}
     />

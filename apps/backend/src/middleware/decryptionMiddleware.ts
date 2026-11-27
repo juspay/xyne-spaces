@@ -4,6 +4,8 @@ import { getCryptoOperations } from '@/services/otel/cryptoMetrics';
 import { logger } from '@/utils/logger';
 import { getEncryptionProvider, isDekPassthrough } from '@/services/encryption';
 import type { TransitCaller } from '@/services/encryption/types';
+import type { MutationEncryptionContext } from '@/zero/encryptedMutation';
+import { sdkMutatorNameFor } from '@/api/sdk/operations';
 
 export function sanitizeForLog(value: unknown): string {
   return String(value ?? '').replace(/[\r\n]+/g, '');
@@ -44,14 +46,20 @@ export async function decryptRequestBodyMiddleware(
 }
 
 /**
- * Zero pushes, which this middleware leaves alone: a mutator with a manifest rule is transformed
- * by the encryption service before it runs, and one without a rule takes plaintext args
- * (zero/encryptedMutation.ts prepareEncryptedMutations refuses transit ciphertext in them).
+ * Requests whose mutations this middleware leaves alone: Zero pushes, and SDK v3 `/mutate` calls
+ * whose op runs a Zero mutator (`runCatalogMutation`). Each of their mutations goes through
+ * zero/encryptedMutation.ts prepareEncryptedMutations: a mutator with a manifest rule is
+ * transformed by the encryption service before it runs, and one without a rule takes plaintext
+ * args (transit ciphertext in them is refused).
  */
 const ZERO_PUSH_PATHS = new Set(['/api/zero/push', '/api/zero/push-fallback']);
 
 function isZeroPush(req: Request): boolean {
   return ZERO_PUSH_PATHS.has((req.originalUrl ?? '').split('?')[0]);
+}
+
+function runsCatalogMutation(req: Request): boolean {
+  return isZeroPush(req) || sdkMutatorNameFor(req) !== undefined;
 }
 
 export async function decryptRequestBody(req: Request, next: NextFunction): Promise<void> {
@@ -62,7 +70,7 @@ export async function decryptRequestBody(req: Request, next: NextFunction): Prom
       return next();
     }
 
-    if (isZeroPush(req) || !hasEncryptedFields(req.body)) {
+    if (runsCatalogMutation(req) || !hasEncryptedFields(req.body)) {
       return next();
     }
 
@@ -120,6 +128,15 @@ export function transitCaller(req: Request): TransitCaller {
     return { proxyClient: req.proxyClient };
   }
   return req.authToken ? { authToken: req.authToken } : {};
+}
+
+/**
+ * Whom a request's client-encrypted mutations are for (transitCaller: the access token, whose
+ * session's registered transit key the encryption service uses). Shared by Zero pushes and
+ * the SDK's /mutate.
+ */
+export function mutationEncryptionContext(req: Request): MutationEncryptionContext {
+  return transitCaller(req);
 }
 
 /** Whether the request names a transit key at all (the proxy or an access token). */

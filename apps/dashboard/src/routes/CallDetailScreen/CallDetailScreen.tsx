@@ -31,7 +31,11 @@ import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { queries } from '../../zero/queries';
 import { cn } from '../../utils/classNames';
 import Tooltip from '../../components/ui/Tooltip/Tooltip';
-import { hasCallEnded, type Call } from '../CallHistoryScreen/callHistoryItem.utils';
+import {
+  hasCallEnded,
+  isExternalCalendarEvent,
+  type Call,
+} from '../CallHistoryScreen/callHistoryItem.utils';
 import { xyneAIActor } from '../../machines/xyneAIMachine';
 import { usePlatform } from '../../hooks/usePlatform';
 import { useTranscriptTranslation } from '../../hooks/useTranscriptTranslation';
@@ -735,13 +739,13 @@ export default function CallDetailScreen(): ReactElement {
               {/*
               {isCallAudience && hasDetailedSummaryTab && (
                 <DropdownMenu>
-                  <div className='inline-flex h-8 shrink-0 items-stretch overflow-hidden rounded-lg bg-foreground text-background shadow-sm'>
+                  <div className='inline-flex h-8 shrink-0 items-stretch overflow-hidden rounded-lg bg-foreground text-background shadow-xs'>
                     <Button
                       type='button'
                       variant='ghost'
                       size='sm'
                       onClick={() => setShowShareModal(true)}
-                      className={cn(POST_BUTTON_CLASS, 'text-xs font-semibold !rounded-2xl')}
+                      className={cn(POST_BUTTON_CLASS, 'text-xs font-semibold rounded-2xl!')}
                       data-track-category='CallDetail'
                       data-track-name='open_post_to_channel_modal'
                     >
@@ -824,7 +828,7 @@ export default function CallDetailScreen(): ReactElement {
                     }}
                     variant='ghost'
                     className={cn(
-                      'inline-flex size-8 items-center justify-center rounded-xl border border-border/70 transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                      'inline-flex size-8 items-center justify-center rounded-xl border border-border/70 transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring',
                       showTranscriptPanel ? 'text-foreground' : 'text-muted-foreground',
                     )}
                     aria-label={!showTranscriptPanel ? 'Open transcript' : 'Close transcript'}
@@ -961,6 +965,8 @@ export default function CallDetailScreen(): ReactElement {
             // Disabled (LLM)
             // onLanguageChange={setSelectedTranscriptLanguage}
             isTranslating={transcript.isTranslating}
+            // A calendar meeting's transcript is Google Meet's own, which names each speaker.
+            {...(call && isExternalCalendarEvent(call) ? { showSpeakers: true } : {})}
             onClose={(): void => {
               setShowTranscriptPanel(false);
               setCitationRef(null);

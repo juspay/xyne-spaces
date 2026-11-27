@@ -21,7 +21,7 @@ interface ReactionsOverlayProps {
  */
 export function ReactionsOverlay({ reactions }: ReactionsOverlayProps): React.ReactElement {
   return (
-    <div className='pointer-events-none absolute inset-0 overflow-hidden z-[55]' aria-hidden='true'>
+    <div className='pointer-events-none absolute inset-0 overflow-hidden z-55' aria-hidden='true'>
       {/* Keyframe injected once per mount — scoped to this component */}
       <style>{REACTION_FLOAT_STYLE}</style>
       {reactions.map(r => (

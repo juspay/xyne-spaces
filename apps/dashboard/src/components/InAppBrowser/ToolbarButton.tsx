@@ -28,12 +28,12 @@ export const ToolbarButton = forwardRef<
       disabled={disabled}
       {...rest}
       className={cn(
-        'flex size-7 shrink-0 items-center justify-center rounded-md outline-none transition-colors',
+        'flex size-7 shrink-0 items-center justify-center rounded-md outline-hidden transition-colors',
         disabled
           ? 'text-muted-foreground/40'
           : pressed
             ? 'bg-muted text-foreground'
-            : 'text-muted-foreground hover:bg-foreground/[0.08] hover:text-foreground focus-visible:bg-foreground/[0.08] focus-visible:text-foreground data-[state=open]:bg-muted data-[state=open]:text-foreground',
+            : 'text-muted-foreground hover:bg-foreground/8 hover:text-foreground focus-visible:bg-foreground/8 focus-visible:text-foreground data-[state=open]:bg-muted data-[state=open]:text-foreground',
         className,
       )}
       data-track-category={trackCategory}

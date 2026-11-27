@@ -92,7 +92,7 @@ export function BackgroundPicker({ callId, className }: BackgroundPickerProps): 
     cn(
       'relative flex aspect-video items-center justify-center overflow-hidden rounded-lg',
       'bg-[#333537] text-[#e3e3e3] transition hover:bg-[#404245]',
-      'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#a8c7fa]',
+      'focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-[#a8c7fa]',
       selected ? 'ring-2 ring-[#a8c7fa]' : 'ring-1 ring-inset ring-white/10',
     );
 

@@ -57,7 +57,7 @@ const AddReactionDrawerMobile = ({
       </Drawer.Trigger>
       <Drawer.Portal>
         <Drawer.Overlay
-          className='fixed inset-0 z-[100] bg-black/30'
+          className='fixed inset-0 z-100 bg-black/30'
           onClick={() => setEmojiPickerOpen(false)}
           data-track-category='MESSAGE'
           data-track-name='CLOSE_ADD_REACTION_DRAWER_BACKDROP'
@@ -67,13 +67,13 @@ const AddReactionDrawerMobile = ({
           onTouchCancel={e => e.stopPropagation()}
         />
         <Drawer.Content
-          className='fixed bottom-0 z-[110] w-full rounded-t-[20px] bg-background p-2 overflow-hidden h-[75dvh]'
+          className='fixed bottom-0 z-110 w-full rounded-t-[20px] bg-background p-2 overflow-hidden h-[75dvh]'
           onTouchStart={e => e.stopPropagation()}
           onTouchMove={e => e.stopPropagation()}
           onTouchEnd={e => e.stopPropagation()}
           onTouchCancel={e => e.stopPropagation()}
         >
-          <Drawer.Handle className='mt-2 !h-2 !w-[100px] !bg-gray-300 !dark:bg-gray-600' />
+          <Drawer.Handle className='mt-2 h-2! w-[100px]! bg-gray-300! !dark:bg-gray-600' />
           <div
             ref={emojiPickerContainerRef}
             className='flex h-full flex-col'
@@ -91,7 +91,7 @@ const AddReactionDrawerMobile = ({
               customEmojis={customEmojis || []}
               previewConfig={{ showPreview: true }}
               autoFocusSearch={false}
-              className='!w-full !min-h-0 !flex-1 !rounded-[inherit] ![--epr-picker-border-color:transparent]'
+              className='w-full! min-h-0! flex-1! rounded-[inherit]! [--epr-picker-border-color:transparent]!'
             />
           </div>
         </Drawer.Content>

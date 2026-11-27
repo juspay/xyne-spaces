@@ -241,7 +241,7 @@ export type SelectionVariant = 'filled' | 'outline';
 
 const selectionTickClass = (variant: SelectionVariant): string =>
   cn(
-    'flex-shrink-0 flex items-center justify-center w-4 h-4 rounded-full',
+    'shrink-0 flex items-center justify-center w-4 h-4 rounded-full',
     variant === 'outline'
       ? 'border border-border text-muted-foreground'
       : 'bg-primary text-primary-foreground',
@@ -292,7 +292,7 @@ export const ChannelCommandItem = ({
       className={`flex items-center gap-3 p-3 rounded-lg cursor-pointer mt-1.5 aria-selected:bg-accent ${!isMobile && 'hover:bg-accent'}`}
       style={{ WebkitTapHighlightColor: 'transparent' }}
     >
-      <div className='flex items-center justify-center h-4 w-5 flex-shrink-0 text-muted-foreground'>
+      <div className='flex items-center justify-center h-4 w-5 shrink-0 text-muted-foreground'>
         {getChannelIcon(channel)}
       </div>
       <div className='flex-1 min-w-0 flex items-center gap-1'>
@@ -336,7 +336,7 @@ export const ChannelCommandItem = ({
 // (Tab is intercepted for tab-cycling), so that ring only ever appears as a
 // click-then-Tab artifact. Overridden here rather than in ui/Button, which other
 // screens rely on for real keyboard navigation.
-const MERGE_BAR_BUTTON_NO_RING = 'focus-visible:outline-none focus-visible:ring-0';
+const MERGE_BAR_BUTTON_NO_RING = 'focus-visible:outline-hidden focus-visible:ring-0';
 
 const DEFAULT_ENABLED_TABS: TabType[] = [
   TabType.MESSAGES,
@@ -469,7 +469,7 @@ const SkeletonGroup = ({
   <div className='mb-4'>
     <Command.Group
       heading={heading}
-      className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono'
+      className='**:[[cmdk-group-heading]]:px-2 **:[[cmdk-group-heading]]:text-xs **:[[cmdk-group-heading]]:font-medium **:[[cmdk-group-heading]]:text-muted-foreground **:[[cmdk-group-heading]]:uppercase **:[[cmdk-group-heading]]:tracking-wide **:[[cmdk-group-heading]]:font-mono'
     >
       <SearchSectionSkeleton rows={rows} variant={variant ?? 'message'} />
     </Command.Group>
@@ -535,7 +535,7 @@ function MentionShowMoreButton({
       data-track-category='SEARCH'
       data-track-name={trackName}
     >
-      <span className='flex h-4 w-5 flex-shrink-0 items-center justify-center'>
+      <span className='flex h-4 w-5 shrink-0 items-center justify-center'>
         <ChevronDown size={14} />
       </span>
       Show more
@@ -560,7 +560,7 @@ interface AtMentionCandidate {
 function UserGroupGlyph({ isDeactivated }: { isDeactivated?: boolean }): ReactElement {
   return (
     <span
-      className={`flex size-4 flex-shrink-0 items-center justify-center overflow-hidden rounded-sm border ${
+      className={`flex size-4 shrink-0 items-center justify-center overflow-hidden rounded-sm border ${
         isDeactivated ? 'bg-muted border-muted-foreground/30' : 'bg-green-50 border-green-200'
       }`}
     >
@@ -3373,7 +3373,7 @@ const ChannelCommandMenuContent = ({
       <div className='mb-4'>
         <Command.Group
           heading={`People & channels (${mergedLocalResults.length})`}
-          className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono'
+          className='**:[[cmdk-group-heading]]:px-2 **:[[cmdk-group-heading]]:text-xs **:[[cmdk-group-heading]]:font-medium **:[[cmdk-group-heading]]:text-muted-foreground **:[[cmdk-group-heading]]:uppercase **:[[cmdk-group-heading]]:tracking-wide **:[[cmdk-group-heading]]:font-mono'
         >
           {displayItems.map((candidate, index) => {
             if (isMergedUser(candidate)) {
@@ -3480,7 +3480,7 @@ const ChannelCommandMenuContent = ({
       <div className='mb-4'>
         <Command.Group
           heading={`${getGroupLabel('others')} (${flatAllBackendResults.length})`}
-          className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono'
+          className='**:[[cmdk-group-heading]]:px-2 **:[[cmdk-group-heading]]:text-xs **:[[cmdk-group-heading]]:font-medium **:[[cmdk-group-heading]]:text-muted-foreground **:[[cmdk-group-heading]]:uppercase **:[[cmdk-group-heading]]:tracking-wide **:[[cmdk-group-heading]]:font-mono'
         >
           {flatAllBackendResults.map((result, index) => (
             <SearchResultItem
@@ -3534,7 +3534,7 @@ const ChannelCommandMenuContent = ({
             heading={
               isScreenAll ? getGroupLabel(groupKey) : `${getGroupLabel(groupKey)} (${displayCount})`
             }
-            className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono'
+            className='**:[[cmdk-group-heading]]:px-2 **:[[cmdk-group-heading]]:text-xs **:[[cmdk-group-heading]]:font-medium **:[[cmdk-group-heading]]:text-muted-foreground **:[[cmdk-group-heading]]:uppercase **:[[cmdk-group-heading]]:tracking-wide **:[[cmdk-group-heading]]:font-mono'
           >
             {displayItems.map((result, index) => (
               <SearchResultItem
@@ -3626,7 +3626,7 @@ const ChannelCommandMenuContent = ({
             <div key={type} className='mb-4'>
               <Command.Group
                 heading={`${getGroupLabel(type)} (${displayCount})`}
-                className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono'
+                className='**:[[cmdk-group-heading]]:px-2 **:[[cmdk-group-heading]]:text-xs **:[[cmdk-group-heading]]:font-medium **:[[cmdk-group-heading]]:text-muted-foreground **:[[cmdk-group-heading]]:uppercase **:[[cmdk-group-heading]]:tracking-wide **:[[cmdk-group-heading]]:font-mono'
               >
                 {displayItems.map((result, index) => (
                   <SearchResultItem
@@ -3714,7 +3714,7 @@ const ChannelCommandMenuContent = ({
           return (
             <Command.Group
               heading={`${getGroupLabel('user')} (${displayCount})`}
-              className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono'
+              className='**:[[cmdk-group-heading]]:px-2 **:[[cmdk-group-heading]]:text-xs **:[[cmdk-group-heading]]:font-medium **:[[cmdk-group-heading]]:text-muted-foreground **:[[cmdk-group-heading]]:uppercase **:[[cmdk-group-heading]]:tracking-wide **:[[cmdk-group-heading]]:font-mono'
             >
               {displayItems.map((item, index) => (
                 <SearchResultItem
@@ -3766,7 +3766,7 @@ const ChannelCommandMenuContent = ({
           return (
             <Command.Group
               heading={getCategoryLabel(category)}
-              className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono'
+              className='**:[[cmdk-group-heading]]:px-2 **:[[cmdk-group-heading]]:text-xs **:[[cmdk-group-heading]]:font-medium **:[[cmdk-group-heading]]:text-muted-foreground **:[[cmdk-group-heading]]:uppercase **:[[cmdk-group-heading]]:tracking-wide **:[[cmdk-group-heading]]:font-mono'
             >
               {displayItems.map(({ channel }, index) => {
                 const unreadCount = unreadCounts[channel.id] ?? 0;
@@ -3829,7 +3829,7 @@ const ChannelCommandMenuContent = ({
           return (
             <Command.Group
               heading={getCategoryLabel(category)}
-              className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono'
+              className='**:[[cmdk-group-heading]]:px-2 **:[[cmdk-group-heading]]:text-xs **:[[cmdk-group-heading]]:font-medium **:[[cmdk-group-heading]]:text-muted-foreground **:[[cmdk-group-heading]]:uppercase **:[[cmdk-group-heading]]:tracking-wide **:[[cmdk-group-heading]]:font-mono'
             >
               {displayItems.map(({ channel }, index) => {
                 const unreadCount = unreadCounts[channel.id] ?? 0;
@@ -3901,7 +3901,7 @@ const ChannelCommandMenuContent = ({
             <div className='mb-4'>
               <Command.Group
                 heading={getCategoryLabel(category)}
-                className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono'
+                className='**:[[cmdk-group-heading]]:px-2 **:[[cmdk-group-heading]]:text-xs **:[[cmdk-group-heading]]:font-medium **:[[cmdk-group-heading]]:text-muted-foreground **:[[cmdk-group-heading]]:uppercase **:[[cmdk-group-heading]]:tracking-wide **:[[cmdk-group-heading]]:font-mono'
               >
                 {displayItems.map(({ channel }, index) => {
                   const unreadCount = unreadCounts[channel.id] ?? 0;
@@ -3967,7 +3967,7 @@ const ChannelCommandMenuContent = ({
       <div key={category} className='mb-4'>
         <Command.Group
           heading={getCategoryLabel(category)}
-          className='[&_[cmdk-group-heading]]:px-2  [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
+          className='**:[[cmdk-group-heading]]:px-2  **:[[cmdk-group-heading]]:text-xs **:[[cmdk-group-heading]]:font-medium **:[[cmdk-group-heading]]:text-muted-foreground **:[[cmdk-group-heading]]:uppercase **:[[cmdk-group-heading]]:tracking-wide **:[[cmdk-group-heading]]:font-["Geist_Mono"]'
         >
           {displayItems.map(({ channel }, index) => {
             const unreadCount = unreadCounts[channel.id] ?? 0;
@@ -4088,8 +4088,8 @@ const ChannelCommandMenuContent = ({
           mimeType={previewFile.mimeType}
           fileSize={previewFile.fileSize}
           // Cmd+K's own surface is z-[9999]; the preview opens on top of it and
-          // its default z-[56] would put it behind.
-          zIndexClass='z-[10002]'
+          // its default z-56 would put it behind.
+          zIndexClass='z-10002'
         />
       )}
     </>
@@ -4766,7 +4766,7 @@ const ChannelCommandMenuContent = ({
         <div className='relative flex-1 flex items-center gap-2 p-3'>
           <button
             onClick={() => onOpenChange(false)}
-            className='p-1 rounded-md text-foreground hover:text-muted-foreground hover:bg-accent transition-colors duration-200 sm:hidden focus-visible:outline-none focus-visible:ring-0'
+            className='p-1 rounded-md text-foreground hover:text-muted-foreground hover:bg-accent transition-colors duration-200 sm:hidden focus-visible:outline-hidden focus-visible:ring-0'
             aria-label='Go back'
             data-track-category='CHANNEL_SEARCH'
             data-track-name='CLOSE_SEARCH_MENU`'
@@ -4843,7 +4843,7 @@ const ChannelCommandMenuContent = ({
                   }
                 }
               }}
-              className='p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors flex-shrink-0 flex items-center justify-center focus-visible:outline-none focus-visible:ring-0'
+              className='p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors shrink-0 flex items-center justify-center focus-visible:outline-hidden focus-visible:ring-0'
               aria-label={search.trim() || searchText.trim() ? 'Clear search' : 'Search'}
               data-track-category='CHANNEL_SEARCH'
               data-track-name={search.trim() || searchText.trim() ? 'ClearSearch' : 'OpenSearch'}
@@ -4864,7 +4864,7 @@ const ChannelCommandMenuContent = ({
           {/* Three inline toggles instead of a filters popover (design 5a): every other
               filter is reachable by typing its prefix, and these three have no syntax —
               they're modes, so they need a control. Active = filled, per the design. */}
-          <div className='flex items-center gap-1 flex-shrink-0'>
+          <div className='flex items-center gap-1 shrink-0'>
             {/* Channel and bot scoping only shape message results; a ticket search keeps
                 just exact match. */}
             {(isInTicketView
@@ -4878,7 +4878,7 @@ const ChannelCommandMenuContent = ({
                   onClick={toggle}
                   aria-pressed={isOn}
                   className={cn(
-                    'rounded-md border px-1.5 py-0.5 text-xs font-semibold transition-colors focus-visible:outline-none focus-visible:ring-0',
+                    'rounded-md border px-1.5 py-0.5 text-xs font-semibold transition-colors focus-visible:outline-hidden focus-visible:ring-0',
                     isOn
                       ? 'border-primary bg-primary/10 text-primary'
                       : 'border-transparent text-muted-foreground hover:border-border',
@@ -4890,7 +4890,7 @@ const ChannelCommandMenuContent = ({
                 </button>
                 {/* Right-aligned, not centred: these sit at the panel's right edge, so a
                     centred tooltip runs off it and gets clipped. */}
-                <div className='pointer-events-none absolute top-full right-0 mt-1.5 px-2 py-1 rounded text-xs bg-foreground text-background whitespace-nowrap opacity-0 group-hover/modetip:opacity-100 transition-opacity z-[10001]'>
+                <div className='pointer-events-none absolute top-full right-0 mt-1.5 px-2 py-1 rounded text-xs bg-foreground text-background whitespace-nowrap opacity-0 group-hover/modetip:opacity-100 transition-opacity z-10001'>
                   {tooltip}
                 </div>
               </div>
@@ -4898,20 +4898,20 @@ const ChannelCommandMenuContent = ({
           </div>
           {canExpandToFullPage && (
             <>
-              <span className='w-px h-5 bg-border mx-1 flex-shrink-0' />
-              <div className='relative group/expandtip flex-shrink-0'>
+              <span className='w-px h-5 bg-border mx-1 shrink-0' />
+              <div className='relative group/expandtip shrink-0'>
                 <button
                   type='button'
                   aria-label='Expand to full page'
                   onMouseDown={event => event.preventDefault()}
                   onClick={() => goToSearchResults('click', 'header')}
-                  className='size-8 grid place-items-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors focus-visible:outline-none focus-visible:ring-0'
+                  className='size-8 grid place-items-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors focus-visible:outline-hidden focus-visible:ring-0'
                   data-track-category='SEARCH'
                   data-track-name='EXPAND_TO_FULL_PAGE'
                 >
                   <Maximize2 size={16} />
                 </button>
-                <div className='pointer-events-none absolute top-full right-0 mt-1.5 px-2 py-1 rounded text-xs bg-foreground text-background whitespace-nowrap opacity-0 group-hover/expandtip:opacity-100 transition-opacity z-[10001]'>
+                <div className='pointer-events-none absolute top-full right-0 mt-1.5 px-2 py-1 rounded text-xs bg-foreground text-background whitespace-nowrap opacity-0 group-hover/expandtip:opacity-100 transition-opacity z-10001'>
                   Expand to full page
                 </div>
               </div>
@@ -4944,7 +4944,7 @@ const ChannelCommandMenuContent = ({
         {isComposing && commandTarget && (
           <div
             role='presentation'
-            className='flex-1 min-h-0 overflow-y-auto focus:outline-none focus-visible:outline-none'
+            className='flex-1 min-h-0 overflow-y-auto focus:outline-hidden focus-visible:outline-hidden'
             onKeyDown={e => e.stopPropagation()}
           >
             <QuickDmComposer
@@ -5007,7 +5007,7 @@ const ChannelCommandMenuContent = ({
           {/* Tabs - hidden when bot is selected or hideTabs is true */}
           <div
             data-tab-strip
-            className={`shrink-0 overflow-x-auto no-scrollbar px-4 py-1.5 focus:outline-none focus-visible:outline-none ${isMobile ? 'mx-1' : ''} ${hideTabs ? 'hidden' : ''}`}
+            className={`shrink-0 overflow-x-auto no-scrollbar px-4 py-1.5 focus:outline-hidden focus-visible:outline-hidden ${isMobile ? 'mx-1' : ''} ${hideTabs ? 'hidden' : ''}`}
           >
             <Tabs.Root value={activeTab}>
               <Tabs.List
@@ -5089,7 +5089,7 @@ const ChannelCommandMenuContent = ({
                           // No focus ring: Tab is bound to tab-cycling here, so a click-focused
                           // trigger would paint a ring on the next Tab press. The active tab's
                           // bg-accent treatment already communicates position.
-                          'flex items-center justify-center px-3 py-1.5 text-sm whitespace-nowrap rounded-md transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-0',
+                          'flex items-center justify-center px-3 py-1.5 text-sm whitespace-nowrap rounded-md transition-colors cursor-pointer focus-visible:outline-hidden focus-visible:ring-0',
                           // Paired with the strip's `min-w-max` — together they make
                           // the row overflow instead of squeezing its tabs.
                           compactTabs ? 'shrink-0' : null,
@@ -5159,8 +5159,8 @@ const ChannelCommandMenuContent = ({
               // cmdk gives the list tabIndex={-1} + role="listbox", and it's a scroll
               // container (Chrome can keyboard-focus scrollers) — both outline. Row
               // position is communicated by aria-selected, never by a ring here.
-              'flex-1 overflow-y-auto px-4 pt-3 pb-6 focus:outline-none focus-visible:outline-none',
-              '[&_[cmdk-item]]:scroll-mb-[30px]',
+              'flex-1 overflow-y-auto px-4 pt-3 pb-6 focus:outline-hidden focus-visible:outline-hidden',
+              '**:[[cmdk-item]]:scroll-mb-[30px]',
               // The pinned "Expand to full-page search" row is exempt: it sits where the cursor
               // rests when the palette opens, and its first click must land even before
               // any mousemove clears suppressHover. Result rows keep the guard.
@@ -5215,7 +5215,7 @@ const ChannelCommandMenuContent = ({
                         {availableRegularChannels.length > 0 && (
                           <Command.Group
                             heading='Channels'
-                            className='[&_[cmdk-group-heading]]:px-2  [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
+                            className='**:[[cmdk-group-heading]]:px-2  **:[[cmdk-group-heading]]:text-xs **:[[cmdk-group-heading]]:font-medium **:[[cmdk-group-heading]]:text-muted-foreground **:[[cmdk-group-heading]]:uppercase **:[[cmdk-group-heading]]:tracking-wide **:[[cmdk-group-heading]]:font-["Geist_Mono"]'
                           >
                             {availableRegularChannels.map(({ channel, displayName }, index) => {
                               return (
@@ -5237,7 +5237,7 @@ const ChannelCommandMenuContent = ({
                                   } ${!isMobile && 'active:bg-muted active:scale-[0.98]'}`}
                                   style={{ WebkitTapHighlightColor: 'transparent' }}
                                 >
-                                  <div className='flex items-center justify-center h-4 w-5 flex-shrink-0 text-muted-foreground'>
+                                  <div className='flex items-center justify-center h-4 w-5 shrink-0 text-muted-foreground'>
                                     {getChannelIcon(channel)}
                                   </div>
                                   <div className='flex-1 min-w-0'>
@@ -5254,7 +5254,7 @@ const ChannelCommandMenuContent = ({
                         {availableDMs.length > 0 && (
                           <Command.Group
                             heading='DMs'
-                            className='[&_[cmdk-group-heading]]:px-2  [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
+                            className='**:[[cmdk-group-heading]]:px-2  **:[[cmdk-group-heading]]:text-xs **:[[cmdk-group-heading]]:font-medium **:[[cmdk-group-heading]]:text-muted-foreground **:[[cmdk-group-heading]]:uppercase **:[[cmdk-group-heading]]:tracking-wide **:[[cmdk-group-heading]]:font-["Geist_Mono"]'
                           >
                             {availableDMs.map(({ channel, displayName }, index) => {
                               // Calculate index offset for keyboard navigation
@@ -5279,7 +5279,7 @@ const ChannelCommandMenuContent = ({
                                   } ${!isMobile && 'active:bg-muted active:scale-[0.98]'}`}
                                   style={{ WebkitTapHighlightColor: 'transparent' }}
                                 >
-                                  <div className='flex items-center justify-center h-4 w-5 flex-shrink-0 text-muted-foreground'>
+                                  <div className='flex items-center justify-center h-4 w-5 shrink-0 text-muted-foreground'>
                                     {getChannelIcon(channel)}
                                   </div>
                                   <div className='flex-1 min-w-0'>
@@ -5310,7 +5310,7 @@ const ChannelCommandMenuContent = ({
                         {availableRegularChannels.length > 0 && (
                           <Command.Group
                             heading='Channels'
-                            className='[&_[cmdk-group-heading]]:px-2  [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
+                            className='**:[[cmdk-group-heading]]:px-2  **:[[cmdk-group-heading]]:text-xs **:[[cmdk-group-heading]]:font-medium **:[[cmdk-group-heading]]:text-muted-foreground **:[[cmdk-group-heading]]:uppercase **:[[cmdk-group-heading]]:tracking-wide **:[[cmdk-group-heading]]:font-["Geist_Mono"]'
                           >
                             {availableRegularChannels.map(({ channel, displayName }, index) => {
                               return (
@@ -5332,7 +5332,7 @@ const ChannelCommandMenuContent = ({
                                   } ${!isMobile && 'active:bg-muted active:scale-[0.98]'}`}
                                   style={{ WebkitTapHighlightColor: 'transparent' }}
                                 >
-                                  <div className='flex items-center justify-center h-4 w-5 flex-shrink-0 text-muted-foreground'>
+                                  <div className='flex items-center justify-center h-4 w-5 shrink-0 text-muted-foreground'>
                                     {getChannelIcon(channel)}
                                   </div>
                                   <div className='flex-1 min-w-0'>
@@ -5358,7 +5358,7 @@ const ChannelCommandMenuContent = ({
                     {channelTrigger === 'in:@' && availableDMs.length > 0 && (
                       <Command.Group
                         heading='DMs'
-                        className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
+                        className='**:[[cmdk-group-heading]]:px-2 **:[[cmdk-group-heading]]:text-xs **:[[cmdk-group-heading]]:font-medium **:[[cmdk-group-heading]]:text-muted-foreground **:[[cmdk-group-heading]]:uppercase **:[[cmdk-group-heading]]:tracking-wide **:[[cmdk-group-heading]]:font-["Geist_Mono"]'
                       >
                         {availableDMs.map(({ channel, displayName }, index) => (
                           <Command.Item
@@ -5379,7 +5379,7 @@ const ChannelCommandMenuContent = ({
                             } ${!isMobile && 'active:bg-muted active:scale-[0.98]'}`}
                             style={{ WebkitTapHighlightColor: 'transparent' }}
                           >
-                            <div className='flex items-center justify-center h-4 w-5 flex-shrink-0 text-muted-foreground'>
+                            <div className='flex items-center justify-center h-4 w-5 shrink-0 text-muted-foreground'>
                               {getChannelIcon(channel)}
                             </div>
                             <div className='flex-1 min-w-0'>
@@ -5403,7 +5403,7 @@ const ChannelCommandMenuContent = ({
                     {channelTrigger === '#' && availableChannels.length > 0 && (
                       <Command.Group
                         heading='Channels'
-                        className='[&_[cmdk-group-heading]]:px-2  [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-["Geist_Mono"]'
+                        className='**:[[cmdk-group-heading]]:px-2  **:[[cmdk-group-heading]]:text-xs **:[[cmdk-group-heading]]:font-medium **:[[cmdk-group-heading]]:text-muted-foreground **:[[cmdk-group-heading]]:uppercase **:[[cmdk-group-heading]]:tracking-wide **:[[cmdk-group-heading]]:font-["Geist_Mono"]'
                       >
                         {availableChannels.map(({ channel, displayName }, index) => {
                           return (
@@ -5425,7 +5425,7 @@ const ChannelCommandMenuContent = ({
                               } ${!isMobile && 'active:bg-muted active:scale-[0.98]'}`}
                               style={{ WebkitTapHighlightColor: 'transparent' }}
                             >
-                              <div className='flex items-center justify-center h-4 w-5 flex-shrink-0 text-muted-foreground'>
+                              <div className='flex items-center justify-center h-4 w-5 shrink-0 text-muted-foreground'>
                                 {getChannelIcon(channel)}
                               </div>
                               <div className='flex-1 min-w-0'>
@@ -5476,7 +5476,7 @@ const ChannelCommandMenuContent = ({
                           <Command.Group
                             key={section.stateKey}
                             heading={section.heading}
-                            className='mb-4 [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono'
+                            className='mb-4 **:[[cmdk-group-heading]]:px-2 **:[[cmdk-group-heading]]:text-xs **:[[cmdk-group-heading]]:font-medium **:[[cmdk-group-heading]]:text-muted-foreground **:[[cmdk-group-heading]]:uppercase **:[[cmdk-group-heading]]:tracking-wide **:[[cmdk-group-heading]]:font-mono'
                           >
                             {atMentionItems
                               .map((item, index) => ({ item, index }))
@@ -5526,7 +5526,7 @@ const ChannelCommandMenuContent = ({
                     {mentionSearchType === ChipType.BOARD && availableBoards.length > 0 && (
                       <Command.Group
                         heading='Board'
-                        className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono'
+                        className='**:[[cmdk-group-heading]]:px-2 **:[[cmdk-group-heading]]:text-xs **:[[cmdk-group-heading]]:font-medium **:[[cmdk-group-heading]]:text-muted-foreground **:[[cmdk-group-heading]]:uppercase **:[[cmdk-group-heading]]:tracking-wide **:[[cmdk-group-heading]]:font-mono'
                       >
                         {availableBoards.map((board, index) => (
                           <Command.Item
@@ -5551,7 +5551,7 @@ const ChannelCommandMenuContent = ({
                             } ${!isMobile && 'active:bg-muted active:scale-[0.98]'}`}
                             style={{ WebkitTapHighlightColor: 'transparent' }}
                           >
-                            <div className='flex items-center justify-center h-4 w-5 flex-shrink-0 text-muted-foreground'>
+                            <div className='flex items-center justify-center h-4 w-5 shrink-0 text-muted-foreground'>
                               <LayoutGrid size={16} />
                             </div>
                             <div className='flex-1 min-w-0'>
@@ -5579,7 +5579,7 @@ const ChannelCommandMenuContent = ({
                           <Command.Group
                             key={group.type}
                             heading={group.heading}
-                            className='mb-4 [&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono'
+                            className='mb-4 **:[[cmdk-group-heading]]:px-2 **:[[cmdk-group-heading]]:text-xs **:[[cmdk-group-heading]]:font-medium **:[[cmdk-group-heading]]:text-muted-foreground **:[[cmdk-group-heading]]:uppercase **:[[cmdk-group-heading]]:tracking-wide **:[[cmdk-group-heading]]:font-mono'
                           >
                             {rows.map(({ target, index }) => (
                               <Command.Item
@@ -5604,7 +5604,7 @@ const ChannelCommandMenuContent = ({
                                 } ${!isMobile && 'active:bg-muted active:scale-[0.98]'}`}
                                 style={{ WebkitTapHighlightColor: 'transparent' }}
                               >
-                                <div className='flex items-center justify-center h-4 w-5 flex-shrink-0 text-muted-foreground'>
+                                <div className='flex items-center justify-center h-4 w-5 shrink-0 text-muted-foreground'>
                                   {target.type === ChipType.USER ? (
                                     <Avatar userId={target.id} size='xs' />
                                   ) : target.type === ChipType.USER_GROUP ? (
@@ -5641,7 +5641,7 @@ const ChannelCommandMenuContent = ({
                     {mentionSearchType === ChipType.DATE && availableDates.length > 0 && (
                       <Command.Group
                         heading='Date'
-                        className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono'
+                        className='**:[[cmdk-group-heading]]:px-2 **:[[cmdk-group-heading]]:text-xs **:[[cmdk-group-heading]]:font-medium **:[[cmdk-group-heading]]:text-muted-foreground **:[[cmdk-group-heading]]:uppercase **:[[cmdk-group-heading]]:tracking-wide **:[[cmdk-group-heading]]:font-mono'
                       >
                         {availableDates.map((option, index) => (
                           <Command.Item
@@ -5660,7 +5660,7 @@ const ChannelCommandMenuContent = ({
                             } ${!isMobile && 'active:bg-muted active:scale-[0.98]'}`}
                             style={{ WebkitTapHighlightColor: 'transparent' }}
                           >
-                            <div className='flex items-center justify-center h-4 w-5 flex-shrink-0 text-muted-foreground'>
+                            <div className='flex items-center justify-center h-4 w-5 shrink-0 text-muted-foreground'>
                               <CalendarDays size={16} />
                             </div>
                             <div className='flex-1 min-w-0'>
@@ -5681,7 +5681,7 @@ const ChannelCommandMenuContent = ({
                     {mentionSearchType === ChipType.PRIORITY && availablePriorities.length > 0 && (
                       <Command.Group
                         heading='Priority'
-                        className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono'
+                        className='**:[[cmdk-group-heading]]:px-2 **:[[cmdk-group-heading]]:text-xs **:[[cmdk-group-heading]]:font-medium **:[[cmdk-group-heading]]:text-muted-foreground **:[[cmdk-group-heading]]:uppercase **:[[cmdk-group-heading]]:tracking-wide **:[[cmdk-group-heading]]:font-mono'
                       >
                         {availablePriorities.map((priority, index) => (
                           <Command.Item
@@ -5703,7 +5703,7 @@ const ChannelCommandMenuContent = ({
                             style={{ WebkitTapHighlightColor: 'transparent' }}
                           >
                             <div
-                              className={`flex items-center justify-center h-4 w-5 flex-shrink-0 ${
+                              className={`flex items-center justify-center h-4 w-5 shrink-0 ${
                                 PRIORITY_ICON_COLOR[priority.id] ?? 'text-muted-foreground'
                               }`}
                             >
@@ -5731,7 +5731,7 @@ const ChannelCommandMenuContent = ({
                       {!searchText.trim() && loadRecents(activeTab).length > 0 && (
                         <Command.Group
                           heading='Recent'
-                          className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono'
+                          className='**:[[cmdk-group-heading]]:px-2 **:[[cmdk-group-heading]]:text-xs **:[[cmdk-group-heading]]:font-medium **:[[cmdk-group-heading]]:text-muted-foreground **:[[cmdk-group-heading]]:uppercase **:[[cmdk-group-heading]]:tracking-wide **:[[cmdk-group-heading]]:font-mono'
                         >
                           {loadRecents(activeTab).map(item => {
                             const isChannelTab = activeTab === TabType.CHANNELS;
@@ -5779,13 +5779,10 @@ const ChannelCommandMenuContent = ({
                                   (item.isPrivate ? (
                                     <Lock02Close
                                       size={16}
-                                      className='text-muted-foreground flex-shrink-0'
+                                      className='text-muted-foreground shrink-0'
                                     />
                                   ) : (
-                                    <Hashtag
-                                      size={16}
-                                      className='text-muted-foreground flex-shrink-0'
-                                    />
+                                    <Hashtag size={16} className='text-muted-foreground shrink-0' />
                                   ))}
                                 <span className='flex-1 min-w-0 text-left text-[15px] leading-[1.2] tracking-[-0.1px] text-foreground truncate'>
                                   {item.title}
@@ -5837,7 +5834,7 @@ const ChannelCommandMenuContent = ({
                           <div className='mb-4'>
                             <Command.Group
                               heading={getGroupLabel('ticket')}
-                              className='[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group-heading]]:uppercase [&_[cmdk-group-heading]]:tracking-wide [&_[cmdk-group-heading]]:font-mono'
+                              className='**:[[cmdk-group-heading]]:px-2 **:[[cmdk-group-heading]]:text-xs **:[[cmdk-group-heading]]:font-medium **:[[cmdk-group-heading]]:text-muted-foreground **:[[cmdk-group-heading]]:uppercase **:[[cmdk-group-heading]]:tracking-wide **:[[cmdk-group-heading]]:font-mono'
                             >
                               <SearchSectionSkeleton rows={4} variant='ticket' />
                             </Command.Group>
@@ -6011,7 +6008,7 @@ const ChannelCommandMenuContent = ({
       {!inline && !isMobile && !isComposing && !feedbackOpen && (
         <div className='relative px-6 py-4 text-sm font-medium text-muted-foreground flex items-center justify-between shrink-0 rounded-b-2xl'>
           {/* Fade the scrolling results into the footer (replaces the hard top border) */}
-          <div className='pointer-events-none absolute inset-x-0 bottom-full h-[30px] bg-gradient-to-t from-card to-transparent' />
+          <div className='pointer-events-none absolute inset-x-0 bottom-full h-[30px] bg-linear-to-t from-card to-transparent' />
           {/* Left: Ask AI hint and the Feedback button */}
           <span className='flex items-center gap-5'>
             <span className='flex items-center gap-2.5'>
@@ -6027,7 +6024,7 @@ const ChannelCommandMenuContent = ({
                 title='Tell the search team about these results'
                 data-track-category='COMMAND_MENU'
                 data-track-name='OPEN_SEARCH_FEEDBACK'
-                className='flex items-center gap-2.5 text-muted-foreground hover:text-foreground transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-0'
+                className='flex items-center gap-2.5 text-muted-foreground hover:text-foreground transition-colors cursor-pointer focus-visible:outline-hidden focus-visible:ring-0'
               >
                 <MessageSquare size={14} />
                 <span>Feedback</span>
@@ -6041,7 +6038,7 @@ const ChannelCommandMenuContent = ({
               hasDeskChannelFilter && (
                 <button
                   onClick={toggleDeskMergeMode}
-                  className='flex gap-2 items-center text-muted-foreground hover:text-foreground transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-0'
+                  className='flex gap-2 items-center text-muted-foreground hover:text-foreground transition-colors cursor-pointer focus-visible:outline-hidden focus-visible:ring-0'
                   data-track-category='COMMAND_MENU'
                   data-track-name='TOGGLE_DESK_MERGE_MODE'
                 >
@@ -6171,7 +6168,7 @@ const ChannelCommandMenuContent = ({
         // cmdk renders its root with tabIndex={-1}, so it can take programmatic focus
         // and paint an outline around the whole palette — suppress it (container, not
         // a control). Same on the dialog branch below and on Command.List.
-        className='w-full h-full flex flex-col focus:outline-none focus-visible:outline-none'
+        className='w-full h-full flex flex-col focus:outline-hidden focus-visible:outline-hidden'
         onMouseMove={() => {
           if (suppressHover) {
             commandRef.current
@@ -6204,7 +6201,7 @@ const ChannelCommandMenuContent = ({
             // Radix gives Content tabIndex={-1} and focuses it on open; opening via
             // Cmd+K means the browser treats that as keyboard focus and outlines the
             // whole palette. It's a container, never a navigation position.
-            className='focus:outline-none focus-visible:outline-none'
+            className='focus:outline-hidden focus-visible:outline-hidden'
             onInteractOutside={event => {
               // Growing into full page: the hand-off closes the palette itself.
               if (growingToFullPageRef.current) {
@@ -6274,8 +6271,8 @@ const ChannelCommandMenuContent = ({
               }}
               className={cn(
                 // cmdk root carries tabIndex={-1} — see the inline branch above.
-                'fixed left-0 md:left-1/2 top-0 md:top-[14vh] -translate-x-0 md:-translate-x-1/2 md:translate-y-0 w-full flex flex-col focus:outline-none focus-visible:outline-none',
-                isMobile ? 'h-[100dvh]' : 'h-screen',
+                'fixed left-0 md:left-1/2 top-0 md:top-[14vh] translate-x-0 md:-translate-x-1/2 md:translate-y-0 w-full flex flex-col focus:outline-hidden focus-visible:outline-hidden',
+                isMobile ? 'h-dvh' : 'h-screen',
                 contextSelectionMode ? 'md:max-w-4xl' : 'md:max-w-3xl',
                 // Fixed height (not max-height) so the shell doesn't grow/shrink as results
                 // come and go. Header + footer are shrink-0; Command.List is flex-1 and
@@ -6288,7 +6285,7 @@ const ChannelCommandMenuContent = ({
                 // together.
                 feedbackOpen ? 'md:h-auto' : 'md:h-[549px]',
                 'md:w-full md:overflow-hidden bg-card md:rounded-2xl shadow-[0px_7px_15px_0px_#0000000D,0px_28px_28px_0px_#00000017,0px_62px_37px_0px_#0000000D,0px_111px_44px_0px_#00000003,0px_173px_48px_0px_#00000000] border border-border',
-                showMergeDialog ? 'z-40' : 'z-[9999]',
+                showMergeDialog ? 'z-40' : 'z-9999',
                 growingToFullPage && 'pointer-events-none',
               )}
               onKeyDownCapture={handleCommandKeyDown}

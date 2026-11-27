@@ -147,10 +147,12 @@ router.post('/poll', sdkSsoPollLimiter, async (req: Request, res: Response) => {
           }
         }
 
+        // With a refresh session, its own access token (carrying the session's `sid`)
+        // replaces the one minted at approval.
         return res.status(200).json({
           status: 'approved',
-          cookie: { name: sessionCookieName(session.workspaceId), value: session.token },
-          expires_at: session.expiresAt,
+          cookie: { name: sessionCookieName(session.workspaceId), value: grant?.token ?? session.token },
+          expires_at: grant?.expiresAt ?? session.expiresAt,
           user_id: session.userId,
           workspace_id: session.workspaceId,
           ...(grant

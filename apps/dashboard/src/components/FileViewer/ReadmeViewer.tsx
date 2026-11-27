@@ -186,7 +186,7 @@ export const ReadmeViewer: React.FC<BaseViewerProps> = memo(({ source }) => {
       a: ({ href, children }) => (
         <a
           href={href}
-          className='text-action-primary hover:text-action-primary/80 underline'
+          className='text-action-primary underline'
           target='_blank'
           rel='noopener noreferrer'
         >
@@ -290,7 +290,7 @@ export const ReadmeViewer: React.FC<BaseViewerProps> = memo(({ source }) => {
         <>
           <TableOfContents headings={tocHeadings} onHeadingClick={handleHeadingClick} />
           <div className='h-full overflow-y-auto' ref={contentRef}>
-            <div className='px-10 py-10 md:px-15 lg:px-20'>
+            <div className='px-10 py-10 lg:px-20'>
               <div className='max-w-4xl mx-auto'>
                 <ReactMarkdown
                   remarkPlugins={[remarkGfm]}

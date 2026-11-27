@@ -179,7 +179,7 @@ const DetailPanel = ({
         <span className='text-xs font-medium text-foreground'>{entry.label}</span>
         <span
           className={cn(
-            'break-words text-xs text-muted-foreground',
+            'wrap-break-word text-xs text-muted-foreground',
             entry.scrollable && 'max-h-24 overflow-y-auto',
           )}
         >
@@ -191,7 +191,7 @@ const DetailPanel = ({
     {systemPrompt && (
       <div className='flex flex-col gap-0.5'>
         <span className='text-xs font-medium text-foreground'>System prompt</span>
-        <pre className='max-h-72 overflow-auto whitespace-pre-wrap break-words text-xs text-muted-foreground'>
+        <pre className='max-h-72 overflow-auto whitespace-pre-wrap wrap-break-word text-xs text-muted-foreground'>
           {systemPrompt}
         </pre>
       </div>
@@ -675,7 +675,7 @@ export function RequestsTab({
                         aria-label={row.approveLabel}
                         disabled={busy || row.approveDisabled}
                         onClick={row.onApprove}
-                        className='size-7 text-muted-foreground hover:bg-status-success/10 hover:text-status-success'
+                        className='size-7 text-muted-foreground hover:text-status-success'
                         data-track-category='Claw Admin'
                         data-track-name={`Approve ${row.kind} request`}
                       >

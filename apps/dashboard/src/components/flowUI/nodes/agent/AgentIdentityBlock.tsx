@@ -66,9 +66,9 @@ const CapabilityChip: React.FC<{
   const className = cn(
     'inline-flex max-w-full items-center gap-1.5 overflow-hidden rounded-[10px]',
     'border-[0.8px] border-border py-1',
-    selected ? 'bg-foreground/[0.06]' : 'border-dashed bg-card',
+    selected ? 'bg-foreground/6' : 'border-dashed bg-card',
     withIcon ? 'pl-1 pr-2' : 'h-9 pl-3 pr-2',
-    interactive && !disabled && 'hover:bg-foreground/[0.09]',
+    interactive && !disabled && 'hover:bg-foreground/9',
     disabled && 'cursor-not-allowed opacity-60',
   );
 

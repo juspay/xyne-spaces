@@ -384,7 +384,7 @@ export const DatePicker: React.FC<DatePickerProps> = ({
         >
           <Calendar
             className={cn(
-              'flex-shrink-0 w-3.5 h-3.5',
+              'shrink-0 w-3.5 h-3.5',
               selectedDate ? 'text-foreground' : 'text-muted-foreground',
             )}
           />
@@ -400,7 +400,7 @@ export const DatePicker: React.FC<DatePickerProps> = ({
             <button
               aria-label='Clear selected date'
               onClick={handleClear}
-              className='ml-1 flex-shrink-0 hover:bg-muted rounded p-0.5 transition-colors'
+              className='ml-1 shrink-0 hover:bg-muted rounded p-0.5 transition-colors'
               data-track-category='Tickets'
               data-track-name='ClearSelectedDate'
             >
@@ -432,7 +432,7 @@ export const DatePicker: React.FC<DatePickerProps> = ({
           sideOffset={4}
           align='start'
         >
-          <div className='sticky top-0 z-10 bg-background pt-2.5 border-b border-border shadow-sm'>
+          <div className='sticky top-0 z-10 bg-background pt-2.5 border-b border-border shadow-xs'>
             <div className='grid grid-cols-7 gap-1 px-3'>
               {['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'].map(day => (
                 <div
