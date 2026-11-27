@@ -257,7 +257,17 @@ export type HostRequestMessage =
  * the CLI's dev implementation. Additive changes only — an older app must not
  * break on a surface it has never heard of.
  */
-export type XyneSurface = 'toolbar' | 'inbox' | 'channel' | 'library' | 'chat' | 'standalone';
+export type XyneSurface =
+  | 'toolbar'
+  | 'inbox'
+  | 'channel'
+  | 'library'
+  | 'chat'
+  | 'standalone'
+  // Drawn over the whole window, behind dialogs. Clicks pass through it.
+  | 'overlay'
+  // A small floating card the user can move. Interactive.
+  | 'widget';
 
 export interface XyneContextChannel {
   id: string;
@@ -270,9 +280,16 @@ interface XyneAppContextBase {
   /** Absent for an artifact that has not been saved as an app yet. */
   appId?: string;
   workspaceId?: string;
-  /** A coarse hint: a full page, or a panel beside other chrome. CSS should
-   *  still do the real work — this is for choosing a layout, not a width. */
-  layout: 'fullscreen' | 'panel';
+  /** A coarse hint: a full page, a panel beside other chrome, a full-window
+   *  overlay or a floating widget. CSS should still do the real work — this is
+   *  for choosing a layout, not a width. */
+  layout: 'fullscreen' | 'panel' | 'overlay' | 'widget';
+  /** False while the page is not on screen (another tab, a minimized window).
+   *  Stop animation loops and polling until it is true again. Absent on older
+   *  hosts, where it should be read as true. */
+  visible?: boolean;
+  /** Whether the viewer's Spaces theme is light or dark. */
+  colorScheme?: 'light' | 'dark';
 }
 
 export type XyneAppContext =
@@ -291,6 +308,32 @@ export interface HostContextMessage {
   context: XyneAppContext;
 }
 
+/**
+ * Where an app may ask the host to take the user. Ids only, never URLs: the
+ * host builds the route, so an app cannot send the main window anywhere else.
+ */
+export type XyneNavigateTarget =
+  | { kind: 'channel'; channelId: string }
+  | { kind: 'app'; appId: string }
+  | { kind: 'aiChat'; sessionId: string };
+
+/** Host → app: the pointer, in window coordinates, for an overlay that asked. */
+export interface HostPointerMessage {
+  source: 'xyne-artifact-host';
+  v: number;
+  type: 'pointer';
+  x: number;
+  y: number;
+}
+
+/** Host → app: a `broadcast` from another running copy of the same app. */
+export interface HostBroadcastMessage {
+  source: 'xyne-artifact-host';
+  v: number;
+  type: 'broadcast';
+  payload: unknown;
+}
+
 /** App → host. */
 export interface AppArtifactMessage {
   source: 'xyne-artifact';
@@ -305,7 +348,12 @@ export interface AppArtifactMessage {
     | 'error'
     | 'request'
     | 'request-abort'
-    | 'context-request';
+    | 'context-request'
+    | 'surface-resize'
+    | 'navigate'
+    | 'overlay-set'
+    | 'pointer-subscribe'
+    | 'broadcast';
   /** `refresh`: which requirement (omitted = all). */
   name?: string;
   /** `mutate` and `request`. */
@@ -329,6 +377,31 @@ export interface AppArtifactMessage {
   message?: string;
   stack?: string;
   componentStack?: string;
+  /** `surface-resize` only: the size a widget asks for, in CSS pixels. */
+  width?: number;
+  height?: number;
+  /** `navigate` only. */
+  target?: XyneNavigateTarget;
+  /** `overlay-set` (this app's overlay) and `pointer-subscribe`. */
+  enabled?: boolean;
+  /** `broadcast` only: any structured-cloneable value, size-capped by the host. */
+  payload?: unknown;
+}
+
+/** Ids as the API issues them: no slashes, dots or query characters can reach a route. */
+const ROUTE_ID = /^[A-Za-z0-9_-]{1,128}$/;
+
+export function isNavigateTarget(value: unknown): value is XyneNavigateTarget {
+  if (!value || typeof value !== 'object') return false;
+  const t = value as Record<string, unknown>;
+  const id = (key: string): boolean => {
+    const v = t[key];
+    return typeof v === 'string' && ROUTE_ID.test(v);
+  };
+  if (t['kind'] === 'channel') return id('channelId');
+  if (t['kind'] === 'app') return id('appId');
+  if (t['kind'] === 'aiChat') return id('sessionId');
+  return false;
 }
 
 export function isAppArtifactMessage(value: unknown): value is AppArtifactMessage {
@@ -355,6 +428,14 @@ export function isAppArtifactMessage(value: unknown): value is AppArtifactMessag
     );
   }
   if (msg.type === 'request-abort') return typeof msg.requestId === 'string';
+  if (msg.type === 'surface-resize') {
+    return Number.isFinite(msg.width) && Number.isFinite(msg.height);
+  }
+  if (msg.type === 'navigate') return isNavigateTarget(msg.target);
+  if (msg.type === 'overlay-set' || msg.type === 'pointer-subscribe') {
+    return typeof msg.enabled === 'boolean';
+  }
+  if (msg.type === 'broadcast') return 'payload' in msg;
   return msg.type === 'mutate' && typeof msg.requestId === 'string' && typeof msg.name === 'string';
 }
 

@@ -1333,6 +1333,7 @@ const ChatDirectory = ({
               store={inboxItemsStore}
               builtIns={inboxBuiltIns}
               trackCategory='CHAT_SIDEBAR'
+              surface='inbox'
               side='bottom'
               align='start'
               trigger={

@@ -79,6 +79,7 @@ import { SlashCommandArtifactBanner } from '../components/Chat/SlashCommandArtif
 import { SlashCommandArtifactSideEffectProvider } from '../components/Chat/SlashCommandArtifactSideEffects';
 import { CallFromRecentsHandler } from '../components/CallFromRecentsHandler/CallFromRecentsHandler';
 import { CloudAgentFloatingHost } from '../components/xyne-desk/CloudAgentDock/CloudAgentDock';
+import { ArtifactSurfacesHost } from '../components/ArtifactSurfaces';
 import { usePlatform } from '../hooks/usePlatform';
 import { useIsInPanelWebview } from '../hooks/useIsInPanelWebview';
 import { roomActor } from '../machines/roomMachine';
@@ -933,6 +934,9 @@ const AppRoot = (): ReactElement => {
                         <SosAlertBanner />
                         <CallFromRecentsHandler />
                         <CloudAgentFloatingHost />
+                        {/* Overlay and widget apps: here, beside the routes, so they keep
+                            running as the viewer moves between pages. */}
+                        <ArtifactSurfacesHost />
                         <BrowserPanelHandler />
                         {/* The browser's pages: here, where they never move, so
                               docking or undocking the browser doesn't reload them. */}

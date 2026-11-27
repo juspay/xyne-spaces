@@ -103,6 +103,14 @@ export interface ReactArtifactViewProps {
   onSave?: (artifact: ReactArtifactRef) => void;
   /** Drives the save button's appearance without the view owning the request. */
   saveState?: 'idle' | 'saving' | 'saved';
+  /**
+   * Run as a full-window overlay or a floating widget: no header, no boot or
+   * error covers (the shell draws its own), and for an overlay a transparent
+   * frame. `hostContext` should carry the same surface.
+   */
+  surfaceMode?: 'overlay' | 'widget';
+  /** Surface mode only: called once the app has painted, or when it fails. */
+  onSurfaceHealth?: (state: 'ready' | 'failed') => void;
 }
 
 /** Narrow an attachment to an artifact ref, or null when it isn't one. */

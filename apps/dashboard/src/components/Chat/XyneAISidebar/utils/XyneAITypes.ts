@@ -459,6 +459,9 @@ export interface ReactArtifactManifest {
   /** Xyne icon id the agent chose. The APP's icon (which the user may have
    *  changed) is authoritative; this is only the agent's suggestion. */
   icon?: string;
+  /** Where the app may be opened, as its author declared (see appSurfaces.ts).
+   *  Absent means every bar: toolbar, Inbox and channel tabs. */
+  surfaces?: Array<'toolbar' | 'inbox' | 'channel' | 'widget' | 'overlay'>;
   /** Stamped server-side once the conversation's app exists. A thread owns ONE
    *  app, so every artifact in it shares `appId`; `versionId` is the specific
    *  build this turn produced, which is what its card renders. */

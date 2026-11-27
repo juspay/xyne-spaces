@@ -2,6 +2,7 @@ import type { ReactElement } from 'react';
 
 export type PreferenceSection =
   | 'appearance'
+  | 'overlays'
   | 'notifications'
   | 'availability'
   | 'voice'

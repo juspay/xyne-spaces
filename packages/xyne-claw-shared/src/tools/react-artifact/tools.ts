@@ -137,6 +137,23 @@ const SUGGESTED_ICONS = [
 /** Agent slugs an app may name. A short list: this is a preference, not a menu —
  *  the viewer's own access is always the real ceiling. */
 const MAX_DECLARED_AGENTS = 4;
+
+/**
+ * Where an app may be opened, as declared by its author. Every app can also be
+ * opened on its own page in the Agent Hub, so that place is never declared.
+ *
+ *  - Bar apps: any non-empty set of `toolbar`, `inbox`, `channel`.
+ *  - A widget app is a widget only: `["widget"]`.
+ *  - An overlay app is an overlay only: `["overlay"]`.
+ *
+ * Absent means the bar default, all three bars — every app built before this
+ * field existed. The dashboard enforces the declaration wherever an app opens.
+ */
+export const BAR_SURFACES = ["toolbar", "inbox", "channel"] as const;
+export const EXCLUSIVE_SURFACES = ["widget", "overlay"] as const;
+export type ArtifactAppSurface =
+  | (typeof BAR_SURFACES)[number]
+  | (typeof EXCLUSIVE_SURFACES)[number];
 const AGENT_SLUG_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
 
 /**
@@ -192,6 +209,8 @@ export interface ReactArtifactPayload {
    *  against what the viewer can reach, so naming an agent here can never grant
    *  access to it. Absent/empty means "any agent the viewer can reach". */
   agents?: string[];
+  /** Where the app may be opened (see ArtifactAppSurface). Absent = all bars. */
+  surfaces?: ArtifactAppSurface[];
 }
 
 /** Small descriptor persisted to ChatAttachment.metadata and rendered by the inline card. */
@@ -207,6 +226,8 @@ export interface ReactArtifactManifest {
   invokesAgents?: boolean;
   agents?: string[];
   icon?: string;
+  /** Where the app may be opened (see ArtifactAppSurface). Absent = all bars. */
+  surfaces?: ArtifactAppSurface[];
   /**
    * The app this build belongs to. Stamped by `create-app` (never by the model
    * directly): a freshly minted id on create, the caller-supplied, ownership-
@@ -518,6 +539,31 @@ function parseAgents(raw: unknown): string[] {
   return agents;
 }
 
+function parseSurfaces(raw: unknown): ArtifactAppSurface[] | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  if (!Array.isArray(raw) || raw.length === 0) {
+    fail("`surfaces` must be a non-empty array, e.g. [\"toolbar\", \"inbox\", \"channel\"].");
+  }
+  const known: readonly string[] = [...BAR_SURFACES, ...EXCLUSIVE_SURFACES];
+  const surfaces: ArtifactAppSurface[] = [];
+  for (const entry of raw) {
+    const value = asString(entry).trim();
+    if (!known.includes(value)) {
+      fail(`"${value}" is not a surface. Use ${known.map((k) => `"${k}"`).join(", ")}.`);
+    }
+    if (!surfaces.includes(value as ArtifactAppSurface)) surfaces.push(value as ArtifactAppSurface);
+  }
+  const exclusive = surfaces.filter((s) => (EXCLUSIVE_SURFACES as readonly string[]).includes(s));
+  if (exclusive.length > 0 && surfaces.length > 1) {
+    fail(
+      `A ${exclusive[0]} app can only be a ${exclusive[0]}: set \`surfaces\` to [\"${exclusive[0]}\"]. ` +
+        "Every app can still be opened from the Agent Hub.",
+    );
+  }
+  // Canonical order, so the same set always hashes to the same build.
+  return [...BAR_SURFACES, ...EXCLUSIVE_SURFACES].filter((s) => surfaces.includes(s));
+}
+
 /**
  * Fold an incremental update onto the app's current build.
  *
@@ -585,6 +631,7 @@ export function mergeArtifactParams(
     invokesAgents: has("invokesAgents") ? params["invokesAgents"] : base.invokesAgents,
     agents: has("agents") ? params["agents"] : base.agents,
     icon: has("icon") ? params["icon"] : base.icon,
+    surfaces: has("surfaces") ? params["surfaces"] : base.surfaces,
     // Describes this turn's change, so never inherited.
     ...(has("summary") ? { summary: params["summary"] } : {}),
   };
@@ -641,6 +688,7 @@ export function buildReactArtifact(params: Record<string, unknown>): BuiltReactA
   const agents = parseAgents(params["agents"]);
   const invokesAgents = params["invokesAgents"] === true || agents.length > 0;
   const icon = parseIcon(params["icon"]);
+  const surfaces = parseSurfaces(params["surfaces"]);
 
   const payload: ReactArtifactPayload = {
     version: ARTIFACT_VERSION,
@@ -654,6 +702,7 @@ export function buildReactArtifact(params: Record<string, unknown>): BuiltReactA
     ...(invokesAgents ? { invokesAgents: true } : {}),
     ...(agents.length ? { agents } : {}),
     ...(icon ? { icon } : {}),
+    ...(surfaces ? { surfaces } : {}),
   };
 
   const manifest: ReactArtifactManifest = {
@@ -668,6 +717,7 @@ export function buildReactArtifact(params: Record<string, unknown>): BuiltReactA
     ...(invokesAgents ? { invokesAgents: true } : {}),
     ...(agents.length ? { agents } : {}),
     ...(icon ? { icon } : {}),
+    ...(surfaces ? { surfaces } : {}),
   };
 
   return { payload, manifest, summary };

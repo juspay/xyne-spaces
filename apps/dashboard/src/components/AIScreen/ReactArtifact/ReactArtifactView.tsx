@@ -38,7 +38,10 @@ import { useArtifactAgentBridge } from './useArtifactAgentBridge';
 import { useArtifactDirectoryBridge } from './useArtifactDirectoryBridge';
 import { useArtifactRequestBridge } from './useArtifactRequestBridge';
 import { useArtifactContextBridge } from './useArtifactContextBridge';
+import { useArtifactSurfaceBridge } from './useArtifactSurfaceBridge';
+import { ArtifactSurfaceHealth, type ArtifactSurfaceHealthState } from './ArtifactSurfaceHealth';
 import type { XyneAppContext } from './artifactData.constants';
+import { useColorScheme, useDocumentVisible } from '../../ArtifactSurfaces/environment';
 import { ArtifactSavedIndicator } from './ArtifactSavedIndicator';
 import { ArtifactBootOverlay } from './ArtifactBootOverlay';
 import { ArtifactErrorOverlay } from './ArtifactErrorOverlay';
@@ -74,6 +77,28 @@ const SANDPACK_FILL_CSS = `
 }
 `;
 
+/**
+ * Overlay and widget frames. An overlay must let Spaces show through, so every
+ * layer Sandpack paints is cleared and the iframe keeps a `normal` colour
+ * scheme (a mismatched scheme makes the browser fill the frame). Neither
+ * surface shows Sandpack's preview buttons.
+ */
+const SANDPACK_SURFACE_CSS = `
+/* The shell reports failures itself (ArtifactSurfaceHealth); Sandpack's own
+   error and restart covers must never sit over the window or a widget. */
+.xyne-artifact-surface .sp-preview-actions,
+.xyne-artifact-surface .sp-overlay { display: none; }
+.xyne-artifact-surface-overlay .sp-wrapper,
+.xyne-artifact-surface-overlay .sp-preview,
+.xyne-artifact-surface-overlay .sp-layout,
+.xyne-artifact-surface-overlay .sp-stack,
+.xyne-artifact-surface-overlay .sp-preview-container,
+.xyne-artifact-surface-overlay .sp-preview-iframe {
+  background: transparent !important;
+  color-scheme: normal;
+}
+`;
+
 type LoadState =
   | { status: 'loading' }
   | { status: 'error'; message: string }
@@ -106,6 +131,8 @@ const ArtifactSandpack = memo(
     fill,
     contextRef,
     pushContextRef,
+    surfaceMode,
+    healthRef,
   }: {
     payload: ReactArtifactPayload;
     theme: 'light' | 'dark';
@@ -126,6 +153,11 @@ const ArtifactSandpack = memo(
     /** Drives the boot overlay's scale and surface. A plain boolean, so the
      *  memo's shallow compare still holds and the iframe is never torn down. */
     fill: boolean;
+    /** Set when running as an overlay or widget: health is reported instead
+     *  of drawing the boot and error covers. */
+    surfaceMode?: 'overlay' | 'widget';
+    /** Stable ref, for the same reason as `contextRef`. */
+    healthRef: MutableRefObject<((state: ArtifactSurfaceHealthState) => void) | null>;
   }): ReactElement => {
     const previewRef = useRef<PreviewClientRef | null>(null);
 
@@ -163,6 +195,10 @@ const ArtifactSandpack = memo(
     // that stays alive across a channel switch follows the user.
     useArtifactContextBridge({ previewRef, contextRef, pushRef: pushContextRef });
 
+    // Widget size, navigation, the app's own overlay, the pointer for an
+    // overlay, and messages between running copies of the same app.
+    useArtifactSurfaceBridge({ previewRef, contextRef, ...(appId ? { appId } : {}) });
+
     const files = useMemo(() => toSandpackFiles(payload), [payload]);
     const customSetup = useMemo(
       () => ({
@@ -186,8 +222,18 @@ const ArtifactSandpack = memo(
             showSandpackErrorOverlay={false}
           />
         </SandpackLayout>
-        <ArtifactBootOverlay fill={fill} />
-        <ArtifactErrorOverlay fill={fill} previewRef={previewRef} />
+        {surfaceMode ? (
+          <>
+            {/* A widget still shows the mark while it boots; an overlay never covers the window. */}
+            {surfaceMode === 'widget' && <ArtifactBootOverlay fill={false} />}
+            <ArtifactSurfaceHealth previewRef={previewRef} healthRef={healthRef} />
+          </>
+        ) : (
+          <>
+            <ArtifactBootOverlay fill={fill} />
+            <ArtifactErrorOverlay fill={fill} previewRef={previewRef} />
+          </>
+        )}
       </SandpackProvider>
     );
   },
@@ -216,6 +262,8 @@ export const ReactArtifactView = ({
   settingsSlot,
   onSave,
   saveState = 'idle',
+  surfaceMode,
+  onSurfaceHealth,
 }: ReactArtifactViewProps): ReactElement => {
   const [state, setState] = useState<LoadState>({ status: 'loading' });
   const [tab, setTab] = useState<'preview' | 'code' | 'settings'>('preview');
@@ -225,9 +273,17 @@ export const ReactArtifactView = ({
   // The context an app may ask for. Callers rebuild the object every render, so
   // it is compared by VALUE here and only the refs cross into the memoized
   // sandbox — a changing prop there would tear the iframe down.
+  // Whether the page is on screen and its light/dark scheme are the host's to
+  // know, so they join every context here rather than at each caller.
+  const visible = useDocumentVisible();
+  const colorScheme = useColorScheme();
   const resolvedContext = useMemo(
-    (): XyneAppContext => hostContext ?? { v: 1, surface: 'chat', layout: 'fullscreen' },
-    [hostContext],
+    (): XyneAppContext => ({
+      ...(hostContext ?? { v: 1, surface: 'chat', layout: 'fullscreen' }),
+      visible,
+      colorScheme,
+    }),
+    [hostContext, visible, colorScheme],
   );
   const contextKey = useMemo(() => JSON.stringify(resolvedContext), [resolvedContext]);
   const contextRef = useRef<XyneAppContext | null>(resolvedContext);
@@ -238,6 +294,11 @@ export const ReactArtifactView = ({
     // `contextKey` rather than the object: same content must not re-push.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [contextKey]);
+  // Read through a ref so the memoized sandbox never sees a changing prop.
+  const healthRef = useRef<((state: ArtifactSurfaceHealthState) => void) | null>(null);
+  useEffect(() => {
+    healthRef.current = onSurfaceHealth ?? null;
+  }, [onSurfaceHealth]);
   const auth = useAuthContextValues();
   const theme = useMemo(() => sandpackThemeName(), []);
   const { attachmentId, inlineData, savedAppId, versionId } = artifact;
@@ -272,6 +333,7 @@ export const ReactArtifactView = ({
           status: 'error',
           message: err instanceof Error ? err.message : 'Failed to load this artifact.',
         });
+        healthRef.current?.('failed');
       });
 
     return (): void => {
@@ -283,6 +345,47 @@ export const ReactArtifactView = ({
     ? 'flex h-full min-h-0 flex-1 flex-col'
     : 'my-3 flex flex-col overflow-hidden rounded-lg border border-border bg-card';
   const bodyStyle: CSSProperties = fill ? { flex: 1, minHeight: 0 } : { height: INLINE_HEIGHT };
+
+  if (surfaceMode) {
+    if (state.status !== 'ready') {
+      // An overlay draws nothing until it runs; a widget shows the mark.
+      return surfaceMode === 'overlay' ? (
+        <div className='h-full w-full' />
+      ) : (
+        <div
+          className='flex h-full w-full items-center justify-center'
+          role='status'
+          aria-label='Loading app'
+        >
+          <AppLoaderMark size='sm' />
+        </div>
+      );
+    }
+    return (
+      <div
+        className={`xyne-artifact-sandpack xyne-artifact-surface xyne-artifact-surface-${surfaceMode} h-full w-full`}
+        style={{ ['--sp-layout-height' as string]: '100%' } as CSSProperties}
+        data-testid={`react-artifact-${surfaceMode}`}
+      >
+        <style>{SANDPACK_FILL_CSS}</style>
+        <style>{SANDPACK_SURFACE_CSS}</style>
+        <ArtifactSandpack
+          payload={state.payload}
+          theme={theme}
+          refreshRef={refreshRef}
+          contextRef={contextRef}
+          pushContextRef={pushContextRef}
+          fill
+          canWrite
+          canInvokeAgents
+          currentUserId={auth.userID ?? ''}
+          surfaceMode={surfaceMode}
+          healthRef={healthRef}
+          {...(artifact.savedAppId ? { appId: artifact.savedAppId } : {})}
+        />
+      </div>
+    );
+  }
 
   if (state.status !== 'ready') {
     return (
@@ -487,6 +590,7 @@ export const ReactArtifactView = ({
             contextRef={contextRef}
             pushContextRef={pushContextRef}
             fill={fill}
+            healthRef={healthRef}
             canWrite
             canInvokeAgents
             currentUserId={auth.userID ?? ''}

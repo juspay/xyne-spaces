@@ -2,6 +2,7 @@ import { ReactElement, ReactNode, useMemo, useState } from 'react';
 import { Plus } from 'lucide-react';
 import { Popover } from '../ui/Popover/Popover';
 import { AppPickerDialog } from './AppPickerDialog';
+import type { BarSurface } from '../ArtifactApp/appSurfaces';
 import { ToggleGlyph } from './ToggleGlyph';
 import type { BarBuiltIn } from './useBarBuiltIns';
 import {
@@ -18,6 +19,8 @@ interface BarAddMenuProps {
   store: BarItemsStore;
   builtIns: readonly BarBuiltIn[];
   trackCategory: string;
+  /** Which bar this is; the app picker lists only apps that open there. */
+  surface: BarSurface;
   /** The "+" control. Defaults to a small ghost icon button. */
   trigger?: ReactNode;
   side?: 'top' | 'right' | 'bottom' | 'left';
@@ -43,6 +46,7 @@ export const BarAddMenu = ({
   store,
   builtIns,
   trackCategory,
+  surface,
   trigger,
   side = 'bottom',
   align = 'start',
@@ -159,6 +163,7 @@ export const BarAddMenu = ({
           store.add(appItemId(app.id));
         }}
         trackCategory={trackCategory}
+        surface={surface}
         {...(publish ? { publish } : {})}
       />
     </>

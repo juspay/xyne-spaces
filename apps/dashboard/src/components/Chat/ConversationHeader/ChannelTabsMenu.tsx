@@ -227,6 +227,7 @@ export const ChannelTabsMenu = ({
           store.add(appItemId(app.id));
         }}
         trackCategory='CHANNELS'
+        surface='channel'
         {...(publish ? { publish } : {})}
       />
     </>

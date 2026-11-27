@@ -159,6 +159,15 @@ export const shortcuts = {
     allowInInputs: true,
     preventDefault: true,
   },
+  'global.toggleOverlays': {
+    keys: 'mod+shift+o',
+    scope: 'global',
+    description: 'Hide or show the overlay',
+    category: 'Navigation',
+    priority: 50,
+    allowInInputs: true,
+    preventDefault: true,
+  },
 
   'composer.voiceInput': {
     keys: 'mod+shift+m',

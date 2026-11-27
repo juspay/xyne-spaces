@@ -7,9 +7,15 @@
  * string so it typechecks, and so app code gets true types for the hook.
  *
  * What it answers: "where am I open?" — the rail, the Inbox menubar, a channel
- * tab, the Agent Hub. Only the host knows; the backend has no idea where an
- * iframe is mounted. So the app asks over postMessage and the host replies, and
- * pushes again whenever the answer changes.
+ * tab, the Agent Hub, a full-window overlay, a floating widget. Only the host
+ * knows; the backend has no idea where an iframe is mounted. So the app asks
+ * over postMessage and the host replies, and pushes again whenever the answer
+ * changes.
+ *
+ * It also carries the few things an app may ask of the host: a widget's size,
+ * opening a channel / app / AI chat in the main window, switching its own
+ * overlay on or off, the pointer position for an overlay, and messages between
+ * running copies of the same app.
  *
  * The CLI scaffolds its own implementation of this exact path for `npm run dev`
  * (where there is no host, and a dev switcher stands in). `push` never uploads
@@ -22,7 +28,15 @@ import { useSyncExternalStore } from 'react';
 
 const PROTOCOL_VERSION = 1;
 
-export type XyneSurface = 'toolbar' | 'inbox' | 'channel' | 'library' | 'chat' | 'standalone';
+export type XyneSurface =
+  | 'toolbar'
+  | 'inbox'
+  | 'channel'
+  | 'library'
+  | 'chat'
+  | 'standalone'
+  | 'overlay'
+  | 'widget';
 
 export interface XyneContextChannel {
   id: string;
@@ -34,7 +48,11 @@ interface XyneAppContextBase {
   v: number;
   appId?: string;
   workspaceId?: string;
-  layout: 'fullscreen' | 'panel';
+  layout: 'fullscreen' | 'panel' | 'overlay' | 'widget';
+  /** False while the page is not on screen. Absent means true. */
+  visible?: boolean;
+  /** Whether the viewer's Spaces theme is light or dark. */
+  colorScheme?: 'light' | 'dark';
 }
 
 /**
@@ -50,8 +68,16 @@ export type XyneAppContext =
   | (XyneAppContextBase & { surface: 'channel'; channel: XyneContextChannel })
   | (XyneAppContextBase & { surface: Exclude<XyneSurface, 'channel'>; channel?: never });
 
+/** Where `navigateTo` may send the main window. Ids only; the host builds the route. */
+export type XyneNavigateTarget =
+  | { kind: 'channel'; channelId: string }
+  | { kind: 'app'; appId: string }
+  | { kind: 'aiChat'; sessionId: string };
+
 let context: XyneAppContext | null = null;
 const listeners = new Set<() => void>();
+const pointerListeners = new Set<(point: { x: number; y: number }) => void>();
+const broadcastListeners = new Set<(payload: unknown) => void>();
 
 const isContext = (value: unknown): value is XyneAppContext => {
   if (!value || typeof value !== 'object') return false;
@@ -64,19 +90,54 @@ const isContext = (value: unknown): value is XyneAppContext => {
 
 const embedded = typeof window !== 'undefined' && window.parent !== window;
 
-const post = (type: string): void => {
+const post = (type: string, extra: Record<string, unknown> = {}): void => {
   if (!embedded) return;
-  window.parent.postMessage({ source: 'xyne-artifact', v: PROTOCOL_VERSION, type }, '*');
+  window.parent.postMessage({ source: 'xyne-artifact', v: PROTOCOL_VERSION, type, ...extra }, '*');
+};
+
+/**
+ * An overlay is drawn over Spaces, so its page must not paint a background.
+ * The injected stylesheet gives `body` one; inline `!important` wins over it,
+ * and a `normal` colour scheme keeps the browser from filling the frame when
+ * the app's scheme differs from the page around it.
+ */
+const applySurfaceStyles = (next: XyneAppContext): void => {
+  if (typeof document === 'undefined' || next.surface !== 'overlay') return;
+  for (const el of [document.documentElement, document.body]) {
+    if (!el) continue;
+    el.style.setProperty('background', 'transparent', 'important');
+    el.style.setProperty('color-scheme', 'normal');
+  }
 };
 
 if (typeof window !== 'undefined') {
   window.addEventListener('message', (event: MessageEvent) => {
-    const data = event.data as { source?: string; type?: string; context?: unknown } | null;
     if (event.source !== window.parent) return;
-    if (!data || data.source !== 'xyne-artifact-host' || data.type !== 'context') return;
-    if (!isContext(data.context)) return;
-    context = data.context;
-    listeners.forEach(listener => listener());
+    const data = event.data as {
+      source?: string;
+      type?: string;
+      context?: unknown;
+      x?: unknown;
+      y?: unknown;
+      payload?: unknown;
+    } | null;
+    if (!data || data.source !== 'xyne-artifact-host') return;
+    if (data.type === 'context') {
+      if (!isContext(data.context)) return;
+      context = data.context;
+      applySurfaceStyles(context);
+      listeners.forEach(listener => listener());
+      return;
+    }
+    if (data.type === 'pointer') {
+      if (typeof data.x !== 'number' || typeof data.y !== 'number') return;
+      const point = { x: data.x, y: data.y };
+      pointerListeners.forEach(listener => listener(point));
+      return;
+    }
+    if (data.type === 'broadcast') {
+      broadcastListeners.forEach(listener => listener(data.payload));
+    }
   });
 }
 
@@ -134,4 +195,61 @@ export function onXyneContext(callback: (next: XyneAppContext) => void): () => v
   return subscribe(() => {
     if (context) callback(context);
   });
+}
+
+/**
+ * Widget surface only: ask for a new size, in CSS pixels. The host clamps it to
+ * its limits and to the window, so read your real size from CSS (or a
+ * ResizeObserver) rather than assuming you got what you asked for.
+ */
+export function requestWidgetSize(width: number, height: number): void {
+  post('surface-resize', { width, height });
+}
+
+/**
+ * Open a channel, an app or an AI chat in the main window. Ignored for ids the
+ * host does not accept; the viewer's own access still decides what they see.
+ */
+export function navigateTo(target: XyneNavigateTarget): void {
+  post('navigate', { target });
+}
+
+/**
+ * Turn this app's own overlay on or off — for example from a picker page. On
+ * asks the viewer to confirm first; off is immediate. An app cannot switch on
+ * any other app's overlay.
+ */
+export function setOverlayEnabled(enabled: boolean): void {
+  post('overlay-set', { enabled });
+}
+
+/**
+ * Overlay surface only: the pointer position in window coordinates, at most
+ * once per frame. Clicks never reach an overlay, so this is the only way to
+ * follow the pointer. Returns an unsubscribe function.
+ */
+export function onPointerMove(callback: (point: { x: number; y: number }) => void): () => void {
+  pointerListeners.add(callback);
+  if (pointerListeners.size === 1) post('pointer-subscribe', { enabled: true });
+  return () => {
+    pointerListeners.delete(callback);
+    if (pointerListeners.size === 0) post('pointer-subscribe', { enabled: false });
+  };
+}
+
+/**
+ * Send a message to every other running copy of this app — for example from
+ * its page to its overlay. Any structured-cloneable value; large payloads are
+ * dropped.
+ */
+export function broadcast(payload: unknown): void {
+  post('broadcast', { payload });
+}
+
+/** Receive messages sent with `broadcast` by other copies of this app. */
+export function onBroadcast(callback: (payload: unknown) => void): () => void {
+  broadcastListeners.add(callback);
+  return () => {
+    broadcastListeners.delete(callback);
+  };
 }
