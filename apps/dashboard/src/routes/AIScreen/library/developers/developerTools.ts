@@ -31,7 +31,7 @@ export const DEVELOPER_TOOLS: readonly DeveloperTool[] = [
     summary:
       'An MCP server that gives your coding agent tools for channels, threads, messages, tickets, ' +
       'calls, canvases and search. It acts as you, so it reaches exactly what you can see in Spaces.',
-    badge: 'Read-only by default',
+    badge: 'New version coming soon',
     npmPackage: '@xyne/spaces-mcp',
   },
   {

@@ -1,5 +1,5 @@
 /**
- * `/api/sdk/v2/claw/api/*`: the claw-auth product API, relayed as the caller.
+ * `/api/sdk/v3/claw/api/*`: the claw-auth product API, relayed as the caller.
  *
  * Every allowed request is forwarded to claw-auth's `/claw/api/v1/*` with the
  * caller's own session rebuilt as a cookie (see `session.ts`), so claw-auth
@@ -216,7 +216,7 @@ async function relay(req: Request, res: Response, path: string): Promise<void> {
   }
 }
 
-/** Mounted at `/claw/api` inside the v2 router. */
+/** Mounted at `/claw/api` inside the v3 router. */
 export function createClawProxyRouter(): Router {
   const router = Router();
   router.use(

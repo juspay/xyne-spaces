@@ -19,6 +19,8 @@
  * so text that shows the shorthand is not turned into a ping.
  */
 
+import { isEncryptedField } from '@xyne/shared';
+
 const USER_MENTION_RE = /(^|[^A-Za-z0-9_>])@([A-Za-z0-9 ._\-']+?)\[([A-Za-z0-9_-]{8,64})\]/g;
 const GROUP_MENTION_RE =
   /(^|[^A-Za-z0-9_>])@([A-Za-z0-9 ._\-']+?)\[group:([A-Za-z0-9_-]{8,64}):([^\]]+)\]/g;
@@ -54,9 +56,13 @@ function expandSegment(text: string): string {
     );
 }
 
-/** Expand mention shorthand in `content`. Non-strings pass through for the mutator's schema to judge. */
+/**
+ * Expand mention shorthand in `content`. Non-strings pass through for the mutator's schema to
+ * judge, and so does ciphertext: a field the client encrypted by a manifest rule arrives
+ * already expanded (the SDK expands it before encrypting), and its text is not ours to read.
+ */
 export function expandMentions<T>(content: T): T {
-  if (typeof content !== 'string' || !content.includes('@')) return content;
+  if (typeof content !== 'string' || isEncryptedField(content as unknown) || !content.includes('@')) return content;
   return content
     .split(CODE_REGION_RE)
     .map((part, i) => (i % 2 === 0 ? expandSegment(part) : part))

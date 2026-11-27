@@ -54,7 +54,7 @@ console.log(\`Signed in as \${me.email}\`);`;
           { value: 'Typed', label: 'every read and write the app performs' },
           { value: 'SSO', label: 'sign-in, no keys to manage' },
           { value: '0', label: 'runtime dependencies' },
-          { value: 'Node + web', label: 'runs in Node 18+ and browsers' },
+          { value: 'Node + web', label: 'runs in Node 19+ and browsers' },
         ]}
       />
 
@@ -102,6 +102,10 @@ console.log(\`Signed in as \${me.email}\`);`;
         <div className='flex flex-col'>
           <Step n={1} title='Install from npm'>
             <CodeBlock code='pnpm add @xyne/spaces-sdk' trackName='Spaces SDK: copy install' />
+            <Text>
+              Version 0.3.0 or later: it speaks Spaces API v3, which encrypts sensitive data between
+              your app and Spaces. Earlier versions use an API that is switched off.
+            </Text>
           </Step>
           <Step n={2} title='Sign the user in with Xyne SSO'>
             <Text>
@@ -122,6 +126,12 @@ console.log(\`Signed in as \${me.email}\`);`;
             <Callout>
               Treat the session like a password: it can do anything the user can. Sign out with{' '}
               <InlineCode>xyneSsoLogout</InlineCode> to stop it being renewed.
+            </Callout>
+            <Callout>
+              Use one client per session at a time. The client registers an encryption key for the
+              session, and Spaces encrypts for the key registered last, so two processes sharing one
+              saved session would each fail to read the other&apos;s responses. Sign each process in
+              with its own session.
             </Callout>
           </Step>
         </div>

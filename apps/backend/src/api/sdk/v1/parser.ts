@@ -16,7 +16,8 @@
  *      filters that are nullable rather than omissible.
  *
  * Message bodies also get their mention shorthand (`@Name[userId]`) expanded to
- * the markup that makes a mention notify — see `mentions.ts`.
+ * the markup that makes a mention notify, before their parser runs — see
+ * `MENTION_FIELDS` and `mentions.ts`.
  */
 
 import { randomUUID } from 'crypto';
@@ -654,7 +655,7 @@ export const V1_PARSERS: Readonly<Record<string, V1Parser>> = {
   'conversations.create': (args): V1Parsed => ({
     args: {
       channelId: args.channelId,
-      content: expandMentions(args.content),
+      content: args.content,
       type: args.type ?? 'USER',
       conversationId: args.conversationId,
       messageId: args.messageId,
@@ -876,7 +877,7 @@ export const V1_PARSERS: Readonly<Record<string, V1Parser>> = {
   'messages.send': (args): V1Parsed => ({
     args: {
       conversationId: args.conversationId,
-      content: expandMentions(args.content),
+      content: args.content,
       type: args.type ?? 'USER',
       messageId: args.messageId,
       timestamp: now(),
@@ -887,7 +888,7 @@ export const V1_PARSERS: Readonly<Record<string, V1Parser>> = {
     },
   }),
   'messages.update': (args): V1Parsed => ({
-    args: { ...args, content: expandMentions(args.content) },
+    args: { ...args },
   }),
   'messages.react': (args): V1Parsed => ({
     args: {
@@ -922,7 +923,7 @@ export const V1_PARSERS: Readonly<Record<string, V1Parser>> = {
     args: {
       id: args.id,
       channelId: args.channelId,
-      content: expandMentions(args.content),
+      content: args.content,
       scheduledFor: args.scheduledFor,
       ...(args.conversationId ? { conversationId: args.conversationId } : {}),
       timestamp: now(),
@@ -939,7 +940,7 @@ export const V1_PARSERS: Readonly<Record<string, V1Parser>> = {
       },
   }),
   'messages.editScheduled': (args): V1Parsed => ({
-    args: { id: args.id, content: expandMentions(args.content), updatedAt: now() },
+    args: { id: args.id, content: args.content, updatedAt: now() },
   }),
   'messages.sendScheduledNow': (args): V1Parsed => ({
     args: { id: args.id, timestamp: now() },
@@ -1332,6 +1333,31 @@ export const V1_PARSERS: Readonly<Record<string, V1Parser>> = {
 };
 
 /**
+ * The message-body arguments whose mention shorthand (`@Name[userId]`) is expanded to
+ * mention markup before the operation's parser runs (see `mentions.ts`), by operation id.
+ *
+ * Also served by `GET /encryption-rules`: a client that encrypts one of these fields by a
+ * manifest rule expands it itself first, since ciphertext is passed through unexpanded.
+ */
+export const MENTION_FIELDS: Readonly<Record<string, readonly string[]>> = {
+  'conversations.create': ['content'],
+  'messages.send': ['content'],
+  'messages.update': ['content'],
+  'messages.schedule': ['content'],
+  'messages.editScheduled': ['content'],
+};
+
+function withMentionsExpanded(op: string, args: Record<string, unknown>): Record<string, unknown> {
+  const fields = Object.prototype.hasOwnProperty.call(MENTION_FIELDS, op) ? MENTION_FIELDS[op] : undefined;
+  if (!fields) return args;
+  const expanded = { ...args };
+  for (const field of fields) {
+    if (field in expanded) expanded[field] = expandMentions(expanded[field]);
+  }
+  return expanded;
+}
+
+/**
  * Shape one operation's arguments for its target.
  *
  * An operation with no parser forwards what it was given, which is the common
@@ -1341,9 +1367,10 @@ export function parseV1Args(op: string, args: unknown): V1Parsed {
   const parser = Object.prototype.hasOwnProperty.call(V1_PARSERS, op)
     ? V1_PARSERS[op]
     : undefined;
-  if (!parser) return { args: args ?? {} };
+  const input = withMentionsExpanded(op, (args ?? {}) as Record<string, unknown>);
+  if (!parser) return { args: input };
   try {
-    return parser((args ?? {}) as Record<string, unknown>);
+    return parser(input);
   } catch (err) {
     // A parser only throws when an argument it reshapes is missing or the wrong
     // shape — a caller mistake, not a server fault.
