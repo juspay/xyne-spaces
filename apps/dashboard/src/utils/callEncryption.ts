@@ -1,7 +1,6 @@
 import { ExternalE2EEKeyProvider, type E2EEOptions, type Room } from 'livekit-client';
 import E2EEWorker from 'livekit-client/e2ee-worker?worker';
 import { openCallKey, type CallEncryptionCredentials } from '@xyne/shared';
-import { getEncryptionState } from '@/machines/encryptionMachine';
 
 /**
  * End-to-end encryption for calls (web, desktop, external guests).
@@ -42,6 +41,6 @@ export async function applyRoomEncryption(
   }
   // Pass the string, not decoded bytes: bytes select HKDF here, while the mobile SDK
   // always uses PBKDF2. A string gives PBKDF2 on both, so web and mobile derive one key.
-  await keyProvider.setKey(await openCallKey(credentials, roomName, getEncryptionState().keyring));
+  await keyProvider.setKey(openCallKey(credentials, roomName));
   await room.setE2EEEnabled(true);
 }

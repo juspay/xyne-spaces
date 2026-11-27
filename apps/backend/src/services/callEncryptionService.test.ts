@@ -23,9 +23,10 @@ jest.mock('@xyne/shared', () => ({
 }));
 
 import { createDecipheriv, createPublicKey, diffieHellman, generateKeyPairSync, hkdfSync, type KeyObject } from 'crypto';
-import { callEncryptionService, SERVICE_KEY_VERSION, type CallKeyRecipient } from './callEncryptionService';
+import { callEncryptionService, SERVICE_KEY_VERSION } from './callEncryptionService';
 
-const user: CallKeyRecipient = { kind: 'user', userId: 'u1', authToken: 'jwt' };
+/** A signed-in user's access token. */
+const user = 'jwt';
 const row = (status: string, e2ee?: Record<string, boolean | number>) => ({
   id: 'call-1',
   externalId: 'room-1',
@@ -134,7 +135,7 @@ describe('callEncryptionService with keys from the encryption service', () => {
   it('refuses a service key to anyone but a signed-in user (guests and the agent, for now)', async () => {
     const serviceKeyed = row('ACTIVE', { enabled: true, keyVersion: SERVICE_KEY_VERSION });
     await expect(callEncryptionService.credentialsForJoin(serviceKeyed, noPin)).rejects.toThrow(/signed-in recipient/);
-    await expect(callEncryptionService.credentialsForJoin(serviceKeyed, noPin, { ...user, authToken: undefined })).rejects.toThrow(/signed-in recipient/);
+    await expect(callEncryptionService.credentialsForJoin(serviceKeyed, noPin, '')).rejects.toThrow(/signed-in recipient/);
     expect(generateKey).not.toHaveBeenCalled();
     expect(() => callEncryptionService.sealKeyForAgent('room-1', undefined, Buffer.alloc(32, 9).toString('base64'))).toThrow(/derived call key/);
   });

@@ -750,11 +750,7 @@ export class CallController {
           });
 
           // Return credentials for existing call
-          const existingEncryption = await callEncryptionService.credentialsForJoin(existingCall, pinCallEncryptionKeyVersion, {
-            kind: 'user',
-            userId,
-            authToken: req.authToken,
-          });
+          const existingEncryption = await callEncryptionService.credentialsForJoin(existingCall, pinCallEncryptionKeyVersion, req.authToken);
           if (existingEncryption) res.set('Cache-Control', 'no-store');
           res.json({
             success: true,
@@ -968,7 +964,7 @@ export class CallController {
       const newCallEncryption = await callEncryptionService.credentialsForState(
         { externalId: callExternalId, workspaceId: callWorkspaceId },
         e2eeState,
-        { kind: 'user', userId, authToken: req.authToken },
+        req.authToken,
       );
       if (newCallEncryption) res.set('Cache-Control', 'no-store');
       res.json({
@@ -1243,11 +1239,7 @@ export class CallController {
       });
 
       // Return credentials - participant record will be handled by webhook
-      const encryption = await callEncryptionService.credentialsForJoin(call, pinCallEncryptionKeyVersion, {
-        kind: 'user',
-        userId: user.id,
-        authToken: req.authToken,
-      });
+      const encryption = await callEncryptionService.credentialsForJoin(call, pinCallEncryptionKeyVersion, req.authToken);
       if (encryption) res.set('Cache-Control', 'no-store');
       res.json({
         success: true,

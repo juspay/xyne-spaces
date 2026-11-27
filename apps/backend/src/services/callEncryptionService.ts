@@ -49,15 +49,13 @@ const TRANSIT_CIPHERTEXT_PREFIX = 'ENC:v1|tk-';
 type KeyedCall = Pick<Call, 'id' | 'externalId' | 'metadata' | 'status' | 'workspaceId'>;
 
 /**
- * Who a call's E2EE key is released to: a signed-in user, named by their access token. The
- * encryption service encrypts the key to the transit key registered for that session.
+ * The access token of the signed-in user a call's E2EE key is released to: the encryption
+ * service encrypts the key to the transit key registered for that session. Guests and the
+ * agent have none, so they are refused a service-issued key for now.
  */
-export type CallKeyRecipient = { kind: 'user'; userId: string; authToken: string | undefined };
-
-/** Only signed-in users get service-issued keys for now; guests and the agent are refused. */
-const transitCallerOf = (recipient: CallKeyRecipient | undefined): TransitCaller => {
-  if (!recipient?.authToken) throw new Error('A service-issued call key needs a signed-in recipient');
-  return { authToken: recipient.authToken };
+const transitCallerOf = (authToken: string | undefined): TransitCaller => {
+  if (!authToken) throw new Error('A service-issued call key needs a signed-in recipient');
+  return { authToken };
 };
 
 export type { CallEncryptionCredentials };
@@ -141,7 +139,7 @@ class CallEncryptionService {
   }
 
   /**
-   * Key for a join response, for `recipient`. A row not activated yet (a SCHEDULED call, or a
+   * Key for a join response, for the user of `authToken`. A row not activated yet (a SCHEDULED call, or a
    * PENDING one written before /initiate pinned versions) has the current version pinned on it
    * now, so every participant and the later activation use one version even if the key source
    * or master key changes in between. `pinKeyVersion` writes only when no version is stored and
@@ -150,7 +148,7 @@ class CallEncryptionService {
   async credentialsForJoin(
     call: KeyedCall,
     pinKeyVersion: (callId: string, keyVersion: number) => Promise<number | null>,
-    recipient?: CallKeyRecipient,
+    authToken?: string,
   ): Promise<CallEncryptionCredentials | undefined> {
     const state = encryptionStateOf(call);
     if (state?.enabled !== true) return undefined;
@@ -163,22 +161,17 @@ class CallEncryptionService {
         keyVersion = LEGACY_KEY_VERSION;
       }
     }
-    return this.credentials(call, keyVersion, recipient);
+    return this.credentials(call, keyVersion, authToken);
   }
 
   /** Same, for a call whose row is being written in the same request (not activated yet). */
   async credentialsForState(
     call: Pick<Call, 'externalId' | 'workspaceId'>,
     state: CallEncryptionState | undefined,
-    recipient: CallKeyRecipient,
+    authToken: string | undefined,
   ): Promise<CallEncryptionCredentials | undefined> {
     if (state?.enabled !== true) return undefined;
-    return this.credentials(call, state.keyVersion ?? this.currentKeyVersion(), recipient);
-  }
-
-  /** Whether a call's key comes from the encryption service (vs. derived here). */
-  isServiceKeyed(call: Pick<Call, 'metadata'>): boolean {
-    return encryptionStateOf(call)?.keyVersion === SERVICE_KEY_VERSION;
+    return this.credentials(call, state.keyVersion ?? this.currentKeyVersion(), authToken);
   }
 
   /**
@@ -228,14 +221,14 @@ class CallEncryptionService {
   private async credentials(
     call: Pick<Call, 'externalId' | 'workspaceId'>,
     keyVersion: number,
-    recipient: CallKeyRecipient | undefined,
+    authToken: string | undefined,
   ): Promise<CallEncryptionCredentials> {
     const roomName = call.externalId;
     try {
       if (keyVersion !== SERVICE_KEY_VERSION) {
         return { key: this.deriveKey(roomName, keyVersion).toString('base64') };
       }
-      const caller = transitCallerOf(recipient);
+      const caller = transitCallerOf(authToken);
       const provider = getEncryptionProvider();
       const { wrappedKey } = await provider.generateKey({ keyType: 'CALL', workspaceId: call.workspaceId, keyValue: roomName });
       const { body } = await provider.transformResponse({ encryptedKey: wrappedKey }, caller);
@@ -244,7 +237,7 @@ class CallEncryptionService {
       return { encryptedKey: body.encryptedKey };
     } catch (error) {
       // An encrypted call with no usable key would leave every client in silence; fail loudly.
-      logger.error(`[${roomName}] e2ee_key_unavailable | key_version=${keyVersion}, recipient=${recipient?.kind ?? 'none'}`, error);
+      logger.error(`[${roomName}] e2ee_key_unavailable | key_version=${keyVersion}, signed_in=${Boolean(authToken)}`, error);
       throw error;
     }
   }
