@@ -283,10 +283,6 @@ export function setupIpcHandlers(): void {
   ipcMain.on('open-external', (_event, url: string) => {
     if (typeof url !== 'string') return;
     let newUrl = url.startsWith("/api/auth/login") ? `${config.MTLS_BACKEND_URL}${url}` : url;
-    if (newUrl.includes("/auth/login") && config.loginTempHeader) {
-      const separator = newUrl.includes("?") ? "&" : "?";
-      newUrl = `${newUrl}${separator}isNy=true`;
-    }
     newUrl = withLoginCodeChallenge(newUrl);
     const safeUrl = normalizeExternalUrl(newUrl);
     if (!safeUrl) {
