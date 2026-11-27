@@ -1,8 +1,8 @@
 import { Request, Response } from 'express';
-import { resolveYSweetDocWorkspaceId } from '@/bypassAcl/ysweetServices';
 import { canvasAuthService } from '@/services/canvasAuthService';
 import { config } from '@/config/env';
 import { getEncryptionProvider, type YSweetSocketKey } from '@/services/encryption';
+import { getPreparedYSweetDocKey } from '@/services/ysweetDocKeys';
 import { logger } from '@/utils/logger';
 import { getTrustedOriginalHost } from '@/utils/publicUrls';
 import { YSweetHttpError, ysweetGetOrCreateDocAndToken } from '@/utils/ysweetUtils';
@@ -361,24 +361,14 @@ export class YSweetController {
   }
 
   /**
-   * Called by the y-sweet server (not the browser) to get the per-doc customer-supplied
-   * encryption key (CSEK) it encrypts the doc's GCS object with. y-sweet never talks to the
-   * encryption service itself: a key is wrapped under the owning workspace's storage key, and
-   * y-sweet knows only the doc id — the doc-to-workspace mapping lives here.
-   *
-   * `wrappedKey` present: unwrap the key already in the object's metadata (read path, and any
-   * write to an object that is already encrypted). Absent: issue a fresh key for the doc, used
-   * on its first encrypted write.
-   *
-   * `grant: true` (y-sweet encrypting docs itself): the key comes back sealed to y-sweet's public
-   * key by the encryption service (`grant`), so this route never holds it; a fresh key also
-   * returns its `wrappedKey`. Without `grant` the raw key is returned, for y-sweet still on CSEK.
-   *
-   * Keys are returned as base64 and must never be logged.
+   * Called by the y-sweet server (not the browser) for the per-doc key it encrypts a doc with.
+   * y-sweet never talks to the encryption service itself. The key, sealed to y-sweet's public key
+   * (`grant`) with its `wrappedKey`, is the one fetched when the doc was opened
+   * (`services/ysweetDocKeys`); a doc nobody opened gets 403. Keys must never be logged.
    */
   async getStorageKey(req: Request, res: Response): Promise<void> {
     try {
-      const { docId, wrappedKey, grant } = req.body;
+      const { docId } = req.body;
 
       if (!docId || typeof docId !== 'string') {
         res.status(400).json({
@@ -388,65 +378,17 @@ export class YSweetController {
         return;
       }
 
-      if (wrappedKey !== undefined && (typeof wrappedKey !== 'string' || !wrappedKey)) {
-        res.status(400).json({
-          error: 'Invalid request',
-          message: 'wrappedKey must be a non-empty string when provided',
-        });
+      const docKey = await getPreparedYSweetDocKey(docId);
+      if (!docKey) {
+        logger.warn('[YSweet] getStorageKey for a doc that was not opened', { docId });
+        res.status(403).json({ error: 'Forbidden', message: 'Doc was not opened' });
         return;
       }
-
-      if (grant !== undefined && typeof grant !== 'boolean') {
-        res.status(400).json({
-          error: 'Invalid request',
-          message: 'grant must be a boolean when provided',
-        });
-        return;
-      }
-
-      if (grant === true) {
-        // The encryption service only unwraps a key of this doc's workspace.
-        const workspaceId = await resolveYSweetDocWorkspaceId(docId);
-        if (!workspaceId) {
-          logger.warn('[YSweet] getStorageKey for unknown doc', { docId });
-          res.status(404).json({ error: 'Not found', message: 'Unknown docId' });
-          return;
-        }
-        const sealed = await getEncryptionProvider().sealYSweetDocKey({
-          workspaceId,
-          docId,
-          ...(typeof wrappedKey === 'string' ? { wrappedKey } : {}),
-        });
-        res.json(typeof wrappedKey === 'string' ? { grant: sealed.grant } : sealed);
-        return;
-      }
-
-      // No doc lookup on this path: an object can outlive its canvas row, and its key still
-      // has to be unwrappable so the doc stays readable.
-      if (typeof wrappedKey === 'string') {
-        const [key] = await getEncryptionProvider().unwrapStorageKeys([wrappedKey]);
-        if (!key) {
-          throw new Error(`Storage key for doc ${docId} could not be unwrapped`);
-        }
-        res.json({ key: key.toString('base64') });
-        return;
-      }
-
-      const workspaceId = await resolveYSweetDocWorkspaceId(docId);
-      if (!workspaceId) {
-        logger.warn('[YSweet] getStorageKey for unknown doc', { docId });
-        res.status(404).json({ error: 'Not found', message: 'Unknown docId' });
-        return;
-      }
-
-      const generated = await getEncryptionProvider().generateStorageKey({ workspaceId });
-      res.json({
-        key: generated.key.toString('base64'),
-        wrappedKey: generated.wrappedKey,
-      });
+      res.json(docKey);
     } catch (error) {
       logger.error('Error in getStorageKey:', error);
       res.status(500).json({ error: 'Failed to get storage key' });
     }
   }
+
 }

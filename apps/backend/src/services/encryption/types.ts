@@ -46,7 +46,14 @@ export type YSweetDocKey = {
 export type SealYSweetDocKeyInput = {
   workspaceId: string;
   docId: string;
-  /** The doc's existing key, wrapped under the workspace storage key; absent for a new key. */
+  /**
+   * How the encryption service finds the doc's key: `CSEK` by `keySha256` (a doc GCS still
+   * encrypts with a customer-supplied key), `STORAGE` by `docId` (any other doc).
+   */
+  keyType: 'CSEK' | 'STORAGE';
+  /** For `CSEK`: the digest GCS records for the doc's key (`customerEncryption.keySha256`). */
+  keySha256?: string;
+  /** The doc's stored wrapped key (`enc-wdek`), used only when its key has no record yet. */
   wrappedKey?: string;
 };
 
