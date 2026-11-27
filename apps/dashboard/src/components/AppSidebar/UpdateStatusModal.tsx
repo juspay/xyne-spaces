@@ -479,7 +479,7 @@ export const UpdateStatusModal: React.FC<UpdateStatusModalProps> = ({
 
             {/* Remove status after dropdown */}
             <div className='space-y-2'>
-              <span className='text-sm font-medium text-foreground'>Remove status after</span>
+              <span className='block text-sm font-medium text-foreground'>Remove status after</span>
               <Select.Root value={expiryOption} onValueChange={setExpiryOption}>
                 <Select.Trigger className='w-full flex items-center justify-between px-3 py-2 rounded-lg border border-input text-foreground hover:bg-muted transition-colors focus:outline-hidden focus:ring-2 focus:ring-ring'>
                   <Select.Value />

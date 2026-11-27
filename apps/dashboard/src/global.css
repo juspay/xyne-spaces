@@ -16,6 +16,14 @@
   --font-code:
     ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
   --font-serif: "Libre Baskerville", Georgia, serif;
+  --text-xs--line-height: 1rem;
+  --text-sm--line-height: 1.25rem;
+  --text-base--line-height: 1.5rem;
+  --text-lg--line-height: 1.75rem;
+  --text-xl--line-height: 1.75rem;
+  --text-2xl--line-height: 2rem;
+  --text-3xl--line-height: 2.25rem;
+  --text-4xl--line-height: 2.5rem;
 }
 
 @theme inline reference {
@@ -450,6 +458,12 @@
 
   :disabled {
     cursor: default;
+  }
+
+  input::placeholder,
+  textarea::placeholder {
+    opacity: 1;
+    color: #9ca3af;
   }
 }
 
@@ -1039,6 +1053,13 @@
     font-family: "Inter", sans-serif;
   }
 
+  code,
+  kbd,
+  samp,
+  pre {
+    font-family: var(--font-mono);
+  }
+
   /* Number styling with Inter */
   .font-mono,
   .tabular-nums {
@@ -1415,17 +1436,6 @@
   [data-theme="midnight"] [cmdk-root] [cmdk-item][data-return-banner="true"][aria-selected="true"] {
     background-color: hsl(var(--card)) !important;
   }
-  /* The selected result on the full-page results screen: the palette's selected-row gray, so the
-     selection reads the same on both sides of the expand, on every card type. */
-  [data-cmdk-full-page] [data-selected-result="true"] > [class] {
-    background-color: hsl(var(--accent));
-  }
-  /* A ticket card paints its own background over that wrapper, on the card and on its description
-     footer, so it takes the gray itself. */
-  [data-cmdk-full-page] [data-selected-result="true"] [data-testid^="ticket-card-"],
-  [data-cmdk-full-page] [data-selected-result="true"] [data-testid^="ticket-card-"] .rounded-b-xl {
-    background-color: hsl(var(--accent));
-  }
   /* The page under full-page search: kept live, but not drawn while full page opens — its style,
      layout and paint are skipped (their state kept) until it is drawn again under the settled
      page. See FullPageKeepAliveOutlet. */
@@ -1456,7 +1466,7 @@
 
   /* ProseMirror Core - TipTap editor */
   .chat-input-field .ProseMirror:focus {
-    @apply outline-none;
+    @apply outline-hidden;
   }
 
   .chat-input-field .ProseMirror {
@@ -2385,7 +2395,7 @@
   }
 
   .jp-message-html div.slack_code code {
-    @apply !bg-transparent !p-0 !border-0 !text-[0.875rem] !leading-5 !font-mono !text-foreground !block;
+    @apply bg-transparent! p-0! border-0! text-[0.875rem]! leading-5! font-mono! text-foreground! block!;
     white-space: pre-wrap;
     overflow-wrap: break-word;
     word-break: normal;
@@ -2505,7 +2515,7 @@
   }
 
   .jp-message-html:has(blockquote) div.slack_code {
-    @apply !m-0;
+    @apply m-0!;
     max-width: 100%;
     overflow-wrap: break-word;
     word-wrap: break-word;
@@ -2522,13 +2532,13 @@
   /* Force code blocks inside blockquotes to wrap */
   .jp-message-html blockquote div.slack_code,
   .jp-message-html blockquote pre {
-    @apply !whitespace-pre-wrap;
+    @apply whitespace-pre-wrap!;
     max-width: 100%;
   }
 
   .jp-message-html blockquote div.slack_code code,
   .jp-message-html blockquote pre code {
-    @apply !whitespace-pre-wrap;
+    @apply whitespace-pre-wrap!;
     white-space: pre-wrap !important;
     word-break: normal;
   }
@@ -3570,31 +3580,6 @@
     padding-right: 0;
   }
 
-  /* Starts on the first block's left edge and follows the width handles. */
-  .canvas-surface .canvas-block-row {
-    box-sizing: border-box;
-    max-width: calc(var(--canvas-content-width) + 2 * var(--canvas-gutter));
-    margin-inline: auto;
-    padding-left: calc(var(--canvas-gutter) + var(--canvas-block-content-offset));
-    padding-right: var(--canvas-gutter);
-  }
-
-  /* The label reveal margin is sized for the page-title header, not this row. */
-  .canvas-surface .canvas-block-row > * {
-    margin-bottom: 0;
-  }
-
-  .canvas-surface
-    .canvas-block-row
-    ~ *
-    .bn-editor
-    > .bn-block-group
-    > .bn-block-outer:first-child
-    > .bn-block
-    > .bn-block-content[data-content-type="heading"] {
-    padding-top: 0;
-  }
-
   /* Centered reading column. .bn-editor keeps its inline padding as the
    hover-handle gutter, so the drag-handle / "+" stay in the margin. */
   .canvas-surface .bn-editor {
@@ -4474,9 +4459,6 @@
   }
 
   /* --- 2B: Chat Input Editor --- */
-  [data-theme="midnight"] .chat-input-field {
-    color: #f3f4f6;
-  }
 
   [data-theme="midnight"] .chat-input-field pre {
     background: #1e293b;
@@ -4840,18 +4822,6 @@
     color: hsl(var(--background)) !important;
   }
 
-  /* --- 2H: Dark Mode Shadow Enhancements --- */
-  /* Override Tailwind shadow utilities for darker shadows in dark mode */
-  [data-theme="midnight"] .shadow-sm {
-    box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.3);
-  }
-
-  [data-theme="midnight"] .shadow-md {
-    box-shadow:
-      0 4px 6px -1px rgba(0, 0, 0, 0.4),
-      0 2px 4px -2px rgba(0, 0, 0, 0.3);
-  }
-
   /* --- 2I: MarkdownPreview Dark Mode Overrides --- */
   /* Ensure MarkdownPreview content inherits theme colors in dark mode */
   [data-theme="midnight"] .wmde-markdown {
@@ -4922,18 +4892,6 @@
 
   [data-theme="midnight"] .wmde-markdown tr:nth-child(2n) {
     background-color: #1f2937 !important;
-  }
-
-  [data-theme="midnight"] .shadow-lg {
-    box-shadow:
-      0 10px 15px -3px rgba(0, 0, 0, 0.5),
-      0 4px 6px -4px rgba(0, 0, 0, 0.4);
-  }
-
-  [data-theme="midnight"] .shadow-xl {
-    box-shadow:
-      0 20px 25px -5px rgba(0, 0, 0, 0.7),
-      0 8px 10px -6px rgba(0, 0, 0, 0.6);
   }
 
   /* Recording detail keeps summaries unframed and easy to scan. */
@@ -5206,38 +5164,6 @@
         *
     ) {
     color: #d1d5db !important;
-  }
-
-  /* MultiSelect dropdown menu dark mode.
-   Excludes the Cmd+K palette, which renders role="listbox" on its list ([cmdk-list])
-   and role="option" on its rows ([cmdk-item]) via cmdk. Those already use design
-   tokens (bg-background list, text-foreground/-muted-foreground rows, its own
-   cmdk-active-row selection), so this hardcoded dark must not override them.
-   Mirrors the [role="option"]:not([cmdk-item]) exclusion below.
-
-   [data-theme-tokens] is the general opt-out: any listbox already built on the
-   design tokens marks itself with it and keeps its own surface, hover and
-   selected colours instead of these hardcoded ones. */
-  [data-theme="midnight"] [role="listbox"]:not([cmdk-list]):not([data-theme-tokens]) {
-    background-color: #1a1a1a !important;
-    border-color: #374151 !important;
-  }
-
-  [data-theme="midnight"] [role="option"]:not([cmdk-item]):not([data-theme-tokens]) {
-    color: #d1d5db !important;
-  }
-
-  [data-theme="midnight"] [role="option"]:not([cmdk-item]):not([data-theme-tokens]):hover {
-    background-color: #2a2d30 !important;
-  }
-
-  /* Select/combobox dropdown options. Excludes cmd+K rows ([cmdk-item]) so they keep the
-   documented gray-resting / blue-navigated two-tier above — otherwise this !important blue
-   overrides the resting gray and resting vs. navigated become indistinguishable in midnight. */
-  [data-theme="midnight"]
-    [role="option"][aria-selected="true"]:not([cmdk-item]):not([data-theme-tokens]) {
-    background-color: rgba(37, 99, 235, 0.2) !important;
-    color: #60a5fa !important;
   }
 
   /* Blend SingleSelect / Select dropdown menu dark mode.
@@ -6406,4 +6332,102 @@
     background-color: hsl(var(--primary) / 0.08);
     outline-color: hsl(var(--primary) / 0.5);
   }
+}
+
+/* --- 2H: Dark Mode Shadow Enhancements --- */
+/* Override Tailwind shadow utilities for darker shadows in dark mode */
+[data-theme="midnight"] .shadow-xs {
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.3);
+}
+
+[data-theme="midnight"] .shadow-md {
+  box-shadow:
+    0 4px 6px -1px rgba(0, 0, 0, 0.4),
+    0 2px 4px -2px rgba(0, 0, 0, 0.3);
+}
+
+[data-theme="midnight"] .shadow-lg {
+  box-shadow:
+    0 10px 15px -3px rgba(0, 0, 0, 0.5),
+    0 4px 6px -4px rgba(0, 0, 0, 0.4);
+}
+
+[data-theme="midnight"] .shadow-xl {
+  box-shadow:
+    0 20px 25px -5px rgba(0, 0, 0, 0.7),
+    0 8px 10px -6px rgba(0, 0, 0, 0.6);
+}
+
+/* The selected result on the full-page results screen: the palette's selected-row gray, so the
+   selection reads the same on both sides of the expand, on every card type. */
+[data-cmdk-full-page] [data-selected-result="true"] > [class] {
+  background-color: hsl(var(--accent));
+}
+
+/* A ticket card paints its own background over that wrapper, on the card and on its description
+   footer, so it takes the gray itself. */
+[data-cmdk-full-page] [data-selected-result="true"] [data-testid^="ticket-card-"],
+[data-cmdk-full-page] [data-selected-result="true"] [data-testid^="ticket-card-"] .rounded-b-xl {
+  background-color: hsl(var(--accent));
+}
+
+/* Starts on the first block's left edge and follows the width handles. */
+.canvas-surface .canvas-block-row {
+  box-sizing: border-box;
+  max-width: calc(var(--canvas-content-width) + 2 * var(--canvas-gutter));
+  margin-inline: auto;
+  padding-left: calc(var(--canvas-gutter) + var(--canvas-block-content-offset));
+  padding-right: var(--canvas-gutter);
+}
+
+/* The label reveal margin is sized for the page-title header, not this row. */
+.canvas-surface .canvas-block-row > * {
+  margin-bottom: 0;
+}
+
+.canvas-surface
+  .canvas-block-row
+  ~ *
+  .bn-editor
+  > .bn-block-group
+  > .bn-block-outer:first-child
+  > .bn-block
+  > .bn-block-content[data-content-type="heading"] {
+  padding-top: 0;
+}
+
+[data-theme="midnight"] .chat-input-field {
+  color: #f3f4f6;
+}
+
+/* MultiSelect dropdown menu dark mode.
+ Excludes the Cmd+K palette, which renders role="listbox" on its list ([cmdk-list])
+ and role="option" on its rows ([cmdk-item]) via cmdk. Those already use design
+ tokens (bg-background list, text-foreground/-muted-foreground rows, its own
+ cmdk-active-row selection), so this hardcoded dark must not override them.
+ Mirrors the [role="option"]:not([cmdk-item]) exclusion below.
+
+ [data-theme-tokens] is the general opt-out: any listbox already built on the
+ design tokens marks itself with it and keeps its own surface, hover and
+ selected colours instead of these hardcoded ones. */
+[data-theme="midnight"] [role="listbox"]:not([cmdk-list]):not([data-theme-tokens]) {
+  background-color: #1a1a1a !important;
+  border-color: #374151 !important;
+}
+
+[data-theme="midnight"] [role="option"]:not([cmdk-item]):not([data-theme-tokens]) {
+  color: #d1d5db !important;
+}
+
+[data-theme="midnight"] [role="option"]:not([cmdk-item]):not([data-theme-tokens]):hover {
+  background-color: #2a2d30 !important;
+}
+
+/* Select/combobox dropdown options. Excludes cmd+K rows ([cmdk-item]) so they keep the
+ documented gray-resting / blue-navigated two-tier above — otherwise this !important blue
+ overrides the resting gray and resting vs. navigated become indistinguishable in midnight. */
+[data-theme="midnight"]
+  [role="option"][aria-selected="true"]:not([cmdk-item]):not([data-theme-tokens]) {
+  background-color: rgba(37, 99, 235, 0.2) !important;
+  color: #60a5fa !important;
 }

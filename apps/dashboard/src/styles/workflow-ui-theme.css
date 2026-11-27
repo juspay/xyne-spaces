@@ -144,15 +144,15 @@
     background: transparent;
     color: hsl(var(--muted-foreground) / 0.5);
   }
+}
 
-  /*
+/*
  * Ask AI is not available here: its agent and builder routes need Claw / an LLM provider, which
  * stay disabled. The package renders these controls unconditionally and has no prop to hide them.
  */
-  .xyne-workflow-ui [role="menuitem"][title="an agent answers until they leave"],
-  .xyne-workflow-ui button[title="Ask AI"],
-  .xyne-workflow-ui button[title="Close AI assistant"],
-  .xyne-workflow-ui button[title="Ask AI about this run"] {
-    display: none;
-  }
+.xyne-workflow-ui [role="menuitem"][title="an agent answers until they leave"],
+.xyne-workflow-ui button[title="Ask AI"],
+.xyne-workflow-ui button[title="Close AI assistant"],
+.xyne-workflow-ui button[title="Ask AI about this run"] {
+  display: none;
 }

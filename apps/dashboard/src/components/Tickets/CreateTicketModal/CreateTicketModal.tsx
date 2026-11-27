@@ -2566,7 +2566,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
               }}
             >
               {field => (
-                <div className='space-y-1'>
+                <div className='flex flex-col gap-1'>
                   {isTitleGenerating ? (
                     <div className='flex h-8 items-center'>
                       <TextShimmer
@@ -2663,7 +2663,7 @@ export const CreateTicketModal: React.FC<CreateTicketModalProps> = ({
               }}
             >
               {field => (
-                <div className='space-y-1'>
+                <div className='flex flex-col gap-1'>
                   <Textarea
                     ref={descriptionTextareaRef}
                     rows={2}

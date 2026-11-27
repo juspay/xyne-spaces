@@ -5,7 +5,7 @@ import { cn } from '../../../utils/classNames';
 const inputVariants = cva(
   cn(
     'file:text-foreground placeholder:text-muted-foreground h-9 w-full min-w-0 border px-3 py-1 text-base text-foreground transition-[color,box-shadow] outline-hidden',
-    'file:inline-flex file:h-7 file:border-0 file:bg-transparent file:text-sm file:font-medium',
+    'file:inline-flex file:h-7 file:border-0 file:bg-transparent file:px-1.5 file:py-px file:text-sm file:font-medium',
     'disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50 md:text-sm',
     'focus-visible:border-ring focus-visible:ring-ring/10 focus-visible:ring-2',
     'aria-invalid:ring-destructive/20 aria-invalid:border-destructive',

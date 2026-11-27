@@ -1074,14 +1074,16 @@ export default function SlackMigration(): React.JSX.Element {
                         inputClassName={inputCls}
                       />
                     </div>
-                    <Checkbox
-                      checked={channel.announceInSlack}
-                      onChange={c => setChannel({ ...channel, announceInSlack: c })}
-                      data-track-category='SLACK_MIGRATION'
-                      data-track-name='ANNOUNCE_IN_SLACK_TOGGLE'
-                      label='Post a “Migrated to Xyne Spaces” notice in the Slack channel when it’s done'
-                      size='md'
-                    />
+                    <div>
+                      <Checkbox
+                        checked={channel.announceInSlack}
+                        onChange={c => setChannel({ ...channel, announceInSlack: c })}
+                        data-track-category='SLACK_MIGRATION'
+                        data-track-name='ANNOUNCE_IN_SLACK_TOGGLE'
+                        label='Post a “Migrated to Xyne Spaces” notice in the Slack channel when it’s done'
+                        size='md'
+                      />
+                    </div>
                     <div className='flex flex-wrap items-center justify-between gap-2 border-t border-border pt-3.5'>
                       <p className='text-xs text-muted-foreground'>
                         Add the Xyne Spaces bot to the channel first — checklist on the left.

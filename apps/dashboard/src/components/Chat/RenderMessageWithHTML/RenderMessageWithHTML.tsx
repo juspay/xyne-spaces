@@ -1452,7 +1452,7 @@ const parseNode = (
 export const RenderMessageWithHTML: React.FC<RenderMessageWithHTMLProps> = ({
   message,
   showEdited = false,
-  isSystemMessage = false,
+  isSystemMessage: _isSystemMessage = false,
   breakLongLinks = false,
   disableLinks = false,
   messageId,
@@ -1595,14 +1595,5 @@ export const RenderMessageWithHTML: React.FC<RenderMessageWithHTMLProps> = ({
     return [...parsedContent, editedSpan];
   }, [parsedContent, showEdited, keyPrefix]);
 
-  return (
-    <div
-      className={cn(
-        'message-html-root jp-message-html',
-        isSystemMessage ? 'text-muted-foreground' : '',
-      )}
-    >
-      {contentWithEdited}
-    </div>
-  );
+  return <div className='message-html-root jp-message-html'>{contentWithEdited}</div>;
 };

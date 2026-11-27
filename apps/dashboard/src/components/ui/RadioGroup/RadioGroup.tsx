@@ -62,7 +62,7 @@ const RadioGroup = ({
   return (
     <div className={cn('space-y-2', className)}>
       {label && (
-        <label className='text-sm font-normal text-muted-foreground' htmlFor={name}>
+        <label className='block text-sm font-normal text-muted-foreground' htmlFor={name}>
           {label}
         </label>
       )}
@@ -97,10 +97,7 @@ const Radio = ({
     <div className={cn('flex items-center justify-start space-x-3', className)} {...rest}>
       <RadioGroupItem value={value} id={value} />
       <div className='flex-1 space-y-0.5'>
-        <label
-          htmlFor={value}
-          className='text-sm font-normal text-foreground cursor-pointer align-text-bottom'
-        >
+        <label htmlFor={value} className='block text-sm font-normal text-foreground cursor-pointer'>
           {children}
         </label>
         {subtext && <p className='text-xs text-muted-foreground leading-none'>{subtext}</p>}

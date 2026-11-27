@@ -1285,9 +1285,7 @@ const ActivityListView = (): ReactElement => {
                         data-track-metadata={JSON.stringify({ tab: tab.value })}
                         className={cn(
                           'group px-2 py-2 flex items-center transition-all duration-300 ease-in-out cursor-pointer select-none sm:px-3 justify-start rounded-lg hover:bg-foreground/6 focus-visible:bg-foreground/6 focus-visible:outline-hidden',
-                          activeTab === tab.value
-                            ? 'bg-foreground/6'
-                            : 'bg-sidebar-accent-foreground/50',
+                          activeTab === tab.value ? 'bg-foreground/6' : 'bg-transparent',
                         )}
                       >
                         {IconComponent && (

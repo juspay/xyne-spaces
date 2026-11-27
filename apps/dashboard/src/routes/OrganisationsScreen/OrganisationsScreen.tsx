@@ -816,7 +816,7 @@ export const OrganisationsScreen = (): ReactElement => {
 
               {/* Organisation Name field */}
               <div className='space-y-2'>
-                <label htmlFor='org-name' className='text-sm font-medium text-foreground'>
+                <label htmlFor='org-name' className='block text-sm font-medium text-foreground'>
                   Organisation Name <span className='text-destructive'>*</span>
                 </label>
                 <Input
@@ -832,7 +832,10 @@ export const OrganisationsScreen = (): ReactElement => {
 
               {/* Workspace Name field */}
               <div className='space-y-2'>
-                <label htmlFor='workspace-name' className='text-sm font-medium text-foreground'>
+                <label
+                  htmlFor='workspace-name'
+                  className='block text-sm font-medium text-foreground'
+                >
                   Workspace Name <span className='text-destructive'>*</span>
                 </label>
                 <Input
@@ -847,7 +850,7 @@ export const OrganisationsScreen = (): ReactElement => {
 
               {/* Owner Email field */}
               <div className='space-y-2'>
-                <label htmlFor='owner-email' className='text-sm font-medium text-foreground'>
+                <label htmlFor='owner-email' className='block text-sm font-medium text-foreground'>
                   Owner Email <span className='text-destructive'>*</span>
                 </label>
                 <Input

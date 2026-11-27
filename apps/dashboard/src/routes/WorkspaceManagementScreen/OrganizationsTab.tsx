@@ -194,7 +194,7 @@ export const OrganizationsTab = (): ReactElement => {
 
             {/* Organization Name */}
             <div className='space-y-2'>
-              <label htmlFor='org-name' className='text-sm font-medium text-foreground'>
+              <label htmlFor='org-name' className='block text-sm font-medium text-foreground'>
                 Organization Name <span className='text-destructive'>*</span>
               </label>
               <Input
@@ -209,7 +209,10 @@ export const OrganizationsTab = (): ReactElement => {
 
             {/* Organization Description */}
             <div className='space-y-2'>
-              <label htmlFor='org-description' className='text-sm font-medium text-foreground'>
+              <label
+                htmlFor='org-description'
+                className='block text-sm font-medium text-foreground'
+              >
                 Description
               </label>
               <textarea
