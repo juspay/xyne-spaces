@@ -750,7 +750,7 @@ export class CallController {
           });
 
           // Return credentials for existing call
-          const existingEncryption = await callEncryptionService.credentialsForJoin(existingCall, pinCallEncryptionKeyVersion);
+          const existingEncryption = await callEncryptionService.credentialsForJoin(existingCall, pinCallEncryptionKeyVersion, req.authToken);
           if (existingEncryption) res.set('Cache-Control', 'no-store');
           res.json({
             success: true,
@@ -961,7 +961,11 @@ export class CallController {
 
       // Return credentials - the webhook activates the PENDING row on first join.
       // The media key travels only here, over the authenticated response; never via LiveKit.
-      const newCallEncryption = callEncryptionService.credentialsForState(callExternalId, e2eeState);
+      const newCallEncryption = await callEncryptionService.credentialsForState(
+        { externalId: callExternalId, workspaceId: callWorkspaceId },
+        e2eeState,
+        req.authToken,
+      );
       if (newCallEncryption) res.set('Cache-Control', 'no-store');
       res.json({
         success: true,
@@ -1235,7 +1239,7 @@ export class CallController {
       });
 
       // Return credentials - participant record will be handled by webhook
-      const encryption = await callEncryptionService.credentialsForJoin(call, pinCallEncryptionKeyVersion);
+      const encryption = await callEncryptionService.credentialsForJoin(call, pinCallEncryptionKeyVersion, req.authToken);
       if (encryption) res.set('Cache-Control', 'no-store');
       res.json({
         success: true,

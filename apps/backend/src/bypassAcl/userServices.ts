@@ -77,6 +77,11 @@ export function createWorkspaceInOrgData(
             orgId: createdWorkspace.orgId,
             entityType: 'WORKSPACE_STORAGE',
           });
+          await getEncryptionProvider().provisionEntity({
+            entityId: createdWorkspace.id,
+            orgId: createdWorkspace.orgId,
+            entityType: 'WORKSPACE_CALLS',
+          });
           return createdWorkspace;
         });
       } catch (error) {

@@ -23,6 +23,11 @@ export function createTx(self: WorkspaceRepository, data: Prisma.WorkspaceCreate
       orgId: workspace.orgId,
       entityType: 'WORKSPACE_STORAGE',
     });
+    await getEncryptionProvider().provisionEntity({
+      entityId: workspace.id,
+      orgId: workspace.orgId,
+      entityType: 'WORKSPACE_CALLS',
+    });
     return workspace;
   });
 }

@@ -9,6 +9,7 @@ import type {
   EncryptedFieldConfig,
   EncryptionProvider,
   FileChunksResult,
+  GenerateKeyInput,
   GenerateStorageKeyInput,
   OpenFileChunksInput,
   ProvisionEntityInput,
@@ -21,6 +22,7 @@ import type {
   TransitCaller,
   TransitEncryptResult,
   TransitServerKeys,
+  WrappedKey,
   YSweetSocketKey,
   YSweetDocKey,
   SealYSweetDocKeyInput,
@@ -149,6 +151,10 @@ const provider: EncryptionProvider = {
     return unsupported('openFileChunksForTransit');
   },
 
+
+  async generateKey(_input: GenerateKeyInput): Promise<WrappedKey> {
+    return unsupported('generateKey');
+  },
 
   async getTransitClientManifest(
     _params: { tag: string } & TransitCaller,

@@ -37,6 +37,11 @@ export function provisionOrgTx(prisma: PrismaClient, orgId: string, orgName: str
       orgId: workspace.orgId,
       entityType: 'WORKSPACE_STORAGE',
     });
+    await getEncryptionProvider().provisionEntity({
+      entityId: workspace.id,
+      orgId: workspace.orgId,
+      entityType: 'WORKSPACE_CALLS',
+    });
 
     // DM project required for every workspace
     await tx.project.create({

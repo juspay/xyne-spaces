@@ -37,6 +37,8 @@ export async function applyRoomEncryption(
   if (!keyProvider) {
     throw new Error('Room was created without encryption options');
   }
+  // Mobile has no transit key pair yet, so it can't open a key issued by the encryption service.
+  if (!credentials.key) throw new Error('Call key from the encryption service is not supported on mobile yet');
   // Same string as web: both sides must run PBKDF2 over identical input to get one key.
   await keyProvider.setSharedKey(credentials.key);
   await room.setE2EEEnabled(true);
