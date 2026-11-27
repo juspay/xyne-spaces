@@ -263,7 +263,7 @@ module.exports = ({ config }) => {
         ''
       ).trim(),
       lotusZeroServerUrl: (process.env.EXPO_PUBLIC_ZERO_SERVER_URL || '').trim(),
-      // Comma-separated HTTPS origins allowed to issue device-enrollment QR codes.
+      // Comma-separated HTTPS origins of the device-enrollment portal.
       lotusEnrollmentOrigins: (process.env.ENROLLMENT_ORIGINS || '').trim(),
       // Metrics configuration. The endpoint is a base URL; app code appends /godel/v1/metrics.
       lotusTelemetryMode: (process.env.LOTUS_TELEMETRY_MODE || '').trim(),

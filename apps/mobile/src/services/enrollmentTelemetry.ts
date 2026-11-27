@@ -5,27 +5,25 @@ import { initializeLogger, logger } from '../utils/logger';
 
 // The shared event registry is generated/ignored in this checkout. Keep the
 // wire event name stable locally so the committed mobile code emits a
-// dedicated Grafana stream without changing generated shared files.
-const SINGLE_QR_ENROLLMENT_EVENT = 'lotus_single_qr_enrollment' as EventType;
+// dedicated Grafana stream without changing generated shared files. The name predates the
+// two-QR flow; it is kept so existing queries still match, and `flow` says which one ran.
+const QR_ENROLLMENT_EVENT = 'lotus_single_qr_enrollment' as EventType;
 const BUILD_VARIANT = APP_VARIANT ?? (__DEV__ ? 'dev' : 'prod');
 
-export type SingleQrEnrollmentStage =
+export type QrEnrollmentStage =
   | 'screen_check'
   | 'enrollment'
-  | 'qr_validation'
   | 'csr_generation'
-  | 'csr_submission'
+  | 'qr_validation'
   | 'certificate_storage'
   | 'mtls_health';
 
-export type SingleQrEnrollmentOutcome = 'started' | 'succeeded' | 'failed' | 'cancelled';
+export type QrEnrollmentOutcome = 'started' | 'succeeded' | 'failed' | 'cancelled';
 
-export type SingleQrEnrollmentTelemetry = {
-  stage: SingleQrEnrollmentStage;
-  outcome: SingleQrEnrollmentOutcome;
+export type QrEnrollmentTelemetry = {
+  stage: QrEnrollmentStage;
+  outcome: QrEnrollmentOutcome;
   reason?: string;
-  status_code?: number;
-  error_code?: string;
   duration_ms?: number;
   is_enrolled?: boolean;
   is_healthy?: boolean;
@@ -33,26 +31,26 @@ export type SingleQrEnrollmentTelemetry = {
 };
 
 /**
- * Emits the single-QR enrollment event through the existing Grafana/VictoriaLogs pipeline.
+ * Emits the QR enrollment event through the existing Grafana/VictoriaLogs pipeline.
  * Keep this payload deliberately allowlisted: never add QR data, tokens, headers, CSRs,
  * certificates, private keys, or raw Error/Axios objects here.
  */
-export function logSingleQrEnrollment(
+export function logQrEnrollment(
   level: 'info' | 'warn' | 'error',
-  fields: SingleQrEnrollmentTelemetry,
+  fields: QrEnrollmentTelemetry,
 ): void {
   const payload = {
-    flow: 'single_qr' as const,
+    flow: 'double_qr' as const,
     build_variant: BUILD_VARIANT,
     ...fields,
   };
 
   if (level === 'error') {
-    logger.error(SINGLE_QR_ENROLLMENT_EVENT, payload);
+    logger.error(QR_ENROLLMENT_EVENT, payload);
   } else if (level === 'warn') {
-    logger.warn(SINGLE_QR_ENROLLMENT_EVENT, payload);
+    logger.warn(QR_ENROLLMENT_EVENT, payload);
   } else {
-    logger.info(SINGLE_QR_ENROLLMENT_EVENT, payload);
+    logger.info(QR_ENROLLMENT_EVENT, payload);
   }
 }
 
@@ -62,15 +60,15 @@ export function logSingleQrEnrollment(
  * failures are visible in Grafana without waiting for sign-in or the 90-second
  * safety timer.
  */
-export function flushSingleQrEnrollmentLogs(): void {
+export function flushQrEnrollmentLogs(): void {
   void initializeLogger()
     .then(async () => {
       const delivered = await logger.flushAllLogs();
       if (!delivered) {
-        console.warn('[SingleQrEnrollment] Grafana logs queued for retry');
+        console.warn('[QrEnrollment] Grafana logs queued for retry');
       }
     })
     .catch(() => {
-      console.warn('[SingleQrEnrollment] Failed to flush Grafana logs');
+      console.warn('[QrEnrollment] Failed to flush Grafana logs');
     });
 }

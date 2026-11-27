@@ -165,7 +165,8 @@ function patchAppBuildGradleForReleaseSigning(contents) {
  * `loadLotusEnv` before prebuild). Do not commit real secrets in the repo; keep `.env.*` out of git if needed.
  *
  * **prodDebug + prod data:** `pnpm run prebuild:prod` sets `LOTUS_PRODDEBUG_USE_RELEASE_SIGNING=true`. The **prod** flavor
- * then uses `signingConfigs.release` for debug builds; **dev** / **sandbox** stay on the debug keystore. Patched from
+ * then uses `signingConfigs.release` for debug builds; **dev** stays on the debug keystore and **sandbox**
+ * uses its own keystore (see `withAndroidProductFlavors`). Patched from
  * `withAndroidAppConfig` (last on the `appBuildGradle` mod chain).
  */
 function withAndroidReleaseSigning(config) {

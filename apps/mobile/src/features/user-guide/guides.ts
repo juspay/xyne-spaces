@@ -25,8 +25,8 @@ export const USER_GUIDES: readonly MobileGuide[] = [
     steps: [
       'On the login screen, tap "Sign in with Google", "Sign in with Microsoft" or "Sign in with Email".',
       'With email, enter your address and password. Forgot it? Tap the reset link, tap "Send Code" and set a new password.',
-      'If your workspace requires device enrollment, the app opens a QR scanner. Allow camera access when asked.',
-      'Point the camera at the enrollment QR code shown on your desktop. The status screen confirms when the device is enrolled.',
+      'If your workspace requires device enrollment, open the enrollment page on your desktop and tap "Start Enrollment" in the app. Allow camera access when asked.',
+      'Hold the QR code the app shows up to your webcam. Then tap "Continue" and scan the certificate QR code the page shows. The status screen confirms when the device is enrolled.',
       'If enrollment fails, tap "Try Again". If it keeps failing, ask your workspace admin for a fresh QR code.',
     ],
     tip: 'Enrollment is once per device. Signing out does not remove it.',
