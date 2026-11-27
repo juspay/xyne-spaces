@@ -11,7 +11,7 @@ import { devicePasswordPopup } from '../services/enrollmentMetrics';
 import { safeRecordMetric } from '../services/telemetry';
 import { IKeychain } from './IKeychain';
 import { config } from '../app/config';
-import { deviceCaCommonName, isIssuedByDeviceCa } from './deviceCa';
+import { deviceCaCommonName, deviceIdentityDisplayName, isIssuedByDeviceCa } from './deviceCa';
 
 const execAsync = promisify(exec);
 // Shell-free variant (argument array, no /bin/sh) for commands that handle a value parsed out of
@@ -149,7 +149,7 @@ class LinuxKeychainService implements IKeychain {
             // The bundle is a per-call temp file, imported immediately and removed in the finally
             // below. The passphrase is fixed so the export and import agree.
             // Create PKCS#12 bundle
-            const p12Cmd = `${OPENSSL} pkcs12 -export -in "${certPath}" -inkey "${keyPath}" -out "${p12Path}" -passout pass:changeit -name "${this.label}"`;
+            const p12Cmd = `${OPENSSL} pkcs12 -export -in "${certPath}" -inkey "${keyPath}" -out "${p12Path}" -passout pass:changeit -name "${deviceIdentityDisplayName(certPem)}"`;
             await execAsync(p12Cmd);
 
             // Import PKCS#12 into all NSS databases (Chrome + Firefox)

@@ -10,8 +10,9 @@ import { devicePasswordPopup } from '../services/enrollmentMetrics';
 import { safeRecordMetric } from '../services/telemetry';
 import { app } from 'electron';
 import { IKeychain } from './IKeychain';
+import { X509Certificate } from 'crypto';
 import { config } from '../app/config';
-import { deviceCaCommonName, isIssuedByDeviceCa } from './deviceCa';
+import { deviceCaCommonName, deviceIdentityDisplayName, isIssuedByDeviceCa } from './deviceCa';
 
 const execAsync = promisify(exec);
 // Shell-free variant (argument array, no /bin/sh) for commands that must handle values parsed
@@ -27,6 +28,12 @@ const OPENSSL = '/usr/bin/openssl';
 // Single source of truth so the delete-identity paths classify it identically.
 function isNotFoundError(e: any): boolean {
     return Boolean(e?.stderr?.includes("not be found"));
+}
+
+// Sets keychain labels (native/keychain-label), which `security` cannot do.
+function keychainLabelPath(): string {
+    const base = app.isPackaged ? path.join(process.resourcesPath, 'app.asar.unpacked') : app.getAppPath();
+    return path.join(base, 'native', 'keychain-label', 'keychain-label');
 }
 
 class MacKeychainService implements IKeychain {
@@ -93,6 +100,22 @@ class MacKeychainService implements IKeychain {
             throw error;
         } finally {
             try { await unlinkAsync(keyPath); } catch { }
+        }
+    }
+
+    /**
+     * Names the imported certificate after the device, so keychain and browser prompts show more
+     * than the deviceId. `security import` cannot set the label, so the bundled helper does it.
+     * Best effort: an unnamed identity still works.
+     */
+    private async labelIdentity(certPem: string): Promise<void> {
+        const label = deviceIdentityDisplayName(certPem);
+        const sha1 = new X509Certificate(certPem).fingerprint.replace(/:/g, '');
+        try {
+            await execFileAsync(keychainLabelPath(), [sha1, label]);
+            log.info(`[mTLS] Device identity named "${label}"`);
+        } catch (e: any) {
+            Logger.warn('keychain.identity.label.failed', { error: e?.stderr || e?.message });
         }
     }
 
@@ -164,6 +187,7 @@ class MacKeychainService implements IKeychain {
             // Import into Keychain
             const importCmd = `${SECURITY} import "${p12Path}" -k "$(${SECURITY} login-keychain | xargs)" -f pkcs12 -P "changeit" -x ${trustFlags}`;
             await execAsync(importCmd);
+            await this.labelIdentity(certPem);
             
             safeRecordMetric(() => {
                 devicePasswordPopup.add(1, { 
