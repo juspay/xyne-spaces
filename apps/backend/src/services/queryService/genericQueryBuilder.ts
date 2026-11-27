@@ -21,7 +21,6 @@ import {
 } from '@/database/repositories/formEntityValueRepository';
 import { formEntityValueTextHash } from '@/utils/formEntityValueHash';
 import { logger } from '@/utils/logger';
-import { trackRunning } from './queryGuards';
 
 /** Most entity ids a custom-field filter may resolve to; well under Postgres's bind limit. */
 const MAX_CUSTOM_FILTER_IDS = 20000;
@@ -140,11 +139,9 @@ async function withTimeout<T>(
   timeoutMs: number = QUERY_TIMEOUT
 ): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
-  // Postgres keeps running a query after we stop waiting; it stays counted until it finishes.
-  const tracked = trackRunning(promise);
   try {
     return await Promise.race([
-      tracked,
+      promise,
       new Promise<never>((_, reject) => {
         timer = setTimeout(() => reject(new Error('Query timeout')), timeoutMs);
       }),

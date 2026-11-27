@@ -1,9 +1,8 @@
 import { Request, Response } from 'express';
 import { createQueryService } from '@/services/queryService/queryService';
-import { DatabaseClient, readReplicaDb } from '@/database/client';
+import { DatabaseClient } from '@/database/client';
 import { logger } from '@/utils/logger';
 import { SUPPORTED_ENTITY_TYPES, isSupportedEntityType } from '@/services/queryService/types';
-import { capacityError, queryOwner } from '@/services/queryService/queryGuards';
 
 export class QueryController {
   /**
@@ -52,14 +51,7 @@ export class QueryController {
    */
   public static async executeQuery(req: Request, res: Response): Promise<void> {
     try {
-      const owner = queryOwner.getStore();
-      const busy = owner ? capacityError(owner) : null;
-      if (busy) {
-        res.status(429).json({ success: false, error: { code: 'BUSY', message: busy } });
-        return;
-      }
-      // Analytics reads stay off the primary when a replica exists.
-      const prisma = readReplicaDb ?? DatabaseClient.getInstance();
+      const prisma = DatabaseClient.getInstance();
       const queryService = createQueryService(prisma);
 
       const parseResult = queryService.parseQuery(req.body);
