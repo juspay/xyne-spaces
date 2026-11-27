@@ -1,3 +1,4 @@
+import type { Prisma } from "@prisma/client";
 import { z } from "zod";
 import {
   DEFAULT_REPO_CONFIGS,
@@ -6,7 +7,7 @@ import {
   type RepoConfigOverride,
   type RepoSetupConfig,
 } from "xyne-claw-shared";
-import { sandboxRepoConfigRepository } from "../repositories/index.js";
+import { repoConfigColumns, sandboxRepoConfigRepository } from "../repositories/index.js";
 import { createLogger } from "../logger.js";
 
 const log = createLogger("sandbox-repo-configs");
@@ -128,4 +129,39 @@ function canonical(value: unknown): unknown {
 /** Same config regardless of key order: tells a stored copy of a built-in from a real edit. */
 export function sameRepoConfig(a: unknown, b: unknown): boolean {
   return JSON.stringify(canonical(a)) === JSON.stringify(canonical(b));
+}
+
+/**
+ * Start-up: keep a copy of every built-in in the table, so a profile can be found by template there.
+ * A missing built-in is inserted; a copy no person has touched follows the code version; a row a person
+ * edited or disabled is left alone. Safe to run again, and from several instances at once.
+ */
+export async function syncBuiltInRepoConfigs(
+  builtIns: RepoConfigMap = DEFAULT_REPO_CONFIGS,
+): Promise<{ inserted: string[]; refreshed: string[] }> {
+  const code = builtIns as unknown as Record<string, Prisma.InputJsonValue>;
+  const inserted = await sandboxRepoConfigRepository.insertSystemCopies(code);
+  const refreshed: string[] = [];
+  for (const { key, ...row } of await sandboxRepoConfigRepository.listSystemCopies(Object.keys(code))) {
+    const config = code[key];
+    if (config === undefined || sameRepoConfig(row, { config, ...repoConfigColumns(config) })) continue;
+    if (await sandboxRepoConfigRepository.refreshSystemCopy(key, config)) refreshed.push(key);
+  }
+  if (inserted.length > 0 || refreshed.length > 0) {
+    log.info(
+      `[sandbox-repo-configs] built-in copies: inserted [${inserted.join(", ")}], refreshed [${refreshed.join(", ")}]`,
+    );
+  }
+  return { inserted, refreshed };
+}
+
+/** The start-up call: a failure is logged, not thrown. Built-ins still come from code for every existing reader. */
+export async function syncBuiltInRepoConfigsAtBoot(): Promise<void> {
+  try {
+    const filled = await sandboxRepoConfigRepository.fillMissingColumns();
+    if (filled.length > 0) log.info(`[sandbox-repo-configs] filled columns for [${filled.join(", ")}]`);
+    await syncBuiltInRepoConfigs();
+  } catch (err) {
+    log.error("[sandbox-repo-configs] copying built-ins into the table failed:", err);
+  }
 }

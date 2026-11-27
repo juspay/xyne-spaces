@@ -33,6 +33,7 @@ import { closeUsagePatternQueue } from "../queue/usage-pattern-queue.js";
 import { initUsagePatternCron, closeUsagePatternCron } from "../services/usagePatternCron.js";
 import { closeBackfillQueue } from "../queue/digital-twin-backfill-queue.js";
 import { bootstrapCustomTools } from "../bootstrap-tools.js";
+import { syncBuiltInRepoConfigsAtBoot } from "../lib/sandbox-repo-configs.js";
 import { beginLocalHarnessDrain } from "../routes/local-harness.js";
 import { initLocalHarnessExpirySweep } from "../services/localHarnessExpiry.js";
 import { initProactiveWorkers, closeProactiveWorkers } from "../queue/proactive-workers.js";
@@ -194,6 +195,8 @@ export function bootWorkers(): void {
   // google-sheets-create, google-forms-create) show up in the agent UI on
   // restart without needing a manual POST /tools/sync call.
   void bootstrapCustomTools();
+  // Built-in sandbox profiles get a row each, so they can be looked up by template in the table.
+  void syncBuiltInRepoConfigsAtBoot();
   // Jobs persist in Redis. A full Redis wipe loses schedulers; there is no
   // auto-reconcile from Postgres. If that ever happens, restore by iterating
   // active ScheduledJob rows and calling enqueueCronJob / enqueueDelayedJob.

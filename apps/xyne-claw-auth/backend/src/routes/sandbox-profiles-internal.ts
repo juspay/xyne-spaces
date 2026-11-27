@@ -150,7 +150,8 @@ sandboxProfilesInternalRouter.post(
     const enabled = body["enabled"];
     const existing = await ownedRow(key, workspaceId);
     log.info(`[sandbox-profiles] ${actorUserId} set "${key}" enabled=${enabled}`);
-    // A built-in back on with an unedited copy: drop the row so code updates reach it again.
+    // A built-in back on with an unedited copy: drop the person's row so code updates reach it again
+    // (delete puts the system copy back in its place, and start-up keeps that one current).
     if (enabled && existing && isBuiltIn(key) && sameRepoConfig(existing.config, DEFAULT_REPO_CONFIGS[key])) {
       await sandboxRepoConfigRepository.delete(key);
       ok(res, { key, enabled });
@@ -169,7 +170,7 @@ sandboxProfilesInternalRouter.post(
   }),
 );
 
-/** Built-in only: drop the stored copy so the code version applies again. */
+/** Built-in only: drop the person's stored copy so the code version applies again. */
 sandboxProfilesInternalRouter.post(
   "/:key/reset",
   asyncHandler(async (req, res) => {
