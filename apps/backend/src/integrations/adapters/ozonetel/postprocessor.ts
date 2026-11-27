@@ -2,8 +2,6 @@ import { BasePostprocessor } from '../../core/basePostprocessor';
 import type { PostprocessContext } from '../../core/types';
 import { logger } from '@/utils/logger';
 import { telephonyEmailService } from '@/services/ozonetel/telephonyEmailService';
-import { callConnectionService } from '@/services/telephony/callConnectionService';
-import { isCallProviderSourceType } from '@/services/telephony/callProviderIds';
 import type { TelephonyEvent } from './types';
 
 function stringValue(value: unknown): string | undefined {
@@ -37,7 +35,7 @@ function metadataJson(value: unknown): Record<string, unknown> {
 export class OzonetelPostprocessor extends BasePostprocessor {
   async process(context: PostprocessContext): Promise<void> {
     const metadata = context.normalizedData.metadata;
-    if (!isCallProviderSourceType(metadata.source)) return;
+    if (metadata.source !== 'ozonetel') return;
 
     const externalId = context.normalizedData.externalId;
     const workspaceId = stringValue(metadata.ozonetelWorkspaceId);
@@ -52,7 +50,6 @@ export class OzonetelPostprocessor extends BasePostprocessor {
     }
 
     const event: TelephonyEvent = {
-      provider: metadata.source,
       externalId,
       workspaceId,
       status,
@@ -68,8 +65,7 @@ export class OzonetelPostprocessor extends BasePostprocessor {
       metadata: metadataJson(metadata.ozonetelMetadataJson),
     };
 
-    const connection = await callConnectionService.getBySourceId(context.sourceId);
-    const result = await telephonyEmailService.applyEvent(event, context.entityId, connection);
+    const result = await telephonyEmailService.applyEvent(event, context.entityId);
     logger.info('[telephony] postprocess_applied', {
       workspaceId,
       externalId,

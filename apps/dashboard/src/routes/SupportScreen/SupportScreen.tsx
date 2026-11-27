@@ -206,6 +206,7 @@ import { PriorityPicker } from '../../components/Tickets/TicketListView/Priority
 import { EmailComposer } from '../../components/xyne-desk/EmailComposer/EmailComposer';
 import { ReplyPill } from '../../components/xyne-desk/EmailComposer/ReplyPill';
 import { ComposeEmailModal } from '../../components/xyne-desk/EmailComposer/ComposeEmailModal';
+import { getOzonetelConfig } from '../../services/clients/telephonyApi';
 import { AnimatePresence, motion } from 'framer-motion';
 import { parseFromField, stripHtml } from '../../components/xyne-desk/EmailComposer/helpers';
 import { EmailBodyRenderer } from '../../components/xyne-desk/EmailBody/EmailBodyRenderer';
@@ -303,13 +304,13 @@ import { summarizeEmailThread } from '../../services/summarizeService';
 import { CallParticipantsSelectionModal } from '../../components/Call/CallParticipantsSelectionModal';
 import { ScheduleCallModal } from '../../components/Call/ScheduleCallModal/ScheduleCallModal';
 import { WorkspaceDeskEmailCard } from '../../components/xyne-desk/WorkspaceDeskEmailCard/WorkspaceDeskEmailCard';
-import { WorkspaceTelephonyCard } from '../../components/xyne-desk/WorkspaceTelephony/WorkspaceTelephonyCard';
+import { WorkspaceOzonetelCard } from '../../components/xyne-desk/WorkspaceOzonetelCard/WorkspaceOzonetelCard';
 import { CallButton } from '../../components/xyne-desk/CallButton/CallButton';
 import {
   CloudAgentDock,
   showCloudAgentOpenTicket,
 } from '../../components/xyne-desk/CloudAgentDock/CloudAgentDock';
-import { getSoftphone, TELEPHONY_QUERY_KEYS } from '../../services/clients/telephonyApi';
+import { getOzonetelToolbar, getPhoneFieldNames } from '../../services/clients/telephonyApi';
 import { AddThreadToCanvasDialog } from '../../components/xyne-desk/AddThreadToCanvasDialog';
 import { DeskCanvasesPanel } from '../../components/xyne-desk/DeskCanvasesPanel';
 
@@ -2721,9 +2722,7 @@ const SupportScreen = (): ReactElement => {
       channelType?: 'EMAIL' | 'SLACK' | 'APP' | 'CALL' | 'SOCIAL_MEDIA' | 'CHANNELS' | undefined;
       assigneeUserGroupId?: string;
       deskType?: 'EMAIL' | 'DL' | 'SLACK' | 'APP' | 'CALL' | 'SOCIAL_MEDIA' | 'CHANNELS';
-      callConnectionId?: string;
-      callRoutingKeys?: string[];
-      callIsDefault?: boolean;
+      callSource?: 'OZONETEL';
       dlEmail?: string;
       slackChannelId?: string;
       installedAppId?: string;
@@ -2740,9 +2739,7 @@ const SupportScreen = (): ReactElement => {
     const {
       connector,
       deskType,
-      callConnectionId,
-      callRoutingKeys,
-      callIsDefault,
+      callSource,
       dlEmail,
       slackChannelId,
       installedAppId,
@@ -2902,20 +2899,25 @@ const SupportScreen = (): ReactElement => {
     }
 
     if (deskType === 'CALL') {
-      createChannelMutation.mutate({
-        ...rest,
-        channelType: 'CALL',
-        emailDeskOpts: {
-          deskType: DeskType.CALL,
-          ...(callConnectionId
-            ? {
-                callConnectionId,
-                callRoutingKeys: callRoutingKeys ?? [],
-                callIsDefault: callIsDefault === true,
-              }
-            : {}),
-        },
-      });
+      void (async () => {
+        if (callSource === 'OZONETEL') {
+          try {
+            const ozonetel = await getOzonetelConfig();
+            if (!ozonetel.configured) {
+              toast.error('Ozonetel is not configured. Set it up in Desk Integrations first.');
+              return;
+            }
+          } catch {
+            // Ignore preflight issues; channel creation can still continue.
+          }
+        }
+
+        await createChannelMutation.mutateAsync({
+          ...rest,
+          channelType: 'CALL',
+          emailDeskOpts: { deskType: DeskType.CALL },
+        });
+      })();
       return;
     }
 
@@ -4498,10 +4500,7 @@ const SupportScreen = (): ReactElement => {
                         {isSelectedChannelJoined &&
                           selectedChannelFull &&
                           selectedChannelFull.type !== ChannelType.APP && (
-                            <CloudAgentDock
-                              buttonBehavior='floating'
-                              channelId={selectedChannelId}
-                            />
+                            <CloudAgentDock buttonBehavior='floating' />
                           )}
                         {isSelectedChannelJoined &&
                           selectedChannelId &&
@@ -4991,11 +4990,10 @@ const SupportScreen = (): ReactElement => {
               <div>
                 <h3 className='text-base font-semibold text-foreground'>Telephony</h3>
                 <p className='text-sm text-muted-foreground'>
-                  Connect call providers. Each call desk picks its connection and campaigns in Desk
-                  Settings → Telephony.
+                  Configure Ozonetel and route campaigns to Call Desks.
                 </p>
               </div>
-              <WorkspaceTelephonyCard />
+              <WorkspaceOzonetelCard />
             </section>
           </div>
         </div>
@@ -5336,14 +5334,11 @@ export const SupportTicketDetail = ({
     }),
     { enabled: (!!ticketId || !!ticketIdParam) && !!routeChannelId },
   );
-  // Phone fields are set per app desk (Desk Settings → Telephony).
-  const softphoneChannelId = ticket?.channelId || routeChannelId;
-  const { data: softphone } = useQuery({
-    queryKey: TELEPHONY_QUERY_KEYS.softphone(softphoneChannelId),
-    queryFn: () => getSoftphone(softphoneChannelId),
-    enabled: !!softphoneChannelId,
+  const { data: ozonetelToolbar } = useQuery({
+    queryKey: ['workspace-ozonetel-toolbar'],
+    queryFn: getOzonetelToolbar,
   });
-  const phoneFieldNames = useMemo(() => softphone?.phoneFieldNames ?? [], [softphone]);
+  const phoneFieldNames = useMemo(() => getPhoneFieldNames(ozonetelToolbar), [ozonetelToolbar]);
   const hasPhoneFields = phoneFieldNames.length > 0;
   const [ticketFormValues] = useCachedQuery(
     queries.getFormEntityValuesByEntityId({ entityId: ticket?.id ?? '' }),
@@ -6162,9 +6157,7 @@ export const SupportTicketDetail = ({
                       </Tooltip>
                     </div>
                   )}
-                  {ticket && channel?.type === ChannelType.APP && (
-                    <CallButton channelId={channelId} />
-                  )}
+                  {ticket && channel?.type === ChannelType.APP && <CallButton />}
                   {/* Status pill */}
                   {ticket && (
                     <div
@@ -6417,7 +6410,7 @@ export const SupportTicketDetail = ({
                           onSelect={e => e.preventDefault()}
                           className='p-0 focus:bg-transparent'
                         >
-                          <CloudAgentDock buttonBehavior='floating' channelId={channelId} />
+                          <CloudAgentDock buttonBehavior='floating' />
                         </DropdownMenuItem>
                       )}
                       <DropdownMenuSeparator />

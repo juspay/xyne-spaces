@@ -10,26 +10,17 @@ import {
 import { createPortal } from 'react-dom';
 import { useQuery } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import {
-  getSoftphone,
-  linkCall,
-  TELEPHONY_QUERY_KEYS,
-  type SoftphoneConnection,
-  type SoftphoneInfo,
-} from '../../../services/clients/telephonyApi';
-import { parseSoftphoneMessage, type SoftphoneCall } from './softphones';
+import { getOzonetelToolbar, linkOzonetelCall } from '../../../services/clients/telephonyApi';
 import Tooltip from '../../ui/Tooltip';
 import { PhoneDefault } from '@xyne/icons';
 
 /**
- * Embeds a call provider's hosted softphone (Ozonetel's CloudAgent toolbar) in a floating panel.
- * The toolbar handles live call control, and the agent must be logged into it for outbound
- * click-to-call. Each opened connection keeps its iframe mounted, so switching between
- * connections keeps their logins and any live call. Renders nothing without a toolbar URL.
+ * Embeds Ozonetel's hosted CloudAgent toolbar as a header-triggered iframe.
+ * The toolbar handles live call control (answer/hold/transfer/dialpad) and the
+ * agent must be logged into it for outbound click-to-call to bridge their leg.
+ * Renders nothing if the workspace has no toolbar URL configured.
  */
 interface CloudAgentDockProps {
-  /** The desk on screen; its own connection opens first. */
-  channelId?: string | null;
   mode?: 'button' | 'inline';
   onClose?: () => void;
   buttonBehavior?: 'popover' | 'floating';
@@ -38,25 +29,18 @@ interface CloudAgentDockProps {
 const FLOATING_WIDTH_PX = 360;
 const FLOATING_HEIGHT_PX = 560;
 const FLOATING_POSITION_KEY = 'support-ozonetel-floating-position';
-const LAST_CONNECTION_KEY = 'support-softphone-last-connection';
 
 let closeActiveFloatingPanel: (() => void) | null = null;
 
 type FloatingDockState = {
   isOpen: boolean;
-  activeId: string | null;
-  /** Connections whose softphone was opened; their iframes stay mounted. */
-  opened: SoftphoneConnection[];
-  /** Connections the panel can switch to. */
-  available: SoftphoneConnection[];
+  url: string | null;
   onClose?: () => void;
 };
 
 let floatingDockState: FloatingDockState = {
   isOpen: false,
-  activeId: null,
-  opened: [],
-  available: [],
+  url: null,
 };
 
 const floatingDockListeners = new Set<() => void>();
@@ -78,28 +62,11 @@ function getFloatingDockSnapshot(): FloatingDockState {
   return floatingDockState;
 }
 
-// By content: each open builds new arrays.
-function sameConnections(a: SoftphoneConnection[], b: SoftphoneConnection[]): boolean {
-  return (
-    a.length === b.length &&
-    a.every(
-      (connection, index) =>
-        connection.id === b[index]?.id &&
-        connection.url === b[index]?.url &&
-        connection.name === b[index]?.name,
-    )
-  );
-}
-
 function setFloatingDockState(next: FloatingDockState): void {
-  const current = floatingDockState;
-  // Nothing changed: keep the same snapshot so the dock doesn't re-render.
   if (
-    current.isOpen === next.isOpen &&
-    current.activeId === next.activeId &&
-    current.onClose === next.onClose &&
-    sameConnections(current.opened, next.opened) &&
-    sameConnections(current.available, next.available)
+    floatingDockState.isOpen === next.isOpen &&
+    floatingDockState.url === next.url &&
+    floatingDockState.onClose === next.onClose
   ) {
     return;
   }
@@ -107,39 +74,7 @@ function setFloatingDockState(next: FloatingDockState): void {
   emitFloatingDockChange();
 }
 
-function readLastConnectionId(): string | null {
-  try {
-    return window.localStorage.getItem(LAST_CONNECTION_KEY);
-  } catch {
-    return null;
-  }
-}
-
-function rememberConnectionId(id: string): void {
-  try {
-    window.localStorage.setItem(LAST_CONNECTION_KEY, id);
-  } catch {
-    /* ignore storage errors */
-  }
-}
-
-/** The softphone to open: the desk's own connection, else the one in use, else the last used. */
-export function pickSoftphoneConnection(
-  info: SoftphoneInfo | undefined,
-): SoftphoneConnection | null {
-  const connections = info?.connections ?? [];
-  const byId = (id: string | null | undefined): SoftphoneConnection | undefined =>
-    id ? connections.find(connection => connection.id === id) : undefined;
-  return (
-    byId(info?.deskConnectionId) ??
-    byId(floatingDockState.activeId) ??
-    byId(readLastConnectionId()) ??
-    connections[0] ??
-    null
-  );
-}
-
-// The softphone's own dial sends no ticket id, so a reported call is linked to the ticket open on
+// The toolbar's own dial sends no ticket id, so a reported call is linked to the ticket open on
 // screen: the one shown last of those still shown (a Desk ticket and one in full-page search's side
 // panel can both be), so one going hands back to the one shown before it.
 interface OpenTicket {
@@ -147,7 +82,7 @@ interface OpenTicket {
   numbers: string[];
 }
 const shownTickets: OpenTicket[] = [];
-// A softphone can report the same call more than once; act on each call once.
+// busyAgent can fire more than once per call, and newCall too; act on each call once.
 const handledCallIds = new Set<string>();
 
 /** `ticket` is on screen: calls are linked to it until another is shown. Returns its hiding. */
@@ -160,17 +95,22 @@ export function showCloudAgentOpenTicket(ticket: OpenTicket): () => void {
   };
 }
 
-function lastDigits(value: string): string {
-  return value.replace(/\D/g, '').slice(-10);
+function asText(value: unknown): string {
+  return typeof value === 'string' || typeof value === 'number' ? String(value).trim() : '';
 }
 
-function linkCallToOpenTicket(connectionId: string, call: SoftphoneCall): void {
-  const openTicket = shownTickets[shownTickets.length - 1];
-  const handledKey = `${connectionId}:${call.callId}`;
-  if (!openTicket || handledCallIds.has(handledKey)) return;
-  handledCallIds.add(handledKey);
+function lastDigits(value: unknown): string {
+  return asText(value).replace(/\D/g, '').slice(-10);
+}
 
-  const dialled = lastDigits(call.dialledNumber);
+function linkCallToOpenTicket(token: unknown): void {
+  const call = (token ?? {}) as { monitorUcid?: unknown; ucid?: unknown; callerId?: unknown };
+  const monitorUcid = asText(call.monitorUcid);
+  const openTicket = shownTickets[shownTickets.length - 1];
+  if (!openTicket || !monitorUcid || handledCallIds.has(monitorUcid)) return;
+  handledCallIds.add(monitorUcid);
+
+  const dialled = lastDigits(call.callerId);
   if (!dialled || !openTicket.numbers.some(number => lastDigits(number) === dialled)) {
     toast.warning('This call is not logged to the open ticket', {
       description: "It went to a number that isn't on the ticket.",
@@ -178,32 +118,20 @@ function linkCallToOpenTicket(connectionId: string, call: SoftphoneCall): void {
     return;
   }
 
-  linkCall({
-    connectionId,
+  const ucid = asText(call.ucid);
+  linkOzonetelCall({
     ticketId: openTicket.ticketId,
-    monitorUcid: call.callId,
-    ...(call.altCallId ? { ucid: call.altCallId } : {}),
+    monitorUcid,
+    ...(ucid ? { ucid } : {}),
   }).catch(() => {
     toast.error('Could not log this call to the ticket');
   });
 }
 
-export function openFloatingDock(
-  target: SoftphoneConnection,
-  available: SoftphoneConnection[] = [target],
-  onClose?: () => void,
-): void {
-  rememberConnectionId(target.id);
-  const alreadyOpen = floatingDockState.opened.some(
-    connection => connection.id === target.id && connection.url === target.url,
-  );
+export function openFloatingDock(url: string, onClose?: () => void): void {
   setFloatingDockState({
     isOpen: true,
-    activeId: target.id,
-    opened: alreadyOpen
-      ? floatingDockState.opened
-      : [...floatingDockState.opened.filter(connection => connection.id !== target.id), target],
-    available: available.length > 0 ? available : [target],
+    url,
     ...(onClose ? { onClose } : {}),
   });
 }
@@ -254,11 +182,11 @@ function persistFloatingPosition(position: { x: number; y: number }): void {
 
 function ToolbarButton({ onClick }: { onClick: () => void }): ReactElement {
   return (
-    <Tooltip side='bottom' delayDuration={300} content='Open call toolbar'>
+    <Tooltip side='bottom' delayDuration={300} content='Open Ozonetel toolbar'>
       <button
         type='button'
         className='flex h-8 w-8 items-center justify-center rounded-full border border-emerald-200 bg-gradient-to-r from-emerald-500 via-teal-500 to-cyan-500 text-white shadow-md shadow-emerald-500/20 transition-all hover:-translate-y-0.5 hover:shadow-lg hover:shadow-emerald-500/30 focus:outline-none focus:ring-2 focus:ring-emerald-400/50'
-        aria-label='Open call toolbar'
+        aria-label='Open Ozonetel toolbar'
         data-track-category='Support'
         data-track-name='OpenOzonetelToolbar'
         onClick={onClick}
@@ -270,16 +198,12 @@ function ToolbarButton({ onClick }: { onClick: () => void }): ReactElement {
 }
 
 function FloatingCloudAgentPanel({
-  opened,
-  activeId,
-  available,
+  url,
   isOpen,
   onClose,
   onRequestClose,
 }: {
-  opened: SoftphoneConnection[];
-  activeId: string;
-  available: SoftphoneConnection[];
+  url: string;
   isOpen: boolean;
   onClose?: () => void;
   onRequestClose: () => void;
@@ -289,23 +213,17 @@ function FloatingCloudAgentPanel({
   const positionRef = useRef(position);
   const dragOffsetRef = useRef<{ x: number; y: number } | null>(null);
   const cleanupDragRef = useRef<(() => void) | null>(null);
-  const iframesRef = useRef(new Map<string, HTMLIFrameElement>());
-  const openedRef = useRef(opened);
-  const active = opened.find(connection => connection.id === activeId);
+  const iframeRef = useRef<HTMLIFrameElement | null>(null);
 
-  useEffect(() => {
-    openedRef.current = opened;
-  }, [opened]);
-
-  // Softphones post with targetOrigin "*", so trust only our own iframes; the frame says which connection.
+  // The toolbar posts with targetOrigin "*", so trust only our own iframe.
   useEffect(() => {
     const onMessage = (event: MessageEvent): void => {
-      const connection = openedRef.current.find(
-        candidate => iframesRef.current.get(candidate.id)?.contentWindow === event.source,
-      );
-      if (!connection || !event.source) return;
-      const call = parseSoftphoneMessage(connection.provider, event.data);
-      if (call) linkCallToOpenTicket(connection.id, call);
+      const frame = iframeRef.current?.contentWindow;
+      if (!frame || event.source !== frame) return;
+      const action = (event.data as { action?: unknown } | null)?.action;
+      if (action === 'busyAgent' || action === 'newCall') {
+        linkCallToOpenTicket((event.data as { token?: unknown }).token);
+      }
     };
     window.addEventListener('message', onMessage);
     return (): void => window.removeEventListener('message', onMessage);
@@ -368,11 +286,6 @@ function FloatingCloudAgentPanel({
     cleanupDragRef.current = stopDragging;
   };
 
-  const switchTo = (connectionId: string): void => {
-    const target = available.find(connection => connection.id === connectionId);
-    if (target) openFloatingDock(target, available, onClose);
-  };
-
   if (!mounted || typeof document === 'undefined') return null;
 
   return createPortal(
@@ -390,40 +303,19 @@ function FloatingCloudAgentPanel({
         <div className='flex items-center gap-2 border-b border-border bg-muted/40 px-4 py-2.5'>
           <button
             type='button'
-            className='flex min-w-0 flex-1 cursor-move select-none items-center gap-2 text-left'
-            aria-label='Move call toolbar'
+            className='flex flex-1 cursor-move select-none items-center gap-2 text-left'
+            aria-label='Move Ozonetel panel'
             data-track-category='Support'
             data-track-name='DragOzonetelToolbar'
             onMouseDown={startDragging}
           >
             <span className='text-muted-foreground'>::</span>
-            {available.length <= 1 ? (
-              <span className='truncate text-sm font-semibold text-foreground'>
-                {active?.name ?? 'Call toolbar'}
-              </span>
-            ) : null}
+            <span className='text-sm font-semibold text-foreground'>Ozonetel</span>
           </button>
-          {available.length > 1 ? (
-            <select
-              value={activeId}
-              onChange={event => switchTo(event.target.value)}
-              onMouseDown={event => event.stopPropagation()}
-              aria-label='Call connection'
-              className='max-w-[200px] truncate rounded-md border border-border bg-background px-2 py-1 text-sm font-medium text-foreground'
-              data-track-category='Support'
-              data-track-name='SwitchSoftphoneConnection'
-            >
-              {available.map(connection => (
-                <option key={connection.id} value={connection.id}>
-                  {connection.name}
-                </option>
-              ))}
-            </select>
-          ) : null}
           <button
             type='button'
             className='rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
-            aria-label='Close call toolbar'
+            aria-label='Close Ozonetel panel'
             title='Close'
             data-track-category='Support'
             data-track-name='CloseOzonetelToolbar'
@@ -433,21 +325,14 @@ function FloatingCloudAgentPanel({
             ×
           </button>
         </div>
-        {opened.map(connection => (
-          <iframe
-            key={connection.id}
-            ref={frame => {
-              if (frame) iframesRef.current.set(connection.id, frame);
-              else iframesRef.current.delete(connection.id);
-            }}
-            title={`${connection.name} toolbar`}
-            src={connection.url}
-            allow='microphone'
-            loading='eager'
-            className='min-h-0 flex-1 border-0 bg-white'
-            style={{ display: connection.id === activeId ? undefined : 'none' }}
-          />
-        ))}
+        <iframe
+          ref={iframeRef}
+          title='Ozonetel CloudAgent'
+          src={url}
+          allow='microphone'
+          loading='eager'
+          className='min-h-0 flex-1 border-0 bg-white'
+        />
       </div>
     </div>,
     document.body,
@@ -455,18 +340,18 @@ function FloatingCloudAgentPanel({
 }
 
 export const CloudAgentDock = ({
-  channelId,
   mode = 'button',
   onClose,
   buttonBehavior: _buttonBehavior = 'floating',
 }: CloudAgentDockProps): ReactElement | null => {
   const { data } = useQuery({
-    queryKey: TELEPHONY_QUERY_KEYS.softphone(channelId),
-    queryFn: () => getSoftphone(channelId),
+    queryKey: ['workspace-ozonetel-toolbar'],
+    queryFn: getOzonetelToolbar,
   });
 
-  const target = pickSoftphoneConnection(data);
-  if (!data || !target) return null;
+  const url = data?.toolbarUrl ?? null;
+
+  if (!url) return null;
 
   if (mode === 'inline') {
     return (
@@ -477,11 +362,11 @@ export const CloudAgentDock = ({
             <span className='relative inline-flex h-2.5 w-2.5 rounded-full bg-emerald-500' />
           </div>
           <PhoneDefault size={15} className='text-emerald-600' />
-          <span className='text-sm font-semibold text-foreground'>{target.name}</span>
+          <span className='text-sm font-semibold text-foreground'>Ozonetel</span>
         </div>
         <iframe
-          title={`${target.name} toolbar`}
-          src={target.url}
+          title='Ozonetel CloudAgent'
+          src={url}
           allow='microphone'
           className='h-[320px] w-full border-0 bg-white'
         />
@@ -489,13 +374,7 @@ export const CloudAgentDock = ({
     );
   }
 
-  return (
-    <ToolbarButton
-      onClick={() =>
-        openFloatingDock(pickSoftphoneConnection(data) ?? target, data.connections, onClose)
-      }
-    />
-  );
+  return <ToolbarButton onClick={() => openFloatingDock(url, onClose)} />;
 };
 
 export function CloudAgentFloatingHost(): ReactElement | null {
@@ -505,14 +384,12 @@ export function CloudAgentFloatingHost(): ReactElement | null {
     getFloatingDockSnapshot,
   );
 
-  // Stay mounted after close so each toolbar iframe keeps its login and any live call.
-  if (floatingState.opened.length === 0 || !floatingState.activeId) return null;
+  // Stay mounted after close so the CloudAgent iframe keeps its login and any live call.
+  if (!floatingState.url) return null;
 
   return (
     <FloatingCloudAgentPanel
-      opened={floatingState.opened}
-      activeId={floatingState.activeId}
-      available={floatingState.available}
+      url={floatingState.url}
       isOpen={floatingState.isOpen}
       {...(floatingState.onClose ? { onClose: floatingState.onClose } : {})}
       onRequestClose={closeFloatingDock}

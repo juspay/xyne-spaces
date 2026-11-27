@@ -529,8 +529,7 @@ export const AUDIT_TABLE_CONFIG: Record<string, AuditTableConfig> = {
       deskReportRangeDays: value =>
         typeof value === 'number' ? `${value} day${value === 1 ? '' : 's'}` : null,
     },
-    // call*: Telephony tab settings (connection ids, JSON rules); not in desk history yet.
-    ignoreFields: ['deskType', 'callConnectionId', 'callIsDefault', 'callSettings'],
+    ignoreFields: ['deskType'],
     // Column defaults. metricsEnabled is left out: Prisma creates it as null, Zero as false.
     createDefaults: {
       classificationEnabled: false,
