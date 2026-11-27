@@ -307,11 +307,14 @@ export async function upsertFormEntityValue(
   return existing;
 }
 
-/**
- * upsertFormEntityValue for several values in one transaction: either every value is written or
- * none is. Each key may appear only once.
- */
-export async function upsertFormEntityValues(
+const ownsTransaction = (client: Client): boolean =>
+  typeof (client as { $transaction?: unknown }).$transaction === 'function';
+
+const isUniqueViolation = (error: unknown): boolean =>
+  error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002';
+
+// One read-then-write pass of upsertFormEntityValues.
+async function writeFormEntityValues(
   client: Client,
   inputs: readonly (NewFormEntityValue & { contextId: string; version: number })[]
 ): Promise<WrittenFormEntityValue[]> {
@@ -360,6 +363,24 @@ export async function upsertFormEntityValues(
   });
   await runTogether(client, operations);
   return written;
+}
+
+/**
+ * upsertFormEntityValue for several values in one transaction: either every value is written or
+ * none is. Each key may appear only once.
+ */
+export async function upsertFormEntityValues(
+  client: Client,
+  inputs: readonly (NewFormEntityValue & { contextId: string; version: number })[]
+): Promise<WrittenFormEntityValue[]> {
+  try {
+    return await writeFormEntityValues(client, inputs);
+  } catch (error) {
+    // Another writer added one of these rows between the reads and the batch, so the batch rolled
+    // back whole. When the batch is its own transaction, read again and write over that row once.
+    if (!isUniqueViolation(error) || !ownsTransaction(client)) throw error;
+    return writeFormEntityValues(client, inputs);
+  }
 }
 
 /** Replaces the value of an existing row. */

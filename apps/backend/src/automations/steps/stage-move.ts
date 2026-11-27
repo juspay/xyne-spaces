@@ -320,6 +320,7 @@ async function prepareFormValues(
   } catch (err) {
     throw new Error(`${stepType}: ${err instanceof Error ? err.message : String(err)}`);
   }
+  await resolveTicketReferences(values, workspaceId, stepType);
 
   return { formId, fieldIds: fields.map(f => f.id), values, skipped };
 }
@@ -334,9 +335,11 @@ function normalizeFormValue(
     case FormFieldType.DOC:
       throw new Error(`"${field.fieldName}" is a file field and can't be filled by an automation`);
     case FormFieldType.TICKET: {
-      const text = asText(Array.isArray(raw) ? raw[0] : raw);
-      if (typeof text !== 'string' || text.trim().length === 0) {
-        throw new Error(`Field "${field.fieldName}" must be a ticket ID`);
+      // A ticket field holds one ticket; resolveTicketReferences checks that it exists.
+      const items = (Array.isArray(raw) ? raw : [raw]).map(asText).filter(v => !isEmptyFormValue(v));
+      const text = items[0];
+      if (items.length !== 1 || typeof text !== 'string') {
+        throw new Error(`Field "${field.fieldName}" must be a single ticket ID`);
       }
       return { value: text.trim(), fieldValue: text.trim() };
     }
@@ -354,14 +357,50 @@ function normalizeFormValue(
   }
 }
 
-// Text lists several values with commas ("A, B"). A multi-select option that itself contains a
-// comma is still taken whole when it is the entire text.
+// Text lists several values with commas ("A, B"). A multi-select option can contain commas itself
+// ("Foo, Inc"), so the longest run of pieces that names an option is kept whole.
 function splitListText(field: ResolvedFormFieldDefinition, value: unknown): unknown {
   if (typeof value !== 'string') return value;
-  const isWholeOption =
-    field.fieldType === FormFieldType.MULTI_SELECT &&
-    parseFieldOptionValues(field.fieldEnum).includes(value.trim());
-  return isWholeOption ? value : value.split(',');
+  const pieces = value.split(',');
+  if (field.fieldType !== FormFieldType.MULTI_SELECT) return pieces;
+  const options = new Set(parseFieldOptionValues(field.fieldEnum));
+  const values: string[] = [];
+  for (let start = 0; start < pieces.length; ) {
+    let end = pieces.length;
+    while (end > start + 1 && !options.has(pieces.slice(start, end).join(',').trim())) end--;
+    values.push(pieces.slice(start, end).join(','));
+    start = end;
+  }
+  return values;
+}
+
+/**
+ * Ticket fields store the ticket's xyneId ("ABC-123"), as the form's ticket picker does. Accepts an
+ * xyneId in any case or a ticket's id, and fails when no such ticket is in the workspace.
+ */
+async function resolveTicketReferences(
+  values: PreparedFormValue[],
+  workspaceId: string,
+  stepType: string,
+): Promise<void> {
+  for (const entry of values) {
+    if (entry.field.fieldType !== FormFieldType.TICKET || typeof entry.value !== 'string') continue;
+    const reference = entry.value;
+    const ticket = await DatabaseClient.getInstance().ticket.findFirst({
+      where: {
+        workspaceId,
+        OR: [{ xyneId: { in: [...new Set([reference, reference.toUpperCase()])] } }, { id: reference }],
+      },
+      select: { id: true, xyneId: true },
+    });
+    if (!ticket) {
+      throw new Error(
+        `${stepType}: field "${entry.field.fieldName}" needs an existing ticket, and no ticket "${reference}" was found`,
+      );
+    }
+    entry.value = ticket.xyneId || ticket.id;
+    entry.fieldValue = ticket.xyneId || ticket.id;
+  }
 }
 
 function isEmptyFormValue(value: unknown): boolean {
