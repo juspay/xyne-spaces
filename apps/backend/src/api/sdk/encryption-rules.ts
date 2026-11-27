@@ -13,12 +13,14 @@
  * shorthand in those before the mutator runs, but cannot once they are ciphertext, so a
  * client encrypting one expands it first.
  *
- * Only operations whose mutator has a rule are listed, so the answer is small and changes
- * only when a manifest rule or an operation mapping does.
+ * Only operations whose mutator has an unreadable arg are listed: every mutator has a rule, but
+ * the client encrypts nothing for one whose args are all plaintext. Its contract decides, and
+ * the encryption service refuses a rule that disagrees with it.
  */
 
 import { Router, type Request, type Response } from 'express';
-import { getEncryptionProvider } from '@/services/encryption';
+import { isMutatorName, mutatorContracts } from '@xyne/shared';
+import { config } from '@/config/env';
 import { handle } from './handler';
 import { MENTION_FIELDS } from './v1/parser';
 import type { V1Target } from './v1/types';
@@ -31,7 +33,7 @@ export interface EncryptionRuleOp {
 }
 
 export interface EncryptionRulesResponse {
-  /** Every operation whose mutator has a client-encryption rule, by operation id. */
+  /** Every operation whose mutator has an arg the client encrypts, by operation id. */
   readonly ops: Readonly<Record<string, EncryptionRuleOp>>;
 }
 
@@ -44,11 +46,11 @@ export function createEncryptionRulesRouter(
   router.get(
     '/encryption-rules',
     handle(async (_req: Request, res: Response) => {
-      const ruled = new Set(await getEncryptionProvider().getClientEncryptedMutators());
       const ops: Record<string, EncryptionRuleOp> = {};
-      for (const op of operationIds()) {
+      for (const op of config.enc.apiClientEncryptionEnabled ? operationIds() : []) {
         const target = resolve(op);
-        if (target?.kind !== 'mutator' || !ruled.has(target.name)) continue;
+        if (target?.kind !== 'mutator' || !isMutatorName(target.name)) continue;
+        if (mutatorContracts[target.name].unreadableFields.length === 0) continue;
         const mentionFields = Object.prototype.hasOwnProperty.call(MENTION_FIELDS, op) ? MENTION_FIELDS[op] : [];
         ops[op] = { mutator: target.name, mentionFields };
       }
