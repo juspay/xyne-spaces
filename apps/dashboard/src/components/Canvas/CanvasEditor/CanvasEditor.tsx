@@ -43,6 +43,7 @@ import { CanvasFilePanel } from '../CanvasFilePanel/CanvasFilePanel';
 import {
   canvasSchema,
   canvasTableOptions,
+  canvasLinkOptions,
   canvasTiptapOptions,
   knownCanvasBlockTypes,
 } from '../canvasSchema';
@@ -180,6 +181,7 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
         resolveFileUrl,
         dictionary: canvasDictionary,
         tables: canvasTableOptions,
+        links: canvasLinkOptions,
         _tiptapOptions: canvasTiptapOptions,
       };
       try {
@@ -420,6 +422,7 @@ export const CanvasEditor = forwardRef<CanvasEditorRef, CanvasEditorProps>(
     const [isSearchOpen, setIsSearchOpen] = useState(false);
 
     useCanvasTableFilters(containerRef);
+
     const getCanvasCommentEditor = useCallback(
       () => (editor ? asBlockNoteEditorForView(editor) : null),
       [editor],

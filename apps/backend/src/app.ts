@@ -65,6 +65,7 @@ import appDeskRoutes from '@/integrations/routes/app-desk';
 import socialMediaRoutes from './integrations/routes/social-media.js';
 import ozonetelIntegrationRoutes from '@/integrations/routes/ozonetel';
 import slackUserAuthRoutes from '@/integrations/routes/slack-user-auth';
+import notionMigrationRoutes from '@/routes/notionMigration';
 import migrationRoutes from '@/migration';
 // Disabled (all workers)
 // import { slackMigrationWorker } from '@/workers/slackMigrationWorker';
@@ -348,6 +349,8 @@ export class App {
     this.app.use('/api/integrations/social-media', socialMediaRoutes);
     this.app.use('/api/integrations/ozonetel', authMiddleware.authenticate, ozonetelIntegrationRoutes);
     this.app.use('/api/integrations/slack-user', slackUserAuthRoutes);
+    // Notion → Canvas migration: an admin pastes a merchant's Notion integration token, reviews, imports.
+    this.app.use('/api/notion-migration', notionMigrationRoutes);
 
     // Migration routes (body parsing handled in route file). Only mounted when
     // MIGRATION_ROUTES_ENABLED=true; otherwise these paths fall through to 404.

@@ -66,7 +66,12 @@ import { insertGroupMention } from 'blocknote-layout-extensions';
 import { buildMentionProps, CanvasMentionContext } from '../CanvasMentionSpec';
 import { useCanvasBlockShortcuts, withBlockShortcutBadges } from '../canvasBlockShortcuts';
 import { withHeadingsTogether, withUnifiedUpload } from '../canvasSlashMenu';
-import { canvasSchema, canvasTableOptions, canvasTiptapOptions } from '../canvasSchema';
+import {
+  canvasSchema,
+  canvasLinkOptions,
+  canvasTableOptions,
+  canvasTiptapOptions,
+} from '../canvasSchema';
 import { createElement } from 'react';
 import { RiGroupLine } from 'react-icons/ri';
 import Avatar from '../../ui/Avatar/Avatar';
@@ -253,6 +258,7 @@ export const CollaborativeCanvasEditor = forwardRef<
       ...(onFileUpload ? { uploadFile: onFileUpload } : {}),
       resolveFileUrl,
       tables: canvasTableOptions,
+      links: canvasLinkOptions,
       _tiptapOptions: canvasTiptapOptions,
     };
 

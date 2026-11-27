@@ -11,6 +11,7 @@ import ProtectedRoute from '../components/Auth/ProtectedRoute';
 import { useActivityTracker } from '../hooks/useActivityTracker';
 import HomeScreen from './HomeScreen';
 import SlackMigration from '../pages/SlackMigration';
+import NotionMigration from '../pages/NotionMigration';
 import AuthScreen from './AuthScreen/AuthScreen';
 import TermsOfServiceScreen from './TermsOfServiceScreen/TermsOfServiceScreen';
 import PrivacyPolicyScreen from './PrivacyPolicyScreen/PrivacyPolicyScreen';
@@ -2002,6 +2003,14 @@ export const router = createBrowserRouter([
                     element: (
                       <ToolbarProtectedRoute path='/migrations/slack'>
                         <SlackMigration />
+                      </ToolbarProtectedRoute>
+                    ),
+                  },
+                  {
+                    path: 'notion',
+                    element: (
+                      <ToolbarProtectedRoute path='/migrations/notion'>
+                        <NotionMigration />
                       </ToolbarProtectedRoute>
                     ),
                   },

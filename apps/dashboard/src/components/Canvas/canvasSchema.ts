@@ -1,6 +1,7 @@
 import { BlockNoteSchema, defaultBlockSpecs, defaultInlineContentSpecs } from '@blocknote/core';
 import { createReactInlineMathSpec } from '@blocknote/math-block';
 import { Extension, type EditorOptions } from '@tiptap/core';
+import { TRUSTED_ORIGINS } from '@xyne/shared';
 import type { Node as ProseMirrorNode } from '@tiptap/pm/model';
 import { Plugin, PluginKey, TextSelection, type Transaction } from '@tiptap/pm/state';
 import { addRowAfter, deleteRow, goToNextCell, isInTable, selectedRect } from '@tiptap/pm/tables';
@@ -9,6 +10,7 @@ import { whiteboardBlockSpecs } from 'blocknote-layout-extensions';
 import { mentionInlineContentSpec } from './CanvasMentionSpec';
 import { citationInlineContentSpec } from './CanvasCitationSpec';
 import { knownBlockTypesOf } from '../../utils/canvasUtils';
+import { openLink } from '../../utils/openLink';
 import { canvasCommentThreadStyleSpec } from './CanvasCommentStyleSpec/CanvasCommentStyleSpec';
 import { canvasTicketStyleSpec } from './CanvasTicketStyleSpec/CanvasTicketStyleSpec';
 import { canvasCodeBlockSpec } from './CanvasCodeBlockSpec';
@@ -285,6 +287,27 @@ const handleCanvasTableKeyDown = (view: EditorView, event: KeyboardEvent): boole
 
   goToNextCell(1)(view.state, dispatchSelection(view, null), view);
   return true;
+};
+
+/**
+ * How a click on a link in an editable canvas opens it (BlockNote's `links` option). BlockNote's
+ * default `window.open(href, '_blank')` runs on mouseup, so an in-app link opened a new tab as well
+ * as navigating. Same-site links are left to the app-wide link handler in App.tsx, which routes
+ * them in place (switching workspace when needed); everything else goes through openLink, which
+ * knows the desktop app and mobile shells. Read-only canvases never reach this (BlockNote skips it)
+ * and go straight to that same App.tsx handler.
+ */
+export const canvasLinkOptions = {
+  onClick: (event: MouseEvent): boolean => {
+    const anchor = (event.target as HTMLElement | null)?.closest<HTMLAnchorElement>('a[href]');
+    if (!anchor) return false;
+    const external =
+      anchor.origin !== window.location.origin && !TRUSTED_ORIGINS.includes(anchor.origin);
+    // An /api/ link (an attachment download) is a file, not a page of the app: open it, don't route it.
+    const apiFile = !external && anchor.pathname.startsWith('/api/');
+    if (external || apiFile) openLink(anchor.href, event);
+    return true;
+  },
 };
 
 export const canvasTiptapOptions = {
