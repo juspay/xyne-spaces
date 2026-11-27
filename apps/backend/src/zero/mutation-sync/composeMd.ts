@@ -1,11 +1,6 @@
 import type { Transaction } from '@rocicorp/zero';
-import {
-  UnreadableString,
-  derive,
-  initialMessageMdTemplate,
-  parentMessageMdTemplate,
-  updateParentSubTicketsMdFromZero,
-} from '@xyne/shared';
+import { updateParentSubTicketsMdFromZero } from '@xyne/shared';
+import { UnreadableString, derive, initialMessageMdTemplate, parentMessageMdTemplate } from '@xyne/contracts';
 import type { Schema } from '@xyne/shared';
 import { composeSafe } from '@/services/encryption/compose';
 import { zql } from '../queries';

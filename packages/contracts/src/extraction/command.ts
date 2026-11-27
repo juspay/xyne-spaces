@@ -1,4 +1,4 @@
-import type { ExtractorGroups } from '../enc-contracts/extractors.js';
+import type { ExtractorGroups } from '../extractors.js';
 
 /** `/<bot-name> <params…>` once HTML tags are stripped. */
 export const BOT_COMMAND_REGEX = /\/([a-zA-Z-]+)\s+(.*)/;

@@ -1,4 +1,4 @@
-import { isHeicAttachment } from '../utils/heic.js';
+import { isHeicAttachment } from '@xyne/shared';
 
 /**
  * The lowercase extension of a file name, without the dot ("Report.PDF" → "pdf"); null when

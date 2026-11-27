@@ -1,5 +1,6 @@
 import { conversationService } from '@/services/conversationService';
-import { AttachmentEntityType, MessageType, type DerivedFacts } from '@xyne/shared';
+import { AttachmentEntityType, MessageType } from '@xyne/shared';
+import { type DerivedFacts } from '@xyne/contracts';
 import { logger } from '@/utils/logger';
 import { ChatEventType, ChatActionResponse, ChannelHistoryResponse, ChannelHistoryCursor, ChannelHistoryItem, ConversationRepliesResponse, ConversationRepliesCursor, ConversationRepliesItem } from '../types';
 import { UploadedFileResult } from '@/services/fileUploadService';

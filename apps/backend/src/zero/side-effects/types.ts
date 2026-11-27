@@ -1,5 +1,5 @@
 import type { TableName } from '../acl/core/types';
-import type { DerivedFacts } from '@xyne/shared';
+import type { DerivedFacts } from '@xyne/contracts';
 export type SideEffectOperation = 'insert' | 'update' | 'delete' | 'upsert';
 
 export interface ConversationPreviousValue {

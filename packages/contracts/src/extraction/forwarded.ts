@@ -1,4 +1,4 @@
-import { parseForwardedMessageXml } from '../forwardedMessage.js';
+import { parseForwardedMessageXml } from '@xyne/shared';
 
 /** The ids a forwarded message refers to; all null when the content is not a forwarded message. */
 export interface ForwardedRefs {

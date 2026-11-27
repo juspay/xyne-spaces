@@ -136,8 +136,8 @@ echo "Running raw SQL guard..."
 bash scripts/validate-no-raw-sql.sh || exit 1
 
 # Unreadable boundary guard: reveal() and the encryption-service conversions (transformRequest,
-# deriveFacts, compose) stay in their files, in apps/backend and packages/shared. The backend
-# build runs it too (prebuild); this covers a commit that touches only packages/shared.
+# deriveFacts, compose) stay in their files, in apps/backend, packages/contracts and packages/shared.
+# The backend build runs it too (prebuild); this covers a commit that touches only the packages.
 echo "Running unreadable boundary guard..."
 bash scripts/validate-unreadable-boundaries.sh || exit 1
 

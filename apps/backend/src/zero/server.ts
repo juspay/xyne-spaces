@@ -37,7 +37,7 @@ import { decryptQueryResult } from './encryption-interceptor';
 import { executeFlatCatalogQuery, NOT_FLAT } from './flat-catalog-query';
 import { prepareEncryptedMutations, runEncryptedMutation, type MutationEncryptionContext } from './encryptedMutation';
 import { runWithMutatorName } from './zeroMetrics';
-import type { DerivedFacts } from '@xyne/shared';
+import type { DerivedFacts } from '@xyne/contracts';
 import { config } from '@/config/env';
 import { checkRateLimit } from '@/services/zeroRateLimiter';
 import { superpositionClient } from '@/services/superpositionClient';

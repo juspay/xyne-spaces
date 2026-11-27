@@ -14,7 +14,7 @@ import { stringFromFormValue } from '@xyne/shared/zero';
 import { formEntityValueTextHash } from '@/utils/formEntityValueHash';
 import { zql } from './queries';
 import type { UnreadableTransaction } from './unreadableTransaction';
-import { mutatorContracts } from '@xyne/shared';
+import { mutatorContracts } from '@xyne/contracts';
 
 export type BranchableMutatorField = {
   fieldName: string;

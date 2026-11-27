@@ -10,7 +10,6 @@ import {
   toTypedFormEntityValue,
 } from '../utils/formEntityValueColumns.js';
 import { zql } from './builder.js';
-import { mutatorContracts } from '../enc-contracts/mutator-contracts.js';
 
 export type BranchableMutatorField = {
   fieldName: string;
@@ -403,8 +402,59 @@ export async function assertFormEntityValueWrites(
   }
 }
 
-/** The args of `formEntityValue.upsertMany`: its contract's schema. */
-export const upsertManyFormEntityValuesArgs = mutatorContracts['formEntityValue.upsertMany'].schema;
+/** The args of `formEntityValue.upsertMany`; its contract (@xyne/contracts) uses this schema. */
+export const upsertManyFormEntityValuesArgs = z
+  .object({
+    entityId: z.string(),
+    entityType: z.nativeEnum(FormEntityType),
+    formId: z.string(),
+    timestamp: z.number(),
+    contextId: z.string().optional(),
+    version: z.number().optional(),
+    values: z
+      .array(
+        z.discriminatedUnion('op', [
+          z.object({
+            op: z.literal('create'),
+            id: z.string(),
+            fieldId: z.string(),
+            newValue: z.array(z.string()),
+          }),
+          z.object({
+            op: z.literal('update'),
+            formEntityValueId: z.string(),
+            newValue: z.array(z.string()),
+            expectedValueUpdatedAt: z.number().nullable().optional(),
+          }),
+        ]),
+      )
+      .min(1),
+  })
+  .superRefine(({ values }, ctx) => {
+    const seenValueIds = new Set<string>();
+    const seenCreateFieldIds = new Set<string>();
+    values.forEach((value, index) => {
+      const valueId = value.op === 'create' ? value.id : value.formEntityValueId;
+      if (seenValueIds.has(valueId)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['values', index],
+          message: `Form value ${valueId} appears more than once in this save`,
+        });
+      }
+      seenValueIds.add(valueId);
+
+      if (value.op !== 'create') return;
+      if (seenCreateFieldIds.has(value.fieldId)) {
+        ctx.addIssue({
+          code: 'custom',
+          path: ['values', index],
+          message: `Field ${value.fieldId} appears more than once in this save`,
+        });
+      }
+      seenCreateFieldIds.add(value.fieldId);
+    });
+  });
 
 export type UpsertManyFormEntityValuesArgs = z.infer<typeof upsertManyFormEntityValuesArgs>;
 

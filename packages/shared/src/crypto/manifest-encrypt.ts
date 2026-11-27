@@ -1,5 +1,5 @@
 import type { ClientEncryptionManifest, ClientManifestRule } from './client-manifest.js';
-import { matchesRoute, normalizeRequestPath } from '../enc-contracts/route-match.js';
+import { matchesRoute, normalizeRequestPath } from './route-match.js';
 
 export type FieldEncryptor = (value: string, fieldName: string) => Promise<string>;
 

@@ -1,8 +1,5 @@
-import type {
-  DerivedFacts,
-  EncryptedTableConfig,
-  FieldFacts,
-} from '@xyne/shared';
+import type { EncryptedTableConfig } from '@xyne/shared';
+import type { DerivedFacts, FieldFacts } from '@xyne/contracts';
 
 export type EncryptedFieldConfig = EncryptedTableConfig;
 

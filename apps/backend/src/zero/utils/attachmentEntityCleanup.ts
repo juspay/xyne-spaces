@@ -1,4 +1,5 @@
-import { AttachmentEntityType, derive } from '@xyne/shared';
+import { AttachmentEntityType } from '@xyne/shared';
+import { derive } from '@xyne/contracts';
 import { storageService } from '@/services/storage';
 import { deleteHeicRenditions, isHeicAttachment } from '@/services/heicRenditionService';
 import { deleteVideoRenditions, isVideoMimetype } from '@/services/videoRenditionService';

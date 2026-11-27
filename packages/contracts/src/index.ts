@@ -5,10 +5,10 @@ export { UnreadableString, reveal, unreadableString } from './unreadable-string.
 export { COMPOSE_TEMPLATES, defineComposeTemplate, forwardedMessageEditTemplate, forwardedMessageTemplate, initialMessageMdTemplate, isComposeTemplateName, parentMessageMdTemplate, repliesMdAddReplierTemplate, runComposeTemplate } from './compose.js';
 export type { ComposeInputs, ComposeResult, ComposeTemplate, ComposeTemplateName } from './compose.js';
 export type { DerivedSpec, Encrypted, FieldDerived, RequestContract, RequestBody, RequestDerived, RequestOf, SourceToDerived, UnreadableBody } from './define.js';
-export { matchesRoute, normalizeRequestPath } from './route-match.js';
 export { isMutatorName, mutatorContracts } from './mutator-contracts.js';
 export type { MutatorName } from './mutator-contracts.js';
 export { replyToConversationClient } from './contracts/conversations.js';
 export type { ReplyToConversationRequest } from './contracts/conversations.js';
 export { appsChatPostMessageClient, appsChatUpdateMessageClient } from './contracts/apps.js';
 export type { AppsChatPostMessageRequest, AppsChatUpdateMessageRequest } from './contracts/apps.js';
+export * from './extraction/index.js';

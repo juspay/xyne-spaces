@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { MessageType } from '../../zero/types.js';
+import { MessageType } from '@xyne/shared';
 import { defineRequestContract, type RequestOf } from '../define.js';
 
 /**

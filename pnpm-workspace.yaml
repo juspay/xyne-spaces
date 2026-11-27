@@ -17,6 +17,7 @@ packages:
   - apps/xyne-claw-auth/frontend
 
   - packages/shared
+  - packages/contracts
   - packages/storage
   - packages/secrets-vault
   - packages/icons

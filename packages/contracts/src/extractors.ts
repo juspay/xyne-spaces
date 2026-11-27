@@ -41,7 +41,7 @@ export const EXTRACTORS = [
 export type ExtractorName = (typeof EXTRACTORS)[number];
 
 /**
- * What each fact is. The extractor functions in encryption-transformation/ are typed against
+ * What each fact is. The extractor functions in extraction/ are typed against
  * this, so a contract that lists `userIds` is promising exactly `string[]` to its handler,
  * whoever runs the extractor.
  */
@@ -128,7 +128,7 @@ export interface ExtractorOutput {
 
 /**
  * The parsers the facts are computed from, each run once per text: the mention tokens, the
- * URLs, the slash command, the visible text. Internal to encryption-transformation/.
+ * URLs, the slash command, the visible text. Internal to extraction/.
  */
 export interface ExtractorGroups {
   mentions: { userIds: string[]; groupIds: string[]; handles: string[]; channel: boolean; here: boolean };

@@ -91,6 +91,7 @@
     "@xyne/cache": "workspace:*",
     "@xyne/connector-sdk": "0.1.6",
     "@xyne/secrets-vault": "workspace:*",
+    "@xyne/contracts": "workspace:*",
     "@xyne/shared": "workspace:*",
     "@xyne/storage": "workspace:*",
     "@xyne/vespa-ts": "1.6.0",

@@ -1,4 +1,4 @@
-import type { ExtractorGroups } from '../enc-contracts/extractors.js';
+import type { ExtractorGroups } from '../extractors.js';
 
 const TOP_TLDS = [
   // global / generic

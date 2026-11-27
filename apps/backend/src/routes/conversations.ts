@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { replyToConversationClient } from '@xyne/shared';
+import { replyToConversationClient } from '@xyne/contracts';
 import { ConversationController } from '../controllers/conversationController';
 import { uploadMultiple } from '../middleware/upload';
 import { encryptedRoute } from '../middleware/encryptedRoute';

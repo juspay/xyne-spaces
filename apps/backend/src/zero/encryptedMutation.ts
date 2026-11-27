@@ -10,8 +10,8 @@ import {
   UnreadableString,
   isMutatorName,
   mutatorContracts,
-} from '@xyne/shared';
-import type { DerivedFacts, FieldDerived, MutatorName, RequestContract } from '@xyne/shared';
+} from '@xyne/contracts';
+import type { DerivedFacts, FieldDerived, MutatorName, RequestContract } from '@xyne/contracts';
 import { config } from '@/config/env';
 import { getEncryptionProvider, runWithDekPassthrough } from '@/services/encryption';
 import type { TransitCaller } from '@/services/encryption';
@@ -22,8 +22,8 @@ import { recordContractApplied, recordFactsDerived, recordFactsError, recordUnre
 
 /**
  * The Zero-mutation counterpart of middleware/encryptedRoute.ts. A mutator is
- * `defineContractMutator('<name>', fn)`, its contract in mutatorContracts (shared
- * enc-contracts/mutator-contracts.ts): the args schema, `unreadableString()` marking the sensitive
+ * `defineContractMutator('<name>', fn)`, its contract in mutatorContracts
+ * (@xyne/contracts, packages/contracts/src/mutator-contracts.ts): the args schema, `unreadableString()` marking the sensitive
  * args, and `sourceToDerived` naming the facts the mutator decides on instead of their text.
  *
  * - Client encryption on (API_CLIENT_ENCRYPTION_ENABLED, the client gets the manifest): the client

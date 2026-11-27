@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { ChatController } from '../controllers/chatController';
 import { validateChannelAccessForGet, validateChannelAccessForPost, validateChannelAccessForPostWithDm } from '../middelware/channelValidation';
 import { requirePermission } from '@/middleware/requirePermission';
-import { appsChatPostMessageClient, appsChatUpdateMessageClient } from '@xyne/shared';
+import { appsChatPostMessageClient, appsChatUpdateMessageClient } from '@xyne/contracts';
 import { encryptedRoute } from '@/middleware/encryptedRoute';
 
 const router = Router();

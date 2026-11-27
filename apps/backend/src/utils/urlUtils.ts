@@ -1,7 +1,7 @@
 // backend/src/utils/urlUtils.ts
 import { config } from '@/config/env';
 import { NodeType, parse, type HTMLElement, type Node } from 'node-html-parser';
-import { stripAndDecodeHtml, trimSurroundingPunctuation } from '@xyne/shared';
+import { stripAndDecodeHtml, trimSurroundingPunctuation } from '@xyne/contracts';
 
 /**
  * URL detection utilities
@@ -15,14 +15,14 @@ import { stripAndDecodeHtml, trimSurroundingPunctuation } from '@xyne/shared';
  *   extractFirstUrl('<a>https://example.com/foo</a>') => 'https://example.com/foo'
  */
 
-// URL detection itself (extractUrls & co.) lives in @xyne/shared so the encryption
+// URL detection itself (extractUrls & co.) lives in @xyne/contracts so the encryption
 // service's link extractor and this file use one implementation; re-exported here.
 export {
   extractUrls,
   extractFirstUrl,
   stripAndDecodeHtml,
   URL_REGEX,
-} from '@xyne/shared';
+} from '@xyne/contracts';
 
 export function canonicalizeMessageLink(candidate: string): string | null {
   const trimmed = candidate.trim();
