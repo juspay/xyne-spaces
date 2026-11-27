@@ -58,9 +58,6 @@ const envSchema = Joi.object({
   GOOGLE_CLIENT_SECRET: Joi.string().allow('').default(''),
   // Email sender configuration (Google OAuth2 via nodemailer)
   GOOGLE_REFRESH_TOKEN: Joi.string().allow('').default(''),
-  // Alternative Google OAuth app (isNy flow)
-  GOOGLE_CLIENT_ID_NEW: Joi.string().allow('').default(''),
-  GOOGLE_CLIENT_SECRET_NEW: Joi.string().allow('').default(''),
   GOOGLE_REFRESH_TOKEN_NEW: Joi.string().allow('').default(''),
   EMAIL_FROM: Joi.string().allow('').default(''),
   EMAIL_FROM_NAME: Joi.string().allow('').default('Xyne Spaces'),
@@ -761,8 +758,6 @@ const envSchema = Joi.object({
   API_BASE_URL: Joi.string().allow('').default(''),
   APP_JWT_KEY: Joi.string().allow('').default(''),
   SUDO_QUERY_TOKEN: Joi.string().allow('').default(''),
-  GOOGLE_MOBILE_CLIENT_ID: Joi.string().allow('').default(''),
-  GOOGLE_MOBILE_CLIENT_SECRET: Joi.string().allow('').default(''),
   GOOGLE_IOS_CLIENT_ID: Joi.string().allow('').default(''),
   GOOGLE_REDIRECT_URI: Joi.string().allow('').default(''),
   GOOGLE_CLOUD_PROJECT_ID: Joi.string().allow('').default(''),
@@ -1479,10 +1474,6 @@ export const config = {
   email: {
     clientId: envVars.GOOGLE_CLIENT_ID as string,
     clientSecret: envVars.GOOGLE_CLIENT_SECRET as string,
-    clientIdNew: envVars.GOOGLE_CLIENT_ID_NEW as string,
-    clientSecretNew: envVars.GOOGLE_CLIENT_SECRET_NEW as string,
-    mobileClientId: envVars.GOOGLE_MOBILE_CLIENT_ID as string,
-    mobileClientSecret: envVars.GOOGLE_MOBILE_CLIENT_SECRET as string,
     iosClientId: envVars.GOOGLE_IOS_CLIENT_ID as string,
     redirectUri: envVars.GOOGLE_REDIRECT_URI as string,
     refreshToken: envVars.GOOGLE_REFRESH_TOKEN as string,

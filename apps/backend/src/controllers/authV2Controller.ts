@@ -70,8 +70,6 @@ type AutoLoginResult = {
 
 export class AuthV2Controller {
   private googleClient: OAuth2Client;
-  private googleClientNew: OAuth2Client | null = null;
-  private mobileGoogleClient: OAuth2Client;
   private userService: UserService;
   private microsoftAuthController: MicrosoftAuthController;
   private prisma = DatabaseClient.getInstance();
@@ -97,8 +95,6 @@ export class AuthV2Controller {
   constructor() {
     const clientId = config.email.clientId;
     const clientSecret = config.email.clientSecret;
-    const mobileClientId = config.email.mobileClientId;
-    const mobileClientSecret = config.email.mobileClientSecret;
 
     if (!clientId || !clientSecret) {
       throw new Error(
@@ -108,22 +104,8 @@ export class AuthV2Controller {
 
     this.googleClient = new OAuth2Client(clientId, clientSecret);
 
-    const clientIdNew = config.email.clientIdNew;
-    const clientSecretNew = config.email.clientSecretNew;
-    if (clientIdNew && clientSecretNew) {
-      this.googleClientNew = new OAuth2Client(clientIdNew, clientSecretNew);
-    }
-    this.mobileGoogleClient = new OAuth2Client(mobileClientId, mobileClientSecret);
-
     this.userService = new UserService();
     this.microsoftAuthController = new MicrosoftAuthController();
-  }
-
-  private getGoogleClient(isNy?: boolean): OAuth2Client {
-    if (isNy && this.googleClientNew) {
-      return this.googleClientNew;
-    }
-    return this.googleClient;
   }
 
   private async ensureSelfDmForUser(
@@ -236,7 +218,6 @@ export class AuthV2Controller {
       const platform = platformQuery || this.detectPlatform(req);
       logger.info(`${authTag(flowId)} Platform detected: ${platform}`);
 
-      const isNy = req.query.isNy === 'true';
       const enterpriseLogin = req.query.enterpriseLogin === 'true';
 
       // Electron holds its own verifier and sends only the challenge; the server stores none.
@@ -281,7 +262,6 @@ export class AuthV2Controller {
         codeChallenge,
         validatedRedirectTo,
         undefined,
-        isNy,
         invitationId,
         enterpriseLogin,
         flowId,
@@ -293,7 +273,7 @@ export class AuthV2Controller {
 
       logger.info(`${authTag(flowId)} Redirect URI: ${redirectUri}`);
 
-      const authUrl = this.getGoogleClient(isNy).generateAuthUrl({
+      const authUrl = this.googleClient.generateAuthUrl({
         access_type: 'offline',
         scope: ['openid', 'email', 'profile'],
         prompt: 'consent',
@@ -429,7 +409,7 @@ export class AuthV2Controller {
       logger.info(`${tag()} Redirect URI: ${redirectUri}`);
 
       logger.info(`${tag()} Exchanging code for tokens`);
-      const { tokens } = await this.getGoogleClient(stateData.isNy).getToken({
+      const { tokens } = await this.googleClient.getToken({
         code: code as string,
         redirect_uri: redirectUri,
         codeVerifier: codeVerifier,
@@ -448,9 +428,9 @@ export class AuthV2Controller {
       }
 
       logger.info(`${tag()} Verifying ID token`);
-      const ticket = await this.getGoogleClient(stateData.isNy).verifyIdToken({
+      const ticket = await this.googleClient.verifyIdToken({
         idToken: id_token,
-        audience: stateData.isNy ? config.email.clientIdNew : config.email.clientId,
+        audience: config.email.clientId,
       });
 
       const payload = ticket.getPayload();
@@ -798,7 +778,7 @@ export class AuthV2Controller {
       logger.info(`${tag()} Redirect URI: ${redirectUri}`);
 
       logger.info(`${tag()} Exchanging code for tokens`);
-      const { tokens } = await this.getGoogleClient(stateData.isNy).getToken({
+      const { tokens } = await this.googleClient.getToken({
         code,
         redirect_uri: redirectUri,
         codeVerifier: codeVerifier,
@@ -817,9 +797,9 @@ export class AuthV2Controller {
       }
 
       logger.info(`${tag()} Verifying ID token`);
-      const ticket = await this.getGoogleClient(stateData.isNy).verifyIdToken({
+      const ticket = await this.googleClient.verifyIdToken({
         idToken: id_token,
-        audience: stateData.isNy ? config.email.clientIdNew : config.email.clientId,
+        audience: config.email.clientId,
       });
 
       const payload = ticket.getPayload();
@@ -1140,7 +1120,7 @@ export class AuthV2Controller {
       logger.info(`${tag()} Redirect URI: ${redirectUri}`);
 
       logger.info(`${tag()} Exchanging code for tokens`);
-      const { tokens } = await this.mobileGoogleClient.getToken({
+      const { tokens } = await this.googleClient.getToken({
         code: code as string,
         redirect_uri: redirectUri,
         ...(codeVerifier ? { codeVerifier } : {}),
@@ -1156,10 +1136,10 @@ export class AuthV2Controller {
       }
 
       logger.info(`${tag()} Verifying ID token`);
-      const ticket = await this.mobileGoogleClient.verifyIdToken({
+      const ticket = await this.googleClient.verifyIdToken({
         idToken: id_token,
         // Accept both web and iOS client IDs
-        audience: [config.email.mobileClientId, config.email.iosClientId].filter(
+        audience: [config.email.clientId, config.email.iosClientId].filter(
           Boolean
         ),
       });

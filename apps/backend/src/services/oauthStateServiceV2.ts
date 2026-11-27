@@ -10,7 +10,6 @@ interface OAuthState {
   codeChallenge?: string;
   createdAt: number;
   redirectTo?: string;
-  isNy?: boolean;
   invitationId?: string;
   enterpriseLogin?: boolean;
   flowId?: string;
@@ -27,7 +26,6 @@ class OAuthStateService {
     codeChallenge?: string,
     redirectTo?: string,
     provider: OAuthProvider = 'google',
-    isNy?: boolean,
     invitationId?: string,
     enterpriseLogin?: boolean,
     flowId?: string,
@@ -44,7 +42,6 @@ class OAuthStateService {
       codeChallenge,
       createdAt: Date.now(),
       ...(redirectTo !== undefined ? { redirectTo } : {}),
-      ...(isNy ? { isNy } : {}),
       ...(invitationId ? { invitationId } : {}),
       ...(enterpriseLogin ? { enterpriseLogin } : {}),
       ...(flowId ? { flowId } : {}),

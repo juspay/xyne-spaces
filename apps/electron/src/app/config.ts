@@ -35,7 +35,6 @@ export interface AppConfig {
     title: string;
   };
   enableMtls: boolean;
-  loginTempHeader?: boolean;
   useBundledUI: boolean;
   sendLogs: boolean;
   enableOtelMetrics: boolean;
@@ -95,7 +94,6 @@ const prodConfig: AppConfig = {
   useBundledUI: false,
   sendLogs: true,
   enableOtelMetrics: true,
-  loginTempHeader: true,
   RELEASE_CONFIG_URL: deploymentValue('RELEASE_CONFIG_URL'),
   UI_ZIP_URL: deploymentValue('UI_ZIP_URL'),
   uiUpdateCheckIntervalMs: 15 * 60 * 1000, // 15 minutes for prod

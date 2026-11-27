@@ -9,11 +9,11 @@
 
 import { AuthProvider } from '@xyne/shared';
 import { OAuth2Client } from 'google-auth-library';
+import { config } from '@/config/env';
 import { DatabaseClient } from '@/database/client';
 import { encrypt } from '@/services/encryptionService';
 import { GoogleService } from '@/services/googleService';
 import { MicrosoftDeskService } from '@/services/microsoftDeskService';
-import { GOOGLE_CLIENTS } from '@/services/googleOAuthClients';
 import { logger } from '@/utils/logger';
 
 export type UserContactsProvider = 'GOOGLE' | 'MICROSOFT';
@@ -189,12 +189,12 @@ export function logContactsOAuthEvent(event: string, data: Record<string, unknow
 async function googleTokenHasContactsScope(accessToken: string): Promise<boolean> {
   try {
     const tokenInfo = await new OAuth2Client().getTokenInfo(accessToken);
-    const webClientId = GOOGLE_CLIENTS.web().id;
-    if (!webClientId) return false;
+    const clientId = config.email.clientId;
+    if (!clientId) return false;
     const scopes = tokenInfo.scopes ?? [];
     return (
       scopes.includes('https://www.googleapis.com/auth/contacts.readonly') &&
-      tokenInfo.aud === webClientId
+      tokenInfo.aud === clientId
     );
   } catch (error) {
     logger.warn('[USER_CONTACTS][AUTO] Failed to verify Google token scopes', getErrorMessage(error));
