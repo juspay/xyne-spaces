@@ -656,9 +656,9 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
   const renderFormComponent = (): ReactElement => (
     <div data-testid='add-channel-form' className='space-y-6 w-full'>
       {title ? (
-        <div className='text-xl font-medium text-foreground mb-1'>{title}</div>
+        <div className='text-xl font-medium text-foreground'>{title}</div>
       ) : (
-        <div className='text-xl font-medium text-foreground mb-1'>
+        <div className='text-xl font-medium text-foreground'>
           {mode === 'promote' ? 'Promote to Channel' : 'Create a channel'}
         </div>
       )}
