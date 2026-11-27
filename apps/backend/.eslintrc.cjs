@@ -117,9 +117,10 @@ module.exports = {
     },
     {
       // The files allowed to reveal an UnreadableString: the Zero transaction wrapper, which
-      // unwraps right before the database write, and the REST reply handler, which still reads
-      // the text until its route has a write/read wrapper of its own.
-      files: ['src/zero/unreadableTransaction.ts', 'src/controllers/conversationController.ts'],
+      // unwraps right before the database write, and compose, which sends stored values to the
+      // encryption service as they are held. scripts/validate-unreadable-boundaries.sh holds the
+      // same list.
+      files: ['src/zero/unreadableTransaction.ts', 'src/services/encryption/compose.ts'],
       rules: {
         'no-restricted-imports': ['error', { paths: GCS_IMPORT_PATHS, patterns: GCS_IMPORT_PATTERNS }],
       },

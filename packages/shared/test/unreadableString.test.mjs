@@ -7,7 +7,6 @@ import {
   UnreadableString,
   reveal,
   makeUnreadable,
-  replyToConversationClient,
   mutatorContracts,
 } from '../dist/enc-contracts/index.js';
 
@@ -31,29 +30,30 @@ test('reveal returns the value and rejects anything that is not an UnreadableStr
 });
 
 test('contracts list their unreadable fields, through .optional() too', () => {
-  assert.deepEqual(replyToConversationClient.unreadableFields, ['content']);
   assert.deepEqual(mutatorContracts['conversations.send'].unreadableFields, ['content']);
+  assert.deepEqual(mutatorContracts['messages.update'].unreadableFields, ['content']);
 });
 
 test('makeUnreadable wraps only the unreadable fields and leaves the input untouched', () => {
-  const body = { content: 'hello', msgType: 'USER', showInChannel: 'true' };
-  const wrapped = makeUnreadable(replyToConversationClient, body);
+  const body = { messageId: 'm1', content: 'hello' };
+  const wrapped = makeUnreadable(mutatorContracts['messages.update'], body);
   assert.ok(wrapped.content instanceof UnreadableString);
   assert.equal(reveal(wrapped.content), 'hello');
-  assert.equal(wrapped.msgType, 'USER');
-  assert.equal(wrapped.showInChannel, 'true');
+  assert.equal(wrapped.messageId, 'm1');
   assert.equal(body.content, 'hello');
-  assert.equal(JSON.stringify(wrapped), '{"content":"<redacted>","msgType":"USER","showInChannel":"true"}');
+  assert.equal(JSON.stringify(wrapped), '{"messageId":"m1","content":"<redacted>"}');
 });
 
 test('makeUnreadable keeps absent fields absent and does not wrap twice', () => {
-  assert.equal(makeUnreadable(replyToConversationClient, {}).content, undefined);
-  const once = makeUnreadable(replyToConversationClient, { content: '' });
+  const contract = mutatorContracts['messages.update'];
+  assert.equal(makeUnreadable(contract, {}).content, undefined);
+  const once = makeUnreadable(contract, { content: '' });
   assert.equal(reveal(once.content), '');
-  assert.equal(makeUnreadable(replyToConversationClient, once).content, once.content);
+  assert.equal(makeUnreadable(contract, once).content, once.content);
 });
 
 test('the contract schema still validates the plain body', () => {
-  assert.ok(replyToConversationClient.schema.safeParse({ content: 'hello' }).success);
-  assert.ok(!replyToConversationClient.schema.safeParse({ content: 42 }).success);
+  const { schema } = mutatorContracts['messages.update'];
+  assert.ok(schema.safeParse({ messageId: 'm1', content: 'hello' }).success);
+  assert.ok(!schema.safeParse({ messageId: 'm1', content: 42 }).success);
 });

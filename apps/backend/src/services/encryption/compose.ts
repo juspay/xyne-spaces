@@ -35,7 +35,7 @@ export type ComposeRequest<T extends ComposeTemplate = ComposeTemplate> = {
  * values held (the result is encrypted at rest on write); a part that is ciphertext then is an
  * error, as in tx.read.
  */
-export async function compose<T extends ComposeTemplate>(
+export async function composeSafe<T extends ComposeTemplate>(
   request: ComposeRequest<T>,
   options: { workspaceId: string },
 ): Promise<ComposeResult> {
@@ -44,7 +44,7 @@ export async function compose<T extends ComposeTemplate>(
 }
 
 /** `compose` for many values, in one encryption-service call; one result per request, in order. */
-export async function composeBatch(
+ async function composeBatch(
   requests: readonly ComposeRequest[],
   options: { workspaceId: string },
 ): Promise<ComposeResult[]> {
