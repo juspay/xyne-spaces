@@ -2,20 +2,63 @@ import type { Prisma } from '@prisma/client';
 import { findCycle, toEdges, type DependencyContext, type DependencyEdge } from '@xyne/shared';
 import { DependencyError } from '@/services/dependencies/types';
 
+const MAX_NODES = 10_000;
+const MAX_EDGES = 20_000;
+function bounded<T>(rows: T[], maximum = MAX_EDGES): T[] {
+  if (rows.length > maximum)
+    throw new DependencyError(
+      'DEPENDENCY_GRAPH_LIMIT',
+      'Dependency graph is too large to process safely',
+    );
+  return rows;
+}
+
 /** Internal graph: privileged ids MUST NOT be serialized to clients or copied to activities. */
-export async function loadDependencyGraph(tx: Prisma.TransactionClient, workspaceId: string, ticketIds?: readonly string[]) {
+export async function loadDependencyGraph(
+  tx: Prisma.TransactionClient,
+  workspaceId: string,
+  ticketIds?: readonly string[],
+) {
+  if (ticketIds?.length === 0) return { edges: [], references: [], mappings: [] };
+  if (ticketIds && ticketIds.length > MAX_NODES) bounded([...ticketIds], MAX_NODES);
   const [references, mappings] = await Promise.all([
-    tx.ticketReferenceMapping.findMany({ where: { workspaceId, relationType: 'BLOCKS', ...(ticketIds ? { OR: [
-      { sourceTicketId: { in: [...ticketIds] } }, { targetTicketId: { in: [...ticketIds] } },
-    ] } : {}) } }),
-    tx.ticketSubTicketMapping.findMany({ where: { workspaceId, ...(ticketIds ? { OR: [
-      { ticketId: { in: [...ticketIds] } }, { subTicket: { mappedTicketId: { in: [...ticketIds] } } },
-    ] } : {}) } }),
+    tx.ticketReferenceMapping.findMany({
+      take: MAX_EDGES + 1,
+      where: {
+        workspaceId,
+        relationType: 'BLOCKS',
+        ...(ticketIds
+          ? {
+              OR: [
+                { sourceTicketId: { in: [...ticketIds] } },
+                { targetTicketId: { in: [...ticketIds] } },
+              ],
+            }
+          : {}),
+      },
+    }),
+    tx.ticketSubTicketMapping.findMany({
+      take: MAX_EDGES + 1,
+      where: {
+        workspaceId,
+        ...(ticketIds
+          ? {
+              OR: [
+                { ticketId: { in: [...ticketIds] } },
+                { subTicket: { mappedTicketId: { in: [...ticketIds] } } },
+              ],
+            }
+          : {}),
+      },
+    }),
   ]);
-  const subTickets = mappings.length ? await tx.subTicket.findMany({
-    where: { workspaceId, id: { in: mappings.map(row => row.subTicketId) } },
-    select: { id: true, mappedTicketId: true },
-  }) : [];
+  bounded([...references, ...mappings]);
+  const subTickets = mappings.length
+    ? await tx.subTicket.findMany({
+        where: { workspaceId, id: { in: mappings.map(row => row.subTicketId) } },
+        select: { id: true, mappedTicketId: true },
+      })
+    : [];
   return { edges: toEdges(references, mappings, subTickets), references, mappings };
 }
 
@@ -24,20 +67,43 @@ export async function loadDependencyContext(
   workspaceId: string,
   ticketIds: readonly string[],
 ): Promise<DependencyContext> {
+  const ids = [...new Set(ticketIds)];
+  bounded(ids, MAX_NODES);
+  if (!ids.length)
+    return {
+      ticketsById: new Map(),
+      boardsById: new Map(),
+      stagesByBoard: new Map(),
+      nextStageIdsByTicket: new Map(),
+    };
   const tickets = await tx.ticket.findMany({
-    where: { workspaceId, id: { in: [...new Set(ticketIds)] } },
+    where: { workspaceId, id: { in: ids } },
     select: { id: true, boardId: true, stageName: true, statusV2: true, eta: true },
   });
   const boardIds = [...new Set(tickets.map(ticket => ticket.boardId))];
   const [boards, stages, transitions, visits] = await Promise.all([
-    tx.board.findMany({ where: { workspaceId, id: { in: boardIds } }, select: { id: true, boardType: true, metadata: true } }),
-    tx.stage.findMany({ where: { workspaceId, boardId: { in: boardIds } } }),
-    tx.stageTransition.findMany({ where: { workspaceId, boardId: { in: boardIds } } }),
+    tx.board.findMany({
+      where: { workspaceId, id: { in: boardIds } },
+      select: { id: true, boardType: true, metadata: true },
+    }),
+    tx.stage.findMany({ take: MAX_EDGES + 1, where: { workspaceId, boardId: { in: boardIds } } }),
+    tx.stageTransition.findMany({
+      take: MAX_EDGES + 1,
+      where: { workspaceId, boardId: { in: boardIds } },
+    }),
     tx.ticketStageEta.findMany({
-      where: { workspaceId, ticketId: { in: tickets.map(ticket => ticket.id) }, stageLeftAt: null },
+      take: MAX_EDGES + 1,
+      where: {
+        workspaceId,
+        ticketId: { in: tickets.map(ticket => ticket.id) },
+        stageLeftAt: null,
+      },
       orderBy: [{ stageEnteredAt: 'desc' }, { id: 'desc' }],
     }),
   ]);
+  bounded(stages);
+  bounded(transitions);
+  bounded(visits);
   // Index once: cycle checks can cover a whole workspace and must not scan all
   // stages, visits and transitions separately for every ticket.
   const key = (left: string, right: string) => JSON.stringify([left, right]);
@@ -60,21 +126,33 @@ export async function loadDependencyContext(
     const visitKey = key(visit.ticketId, visit.stageId);
     if (!activeEta.has(visitKey)) activeEta.set(visitKey, visit.stageEta);
   }
-  const nextStageIdsByTicket = new Map(tickets.map(ticket => {
-    const stage = stageByName.get(key(ticket.boardId, ticket.stageName));
-    return [ticket.id, [...new Set([
-      ...(stage ? outgoing.get(key(ticket.boardId, stage.id)) ?? [] : []),
-      ...(outgoing.get(key(ticket.boardId, '*')) ?? []),
-    ])]];
-  }));
-  return {
-    ticketsById: new Map(tickets.map(ticket => {
+  const nextStageIdsByTicket = new Map(
+    tickets.map(ticket => {
       const stage = stageByName.get(key(ticket.boardId, ticket.stageName));
-      return [ticket.id, {
-        ...ticket,
-        activeStageEta: stage ? activeEta.get(key(ticket.id, stage.id)) ?? null : null,
-      }];
-    })),
+      return [
+        ticket.id,
+        [
+          ...new Set([
+            ...(stage ? (outgoing.get(key(ticket.boardId, stage.id)) ?? []) : []),
+            ...(outgoing.get(key(ticket.boardId, '*')) ?? []),
+          ]),
+        ],
+      ];
+    }),
+  );
+  return {
+    ticketsById: new Map(
+      tickets.map(ticket => {
+        const stage = stageByName.get(key(ticket.boardId, ticket.stageName));
+        return [
+          ticket.id,
+          {
+            ...ticket,
+            activeStageEta: stage ? (activeEta.get(key(ticket.id, stage.id)) ?? null) : null,
+          },
+        ];
+      }),
+    ),
     boardsById: new Map(boards.map(board => [board.id, board])),
     stagesByBoard,
     nextStageIdsByTicket,
@@ -87,8 +165,25 @@ export async function assertNoDependencyCycle(
   workspaceId: string,
   candidate: DependencyEdge,
 ): Promise<void> {
-  const { edges } = await loadDependencyGraph(tx, workspaceId);
-  const ids = [candidate, ...edges].flatMap(edge => [edge.blockerTicketId, edge.dependentTicketId]);
+  const nodes = new Set([candidate.blockerTicketId, candidate.dependentTicketId]);
+  const seen = new Set<string>();
+  const component = new Map<string, DependencyEdge>();
+  while (nodes.size > seen.size) {
+    const frontier = [...nodes].filter(id => !seen.has(id)).slice(0, 200);
+    if (!frontier.length) break;
+    frontier.forEach(id => seen.add(id));
+    const graph = await loadDependencyGraph(tx, workspaceId, frontier);
+    for (const edge of graph.edges) {
+      if (edge.satisfiedAt != null) continue;
+      component.set(`${edge.kind}:${edge.id}`, edge);
+      nodes.add(edge.blockerTicketId);
+      nodes.add(edge.dependentTicketId);
+    }
+    bounded([...nodes], MAX_NODES);
+    bounded([...component.values()]);
+  }
+  const edges = [...component.values()];
+  const ids = [...nodes];
   const context = await loadDependencyContext(tx, workspaceId, ids);
   // Edges whose ticket was deleted or moved out of this workspace are not trustworthy.
   if (ids.some(id => !context.ticketsById.has(id))) {

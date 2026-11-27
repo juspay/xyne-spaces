@@ -4534,6 +4534,12 @@ export const mutators = defineMutators({
         statusV2: z.string().optional(),
         priority: z.string().optional(),
         stageName: z.string().optional(),
+        dependencyOverride: z.object({
+          reason: z.string().trim().min(1).max(2000),
+          adminOverride: z.boolean().optional(),
+        }).strict().optional(),
+        dependencyReason: z.string().trim().min(1).max(2000).optional(),
+        dependencyAdminOverride: z.boolean().optional(),
         assignedTo: z.string().nullable().optional(),
         ticketType: z.string().optional(),
         userGroupId: z.string().nullable().optional(),

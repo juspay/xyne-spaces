@@ -21,3 +21,13 @@ export function groupTicketsByDate(
   }
   return grouped;
 }
+
+/** Keep undated and invalid-date tickets reachable without treating epoch zero as absent. */
+export function ticketsWithoutEta(tickets: readonly Ticket[]): Ticket[] {
+  return tickets.filter(
+    ticket =>
+      ticket.eta === null ||
+      ticket.eta === undefined ||
+      !Number.isFinite(new Date(ticket.eta).getTime()),
+  );
+}

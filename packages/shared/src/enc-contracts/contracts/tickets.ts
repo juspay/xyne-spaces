@@ -1,6 +1,6 @@
-import { z } from 'zod';
-import { defineRequestContract } from '../define.js';
-import { unreadableString } from '../unreadable-string.js';
+import { z } from "zod";
+import { defineRequestContract } from "../define.js";
+import { unreadableString } from "../unreadable-string.js";
 
 /**
  * Zero mutator `ticket.update`. The client encrypts `description`; it is stored as received.
@@ -16,6 +16,13 @@ export const ticketUpdateClient = defineRequestContract({
     statusV2: z.string().optional(),
     priority: z.string().optional(),
     stageName: z.string().optional(),
+    dependencyOverride: z
+      .object({
+        reason: z.string().trim().min(1).max(2000),
+        adminOverride: z.boolean().optional(),
+      })
+      .strict()
+      .optional(),
     dependencyReason: z.string().trim().min(1).max(2000).optional(),
     dependencyAdminOverride: z.boolean().optional(),
     assignedTo: z.string().nullable().optional(),

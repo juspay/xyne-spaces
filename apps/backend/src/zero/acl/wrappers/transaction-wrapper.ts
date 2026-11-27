@@ -5,7 +5,7 @@ import { Schema } from '@xyne/shared';
 import {
   collectVespaJobs,
   type VespaJobsAccumulator,
-  type VespaOperation
+  type VespaOperation,
 } from '../../vespa-injection';
 import {
   collectSideEffectJobs,
@@ -24,8 +24,12 @@ import {
   type AuditOperation,
 } from '../../audit';
 import { TICKET_DEPENDENCIES_ENFORCEMENT_READY } from '@/services/dependencies/featureFlag';
-import { dependencyTicketWrite, dependencyRequestMoveOptions, zeroDependencySql } from '@/bypassAcl/dependencyStageGate';
-import { getContextOrNull } from '@/database/tenant/context';
+import {
+  dependencyTicketWrite,
+  dependencyRequestMoveOptions,
+  zeroDependencySql,
+  currentDependencyMoveOptions,
+} from '@/bypassAcl/dependencyStageGate';
 import { DependencyError } from '@/services/dependencies/types';
 import { logger } from '@/utils/logger';
 
@@ -67,7 +71,15 @@ export function wrapTransactionWithACL(
   return new Proxy(storageTx, {
     get(target, prop: string | symbol, receiver) {
       if (prop === 'mutate') {
-        return wrapMutateWithACL(target.mutate, ctx, storageTx, vespaJobs, sideEffectJobs, auditJobs, dependencyInput);
+        return wrapMutateWithACL(
+          target.mutate,
+          ctx,
+          storageTx,
+          vespaJobs,
+          sideEffectJobs,
+          auditJobs,
+          dependencyInput,
+        );
       }
       const value = Reflect.get(target, prop, receiver);
       if (typeof value === 'function') {
@@ -121,7 +133,10 @@ function wrapMutateWithACL(
 
             // 1. ACL Check (throws if unauthorized)
             const acl = await ACLFactory.getACL(tableName as TableName, ctx);
-            const operationMethod = acl[`can${operation.charAt(0).toUpperCase()}${operation.slice(1)}` as keyof typeof acl];
+            const operationMethod =
+              acl[
+                `can${operation.charAt(0).toUpperCase()}${operation.slice(1)}` as keyof typeof acl
+              ];
             if (typeof operationMethod === 'function') {
               await (operationMethod as any).call(acl, args, tx);
             }
@@ -134,13 +149,23 @@ function wrapMutateWithACL(
             // Capture side-effect previous state before the write, but only
             // publish the job if the write succeeds.
             if (['insert', 'update', 'upsert', 'delete'].includes(sideEffectOperation)) {
-              await collectSideEffectJobs(tableName as TableName, sideEffectOperation, args, tx, stagedSideEffectJobs);
+              await collectSideEffectJobs(
+                tableName as TableName,
+                sideEffectOperation,
+                args,
+                tx,
+                stagedSideEffectJobs,
+              );
             }
-            
+
             const stagedAuditJobs: AuditJobsAccumulator | undefined = auditJobs
               ? { jobs: [], resolution: auditJobs.resolution }
               : undefined;
-            if (auditJobs && stagedAuditJobs && ['insert', 'update', 'upsert', 'delete'].includes(auditOperation)) {
+            if (
+              auditJobs &&
+              stagedAuditJobs &&
+              ['insert', 'update', 'upsert', 'delete'].includes(auditOperation)
+            ) {
               try {
                 await collectZeroAuditOperation({
                   table: tableName,
@@ -164,20 +189,45 @@ function wrapMutateWithACL(
               tableName as TableName,
               operation as MutationSyncOperation,
               args,
-              tx
+              tx,
             );
 
             // 5. Execute original mutation (if ACL passes)
-            const write = () => (originalOp as (this: unknown, value: unknown) => Promise<unknown>).call(this, args);
+            const write = () =>
+              (originalOp as (this: unknown, value: unknown) => Promise<unknown>).call(this, args);
             let result: unknown;
-            if (TICKET_DEPENDENCIES_ENFORCEMENT_READY && tableName === 'tickets' && ['update', 'upsert'].includes(operation)
-              && args && typeof args === 'object' && ['stageName', 'statusV2', 'boardId', 'isArchived', 'eta'].some(key => key in args)) {
-              if (operation === 'upsert') throw new DependencyError('DEPENDENCY_UNSUPPORTED_WRITER', 'Stage-changing upserts must use a ticket transition');
+            if (
+              TICKET_DEPENDENCIES_ENFORCEMENT_READY &&
+              tableName === 'tickets' &&
+              ['update', 'upsert'].includes(operation) &&
+              args &&
+              typeof args === 'object' &&
+              ['stageName', 'statusV2', 'boardId', 'isArchived', 'eta'].some(key => key in args)
+            ) {
+              if (operation === 'upsert')
+                throw new DependencyError(
+                  'DEPENDENCY_UNSUPPORTED_WRITER',
+                  'Stage-changing upserts must use a ticket transition',
+                );
               const row = args as Record<string, unknown>;
               const input = dependencyInput as Record<string, unknown> | undefined;
-              const actor = getContextOrNull()?.actor;
-              result = await dependencyTicketWrite(zeroDependencySql(tx), String(row.id), row,
-                { ...dependencyRequestMoveOptions(ctx.userID, input?.id === row.id ? input : undefined, actor === 'system' || actor === 'service'), workspaceId: ctx.workspaceId }, write);
+              const trusted = currentDependencyMoveOptions();
+              result = await dependencyTicketWrite(
+                zeroDependencySql(tx),
+                String(row.id),
+                row,
+                {
+                  ...dependencyRequestMoveOptions(
+                    ctx.userID,
+                    input?.id === row.id ? input : undefined,
+                    trusted?.automation === true &&
+                      trusted.actorId === ctx.userID &&
+                      (!trusted.workspaceId || trusted.workspaceId === ctx.workspaceId),
+                  ),
+                  workspaceId: ctx.workspaceId,
+                },
+                write,
+              );
             } else {
               result = await write();
             }
@@ -197,13 +247,13 @@ function wrapMutateWithACL(
               args,
               tx,
               ctx,
-              previousValue
+              previousValue,
             );
 
             return result;
           };
-        }
+        },
       });
-    }
+    },
   }) as Transaction<Schema>['mutate'];
 }

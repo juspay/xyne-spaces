@@ -45,12 +45,14 @@ configured strength: board policy can harden it.
 From `apps/dashboard`:
 
 - `pnpm typecheck`
-- `pnpm exec vitest run src/services/dependencies/__tests__ src/components/Tickets/Dependencies/Dependencies.test.tsx src/components/Tickets/CalendarView/dateGrouping.test.ts --maxWorkers=1`
+- `pnpm exec vitest run src/services/dependencies/__tests__ src/components/Tickets/Dependencies/Dependencies.test.tsx src/components/Tickets/CalendarView/dateGrouping.test.ts src/components/Tickets/CalendarView/CalendarView/CalendarView.test.tsx --maxWorkers=1`
 
 The focused tests cover batching, serial chunking, reference counts,
 invalidation, abort/rejoin, failure cache clearing, isolated stores, REST
-payloads, static privacy rendering and Created/ETA grouping. React components
-are rendered statically, not exercised in a browser. Store isolation tests do
+payloads, static privacy rendering and Created/ETA grouping. Dependency components
+are rendered statically. The No ETA tray has a mounted jsdom contract test with
+mocked auth, preferences, badges and date views; it proves collapse/expand/open
+behavior and feature/Created-mode hiding, not browser or application acceptance. Store isolation tests do
 not prove live application authorization, hook StrictMode behavior or grant
 revocation.
 
@@ -62,6 +64,13 @@ original Vitest configuration. They were not suppressed or fixed in this feature
 change. Full repository lint and browser acceptance are separate outstanding
 checks.
 
+## Reapplied calendar continuation
+
+ETA mode now includes a collapsed No ETA tray. It preserves access to absent or
+invalid-date tickets and their ordinary open action; epoch zero stays a dated
+ticket. Created mode and feature-off behavior omit the tray. No ticket dates,
+shared saved views, or authorization rules are changed.
+
 ## Still required before release
 
 - Stage-move reason/admin-override dialogs and option propagation through every
@@ -69,7 +78,7 @@ checks.
 - Board policy settings, dependency filters, related-ticket highlighting and
   specialized activity rendering.
 - Merge/cancellation/deletion lifecycle behavior, notifications, risk watcher,
-  Jira/export/MCP compatibility and bounded server reads.
+  Jira/export/MCP compatibility and production-shaped graph-bound acceptance.
 - Actual application authorization/revocation, mobile/desktop interaction,
   keyboard/focus, sync and end-to-end concurrency acceptance.
 

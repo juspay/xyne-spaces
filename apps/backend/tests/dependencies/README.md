@@ -36,11 +36,19 @@ The private audit migration preserves historical CHILD override authors and reas
 
 Required flag evaluation uses OpenFeature details. Errors and default fallbacks are not explicit permission to disable enforcement. Other flag consumers retain their existing fallback behavior.
 
+## Reapplied continuation checkpoint
+
+- Dependency errors carry only gate counts and live admin eligibility through Zero ApplicationError details. Nested override intent survives the shared encryption contract and registered ticket update validators; malformed/ambiguous intent is refused. This does not establish all-writer UI propagation.
+- BLOCKS and CHILD author/reason values are cleared from mapping stamps; audit text remains private. Automation audit reasons are exactly `automation`; service/system identity and data.updatedBy do not establish automation provenance.
+- Cycle validation walks the incident unsatisfied component in 200-ID frontiers. Graph/context reads fail closed beyond 10,000 nodes or 20,000 rows, and empty explicit selections never scan the workspace. Prisma updateMany refuses more than 100 targets; this is not final-state bulk acceptance.
+- Zero board policy changes recheck live administration before creator/project shortcuts. Prisma board policy enforcement and real grant-revocation acceptance remain outstanding.
+- Isolated Prisma rollback tests use the existing SQL adapter, not new raw-query calls. The raw SQL guard is unchanged.
+
 ## Remaining release requirements
 
 - audit and cover every writer, including approval execution, REST and SDK options, nested Prisma writes, raw SQL, bulk writes and integrations
 - prove real Prisma and Zero authorization, live revocation, board-administrator grant scope and concurrent edits
-- bound workspace graph scans and evaluate bulk moves against their atomic final state
+- validate graph bounds against production-shaped data and evaluate bulk moves against their atomic final state
 - finish richer transition and ETA context, merge repointing, cancellation and deletion behavior, idempotent notifications and risk watching
 - complete policy settings, gate dialogs, activity rendering, filters, highlighting and shared calendar saved-view definitions; the dashboard dependency editor, shared badges and Created/ETA grouping now have focused tests, not browser acceptance
 - finish Jira mapping, export and MCP compatibility

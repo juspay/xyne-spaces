@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { format } from 'date-fns';
 import type { Ticket } from '@xyne/shared';
-import { groupTicketsByDate } from './dateGrouping';
+import { groupTicketsByDate, ticketsWithoutEta } from './dateGrouping';
 const createdAt = new Date(2026, 10, 27, 9).getTime();
 const eta = new Date(2026, 11, 4, 15).getTime();
 // These tests exercise only date grouping, not ticket validation or application ACLs.
@@ -32,5 +32,18 @@ describe('calendar Created / ETA grouping', () => {
     expect(
       groupTicketsByDate([ticket('epoch', 0)], 'eta').has(format(new Date(0), 'yyyy-MM-dd')),
     ).toBe(true);
+  });
+});
+
+describe('No ETA tray partition', () => {
+  it('keeps absent and invalid dates reachable, without duplicating epoch zero', () => {
+    const undated = ticket('undated', null);
+    const invalid = ticket('invalid', NaN);
+    const epoch = ticket('epoch', 0);
+    expect(ticketsWithoutEta([undated, invalid, epoch, ticket('dated')])).toEqual([
+      undated,
+      invalid,
+    ]);
+    expect(undated.eta).toBeNull();
   });
 });

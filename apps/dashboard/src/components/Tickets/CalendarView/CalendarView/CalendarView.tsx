@@ -1,7 +1,8 @@
 import { useTicketDependenciesEnabled } from '../../../../hooks/useDependencyState';
 import { useAuth } from '../../../../hooks/useAuth';
 import { setUserPreference, useUserPreference } from '../../../../machines/userPreferencesMachine';
-import type { TicketCalendarDateMode } from '../dateGrouping';
+import { ticketsWithoutEta, type TicketCalendarDateMode } from '../dateGrouping';
+import { CompactTicketBadge } from '../CompactTicketBadge';
 import { useState } from 'react';
 import { addDays, addWeeks, addMonths, subDays, subWeeks, subMonths } from 'date-fns';
 import type { Ticket } from '@xyne/shared';
@@ -20,6 +21,7 @@ export function CalendarView({ tickets, viewKey = 'default', onTicketClick }: Ca
     enabled && modes[preferenceKey] === 'eta' ? 'eta' : 'created';
   const changeDateMode = (mode: TicketCalendarDateMode) =>
     setUserPreference('ticketCalendarDateModes', { ...modes, [preferenceKey]: mode });
+  const undatedTickets = dateMode === 'eta' ? ticketsWithoutEta(tickets) : [];
   const [currentDate, setCurrentDate] = useState(new Date());
   const [viewMode, setViewMode] = useState<CalendarViewMode>('month');
 
@@ -65,9 +67,21 @@ export function CalendarView({ tickets, viewKey = 'default', onTicketClick }: Ca
       />
 
       {dateMode === 'eta' && (
-        <p className='border-b border-border px-6 py-2 text-xs text-muted-foreground'>
-          Showing ticket ETAs. Tickets without an ETA are not shown.
-        </p>
+        <details className='border-b border-border px-6 py-2'>
+          <summary className='cursor-pointer text-sm'>No ETA ({undatedTickets.length})</summary>
+          <div className='grid max-h-60 grid-cols-1 gap-2 overflow-y-auto py-2 sm:grid-cols-2 lg:grid-cols-3'>
+            {undatedTickets.map(ticket => (
+              <CompactTicketBadge
+                key={ticket.id}
+                ticket={ticket}
+                onClick={() => handleTicketClick(ticket)}
+              />
+            ))}
+          </div>
+          {!undatedTickets.length && (
+            <p className='text-xs text-muted-foreground'>All tickets have an ETA.</p>
+          )}
+        </details>
       )}
       {viewMode === 'month' && (
         <MonthView
