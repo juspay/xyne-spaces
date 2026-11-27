@@ -74,6 +74,7 @@ export type SpacesAuthCaller =
   | "artifact-app-storage"
   | "conversation-artifacts"
   | "start-run"
+  | "git-scope"
   | "unknown";
 
 /**

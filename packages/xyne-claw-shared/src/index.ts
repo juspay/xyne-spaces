@@ -13,7 +13,7 @@ export { OPTIMIZATIONS, OPTIMIZATION_KEYS, OPTIMIZATION_GROUPS, OPTIMIZATION_TIE
 export { PRESENTATION_TOOL_SOURCES, PRESENTATION_CATALOG_SOURCE, isPresentationToolSource } from "./tools/presentation.js";
 export { classifyToolRisk, riskAtOrBelow, TOOL_RISK_LADDER, type ToolRiskLevel } from "./tools/tool-risk.js";
 export { openPaletteMode, openPaletteModeFromTools, openPaletteAdmits, type OpenPaletteMode } from "./tools/open-palette.js";
-export { getSandboxSession, probeSession, cleanupSdlcSandboxCredentialsForContext, buildSandboxStoreKey, sandboxConversationIdFromMeta, sandboxContentType, DEFAULT_REPO_CONFIGS, SBX_GIT, type RepoSetupConfig, type SetupStep, buildEffectiveRepoConfigs, getCachedRepoConfigs, getRepoConfig, getRepoConfigs, getRepoConfigsFor, repoConfigsForWorkspace, setRepoConfigLoader, type RepoConfigLoader, type RepoConfigMap, type RepoConfigOverride, findSandboxKeys, normalizeRepoUrl, rotationVariantNames } from "./tools/sandbox/index.js";
+export { getSandboxSession, probeSession, cleanupSdlcSandboxCredentialsForContext, buildSandboxStoreKey, sandboxConversationIdFromMeta, sandboxContentType, DEFAULT_REPO_CONFIGS, SBX_GIT, type RepoSetupConfig, type SetupStep, buildEffectiveRepoConfigs, getCachedRepoConfigs, getRepoConfig, getRepoConfigs, getRepoConfigsFor, repoConfigsForWorkspace, setRepoConfigLoader, type RepoConfigLoader, type RepoConfigMap, type RepoConfigOverride, findSandboxKeys, isSameTemplateFamily, normalizeRepoUrl, rotationVariantNames } from "./tools/sandbox/index.js";
 export type { Citation, CitationIconKey } from "./types/citation.js";
 export { citationIconUrl, citationIconKey, iconUrlForKey, toolIconKey, CITATION_ICONS } from "./types/citation.js";
 export type { ClassifierExchange } from "./types/classifier-exchange.js";
@@ -98,6 +98,8 @@ export type { PrProvider, PrStatus, PrCardInput, PrIdentity } from "./flow/pr-fl
 export { todoTools, todoWriteTool, todoReadTool, getPlan, clearPlan, PLAN_TOOL_SLUGS, isPlanToolSlug } from "./tools/todo/todo-tools.js";
 export { isReadOnlyJob } from "./tools/sandbox/repo-configs.js";
 export * from "./sdlc/index.js";
+// The git-gateway's signed repository list: signer, runtime and gateway share one format.
+export * from "./git-scope/index.js";
 // The sandbox_unavailable wire contract — shared by the emitting tool, the
 // xyne-claw runtime, and claw-auth run-recovery so the token can't drift.
 export {
