@@ -1,4 +1,4 @@
-import express, { Router, type NextFunction, type Request, type Response } from 'express';
+import { Router, type NextFunction, type Request, type Response } from 'express';
 import { AccessType } from '@xyne/shared';
 import { z } from 'zod';
 import { db } from '@/database/client';
@@ -18,7 +18,6 @@ import {
 import { logger } from '@/utils/logger';
 
 const router = Router();
-router.use(express.json());
 
 const supportAdminAuth = authorize('SUPPORT', AccessType.ADMIN);
 const supportReadAuth = authorize('SUPPORT', AccessType.READ);
