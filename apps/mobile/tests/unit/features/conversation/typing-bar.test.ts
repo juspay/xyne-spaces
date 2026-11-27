@@ -4,7 +4,7 @@ import { describe, it } from 'node:test';
 import { getChatComposerBottomPadding } from '@/src/features/chat/v2/chatKeyboardConfig';
 import {
   TYPING_BAR_DICTATING_WIDTH as DICTATING_WIDTH,
-  TYPING_BAR_FIELD_HEIGHT as FIELD_MIN_HEIGHT,
+  TYPING_BAR_CARD_HEIGHT as FIELD_MIN_HEIGHT,
   TYPING_BAR_FIELD_PADDING_LEFT as TEXT_LEFT,
   TYPING_BAR_FIELD_PADDING_RIGHT as SHELL_RIGHT,
   TYPING_BAR_PADDING_TOP as BAR_TOP_PADDING,
