@@ -98,6 +98,8 @@ export type { PrProvider, PrStatus, PrCardInput, PrIdentity } from "./flow/pr-fl
 export { todoTools, todoWriteTool, todoReadTool, getPlan, clearPlan, PLAN_TOOL_SLUGS, isPlanToolSlug } from "./tools/todo/todo-tools.js";
 export { isReadOnlyJob } from "./tools/sandbox/repo-configs.js";
 export * from "./sdlc/index.js";
+// The git-gateway's signed repository list: signer, runtime and gateway share one format.
+export * from "./git-scope/index.js";
 // The sandbox_unavailable wire contract — shared by the emitting tool, the
 // xyne-claw runtime, and claw-auth run-recovery so the token can't drift.
 export {
