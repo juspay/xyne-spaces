@@ -10,6 +10,7 @@ import {
   isSupportedEntityType,
   normalizeValueForOperator,
   isValidFormEntityType,
+  MAX_QUERY_LIMIT,
 } from './types';
 import { PrismaFieldType, getFieldMetadata, getModelFields, hasField } from './genericFieldRegistry';
 import { resolveFieldDefinitionsByIds } from '@/utils/fieldDefinition';
@@ -19,8 +20,23 @@ import {
   findFormEntityValues,
 } from '@/database/repositories/formEntityValueRepository';
 import { formEntityValueTextHash } from '@/utils/formEntityValueHash';
+import { logger } from '@/utils/logger';
 
-const MAX_QUERY_LIMIT = 10000;
+/** Most entity ids a custom-field filter may resolve to; well under Postgres's bind limit. */
+const MAX_CUSTOM_FILTER_IDS = 20000;
+
+/** A query refused for a reason the caller can fix. Its message is safe to return. */
+export class QueryRejectedError extends Error {}
+
+/** Returned to the caller instead of the raw error, which can carry Prisma's view of the schema. */
+function executionFailure(code: string, error: unknown, startTime: number): QueryResult {
+  const details = { executionTimeMs: Date.now() - startTime };
+  if (error instanceof QueryRejectedError) {
+    return { success: false, error: { code, message: error.message, details } };
+  }
+  logger.error('[analytics-query] execution failed', { code, error });
+  return { success: false, error: { code, message: 'Query execution failed', details } };
+}
 
 type TypedFilterTarget =
   | { column: 'textValue' | 'plainValue'; value: string }
@@ -122,12 +138,17 @@ async function withTimeout<T>(
   promise: Promise<T>,
   timeoutMs: number = QUERY_TIMEOUT
 ): Promise<T> {
-  return Promise.race([
-    promise,
-    new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error('Query timeout')), timeoutMs)
-    ),
-  ]);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error('Query timeout')), timeoutMs);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export class GenericQueryBuilder {
@@ -258,13 +279,10 @@ export class GenericQueryBuilder {
   private getModel(entityType: string) {
     const modelMap: Record<string, any> = {
       TICKET: this.prisma.ticket,
-      SUB_TICKET: this.prisma.subTicket,
-      RELEASE_ENV_FORM: this.prisma.releaseChangeType,
-      RELEASE_MIGRATION_FORM: this.prisma.releaseChangeType,
       USER_WORKLOAD_MAPPING: this.prisma.userWorkloadMapping,
     };
 
-    const model = modelMap[entityType];
+    const model = Object.prototype.hasOwnProperty.call(modelMap, entityType) ? modelMap[entityType] : undefined;
     if (!model) {
       throw new Error(`Unsupported entity type: ${entityType}`);
     }
@@ -278,21 +296,42 @@ export class GenericQueryBuilder {
     const startTime = Date.now();
 
     try {
+      this.assertScalarFields(query);
+
       if (query.aggregations && query.aggregations.length > 0) {
-        return this.executeAggregation(query);
+        return await this.executeAggregation(query);
       }
 
-      return this.executeFindMany(query);
+      return await this.executeFindMany(query);
     } catch (error) {
-      const executionTime = Date.now() - startTime;
-      return {
-        success: false,
-        error: {
-          code: 'EXECUTION_ERROR',
-          message: error instanceof Error ? error.message : 'Unknown error',
-          details: { executionTimeMs: executionTime },
-        },
-      };
+      return executionFailure('EXECUTION_ERROR', error, startTime);
+    }
+  }
+
+  /**
+   * Every non-custom field that becomes a Prisma `select`, `orderBy`, `by` or aggregate key
+   * must be a scalar column of the queried model. The tenant ACL only filters the top-level
+   * model, so a relation name in any of these would read related rows unfiltered.
+   *
+   * validateQuery already enforces this; it is repeated here because this is the last point
+   * before the request reaches Prisma.
+   */
+  private assertScalarFields(query: GenericQuery): void {
+    if (!isSupportedEntityType(query.entityType)) {
+      throw new Error(`Unsupported entity type: ${query.entityType}`);
+    }
+    const modelName = getPrismaModelName(query.entityType);
+    const names = [
+      ...(query.select ?? []),
+      ...(query.groupBy ?? []),
+      ...(query.orderBy ?? []).map(o => o.field),
+      ...(query.aggregations ?? []).map(a => a.field),
+    ];
+    for (const name of names) {
+      if (name.startsWith('custom.')) continue;
+      if (!hasField(modelName, name)) {
+        throw new Error(`Field '${name}' is not a column of ${modelName}`);
+      }
     }
   }
 
@@ -415,8 +454,15 @@ export class GenericQueryBuilder {
       findFormEntityValueKeys(this.prisma, {
         where: formEntityWhere,
         distinct: ['entityId'],
+        // Every id ends up in an `id IN (...)` list, so the list is bounded.
+        take: MAX_CUSTOM_FILTER_IDS + 1,
       })
     );
+    if (matchingValues.length > MAX_CUSTOM_FILTER_IDS) {
+      throw new QueryRejectedError(
+        `The custom-field filter matches more than ${MAX_CUSTOM_FILTER_IDS} records; narrow it`,
+      );
+    }
 
     return matchingValues.map(v => v.entityId);
   }
@@ -613,10 +659,12 @@ export class GenericQueryBuilder {
 
       // Handle system field aggregations via Prisma
       if (systemAggregations.length > 0) {
-        const aggregateResult = await model.aggregate({
-          where,
-          ...this.buildAggregateOperations(systemAggregations),
-        });
+        const aggregateResult = await withTimeout(
+          model.aggregate({
+            where,
+            ...this.buildAggregateOperations(systemAggregations),
+          }),
+        ) as Record<string, any>;
 
         systemAggregations.forEach(agg => {
           const alias = agg.alias || `${agg.function.toLowerCase()}_${agg.field}`;
@@ -645,15 +693,7 @@ export class GenericQueryBuilder {
         },
       };
     } catch (error) {
-      const executionTime = Date.now() - startTime;
-      return {
-        success: false,
-        error: {
-          code: 'AGGREGATION_ERROR',
-          message: error instanceof Error ? error.message : 'Unknown error',
-          details: { executionTimeMs: executionTime },
-        },
-      };
+      return executionFailure('AGGREGATION_ERROR', error, startTime);
     }
   }
 
@@ -668,16 +708,15 @@ export class GenericQueryBuilder {
     const model = this.getModel(entityType);
     
     // Get all matching entity IDs
-    const entities = await model.findMany({
-      where,
-      select: { id: true },
-    });
+    const entities = await withTimeout(
+      model.findMany({
+        where,
+        select: { id: true },
+        take: MAX_QUERY_LIMIT,
+      }),
+    ) as { id: string }[];
 
-    let entityIds = entities.map((e: any) => e.id);
-    
-    if (entityIds.length > MAX_QUERY_LIMIT) {
-      entityIds = entityIds.slice(0, MAX_QUERY_LIMIT);
-    }
+    const entityIds = entities.map(e => e.id);
     
     if (entityIds.length === 0) {
       // Return 0 for all aggregations
@@ -691,19 +730,23 @@ export class GenericQueryBuilder {
 
     // Get custom field values for all entities
     const customFieldIds = aggregations.map(agg => agg.field.replace('custom.', ''));
-    const customFieldValues = await findFormEntityValues(this.prisma, {
-      where: {
-        entityId: { in: entityIds },
-        entityType,
-        fieldId: { in: customFieldIds },
-      },
-    });
+    const customFieldValues = await withTimeout(
+      findFormEntityValues(this.prisma, {
+        where: {
+          entityId: { in: entityIds },
+          entityType,
+          fieldId: { in: customFieldIds },
+        },
+      }),
+    );
 
     // Fetch field types to know how to interpret values
-    const formFields = await this.prisma.formFields.findMany({
-      where: { id: { in: customFieldIds } },
-      select: { id: true, fieldType: true },
-    });
+    const formFields = await withTimeout(
+      this.prisma.formFields.findMany({
+        where: { id: { in: customFieldIds } },
+        select: { id: true, fieldType: true },
+      }),
+    );
     const fieldTypeMap = new Map(formFields.map(f => [f.id, f.fieldType]));
 
     // Group values by field
@@ -797,11 +840,13 @@ export class GenericQueryBuilder {
       // Only use native Prisma groupBy if no custom fields AND no aggregations
       if (!hasCustomGroupBy && customAggregations.length === 0 && !query.groupBy?.some(f => this.isDateField(f, query.entityType))) {
         // All system fields, no date fields - use native Prisma
-        const groupByResult = await model.groupBy({
-          by: groupByFields,
-          where,
-          ...this.buildAggregateOperations(systemAggregations),
-        });
+        const groupByResult = await withTimeout(
+          model.groupBy({
+            by: groupByFields,
+            where,
+            ...this.buildAggregateOperations(systemAggregations),
+          }),
+        ) as Record<string, any>[];
 
         const formatted = groupByResult.map((row: any) => {
           const formattedRow: Record<string, unknown> = {};
@@ -837,17 +882,16 @@ export class GenericQueryBuilder {
       const systemGroupByFields = groupByFields.filter(f => !f.startsWith('custom.'));
       
       // Single query to get all entity data (fixes double-fetch)
-      let entityData = await model.findMany({
-        where,
-        select: {
-          id: true,
-          ...systemGroupByFields.reduce((acc, field) => ({ ...acc, [field]: true }), {}),
-        },
-      });
-
-      if (entityData.length > MAX_QUERY_LIMIT) {
-        entityData = entityData.slice(0, MAX_QUERY_LIMIT);
-      }
+      const entityData = await withTimeout(
+        model.findMany({
+          where,
+          select: {
+            id: true,
+            ...Object.fromEntries(systemGroupByFields.map(field => [field, true])),
+          },
+          take: MAX_QUERY_LIMIT,
+        }),
+      ) as Record<string, unknown>[];
 
       if (entityData.length === 0) {
         return {
@@ -872,13 +916,15 @@ export class GenericQueryBuilder {
       const customFieldValuesByField = new Map<string, Map<string, any>>();
       
       if (allCustomFieldIds.length > 0) {
-        const customFieldValues = await findFormEntityValues(this.prisma, {
-          where: {
-            entityId: { in: entityData.map((e: any) => e.id) },
-            entityType: query.entityType,
-            fieldId: { in: allCustomFieldIds },
-          },
-        });
+        const customFieldValues = await withTimeout(
+          findFormEntityValues(this.prisma, {
+            where: {
+              entityId: { in: entityData.map((e: any) => e.id) },
+              entityType: query.entityType,
+              fieldId: { in: allCustomFieldIds },
+            },
+          }),
+        );
 
         // Preprocess: O(n) instead of O(n * aggregations)
         customFieldValues.forEach(cf => {
@@ -1054,22 +1100,31 @@ export class GenericQueryBuilder {
         },
       };
     } catch (error) {
-      const executionTime = Date.now() - startTime;
-      return {
-        success: false,
-        error: {
-          code: 'GROUP_BY_AGGREGATION_ERROR',
-          message: error instanceof Error ? error.message : 'Unknown error',
-          details: { executionTimeMs: executionTime },
-        },
-      };
+      return executionFailure('GROUP_BY_AGGREGATION_ERROR', error, startTime);
     }
+  }
+
+  /**
+   * The full where for a query. Every read of the entity's model goes through here.
+   */
+  private async buildWhere(
+    query: GenericQuery,
+    entityIds: string[] = []
+  ): Promise<Record<string, unknown>> {
+    if (!isSupportedEntityType(query.entityType)) {
+      throw new Error(`Unsupported entity type: ${query.entityType}`);
+    }
+    // projectId only filters models that have the column (also rejected in validateQuery).
+    const modelName = getPrismaModelName(query.entityType);
+    const scopedQuery = hasField(modelName, 'projectId') ? query : { ...query, projectId: undefined };
+
+    return this.buildFilterWhere(scopedQuery, entityIds);
   }
 
   /**
    * Build Prisma where clause from filters
    */
-  private async buildWhere(
+  private async buildFilterWhere(
     query: GenericQuery,
     entityIds: string[] = []
   ): Promise<Record<string, unknown>> {
