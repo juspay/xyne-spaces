@@ -321,10 +321,10 @@ export const TYPING_BAR_EMOJI_KEYBOARD_WAIT_MS = 350;
 export const TYPING_BAR_TOOLS_SWAP_SCALE = 0.96;
 
 /**
- * How long the edit strip takes to settle into the typing bar (the bar's
- * height eases over 160ms), before the list scrolls its newest message above it.
+ * How long the typing bar takes to settle after it grows (its height eases
+ * over 160ms), before the list scrolls its newest message above it.
  */
-export const EDIT_STRIP_SETTLE_MS = 220;
+export const TYPING_BAR_GROWTH_SETTLE_MS = 220;
 
 /*
  * Typing bar: edit / also send / attachments, in the room's own language:
@@ -605,6 +605,8 @@ export const THREAD_CARD_SETTLE_SPRING = { duration: 380, dampingRatio: 0.9 } as
 /** Grown from a strip: how long the strip takes to grow into the card, and to shrink back. */
 export const THREAD_CARD_MORPH_ENTER_MS = 460;
 export const THREAD_CARD_MORPH_EXIT_MS = 380;
+/** The room goes to its end once more after a card leaves it: the longer of the card's two exits. */
+export const ROOM_RETURN_SETTLE_MS = Math.max(THREAD_CARD_EXIT_MS, THREAD_CARD_MORPH_EXIT_MS);
 /**
  * Morph: the shrink eases in and out, so it neither snaps off the card nor
  * crawls the last stretch into the strip.

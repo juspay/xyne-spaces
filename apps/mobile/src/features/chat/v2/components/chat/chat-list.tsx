@@ -267,6 +267,8 @@ export type ChatListHandle = {
   getReadCursorConversationId: () => string | undefined;
   scrollToBottom: () => void;
   scrollToEnd: (params?: { animated?: boolean }) => Promise<void>;
+  /** Whether the list rests at its newest messages, within the distance it keeps its tail from. */
+  isAtEnd: () => boolean;
   hasPaintedConversation: (conversationId: string) => boolean;
   registerLocalSend: (conversationId: string) => void;
 };
@@ -1152,18 +1154,24 @@ export const ChatList = forwardRef<ChatListHandle, ChatListProps>(function ChatL
   const hasPaintedConversation = useCallback((conversationId: string): boolean => {
     return displayRowIndexesRef.current.byConversationId.has(conversationId);
   }, []);
+  const isAtEnd = useCallback(
+    (): boolean => scrollStateRef.current.distanceFromBottom <= NEAR_END_AUTO_SCROLL_THRESHOLD,
+    [],
+  );
   useImperativeHandle(
     ref,
     () => ({
       getReadCursorConversationId,
       scrollToBottom,
       scrollToEnd,
+      isAtEnd,
       hasPaintedConversation,
       registerLocalSend,
     }),
     [
       getReadCursorConversationId,
       hasPaintedConversation,
+      isAtEnd,
       registerLocalSend,
       scrollToBottom,
       scrollToEnd,

@@ -107,11 +107,7 @@ export const ConversationChannelScreen = (): ReactElement => {
     [isDraggingPastNewest],
   );
 
-  const handleListScrolledUpChange = useRoomKeepsTail(
-    editingTarget !== null,
-    chatListRef,
-    handleScrolledUpChange,
-  );
+  const handleComposerLayout = useRoomKeepsTail(chatListRef, composerGeometry.onComposerLayout);
 
   // The emoji and forward views close without the hold menu mounted, so the
   // held row is released here, once the sheet is finally gone.
@@ -193,7 +189,7 @@ export const ConversationChannelScreen = (): ReactElement => {
                     keyboardOffset={keyboardGeometry.listOffset}
                     onMessagePress={handleMessagePress}
                     onMessageLongPress={handleMessageLongPress}
-                    onScrolledUpChange={handleListScrolledUpChange}
+                    onScrolledUpChange={handleScrolledUpChange}
                     onDragPastNewestChange={handleDragPastNewestChange}
                     onFirstLayout={handleChatListFirstLayout}
                     onInitialLoadComplete={handleChatListInitialLoadComplete}
@@ -218,7 +214,7 @@ export const ConversationChannelScreen = (): ReactElement => {
         disabled={isComposerDisabled}
         onComposerHeight={composerGeometry.onComposerHeight}
         keyboardGeometry={keyboardGeometry}
-        onComposerLayout={composerGeometry.onComposerLayout}
+        onComposerLayout={handleComposerLayout}
         intrinsicContentHeight
         onShellReady={handleComposerShellReady}
         shellReadyKey={screenOpenIdentityKey}
