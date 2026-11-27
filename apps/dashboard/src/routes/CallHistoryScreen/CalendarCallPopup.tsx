@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Download,
   MessageSquare,
@@ -159,6 +160,7 @@ const CalendarCallPopup = ({
   onDeleteClick,
   onHideClick,
 }: CalendarCallPopupProps): React.ReactElement => {
+  const navigate = useNavigate();
   const currentCallExternalId = useSelector(roomActor, state => state.context.externalId);
   const isRoomActive = useSelector(
     roomActor,
@@ -435,6 +437,21 @@ const CalendarCallPopup = ({
               Join
             </a>
           )}
+          {/* The meeting's own page: shows its Google Meet transcript once Xyne has fetched it. */}
+          <button
+            type='button'
+            onClick={() => {
+              onClose();
+              void navigate(
+                `/calls/${encodeURIComponent(call.externalId)}/detail${call.transcript ? '?lang=original' : ''}`,
+              );
+            }}
+            data-track-category='CALLS'
+            data-track-name='popup-view-external'
+            className='flex items-center gap-2 text-sm text-foreground border border-border rounded-lg px-3 py-1.5 hover:bg-muted transition-colors cursor-pointer'
+          >
+            View
+          </button>
           {htmlLink && (
             <a
               href={htmlLink}

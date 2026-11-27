@@ -7,7 +7,7 @@ import { TRANSIT_PROXY_HEADER, parseTransitProxyHeader } from './authenticator';
  * came from must agree. The ingress proxy sets `x-xyne-transit-proxy: ingress;<version>` on each
  * request it forwards and drops any the caller sent.
  *
- * - TRANSIT_PROXY_INGRESS_ENABLED on (the proxy is deployed): every Xyne Apps call must have
+ * - TRANSIT_PROXY_ENABLED on (the proxy is deployed): every Xyne Apps call must have
  *   come through it. One without the header reached the backend some other way: 403
  *   TRANSIT_PROXY_REQUIRED, so nothing falls back to plaintext.
  * - Off (the default, no proxy): a request with the header is refused, 503
@@ -21,7 +21,7 @@ import { TRANSIT_PROXY_HEADER, parseTransitProxyHeader } from './authenticator';
  */
 export function requireTransitProxyIngress(req: Request, res: Response, next: NextFunction): void {
   const viaIngressProxy = parseTransitProxyHeader(req.headers[TRANSIT_PROXY_HEADER])?.role === 'ingress';
-  if (config.internal.transitProxyIngressEnabled === viaIngressProxy) {
+  if (config.internal.transitProxyEnabled === viaIngressProxy) {
     next();
     return;
   }
@@ -29,7 +29,7 @@ export function requireTransitProxyIngress(req: Request, res: Response, next: Ne
     res.status(503).json({
       error: 'Service Unavailable',
       code: 'TRANSIT_PROXY_NOT_ENABLED',
-      message: 'This backend is not set up for the transit proxy (TRANSIT_PROXY_INGRESS_ENABLED is off)',
+      message: 'This backend is not set up for the transit proxy (TRANSIT_PROXY_ENABLED is off)',
     });
     return;
   }

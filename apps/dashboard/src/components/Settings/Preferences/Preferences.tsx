@@ -118,6 +118,7 @@ import { SettingsSearchInput } from './SettingsSearchInput';
 import { SettingsSearchResults, settingsSearchOptionId } from './SettingsSearchResults';
 import type { PreferenceSection, PreferencesProps, NavItem } from '.';
 import { disconnectCalendar } from '../../../services/clients/calendarApi';
+import { useMeetTranscripts } from '../../../hooks/useMeetTranscripts';
 import { toast } from 'sonner';
 
 // ─── Constants ──────────────────────────────────────────────────────────────
@@ -585,6 +586,39 @@ const VoiceSection: FC<{ state: PreferencesState }> = ({ state }) => (
 
 // ─── Calls ──────────────────────────────────────────────────────────────────
 
+/**
+ * Google Meet's own transcript for the meetings I organise, fetched by Xyne (no bot
+ * joins). Opt-in, and hidden unless the feature is switched on.
+ */
+const MeetTranscriptsToggle: FC = () => {
+  const { available, meetTranscripts, setMeetTranscripts, error } = useMeetTranscripts();
+  if (!available) return null;
+  return (
+    <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
+      <div>
+        <p className='text-sm font-medium text-foreground'>Google Meet transcripts</p>
+        <p className='text-xs text-muted-foreground mt-0.5'>
+          For Google Meet meetings you organize, Xyne turns on Meet&apos;s transcription and adds
+          the transcript to the call afterwards. Everyone in the meeting sees that it is being
+          transcribed. If you connected your calendar before turning this on, disconnect and connect
+          it again to grant access.
+        </p>
+        {error && (
+          <p role='alert' className='text-xs text-destructive mt-1.5'>
+            {error}
+          </p>
+        )}
+      </div>
+      <Switch
+        id='meet-transcripts'
+        aria-label='Google Meet transcripts'
+        checked={meetTranscripts}
+        onCheckedChange={setMeetTranscripts}
+      />
+    </div>
+  );
+};
+
 const CallsSection: FC<{ state: PreferencesState }> = ({ state }) => {
   const [isDisconnecting, setIsDisconnecting] = useState(false);
   const {
@@ -713,6 +747,7 @@ const CallsSection: FC<{ state: PreferencesState }> = ({ state }) => {
           Disconnect to revoke access and reconnect with updated permissions.
         </p>
       </div>
+      <MeetTranscriptsToggle />
       <div className='flex items-center justify-between gap-4 p-3 rounded-lg border border-border bg-muted/30'>
         <div>
           <p className='text-sm font-medium text-foreground'>Disconnect Calendar</p>

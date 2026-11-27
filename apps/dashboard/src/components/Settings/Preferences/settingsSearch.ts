@@ -72,6 +72,12 @@ export const SETTINGS_INDEX: SettingsSearchEntry[] = [
   // Calls
   {
     section: 'calls',
+    label: 'Google Meet transcripts',
+    description: "Add Google Meet's transcript to meetings you organize",
+    keywords: ['gmeet', 'notes', 'notetaker', 'transcription', 'calendar'],
+  },
+  {
+    section: 'calls',
     label: 'Join with microphone turned off',
     keywords: ['mute', 'mic', 'audio'],
   },
