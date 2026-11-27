@@ -283,6 +283,9 @@ const envSchema = Joi.object({
   // Y-Sweet Configuration
   Y_SWEET_URL: Joi.string().default('http://localhost:8080'),
   Y_SWEET_SERVER_TOKEN: Joi.string().allow('').default(''),
+  // y-sweet's object prefix in GCS_CANVAS_BUCKET_NAME (its STORAGE_PREFIX, or the path of its
+  // gs:// store); docs are at <prefix>/<docId>/data.ysweet.
+  Y_SWEET_STORAGE_PREFIX: Joi.string().allow('').default(''),
   // LiteLLM Configuration for AI Agents
   LITELLM_BASE_URL: Joi.string().default(''),
   LITELLM_API_KEY: Joi.string().allow('').default(''),
@@ -1217,6 +1220,7 @@ export const config = {
   ysweet: {
     url: envVars.Y_SWEET_URL,
     serverToken: envVars.Y_SWEET_SERVER_TOKEN,
+    storagePrefix: envVars.Y_SWEET_STORAGE_PREFIX,
   },
   entityExtraction: {
     enabled: envVars.ENABLE_ENTITY_EXTRACTION,
