@@ -1,6 +1,7 @@
 import { isAgentInvocableBy } from "xyne-claw-shared";
 import { startRunInProcess } from "../../lib/start-run.js";
 import { createLogger } from "../../logger.js";
+import type { SpacesAuthContext } from "../../mcp/servers/xyne-spaces-client.js";
 import type { SpacesActor } from "./identity.js";
 import { rejectIdentityFields, stripIdentityFields } from "./schema.js";
 
@@ -11,6 +12,7 @@ export interface SpacesDispatchInput {
   agent: { slug: string; config: unknown };
   conversationId: string;
   body: Record<string, unknown>;
+  resolveSpacesAuth?: ((userId: string) => Promise<SpacesAuthContext | undefined>) | undefined;
 }
 
 export type SpacesDispatchResult =
@@ -50,6 +52,7 @@ export async function dispatchSpacesRun(input: SpacesDispatchInput): Promise<Spa
       wantsSse: false,
       authenticatedUserId: input.actor.userId,
       headerOrgId: input.actor.orgId,
+      ...(input.resolveSpacesAuth ? { resolveSpacesAuth: input.resolveSpacesAuth } : {}),
     },
     {},
   );
