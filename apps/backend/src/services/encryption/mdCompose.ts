@@ -1,92 +1,20 @@
-import { UnreadableString, initialMessageMdTemplate, parentMessageMdTemplate, repliesMdAddReplierTemplate } from '@xyne/shared';
-import type { ComposeRequest } from './compose';
+import { UnreadableString, type ComposeInputs, type ComposeTemplate } from '@xyne/shared';
 
-// Compose requests for the md columns built from stored values, shared by the Zero handlers and the Prisma writers.
+// Compose inputs from stored rows: the template is the only list of its inputs and of which are unreadable.
 
-/** A message row as read from the database: content and link_preview_md as stored. */
-export type StoredMessage = {
-  messageId: string;
-  conversationId: string;
-  workspaceId?: string | null;
-  senderId: string;
-  content: string;
-  msgType: string;
-  createdAt: number;
-  hasAttachment?: boolean;
-  edited?: boolean;
-  isDeleted?: boolean;
-  showInChannel?: boolean;
-  visibleTo?: string | null;
-  metadata?: unknown;
-  nudgeCount?: number | null;
-  isSent?: boolean;
-  reactions_md?: string | null;
-  link_preview_md?: string | null;
-  childConversationId?: string | null;
-};
-
+/** `value` as stored, sealed; null and undefined stay as they are. */
 export function seal(value: string | null | undefined): UnreadableString | null | undefined {
   return value === null || value === undefined ? value : UnreadableString.make(value);
 }
 
-/** `initial_message_md` for `message`; `current` is the stored value, so an equal result comes back unchanged. */
-export function initialMessageMdRequest(
-  message: StoredMessage,
-  current: string | null | undefined,
-): ComposeRequest<typeof initialMessageMdTemplate> {
-  return {
-    template: initialMessageMdTemplate,
-    inputs: {
-      messageId: message.messageId,
-      conversationId: message.conversationId,
-      workspaceId: message.workspaceId,
-      senderId: message.senderId,
-      content: UnreadableString.make(message.content),
-      msgType: message.msgType,
-      createdAt: message.createdAt,
-      hasAttachment: message.hasAttachment,
-      edited: message.edited,
-      isDeleted: message.isDeleted,
-      showInChannel: message.showInChannel,
-      visibleTo: message.visibleTo,
-      metadata: message.metadata,
-      nudgeCount: message.nudgeCount,
-      isSent: message.isSent,
-      reactions_md: message.reactions_md,
-      link_preview_md: seal(message.link_preview_md),
-      childConversationId: message.childConversationId,
-    },
-    current: seal(current),
-  };
-}
-
-/** `parent_message_md` for the parent `message`. */
-export function parentMessageMdRequest(
-  message: Pick<StoredMessage, 'messageId' | 'conversationId' | 'senderId' | 'content' | 'msgType' | 'createdAt'>,
-  current: string | null | undefined,
-): ComposeRequest<typeof parentMessageMdTemplate> {
-  return {
-    template: parentMessageMdTemplate,
-    inputs: {
-      messageId: message.messageId,
-      conversationId: message.conversationId,
-      senderId: message.senderId,
-      content: UnreadableString.make(message.content),
-      msgType: message.msgType,
-      createdAt: message.createdAt,
-    },
-    current: seal(current),
-  };
-}
-
-/** The stored `replies_md` with `replierId` added as the latest replier. */
-export function repliesMdAddReplierRequest(
-  repliesMd: string | null | undefined,
-  replierId: string,
-): ComposeRequest<typeof repliesMdAddReplierTemplate> {
-  return {
-    template: repliesMdAddReplierTemplate,
-    inputs: { repliesMd: seal(repliesMd) ?? null, replierId },
-    current: seal(repliesMd),
-  };
+/** `template`'s inputs read from `row` (fields it lacks left out), the template's unreadable fields sealed. */
+export function storedInputs<T extends ComposeTemplate>(template: T, row: object): ComposeInputs<T> {
+  const values = row as Record<string, unknown>;
+  const inputs: Record<string, unknown> = {};
+  for (const field of Object.keys(template.inputs.shape)) {
+    const value = values[field];
+    if (value === undefined) continue;
+    inputs[field] = template.unreadableFields.includes(field) ? seal(value as string | null) : value;
+  }
+  return inputs as ComposeInputs<T>;
 }

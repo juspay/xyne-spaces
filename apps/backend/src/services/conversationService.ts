@@ -20,7 +20,7 @@ import { keepMentionsWithin } from '@/utils/mentionParser';
 import { ConversationParticipantRepository } from '@/database/repositories/conversationParticipantRepository';
 import { UserRepository } from '@/database/repositories/users';
 import { Conversation, Message } from '@prisma/client';
-import { ConversationParticipation, MessageType, AttachmentEntityType, ChannelScopeType, ChannelRole, VespaInsertionStatus, VespaOperationType, WorkspaceRole, buildInitialMessageMd, isCiphertextValue } from '@xyne/shared';
+import { ConversationParticipation, MessageType, AttachmentEntityType, ChannelScopeType, ChannelRole, VespaInsertionStatus, VespaOperationType, WorkspaceRole } from '@xyne/shared';
 import { uploadFiles, UploadedFileResult } from '@/services/fileUploadService';
 import { websocketService } from './websocketService';
 import { redisService } from './redisService';
@@ -468,10 +468,7 @@ export class ConversationService {
       isSent: true,
       nudgeCount: 0,
     };
-    // Content held encrypted (a bot's post through the transit proxy): the md is composed, not built around the ciphertext.
-    const initialMessageMd = isCiphertextValue(initialMessage.content)
-      ? await messageMetadataService.composeNewInitialMessageMd(initialMessage, channel.workspaceId)
-      : buildInitialMessageMd(initialMessage);
+    const initialMessageMd = await messageMetadataService.composeNewInitialMessageMd(initialMessage, channel.workspaceId);
 
     const conversationData: CreateConversationInput = {
       conversationId,
@@ -824,19 +821,25 @@ export class ConversationService {
 
     // Create child conversation if replyBroadcast is true (similar to mutator logic)
     if (replyBroadcast && childConversationId) {
-      // Create a new conversation for this message in the channel
+      // Both mds composed first, so the child is created complete in one insert.
+      const [initialMd, parentMd] = await Promise.all([
+        messageMetadataService.composeNewInitialMessageMd(
+          { ...message, createdAt: message.createdAt.getTime() },
+          conversation.workspaceId,
+        ),
+        messageMetadataService.composeNewParentMessageMd(conversation.initialMessageId, conversation.workspaceId),
+      ]);
       await this.conversationRepository.create({
         conversationId: childConversationId,
         channelId: conversation.channelId,
         createdBy: userId,
         createdAt: message.createdAt,
         initialMessageId: message.messageId,
+        initial_message_md: initialMd,
         parentMessageId: conversation.initialMessageId,
+        parent_message_md: parentMd,
         pinned: false,
       });
-      // Built from the stored message by compose, as the parent's md just below.
-      await messageMetadataService.syncInitialMessageMd(childConversationId);
-      await messageMetadataService.syncParentMessageMd(childConversationId);
     }
 
     // Single conversations write: replyCount, lastActivityAt and replies_md were

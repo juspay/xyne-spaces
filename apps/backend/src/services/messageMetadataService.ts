@@ -2,7 +2,7 @@ import { PrismaClient } from '@prisma/client';
 import { db } from '@/database/client';
 import { unwrapForColumn } from '@/database/unwrapUnreadable';
 import { compose } from '@/services/encryption/compose';
-import { initialMessageMdRequest, parentMessageMdRequest, repliesMdAddReplierRequest, type StoredMessage } from '@/services/encryption/mdCompose';
+import { seal, storedInputs } from '@/services/encryption/mdCompose';
 import { logger } from '@/utils/logger';
 import {
   parseReactionsMd,
@@ -10,6 +10,9 @@ import {
   addReactionToData,
   removeReactionFromData,
   serializeRepliesMd,
+  initialMessageMdTemplate,
+  parentMessageMdTemplate,
+  repliesMdAddReplierTemplate,
 } from '@xyne/shared';
 
 export class MessageMetadataService {
@@ -75,9 +78,14 @@ export class MessageMetadataService {
       select: { replies_md: true, workspaceId: true },
     });
     if (!conversation) return undefined;
-    const result = await compose(repliesMdAddReplierRequest(conversation.replies_md, replierUserId), {
-      workspaceId: conversation.workspaceId,
-    });
+    const result = await compose(
+      {
+        template: repliesMdAddReplierTemplate,
+        inputs: storedInputs(repliesMdAddReplierTemplate, { repliesMd: conversation.replies_md, replierId: replierUserId }),
+        current: seal(conversation.replies_md),
+      },
+      { workspaceId: conversation.workspaceId },
+    );
     return result.unchanged ? undefined : unwrapForColumn('conversations', 'replies_md', result.value);
   }
 
@@ -137,10 +145,29 @@ export class MessageMetadataService {
       latestReplierId: latestReply?.senderId ?? null
     };
   }
-  /** `initial_message_md` for a first message not stored yet, built by compose from its content as held. */
-  async composeNewInitialMessageMd(message: StoredMessage, workspaceId: string): Promise<string | null> {
-    const result = await compose(initialMessageMdRequest(message, null), { workspaceId });
-    return result.unchanged ? null : unwrapForColumn('conversations', 'initial_message_md', result.value);
+  /** `initial_message_md` for a conversation not stored yet, built by compose from its first message (createdAt in ms). */
+  async composeNewInitialMessageMd(message: object, workspaceId: string): Promise<string> {
+    const result = await compose(
+      { template: initialMessageMdTemplate, inputs: storedInputs(initialMessageMdTemplate, message) },
+      { workspaceId },
+    );
+    if (result.unchanged) throw new Error('compose initialMessageMd: unchanged without a current value');
+    return unwrapForColumn('conversations', 'initial_message_md', result.value);
+  }
+
+  /** `parent_message_md` for a conversation not stored yet, hanging off `parentMessageId`; undefined without it. */
+  async composeNewParentMessageMd(parentMessageId: string, workspaceId: string): Promise<string | undefined> {
+    const parent = await this.prisma.message.findUnique({
+      where: { messageId: parentMessageId },
+      select: { messageId: true, conversationId: true, senderId: true, content: true, msgType: true, createdAt: true },
+    });
+    if (!parent) return undefined;
+    const result = await compose(
+      { template: parentMessageMdTemplate, inputs: storedInputs(parentMessageMdTemplate, { ...parent, createdAt: parent.createdAt.getTime() }) },
+      { workspaceId },
+    );
+    if (result.unchanged) throw new Error('compose parentMessageMd: unchanged without a current value');
+    return unwrapForColumn('conversations', 'parent_message_md', result.value);
   }
 
   /**
@@ -162,7 +189,11 @@ export class MessageMetadataService {
 
     // The message text is unreadable: the encryption service builds the md (initialMessageMd).
     const result = await compose(
-      initialMessageMdRequest({ ...message, createdAt: message.createdAt.getTime() }, conversation.initial_message_md),
+      {
+        template: initialMessageMdTemplate,
+        inputs: storedInputs(initialMessageMdTemplate, { ...message, createdAt: message.createdAt.getTime() }),
+        current: seal(conversation.initial_message_md),
+      },
       { workspaceId: conversation.workspaceId },
     );
     if (result.unchanged) return;
@@ -201,7 +232,11 @@ export class MessageMetadataService {
     if (!message) return;
 
     const result = await compose(
-      parentMessageMdRequest({ ...message, createdAt: message.createdAt.getTime() }, conversation.parent_message_md),
+      {
+        template: parentMessageMdTemplate,
+        inputs: storedInputs(parentMessageMdTemplate, { ...message, createdAt: message.createdAt.getTime() }),
+        current: seal(conversation.parent_message_md),
+      },
       { workspaceId: conversation.workspaceId },
     );
     if (result.unchanged) return;

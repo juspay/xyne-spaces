@@ -1,9 +1,9 @@
 import { transaction } from '../base';
 import { CallWhiteboardRepository, SaveCallWhiteboardAttachmentInput } from '@/database/repositories/callWhiteboardRepository';
-import { AttachmentEntityType, MessageType } from '@xyne/shared';
+import { AttachmentEntityType, MessageType, repliesMdAddReplierTemplate } from '@xyne/shared';
 import { unwrapForColumn } from '@/database/unwrapUnreadable';
 import { compose } from '@/services/encryption/compose';
-import { repliesMdAddReplierRequest } from '@/services/encryption/mdCompose';
+import { seal, storedInputs } from '@/services/encryption/mdCompose';
 import { advisoryXactLock } from '@/bypassAcl/lockServices';
 import { escapeHtml } from '@/utils/htmlEscape';
 
@@ -104,9 +104,15 @@ export function saveCallWhiteboardAttachmentTx(self: CallWhiteboardRepository, l
         select: { replies_md: true },
       });
       // replies_md is unreadable: the encryption service adds the replier (repliesMdAddReplier).
-      const replies = await compose(repliesMdAddReplierRequest(conversation?.replies_md, data.botUserId), {
-        workspaceId: data.workspaceId,
-      });
+      const repliesMd = conversation?.replies_md ?? null;
+      const replies = await compose(
+        {
+          template: repliesMdAddReplierTemplate,
+          inputs: storedInputs(repliesMdAddReplierTemplate, { repliesMd, replierId: data.botUserId }),
+          current: seal(repliesMd),
+        },
+        { workspaceId: data.workspaceId },
+      );
 
       await tx.conversation.update({
         where: { conversationId: data.conversationId },

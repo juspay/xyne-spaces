@@ -1,6 +1,7 @@
 import type { Transaction } from '@rocicorp/zero';
 import {
   UnreadableString,
+  initialMessageMdTemplate,
   parentMessageMdTemplate,
   parseParentMessageMd,
   resolveConversationAnchorType,
@@ -8,7 +9,7 @@ import {
 } from '@xyne/shared';
 import type { Schema } from '@xyne/shared';
 import { compose } from '@/services/encryption/compose';
-import { initialMessageMdRequest, parentMessageMdRequest, seal, type StoredMessage } from '@/services/encryption/mdCompose';
+import { seal, storedInputs } from '@/services/encryption/mdCompose';
 import { zql } from '../queries';
 import { unreadableTransaction } from '../unreadableTransaction';
 
@@ -20,10 +21,13 @@ type TargetConversation = { conversationId: string; workspaceId: string };
 /** Rebuilds `conversation.initial_message_md` from `message`; writes it only when it changed. */
 export async function composeInitialMessageMd(
   tx: Transaction<Schema>,
-  message: StoredMessage,
+  message: object,
   conversation: TargetConversation & { initial_message_md: string | null },
 ): Promise<void> {
-  const result = await compose(initialMessageMdRequest(message, conversation.initial_message_md), { workspaceId: conversation.workspaceId });
+  const result = await compose(
+    { template: initialMessageMdTemplate, inputs: storedInputs(initialMessageMdTemplate, message), current: seal(conversation.initial_message_md) },
+    { workspaceId: conversation.workspaceId },
+  );
   if (result.unchanged) return;
   // Written sealed: unreadableTransaction unwraps it for the database.
   await unreadableTransaction(tx, conversation.workspaceId).mutate.conversations.update({
@@ -35,10 +39,13 @@ export async function composeInitialMessageMd(
 /** Rebuilds `conversation.parent_message_md` from its parent `message`; writes it only when it changed. */
 export async function composeParentMessageMd(
   tx: Transaction<Schema>,
-  message: Pick<StoredMessage, 'messageId' | 'conversationId' | 'senderId' | 'content' | 'msgType' | 'createdAt'>,
+  message: object,
   conversation: TargetConversation & { parent_message_md: string | null },
 ): Promise<void> {
-  const result = await compose(parentMessageMdRequest(message, conversation.parent_message_md), { workspaceId: conversation.workspaceId });
+  const result = await compose(
+    { template: parentMessageMdTemplate, inputs: storedInputs(parentMessageMdTemplate, message), current: seal(conversation.parent_message_md) },
+    { workspaceId: conversation.workspaceId },
+  );
   if (result.unchanged) return;
   // Written sealed: unreadableTransaction unwraps it for the database.
   await unreadableTransaction(tx, conversation.workspaceId).mutate.conversations.update({

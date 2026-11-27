@@ -17,6 +17,8 @@ export interface CreateConversationInput {
    */
   initial_message_md?: string | null;
   parentMessageId?: string;
+  /** The parent message's md, composed before the insert (a thread reply sent to the channel). */
+  parent_message_md?: string | null;
   pinned?: boolean;
   doNotPostToChannel?: boolean;
   metadata?: Record<string, any>;
@@ -83,6 +85,7 @@ export class ConversationRepository extends BaseRepository<Conversation, CreateC
           initial_message_md: data.initial_message_md,
         }),
         parentMessageId: data.parentMessageId,
+        ...(data.parent_message_md !== undefined && { parent_message_md: data.parent_message_md }),
         pinned: data.pinned || false,
         ...(data.doNotPostToChannel !== undefined && {
           doNotPostToChannel: data.doNotPostToChannel,
