@@ -9,18 +9,23 @@ import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
 import java.net.HttpURLConnection
+import java.net.Socket
 import java.net.SocketTimeoutException
 import java.net.URL
 import java.util.concurrent.atomic.AtomicBoolean
 import java.security.KeyStore
+import java.security.Principal
+import java.security.PrivateKey
 import java.security.SecureRandom
+import java.security.cert.X509Certificate
 import javax.net.ssl.HostnameVerifier
 import javax.net.ssl.HttpsURLConnection
-import javax.net.ssl.KeyManagerFactory
 import javax.net.ssl.SSLContext
+import javax.net.ssl.SSLEngine
 import javax.net.ssl.SSLSocketFactory
 import javax.net.ssl.TrustManager
 import javax.net.ssl.TrustManagerFactory
+import javax.net.ssl.X509ExtendedKeyManager
 import javax.net.ssl.X509TrustManager
 import org.json.JSONObject
 
@@ -949,14 +954,19 @@ class MtlsNetworkClient(private val context: Context) {
             throw IllegalStateException(error)
         }
 
-        val kmf = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm())
-        kmf.init(keyStore, null)
-        val keyManagers = kmf.keyManagers
+        // Only the enrolled identity is offered. The Keystore holds other app keys (the transit key
+        // is EC P-256 too, but may only do key agreement), and a key manager over the whole store
+        // could pick one of them and fail every handshake.
+        val keyManager = ClientIdentityKeyManager(
+            KEY_ALIAS,
+            keyEntry.privateKey,
+            keyEntry.certificateChain.map { it as X509Certificate }.toTypedArray(),
+        )
 
         val trustManager = buildSystemTrustManager()
 
         val sslContext = SSLContext.getInstance("TLS")
-        sslContext.init(keyManagers, arrayOf<TrustManager>(trustManager), SecureRandom())
+        sslContext.init(arrayOf(keyManager), arrayOf<TrustManager>(trustManager), SecureRandom())
 
         return sslContext.socketFactory to trustManager
     }
@@ -969,4 +979,29 @@ class MtlsNetworkClient(private val context: Context) {
     }
 
 
+}
+
+/** Presents only the enrolled key and its certificate chain, under [alias], as the TLS client identity. */
+private class ClientIdentityKeyManager(
+    private val alias: String,
+    private val privateKey: PrivateKey,
+    private val chain: Array<X509Certificate>,
+) : X509ExtendedKeyManager() {
+
+    override fun chooseClientAlias(keyType: Array<out String>?, issuers: Array<out Principal>?, socket: Socket?) =
+        alias
+
+    override fun chooseEngineClientAlias(keyType: Array<out String>?, issuers: Array<out Principal>?, engine: SSLEngine?) =
+        alias
+
+    override fun getClientAliases(keyType: String?, issuers: Array<out Principal>?) = arrayOf(alias)
+
+    override fun getPrivateKey(alias: String?): PrivateKey? = if (alias == this.alias) privateKey else null
+
+    override fun getCertificateChain(alias: String?): Array<X509Certificate>? = if (alias == this.alias) chain else null
+
+    // A client never acts as a TLS server.
+    override fun chooseServerAlias(keyType: String?, issuers: Array<out Principal>?, socket: Socket?): String? = null
+
+    override fun getServerAliases(keyType: String?, issuers: Array<out Principal>?): Array<String>? = null
 }

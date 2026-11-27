@@ -45,8 +45,13 @@ describe('Android mTLS server trust policy', () => {
     );
     assert.match(
       SOURCE,
-      /kmf\.init\(keyStore, null\)/,
+      /ClientIdentityKeyManager\(\s*KEY_ALIAS,/,
       'the enrolled client certificate must remain the mTLS client identity',
+    );
+    assert.doesNotMatch(
+      SOURCE,
+      /KeyManagerFactory/,
+      'a key manager over the whole Keystore could present another app key, such as the transit key',
     );
     assert.doesNotMatch(
       SOURCE,
