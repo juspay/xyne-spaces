@@ -18,6 +18,8 @@ const ONE_SHOT_SESSION_TIMEOUT_MS = 60 * 1000;
 // throttles per-source-snapshot CreateVolume ops, so bursts trip a
 // self-sustaining retry loop. 10s spacing keeps callers under the budget.
 const DEFAULT_MIN_CREATE_SPACING_MS = 10_000;
+/** Claim annotation that carries the signed list of repositories the sandbox may use through the git-gateway. */
+export const GIT_SCOPE_ANNOTATION = "xyne.ai/git-scope";
 
 function sleep(delayMs: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, delayMs));
@@ -114,6 +116,23 @@ export class KataClient {
 
     await this.claimCreateSlot();
 
+    // A claim without a list keeps exactly the body it always had. With a list,
+    // the end time is cut to whole seconds first so the list's `exp` (unix
+    // seconds) and the claim's shutdownTime are the same instant.
+    let shutdownTime: string;
+    let annotations: Record<string, string> | undefined;
+    if (options.gitScope) {
+      const endTime = new Date(Math.floor((Date.now() + timeoutMs) / 1000) * 1000);
+      const token = await options.gitScope({ claimName, namespace, template, endTime });
+      if (typeof token !== "string" || token.length === 0) {
+        throw new Error(`No git scope was returned for SandboxClaim ${claimName}; the claim was not created.`);
+      }
+      shutdownTime = endTime.toISOString();
+      annotations = { [GIT_SCOPE_ANNOTATION]: token };
+    } else {
+      shutdownTime = new Date(Date.now() + timeoutMs).toISOString();
+    }
+
     await this.k8sClient.createNamespacedCustomObject({
       group: GROUP,
       version: VERSION,
@@ -125,6 +144,7 @@ export class KataClient {
         metadata: {
           name: claimName,
           namespace,
+          ...(annotations ? { annotations } : {}),
         },
         spec: {
           sandboxTemplateRef: {
@@ -132,7 +152,7 @@ export class KataClient {
           },
           lifecycle: {
             shutdownPolicy: "Delete",
-            shutdownTime: new Date(Date.now() + timeoutMs).toISOString(),
+            shutdownTime,
           },
         },
       },
