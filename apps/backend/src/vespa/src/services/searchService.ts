@@ -749,4 +749,21 @@ export class SearchService {
       return { tags: [], total: 0 };
     }
   }
+
+  /** Doc ids whose target field contains every query word, newest first (see MATCH_TARGETS). */
+  async searchMatchIds(opts: Parameters<YqlBuilder['buildMatchIdsYql']>[0] & { limit?: number }): Promise<string[]> {
+    if (!opts.query.trim()) return [];
+    const { yql, params } = this.yqlBuilder.buildMatchIdsYql(opts);
+    const response = await this.vespa.search<VespaSearchResponse>({
+      yql,
+      ...params,
+      hits: opts.limit ?? 20,
+      'ranking.profile': 'unranked',
+      timeout: '5s',
+    } as any);
+    const hits: any[] = (response?.root as any)?.children ?? [];
+    return hits
+      .map((hit) => hit?.fields?.docId)
+      .filter((id: unknown): id is string => typeof id === 'string');
+  }
 }
