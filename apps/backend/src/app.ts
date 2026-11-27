@@ -348,7 +348,6 @@ export class App {
     this.app.use('/api/integrations/slack-desk', slackDeskRoutes);
     this.app.use('/api/integrations/app-desk', appDeskRoutes);
     this.app.use('/api/integrations/social-media', socialMediaRoutes);
-    this.app.use('/api/integrations/telephony', authMiddleware.authenticate, telephonyRoutes);
     this.app.use('/api/integrations/slack-user', slackUserAuthRoutes);
 
     // Migration routes (body parsing handled in route file). Only mounted when
@@ -541,6 +540,7 @@ export class App {
 
     // New chat schema routes
     this.app.use('/api/integrations/microsoft', microsoftDeskAuthRoutes); // Microsoft email channel OAuth (auth handled per-route)
+    this.app.use('/api/integrations/telephony', authMiddleware.authenticate, telephonyRoutes);
     this.app.use('/api/channels', authMiddleware.authenticate, channelRoutes);
     // Claw MCP route (user + app auth) — must be before /api/conversations
     this.app.use('/api/conversations/claw', authenticateUserOrApp, conversationRoutes);
