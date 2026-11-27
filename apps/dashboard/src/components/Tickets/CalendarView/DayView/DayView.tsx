@@ -6,9 +6,14 @@ import { CalendarDefault as Calendar, ClockDefault as Clock } from '@xyne/icons'
 import type { DayViewProps } from './types';
 import { useTicketNoun } from '../../../../contexts/TicketNounContext';
 
-export function DayView({ currentDate, tickets, onTicketClick }: DayViewProps): React.ReactElement {
+export function DayView({
+  currentDate,
+  dateMode = 'created',
+  tickets,
+  onTicketClick,
+}: DayViewProps): React.ReactElement {
   const noun = useTicketNoun();
-  const ticketsByDate = useMemo(() => groupTicketsByDate(tickets), [tickets]);
+  const ticketsByDate = useMemo(() => groupTicketsByDate(tickets, dateMode), [tickets, dateMode]);
   const dateKey = format(currentDate, 'yyyy-MM-dd');
   const dayTickets = ticketsByDate.get(dateKey) || [];
 
@@ -26,7 +31,8 @@ export function DayView({ currentDate, tickets, onTicketClick }: DayViewProps): 
                 {format(currentDate, 'EEEE, MMMM d')}
               </h2>
               <p className='text-sm text-muted-foreground'>
-                {dayTickets.length} ticket{dayTickets.length !== 1 ? 's' : ''} created
+                {dayTickets.length} ticket{dayTickets.length !== 1 ? 's' : ''}{' '}
+                {dateMode === 'eta' ? 'due' : 'created'}
               </p>
             </div>
           </div>
@@ -49,8 +55,18 @@ export function DayView({ currentDate, tickets, onTicketClick }: DayViewProps): 
             </div>
             <div className='divide-y divide-border'>
               {dayTickets.map((ticket, index) => (
-                <button
-                  type='button'
+                <div
+                  role='button'
+                  tabIndex={0}
+                  onKeyDown={event => {
+                    if (
+                      event.target === event.currentTarget &&
+                      (event.key === 'Enter' || event.key === ' ')
+                    ) {
+                      event.preventDefault();
+                      event.currentTarget.click();
+                    }
+                  }}
                   key={ticket.id}
                   onClick={() => onTicketClick(ticket)}
                   className='w-full text-left p-4 hover:bg-muted transition-colors cursor-pointer group'
@@ -69,7 +85,7 @@ export function DayView({ currentDate, tickets, onTicketClick }: DayViewProps): 
                       <CompactTicketBadge ticket={ticket} />
                     </div>
                   </div>
-                </button>
+                </div>
               ))}
             </div>
           </div>
@@ -79,7 +95,7 @@ export function DayView({ currentDate, tickets, onTicketClick }: DayViewProps): 
               <Calendar className='w-8 h-8 text-muted' />
             </div>
             <p className='text-muted-foreground font-medium'>
-              No {noun.plural} created on this day
+              No {noun.plural} {dateMode === 'eta' ? 'due' : 'created'} on this day
             </p>
             <p className='text-sm text-muted-foreground mt-1'>
               Select another date to view {noun.plural}

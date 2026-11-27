@@ -3,7 +3,7 @@ import {
   MutationACLError,
   type TableSchema,
 } from '../core/types';
-import { ChannelVisibility, Schema } from '@xyne/shared';
+import { assertGenericTicketReference, ChannelVisibility, Schema } from '@xyne/shared';
 import { BaseACL } from '../core/base-acl';
 import { zql } from '../../queries';
 import { hasGuestTicketAccess } from '../core/guest-access';
@@ -19,6 +19,7 @@ export class TicketReferenceMappingsACL extends BaseACL<'ticket_reference_mappin
   }
 
   async canInsert(args: InsertValue<TableSchema<'ticket_reference_mappings'>>, tx: Transaction<Schema>): Promise<void> {
+    assertGenericTicketReference(args.relationType);
     await this.verifyTicketInWorkspace(args.sourceTicketId, tx);
     if (this.ctx.role === 'GUEST') {
       const guestTicket = await tx.run(zql.tickets.where('id', args.sourceTicketId).one());
@@ -82,6 +83,8 @@ export class TicketReferenceMappingsACL extends BaseACL<'ticket_reference_mappin
 
   async canUpdate(args: UpdateValue<TableSchema<'ticket_reference_mappings'>>, tx: Transaction<Schema>): Promise<void> {
     const mapping = await tx.run(zql.ticket_reference_mappings.where('id', args.id).one());
+    assertGenericTicketReference(mapping?.relationType ?? '');
+    if ('relationType' in args) assertGenericTicketReference(typeof args.relationType === 'string' ? args.relationType : '');
     if (mapping) {
       await this.verifyTicketInWorkspace(mapping.sourceTicketId, tx);
     }
@@ -134,6 +137,7 @@ export class TicketReferenceMappingsACL extends BaseACL<'ticket_reference_mappin
 
   async canDelete(args: DeleteID<TableSchema<'ticket_reference_mappings'>>, tx: Transaction<Schema>): Promise<void> {
     const mapping = await tx.run(zql.ticket_reference_mappings.where('id', args.id).one());
+    assertGenericTicketReference(mapping?.relationType ?? '');
     if (mapping) {
       await this.verifyTicketInWorkspace(mapping.sourceTicketId, tx);
     }

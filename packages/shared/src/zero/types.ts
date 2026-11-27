@@ -58,6 +58,7 @@ export enum AutoDraftStatus {
 
 // @ts-ignore TS1294
 export enum TicketReferenceRelation {
+  BLOCKS = 'BLOCKS',
   LINKED = 'LINKED',
   DUPLICATE_CONFIRMED = 'DUPLICATE_CONFIRMED',
   DUPLICATE_POSSIBLE = 'DUPLICATE_POSSIBLE',

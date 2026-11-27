@@ -1,0 +1,148 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import type { DependencyEdge } from '@xyne/shared';
+import { ticketDependenciesEnabled, TICKET_DEPENDENCIES_ENFORCEMENT_READY } from '../../src/services/dependencies/featureFlag';
+import { projectDependencyEdges } from '../../src/services/dependencies/projection';
+import { createBlocksSchema, dependencySettingsSchema, subTicketGatingSchema } from '../../src/services/dependencies/types';
+import { assertNoDependencyCycle, loadDependencyGraph, loadDependencyContext } from '../../src/bypassAcl/dependencyGraph';
+
+const edge: DependencyEdge = {
+  id: 'legacy-id-contains-hidden-ticket', kind: 'BLOCKS',
+  blockerTicketId: 'hidden-ticket', dependentTicketId: 'visible-ticket',
+  strength: 'HARD', gatedStageId: 'visible-stage', satisfiedStageId: 'hidden-stage',
+  satisfiedAt: null, reviewNeededAt: null,
+  override: { at: 1, by: 'private-actor', reason: 'hidden-ticket: private title on a private board' },
+};
+const opaqueId = () => 'opaque';
+
+test('restricted blocker transport contains no hidden ids, stages, author or free text', () => {
+  const [projected] = projectDependencyEdges([edge], new Set(['visible-ticket']), opaqueId);
+  assert.deepEqual(projected, {
+    id: 'opaque', kind: 'BLOCKS', strength: 'HARD', restricted: true,
+    blockerTicketId: 'restricted:opaque:blocker', dependentTicketId: 'visible-ticket',
+    gatedStageId: 'visible-stage', satisfiedStageId: null, satisfiedAt: null, reviewNeededAt: null,
+    override: { at: 1, by: null, reason: null },
+  });
+  assert.doesNotMatch(JSON.stringify(projected), /hidden-ticket|hidden-stage|private-actor|private title|private board/);
+});
+
+test('restricted dependent transport also removes its gate and legacy mapping id', () => {
+  const projected = projectDependencyEdges([edge], new Set(['hidden-ticket']), opaqueId)[0]!;
+  assert.equal(projected.dependentTicketId, 'restricted:opaque:dependent');
+  assert.equal(projected.gatedStageId, null);
+  assert.equal(projected.satisfiedStageId, 'hidden-stage');
+  assert.equal(projected.id, 'opaque');
+  assert.doesNotMatch(JSON.stringify(projected), /visible-ticket|visible-stage|legacy-id/);
+});
+
+test('both visible endpoints retain an editable mapping id, without forwarding arbitrary fields', () => {
+  const withSecret = { ...edge, title: 'should never be forwarded', boardId: 'secret-board' };
+  const projected = projectDependencyEdges([withSecret], new Set(['visible-ticket', 'hidden-ticket']), opaqueId)[0]!;
+  assert.equal(projected.id, edge.id);
+  assert.equal(projected.restricted, false);
+  assert.equal(projected.blockerTicketId, edge.blockerTicketId);
+  assert.doesNotMatch(JSON.stringify(projected), /should never|secret-board|private title/);
+});
+
+test('hidden CHILD endpoints and free text get the same redaction as BLOCKS', () => {
+  const projected = projectDependencyEdges([{ ...edge, kind: 'CHILD' }], new Set(['visible-ticket']), opaqueId)[0]!;
+  assert.equal(projected.kind, 'CHILD');
+  assert.equal(projected.restricted, true);
+  assert.doesNotMatch(JSON.stringify(projected), /hidden-ticket|hidden-stage|private title/);
+});
+
+test('dependency write schemas cannot accept body-controlled identity or latches', () => {
+  const valid = { sourceTicketId: 'a', targetTicketId: 'b' };
+  assert.deepEqual(createBlocksSchema.parse(valid), {
+    ...valid, strength: 'SOFT', gatedStageId: null, satisfiedStageId: null,
+  });
+  for (const forbidden of ['workspaceId', 'createdBy', 'satisfiedAt', 'overriddenBy', 'overrideReason', 'relationType', 'id', 'origin']) {
+    assert.equal(createBlocksSchema.safeParse({ ...valid, [forbidden]: 'injected' }).success, false);
+  }
+  assert.equal(dependencySettingsSchema.safeParse({ strength: 'INVALID' }).success, false);
+  assert.equal(subTicketGatingSchema.safeParse({ satisfiedStageId: 'ignored-stage' }).success, false);
+});
+
+test('graph loading includes only mapped CHILD rows; unrelated sub-ticket rows are not dependencies', async () => {
+  let subTicketQuery: unknown;
+  const tx = {
+    ticketReferenceMapping: { findMany: async () => [] },
+    ticketSubTicketMapping: { findMany: async () => [{ id: 'map', ticketId: 'parent', subTicketId: 'sub' }] },
+    subTicket: { findMany: async (args: unknown) => {
+      subTicketQuery = args;
+      return [{ id: 'sub', mappedTicketId: 'child' }];
+    } },
+  };
+  const { edges } = await loadDependencyGraph(tx as never, 'workspace');
+  assert.equal(edges.length, 1);
+  assert.equal(edges[0]!.kind, 'CHILD');
+  assert.equal(edges[0]!.blockerTicketId, 'child');
+  assert.deepEqual(subTicketQuery, {
+    where: { workspaceId: 'workspace', id: { in: ['sub'] } }, select: { id: true, mappedTicketId: true },
+  });
+});
+
+test('cycle checking fails closed on missing/cross-workspace endpoints without returning their ids', async () => {
+  const tx = {
+    ticketReferenceMapping: { findMany: async () => [] },
+    ticketSubTicketMapping: { findMany: async () => [] },
+    ticket: { findMany: async () => [] },
+    board: { findMany: async () => [] }, stage: { findMany: async () => [] },
+    stageTransition: { findMany: async () => [] }, ticketStageEta: { findMany: async () => [] },
+  };
+  await assert.rejects(assertNoDependencyCycle(tx as never, 'workspace', edge), error => {
+    assert.equal((error as Error).message, 'Dependency graph requires repair');
+    assert.doesNotMatch(JSON.stringify(error), /hidden-ticket|visible-ticket/);
+    return true;
+  });
+});
+
+test('context resolves current-board stages, outgoing transitions and latest active ETA without cross-board name collisions', async () => {
+  const latest = new Date('2026-11-28T00:00:00Z');
+  const tx = {
+    ticket: { findMany: async () => [
+      { id: 't', boardId: 'b', stageName: 'Started', statusV2: 'STARTED', eta: null },
+    ] },
+    board: { findMany: async () => [{ id: 'b', boardType: 'NON_LINEAR', metadata: null }] },
+    stage: { findMany: async () => [
+      { id: 'other-stage', boardId: 'other-board', name: 'Started', sequenceNumber: 0 },
+      { id: 'current', boardId: 'b', name: 'Started', sequenceNumber: 0 },
+    ] },
+    stageTransition: { findMany: async () => [
+      { boardId: 'b', fromStageId: 'current', toStageId: 'next' },
+      { boardId: 'b', fromStageId: null, toStageId: 'global' },
+      { boardId: 'b', fromStageId: 'different-stage', toStageId: 'not-allowed' },
+    ] },
+    ticketStageEta: { findMany: async () => [
+      { ticketId: 't', stageId: 'other-stage', stageEta: new Date(0) },
+      { ticketId: 't', stageId: 'current', stageEta: latest },
+      { ticketId: 't', stageId: 'current', stageEta: new Date(0) },
+    ] },
+  };
+  const context = await loadDependencyContext(tx as never, 'workspace', ['t']);
+  assert.equal(context.ticketsById.get('t')!.activeStageEta, latest);
+  assert.deepEqual(context.nextStageIdsByTicket!.get('t'), ['next', 'global']);
+});
+
+test('unready enforcement cannot be enabled and does not load the native flag provider', async () => {
+  assert.equal(TICKET_DEPENDENCIES_ENFORCEMENT_READY, false);
+  assert.equal(await ticketDependenciesEnabled('workspace'), false);
+});
+
+test('CHILD Zero schema cannot replicate override author or free text', async () => {
+  const { schema } = await import('@xyne/shared');
+  for (const column of ['overriddenAt', 'overriddenBy', 'overrideReason']) {
+    assert.equal(column in schema.tables.ticket_sub_ticket_mappings.columns, false);
+  }
+});
+
+test('flag evaluation fallback is not an explicit permission to disable enforcement', async () => {
+  const { requireBooleanFlag } = await import('../../src/services/requiredFeatureFlag');
+  assert.equal(requireBooleanFlag({ value: true, reason: 'TARGETING_MATCH' }), true);
+  assert.equal(requireBooleanFlag({ value: false, reason: 'STATIC' }), false);
+  for (const details of [
+    { value: false, reason: 'ERROR' },
+    { value: false, reason: 'DEFAULT' },
+    { value: false, reason: 'UNKNOWN', errorCode: 'PROVIDER_NOT_READY' },
+  ]) assert.throws(() => requireBooleanFlag(details), /Required feature flag/);
+});

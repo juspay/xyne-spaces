@@ -14,6 +14,7 @@ import { setupTicketActivityChannelSync } from './middleware/ticketActivityChann
 import { setupTicketCreatedActivity } from './middleware/ticketCreatedActivity';
 import { setupUserVespaSync } from './middleware/userVespaSync';
 import { setupEnumTextValidation } from './middleware/enumTextValidation';
+import { setupTicketDependencies } from './middleware/ticketDependencies';
 import { pingDatabase } from '@/bypassAcl/healthServices';
 
 export class DatabaseClient {
@@ -69,6 +70,7 @@ export class DatabaseClient {
         setupUserSessionLogging(DatabaseClient.instance, true);
       }
 
+      setupTicketDependencies(DatabaseClient.instance);
       setupEnumTextValidation(DatabaseClient.instance);
       setupMessageMetadataSync(DatabaseClient.instance);
       setupTicketActivityChannelSync(DatabaseClient.instance);
@@ -90,10 +92,11 @@ export class DatabaseClient {
         logger.warn('Database warning:', e.message);
       });
 
+      const rawClient = DatabaseClient.instance;
       // Apply zero field encryption extension (public build: pass-through)
       DatabaseClient.instance = DatabaseClient.instance.$extends(encryptionExtension) as unknown as PrismaClient;
       DatabaseClient.instance = DatabaseClient.instance.$extends(auditExtension) as unknown as PrismaClient;
-      DatabaseClient.wrappedInstance = withWorkspaceStamp(withAclExtension(DatabaseClient.instance));
+      DatabaseClient.wrappedInstance = withWorkspaceStamp(withAclExtension(DatabaseClient.instance, rawClient));
     }
 
     return DatabaseClient.wrappedInstance ?? DatabaseClient.instance;

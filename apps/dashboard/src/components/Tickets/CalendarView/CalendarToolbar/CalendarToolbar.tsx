@@ -5,6 +5,8 @@ import type { CalendarToolbarProps } from './types';
 
 export function CalendarToolbar({
   currentDate,
+  dateMode = 'created',
+  onDateModeChange,
   viewMode,
   onViewModeChange,
   onNavigate,
@@ -68,6 +70,22 @@ export function CalendarToolbar({
         </div>
       </div>
 
+      {onDateModeChange && (
+        <label className='flex items-center gap-2 text-xs text-muted-foreground'>
+          Date
+          <select
+            data-track-category='TICKET_CALENDAR'
+            data-track-name='ChangeDateBasis'
+            aria-label='Calendar date basis'
+            value={dateMode}
+            onChange={event => onDateModeChange(event.target.value as 'created' | 'eta')}
+            className='rounded border border-border bg-background px-2 py-1.5 text-foreground'
+          >
+            <option value='created'>Created</option>
+            <option value='eta'>ETA</option>
+          </select>
+        </label>
+      )}
       {/* Right side - View mode toggle */}
       <div className='flex items-center bg-muted rounded-xl p-1 border border-border'>
         {viewModes.map(mode => (

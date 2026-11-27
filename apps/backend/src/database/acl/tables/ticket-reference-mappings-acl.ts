@@ -16,6 +16,7 @@ export class TicketReferenceMappingsACL extends BaseQueryACL<
       const ticketIds = await getAccessibleTicketIds(this.prisma, this.ctx.userId, this.ctx)
 
       return {
+        relationType: { not: 'BLOCKS' },
         OR: [
           { sourceTicketId: { in: ticketIds } },
           { targetTicketId: { in: ticketIds } },
@@ -24,6 +25,7 @@ export class TicketReferenceMappingsACL extends BaseQueryACL<
     }
 
     return {
+      relationType: { not: 'BLOCKS' },
       sourceTicket: await accessibleTicketWhere(this.prisma, this.ctx),
     }
   }
@@ -32,6 +34,7 @@ export class TicketReferenceMappingsACL extends BaseQueryACL<
     const workspaceId = this.ctx.workspaceId
     return {
       workspaceId,
+      relationType: { not: 'BLOCKS' },
       sourceTicket: {
         workspaceId,
         OR: [
@@ -60,7 +63,7 @@ export class TicketReferenceMappingsACL extends BaseQueryACL<
   }
 
   async canCreate(data: Prisma.TicketReferenceMappingUncheckedCreateInput): Promise<boolean> {
-    if (data.workspaceId !== this.ctx.workspaceId) return false
+    if (data.workspaceId !== this.ctx.workspaceId || data.relationType === 'BLOCKS') return false
     const ticket = await this.prisma.ticket.findFirst({
       where: {
         id: data.sourceTicketId,

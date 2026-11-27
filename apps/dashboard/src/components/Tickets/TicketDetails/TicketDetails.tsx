@@ -1,3 +1,6 @@
+import { DependencyPanel } from '../Dependencies/DependencyPanel';
+import { TicketDependencyBadge } from '../Dependencies/TicketDependencyBadge';
+import { useDependencyData } from '../../../hooks/useDependencyState';
 import { logger, Event as LogEvent } from '../../../utils/logger';
 import React, { useMemo, useState, useRef, useEffect, useCallback, useContext } from 'react';
 import { useZero } from '../../../hooks/useZero';
@@ -677,6 +680,14 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
   const [hasBoardDropdownOpened, setHasBoardDropdownOpened] = useState(false);
 
   // Query ticket data
+  const dependencyView = useDependencyData([ticketId]).get(ticketId);
+  const dependencyLinkedPairs = new Set(
+    (dependencyView?.batch.edges ?? [])
+      .filter(edge => edge.kind === 'BLOCKS' && !edge.restricted)
+      .map(edge =>
+        edge.blockerTicketId === ticketId ? edge.dependentTicketId : edge.blockerTicketId,
+      ),
+  );
   const [ticket] = useCachedQuery(queries.ticketDetailsByIdV2({ ticketId: ticketId }));
 
   // TICKET_VIEWED: one event per ticket arrival, whichever way the user got here
@@ -1974,6 +1985,16 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
         ? (ticket.referencesIn as TicketReferenceWithTicket[])
         : [],
     [ticket?.referencesIn],
+  );
+  const visibleReferencesOut = referencesOut.filter(
+    reference =>
+      reference.relationType !== TicketReferenceRelation.LINKED ||
+      !dependencyLinkedPairs.has(reference.targetTicketId),
+  );
+  const visibleReferencesIn = referencesIn.filter(
+    reference =>
+      reference.relationType !== TicketReferenceRelation.LINKED ||
+      !dependencyLinkedPairs.has(reference.sourceTicketId),
   );
   const duplicateReferences = [...referencesOut, ...referencesIn].filter(
     reference =>
@@ -3988,6 +4009,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                 </Tooltip>
               </>
             )}
+            <TicketDependencyBadge ticketId={ticketId} />
             {duplicateCount > 0 && (
               <DuplicatesPill
                 count={duplicateCount}
@@ -4281,6 +4303,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
           {!expandedView && (
             <>
               {statusPill}
+              <TicketDependencyBadge ticketId={ticketId} />
               {duplicateCount > 0 && (
                 <DuplicatesPill
                   count={duplicateCount}
@@ -5586,6 +5609,20 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
             </div>
           )} */}
 
+        {!hideRelationships && (
+          <DependencyPanel
+            ticketId={ticketId}
+            linkedTicketIds={[
+              ...referencesOut
+                .filter(reference => reference.relationType === TicketReferenceRelation.LINKED)
+                .map(reference => reference.targetTicketId),
+              ...referencesIn
+                .filter(reference => reference.relationType === TicketReferenceRelation.LINKED)
+                .map(reference => reference.sourceTicketId),
+            ]}
+            {...(onNavigateToTicket ? { onOpen: onNavigateToTicket } : {})}
+          />
+        )}
         {/* Relationships — sub-tickets and linked tickets, the panel's own tab. */}
         {!hideRelationships && (
           <div
@@ -5679,12 +5716,12 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                     Linked
                   </span>
                   <span className='font-mono text-[10.5px] tabular-nums text-muted-foreground/60'>
-                    {referencesOut.length + referencesIn.length}
+                    {visibleReferencesOut.length + visibleReferencesIn.length}
                   </span>
                 </div>
 
                 <div className='flex flex-col gap-1.5'>
-                  {referencesOut.map(reference =>
+                  {visibleReferencesOut.map(reference =>
                     renderRelatedTicketRow(
                       reference,
                       reference.targetTicket,
@@ -5692,7 +5729,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
                       reference.relationType !== TicketReferenceRelation.MERGED_INTO,
                     ),
                   )}
-                  {referencesIn.map(reference => {
+                  {visibleReferencesIn.map(reference => {
                     const unmergeSourceTicketId = reference.sourceTicket?.id;
                     return renderRelatedTicketRow(
                       reference,

@@ -1,38 +1,32 @@
+import { TicketDependencyBadge } from '../../Dependencies/TicketDependencyBadge';
 import { getTicketStatusColor } from './utils';
 import type { CompactTicketBadgeProps } from './types';
 
 export function CompactTicketBadge({ ticket, onClick }: CompactTicketBadgeProps) {
   const statusColor = getTicketStatusColor(ticket.statusV2);
-
   return (
-    <button
-      type='button'
-      onClick={onClick}
-      className='w-full text-left group'
-      title={`${ticket.xyneId}: ${ticket.title}`}
-      data-track-category='CALENDAR'
-      data-track-name='OpenTicketFromCalendar'
-      data-track-metadata={JSON.stringify({ ticketId: ticket.id, xyneId: ticket.xyneId })}
-    >
-      <div className='flex items-center gap-2 p-2 rounded-lg bg-muted hover:bg-background border border-border hover:border-border hover:shadow-sm transition-all duration-200'>
-        {/* Status indicator */}
-        <div
-          className='w-1.5 h-8 rounded-full flex-shrink-0'
+    <div className='w-full rounded-lg border border-border bg-muted p-2 transition-all hover:bg-background hover:shadow-sm'>
+      <button
+        type='button'
+        onClick={onClick}
+        className='group flex w-full items-center gap-2 text-left'
+        title={`${ticket.xyneId}: ${ticket.title}`}
+        data-track-category='CALENDAR'
+        data-track-name='OpenTicketFromCalendar'
+        data-track-metadata={JSON.stringify({ ticketId: ticket.id, xyneId: ticket.xyneId })}
+      >
+        <span
+          className='h-8 w-1.5 shrink-0 rounded-full'
           style={{ backgroundColor: statusColor }}
         />
-
-        {/* Content */}
-        <div className='flex-1 min-w-0'>
-          <div className='flex items-center gap-2 mb-0.5'>
-            <span className='text-[10px] font-medium text-muted-foreground font-mono'>
-              {ticket.xyneId}
-            </span>
-          </div>
-          <p className='text-xs font-medium text-foreground truncate group-hover:text-foreground'>
-            {ticket.title}
-          </p>
-        </div>
-      </div>
-    </button>
+        <span className='min-w-0 flex-1'>
+          <span className='mb-0.5 block font-mono text-[10px] font-medium text-muted-foreground'>
+            {ticket.xyneId}
+          </span>
+          <span className='block truncate text-xs font-medium text-foreground'>{ticket.title}</span>
+        </span>
+      </button>
+      <TicketDependencyBadge ticketId={ticket.id} compact />
+    </div>
   );
 }

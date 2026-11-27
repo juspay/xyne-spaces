@@ -153,6 +153,12 @@ export const ticketSubTicketMappingTable = table("ticket_sub_ticket_mappings")
     id: string(),
     ticketId: string(),
     subTicketId: string(),
+    strength: string().optional(),
+    gatedStageId: string().optional(),
+    satisfiedAt: number().optional(),
+    overriddenAt: number().optional(),
+    overriddenBy: string().optional(),
+    overrideReason: string().optional(),
   })
   .primaryKey("id");
 
@@ -250,6 +256,15 @@ export const ticketReferenceMappingTable = table("ticket_reference_mappings")
     createdBy: string(),
     createdAt: number(),
     updatedAt: number(),
+    strength: string().optional(),
+    gatedStageId: string().optional(),
+    satisfiedAt: number().optional(),
+    overriddenAt: number().optional(),
+    overriddenBy: string().optional(),
+    overrideReason: string().optional(),
+    satisfiedStageId: string().optional(),
+    origin: string().optional(),
+    reviewNeededAt: number().optional(),
   })
   .primaryKey("id");
 

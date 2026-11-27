@@ -9,6 +9,7 @@ import { useTicketNoun } from '../../../../contexts/TicketNounContext';
 
 export function WeekView({
   currentDate,
+  dateMode = 'created',
   tickets,
   onTicketClick,
 }: WeekViewProps): React.ReactElement {
@@ -18,7 +19,7 @@ export function WeekView({
   const startDate = startOfWeek(currentDate);
   const endDate = endOfWeek(currentDate);
   const days = eachDayOfInterval({ start: startDate, end: endDate });
-  const ticketsByDate = useMemo(() => groupTicketsByDate(tickets), [tickets]);
+  const ticketsByDate = useMemo(() => groupTicketsByDate(tickets, dateMode), [tickets, dateMode]);
 
   const selectedDateTickets = selectedDate
     ? ticketsByDate.get(format(selectedDate, 'yyyy-MM-dd')) || []
@@ -55,8 +56,18 @@ export function WeekView({
               const isToday = isSameDay(day, new Date());
 
               return (
-                <button
-                  type='button'
+                <div
+                  role='button'
+                  tabIndex={0}
+                  onKeyDown={event => {
+                    if (
+                      event.target === event.currentTarget &&
+                      (event.key === 'Enter' || event.key === ' ')
+                    ) {
+                      event.preventDefault();
+                      event.currentTarget.click();
+                    }
+                  }}
                   key={dateKey}
                   onClick={() => dayTickets.length > 0 && setSelectedDate(day)}
                   className={`p-3 border-r border-border last:border-r-0 text-left transition-all duration-200 hover:bg-muted/50 ${
@@ -91,7 +102,7 @@ export function WeekView({
                       </div>
                     )}
                   </div>
-                </button>
+                </div>
               );
             })}
           </div>
@@ -104,6 +115,7 @@ export function WeekView({
           onClose={() => setSelectedDate(null)}
           date={selectedDate}
           tickets={selectedDateTickets}
+          dateMode={dateMode}
           onTicketClick={onTicketClick}
         />
       )}

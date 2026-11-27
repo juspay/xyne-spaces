@@ -1,3 +1,4 @@
+import { TicketDependencyBadge } from '../Dependencies/TicketDependencyBadge';
 import React, { createContext, useContext, useMemo, useRef, useState } from 'react';
 import {
   CalendarDefault as Calendar,
@@ -614,8 +615,14 @@ export const TicketCard: React.FC<TicketCardProps> = ({
 
     return (
       <div className={cn('flex flex-col gap-1.5 max-w-lg', width)}>
-        <button
-          type='button'
+        <div
+          role='button'
+          tabIndex={0}
+          onKeyDown={e => {
+            if (e.target !== e.currentTarget || (e.key !== 'Enter' && e.key !== ' ')) return;
+            e.preventDefault();
+            onClick?.(e.nativeEvent);
+          }}
           onClick={e => onClick?.(e)}
           data-testid={`ticket-card-${ticket.id}`}
           className={cn(
@@ -644,6 +651,7 @@ export const TicketCard: React.FC<TicketCardProps> = ({
               )}
             </h3>
           </TruncatedTooltip>
+          <TicketDependencyBadge ticketId={ticket.id} compact />
           <div className='flex items-center gap-2.5 shrink-0'>
             <TicketStatusWithStages
               currentStageName={ticket.stageName}
@@ -653,7 +661,7 @@ export const TicketCard: React.FC<TicketCardProps> = ({
             />
             {conversationAssignee}
           </div>
-        </button>
+        </div>
       </div>
     );
   }
@@ -872,6 +880,7 @@ export const TicketCard: React.FC<TicketCardProps> = ({
                 </h3>
               </TruncatedTooltip>
             )}
+            <TicketDependencyBadge ticketId={ticket.id} compact />
 
             {/* Description */}
             {!isCompact && (

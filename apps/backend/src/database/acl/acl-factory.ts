@@ -1,3 +1,4 @@
+import { TicketDependencyOverridesACL } from './tables/ticket-dependency-overrides-acl';
 import { PrismaClient, Prisma } from '@prisma/client'
 import { BaseQueryACL, ACLContext } from './base-acl'
 import {
@@ -364,6 +365,8 @@ export class ACLFactory {
       return new TicketAssignmentsACL(ctx, prisma)
     case 'ticketEntityMapping':
       return new TicketEntityMappingsACL(ctx, prisma)
+    case 'ticketDependencyOverride':
+      return new TicketDependencyOverridesACL(ctx, prisma);
     case 'ticketReferenceMapping':
       return new TicketReferenceMappingsACL(ctx, prisma)
     case 'ticketStageEta':

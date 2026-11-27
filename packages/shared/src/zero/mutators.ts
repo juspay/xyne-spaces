@@ -1,4 +1,5 @@
 import { ReadonlyJSONValue, Transaction, defineMutators, defineMutator } from '@rocicorp/zero';
+import { assertGenericTicketReference } from '../tickets/dependencies/index.js';
 import {
   ChannelRole,
   AgentProactivityMode,
@@ -6091,6 +6092,7 @@ export const mutators = defineMutators({
         ctx,
         args: { sourceTicketId, targetTicketId, relationType, timestamp, referenceId },
       }) => {
+        assertGenericTicketReference(relationType);
         const existingReference = await tx.run(
           zql.ticket_reference_mappings
             .where('sourceTicketId', sourceTicketId)
@@ -6122,10 +6124,13 @@ export const mutators = defineMutators({
         timestamp: z.number(),
       }),
       async ({ tx, args: { id, relationType, timestamp } }) => {
+        assertGenericTicketReference(relationType);
         const reference = await tx.run(zql.ticket_reference_mappings.where('id', id).one());
         if (!reference) {
           throw new Error('Ticket reference not found');
         }
+
+        assertGenericTicketReference(reference.relationType);
 
         await tx.mutate.ticket_reference_mappings.update({
           id,
@@ -6139,6 +6144,8 @@ export const mutators = defineMutators({
       if (!reference) {
         throw new Error('Ticket reference not found');
       }
+
+      assertGenericTicketReference(reference.relationType);
 
       await tx.mutate.ticket_reference_mappings.delete({
         id,
