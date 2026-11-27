@@ -1,3 +1,4 @@
+import { useDependencyMutation } from '../../../hooks/useDependencyMutation';
 import { ReactElement, useMemo, useRef, useState } from 'react';
 import { ChevronDown } from '@xyne/icons';
 import { toast } from 'sonner';
@@ -350,6 +351,19 @@ export function StagePicker({
   const stagesRef = useRef(stages);
   stagesRef.current = stages;
 
+  const runDependencyMove = useDependencyMutation(ticketId);
+  const updateTicketWithConsent = (args: Parameters<typeof mutators.ticket.update>[0]) => ({
+    server: runDependencyMove(
+      dependencyOverride =>
+        zero.mutate(
+          mutators.ticket.update({
+            ...args,
+            ...(dependencyOverride ? { dependencyOverride } : {}),
+          }),
+        ).server,
+    ),
+  });
+
   const setStage = (next: string): void => {
     if (next === currentStage) {
       setOpen(false);
@@ -363,9 +377,7 @@ export function StagePicker({
       } else {
         // Outcome only once the server confirmed, like the two branches below.
         void surfaceMutationError(
-          zero.mutate(
-            mutators.ticket.update({ id: ticketId, stageName: next, updatedAt: Date.now() }),
-          ),
+          updateTicketWithConsent({ id: ticketId, stageName: next, updatedAt: Date.now() }),
           'Failed to update stage',
         ).then(ok => {
           if (!ok) return;
@@ -540,9 +552,19 @@ export function StagePicker({
       // Fire mutation; if Zero cache missed the formId, open form from server error details.
       const capturedTargetStageObj = targetStageObj;
       const capturedCurrentStageObj = currentStageObj;
-      const transResult = zero.mutate(
-        mutators.nonLinear.transition({ ticketId, toStageName: next, now: Date.now() }),
-      );
+      const transResult = {
+        server: runDependencyMove(
+          dependencyOverride =>
+            zero.mutate(
+              mutators.nonLinear.transition({
+                ticketId,
+                toStageName: next,
+                now: Date.now(),
+                ...(dependencyOverride ? { dependencyOverride } : {}),
+              }),
+            ).server,
+        ),
+      };
       void (
         transResult as {
           server: Promise<
@@ -649,19 +671,18 @@ export function StagePicker({
       });
     } else {
       void surfaceMutationError(
-        zero.mutate(
-          mutators.ticket.update({
-            id: ticketId,
-            stageName: next,
-            ...(targetStageObj?.defaultTicketStatusV2 && {
-              statusV2: targetStageObj.defaultTicketStatusV2,
-            }),
-            updatedAt: Date.now(),
+        updateTicketWithConsent({
+          id: ticketId,
+          stageName: next,
+          ...(targetStageObj?.defaultTicketStatusV2 && {
+            statusV2: targetStageObj.defaultTicketStatusV2,
           }),
-        ),
+          updatedAt: Date.now(),
+        }),
         'Failed to update stage',
       ).then(ok => {
         if (ok) {
+          onAfterStageChange?.(next);
           trackTicketOutcome(
             'TICKET_STAGE_CHANGED',
             { id: ticketId, boardId },
@@ -677,7 +698,6 @@ export function StagePicker({
           );
         }
       });
-      onAfterStageChange?.(next);
     }
     setOpen(false);
   };

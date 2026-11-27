@@ -435,10 +435,19 @@ export function withAclExtension<T extends PrismaClient>(prisma: T, rawClient: P
             const protectedTx: Prisma.TransactionClient = new Proxy(tx, {
               get(target, property) {
                 if (property === 'ticket') return protectedTicket;
+                if (property === 'board') return protectedBoard;
                 return Reflect.get(target, property, target);
               },
             });
             const protectedTicket = new Proxy(ticket, {
+              get(target, property) {
+                const method = Reflect.get(target, property, target);
+                if (typeof method !== 'function') return method;
+                if (!['update', 'updateMany', 'upsert'].includes(String(property))) return method.bind(target);
+                return (input: unknown) => dependencyConnection.run(protectedTx, async () => await method.call(target, input));
+              },
+            });
+            const protectedBoard = new Proxy(tx.board, {
               get(target, property) {
                 const method = Reflect.get(target, property, target);
                 if (typeof method !== 'function') return method;

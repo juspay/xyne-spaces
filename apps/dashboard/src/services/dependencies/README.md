@@ -71,11 +71,25 @@ invalid-date tickets and their ordinary open action; epoch zero stays a dated
 ticket. Created mode and feature-off behavior omit the tray. No ticket dates,
 shared saved views, or authorization rules are changed.
 
+## Stage consent and board policy continuation
+
+The application mounts one identity-owned dependency consent host. Ticket details, the stage
+picker, inline table moves and linear/non-linear drag-and-drop use one authoritative retry.
+Private reasons are excluded from analytics; hard consent begins unchecked and requires live
+server eligibility. Separate DnD state is restored before prompting. Cancellation suppresses
+success callbacks and analytics. Mounted jsdom tests mock identity and UI primitives; they do
+not prove real ACL, encrypted writes, focus or synchronization.
+
+Feature-enabled table bulk stage changes use the bounded atomic server mutator; unrelated
+field updates run only after accepted stage completion. Board settings expose default strength,
+automation behavior and hard stages, retaining unrelated metadata and generated stage IDs.
+These surfaces still require application acceptance before enabling enforcement.
+
 ## Still required before release
 
-- Stage-move reason/admin-override dialogs and option propagation through every
-  writer, including non-linear forms and approvals.
-- Board policy settings, dependency filters, related-ticket highlighting and
+- Finish stage option propagation and application acceptance through every writer,
+  including non-linear forms, approvals and REST/SDK multi-write atomicity.
+- Board policy application acceptance, dependency filters, related-ticket highlighting and
   specialized activity rendering.
 - Merge/cancellation/deletion lifecycle behavior, notifications, risk watcher,
   Jira/export/MCP compatibility and production-shaped graph-bound acceptance.

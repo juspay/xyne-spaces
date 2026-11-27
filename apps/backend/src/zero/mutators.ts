@@ -1,4 +1,7 @@
-import { ReadonlyJSONValue, Transaction, defineMutator, defineMutators, ApplicationError } from '@rocicorp/zero';
+import { DependencyError } from '@/services/dependencies/types';
+import { dependencyBulkStageWrite, dependencyRequestMoveOptions, zeroDependencySql } from '@/bypassAcl/dependencyStageGate';
+import { TicketACl } from './acl/tables/tickets-acl';
+import { ReadonlyJSONValue, Transaction, type DefaultContext, defineMutator, defineMutators, ApplicationError } from '@rocicorp/zero';
 import { AutomationStatus } from '../automations/types/status';
 import { toDisplayFilename } from '@/utils/filename';
 import { buildAutomationMetadata, parseAutomationMetadata } from '../automations/types/workflow-adapter';
@@ -1314,7 +1317,9 @@ export function createMutators(
     });
   };
 
-  return defineMutators({
+  type BulkStageTarget = { id: string; stageName: string; statusV2?: TicketStatusV2; updatedAt: number };
+  let applyBulkStage: (tx: Transaction<Schema>, target: BulkStageTarget, ctx: DefaultContext) => Promise<void>;
+  const registeredMutators = defineMutators({
     notificationSettings: {
        setChannelNotificationLevel: defineMutator(
          z.object({
@@ -6367,6 +6372,96 @@ export function createMutators(
       ),
     },
     ticket: {
+      bulkStageUpdate: defineMutator(
+        z
+          .object({
+            tickets: z
+              .array(
+                z
+                  .object({
+                    id: z.string().min(1),
+                    stageName: z.string().min(1),
+                    statusV2: z.nativeEnum(TicketStatusV2).optional(),
+                  })
+                  .strict(),
+              )
+              .min(1)
+              .max(100)
+              .refine(
+                tickets =>
+                  new Set(tickets.map(ticket => ticket.id)).size === tickets.length,
+                'Select unique tickets',
+              ),
+            dependencyOverride: z
+              .object({
+                reason: z.string().trim().min(1).max(2000),
+                adminOverride: z.boolean().optional(),
+              })
+              .strict()
+              .optional(),
+            updatedAt: z.number(),
+          })
+          .strict(),
+        async ({ tx, args, ctx }) => {
+          const acl = new TicketACl({
+            userID: authData.sub,
+            workspaceId: authData.workspaceId,
+            role: authData.role ?? '',
+            orgRole: authData.orgRole ?? '',
+            memberId: authData.memberId ?? '',
+          });
+          // Preauthorize the full selection before privileged graph reads or any stage write.
+          const changes: Array<{
+            id: string;
+            data: { stageName: string; statusV2: TicketStatusV2 };
+          }> = [];
+          for (const target of args.tickets) {
+            await acl.canUpdate(target, tx);
+            const ticket = await tx.run(zql.tickets.where('id', target.id).one());
+            if (!ticket) throw new Error('Ticket not found');
+            const stage = await tx.run(
+              zql.stages
+                .where('boardId', ticket.boardId)
+                .where('name', target.stageName)
+                .one(),
+            );
+            if (!stage) throw new Error('Target stage not found');
+            const statusV2 = z
+              .nativeEnum(TicketStatusV2)
+              .parse(stage.defaultTicketStatusV2 ?? ticket.statusV2);
+            if (target.statusV2 !== undefined && target.statusV2 !== statusV2)
+              throw new DependencyError(
+                'DEPENDENCY_STAGE',
+                'Stage status does not match the destination',
+                400,
+              );
+            changes.push({
+              id: target.id,
+              data: { stageName: target.stageName, statusV2 },
+            });
+          }
+          await dependencyBulkStageWrite(
+            zeroDependencySql(tx),
+            changes,
+            {
+              ...dependencyRequestMoveOptions(authData.sub, args),
+              workspaceId: authData.workspaceId,
+            },
+            async () => {
+              for (const [index, target] of args.tickets.entries())
+                await applyBulkStage(
+                  tx,
+                  {
+                    ...target,
+                    statusV2: changes[index]!.data.statusV2,
+                    updatedAt: args.updatedAt,
+                  },
+                  ctx,
+                );
+            },
+          );
+        },
+      ),
       update: defineContractMutator(
         ticketUpdateClient,
         z.object({
@@ -18852,6 +18947,10 @@ export function createMutators(
         z.object({
           ticketId: z.string(),
           toStageName: z.string(),
+          dependencyOverride: z.object({
+            reason: z.string().trim().min(1).max(2000),
+            adminOverride: z.boolean().optional(),
+          }).strict().optional(),
           // Caller-supplied timestamp. Passed from the client so the optimistic and
           // authoritative (server) runs of this mutator persist identical timestamps.
           now: z.number(),
@@ -19418,4 +19517,16 @@ export function createMutators(
       ),
     },
   });
+  applyBulkStage = async (tx, target, ctx) => {
+    const ticket = await tx.run(zql.tickets.where('id', target.id).one());
+    const board = ticket && await tx.run(zql.boards.where('id', ticket.boardId).one());
+    if (board?.boardType === BoardType.NON_LINEAR) {
+      await registeredMutators.nonLinear.transition.fn({ tx, ctx, args: {
+        ticketId: target.id, toStageName: target.stageName, now: target.updatedAt,
+      } });
+    } else {
+      await registeredMutators.ticket.update.fn({ tx, ctx, args: target });
+    }
+  };
+  return registeredMutators;
 }

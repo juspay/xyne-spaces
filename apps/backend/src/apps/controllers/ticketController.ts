@@ -1,3 +1,4 @@
+import { sendDependencyError } from '@/services/dependencies/http';
 import { Request, Response } from 'express';
 import { randomUUID } from 'crypto';
 import { z } from 'zod';
@@ -806,7 +807,7 @@ export class TicketController {
       const bodyResult = UpdateTicketBodySchema.safeParse(req.body);
 
       logger.info(`[TicketController] Received update ticket request`, {
-        body: req.body,
+        fields: Object.keys(req.body ?? {}),
         validationSuccess: bodyResult.success,
         validationErrors: bodyResult.success ? null : bodyResult.error.issues,
       });
@@ -1097,6 +1098,7 @@ export class TicketController {
 
       res.status(200).json({ success: true });
     } catch (error) {
+      if (sendDependencyError(error, res)) return;
       const errorMessage = error instanceof Error ? error.message : String(error);
       const errorStack = error instanceof Error ? error.stack : undefined;
       logger.error('[TicketController] Error updating ticket:', {

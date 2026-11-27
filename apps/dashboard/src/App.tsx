@@ -1,4 +1,5 @@
 import './App.css';
+import { DependencyGateHost } from './components/Tickets/Dependencies/GateDialog';
 import { ReactElement, useEffect } from 'react';
 import { AuthProvider } from './providers/AuthProvider';
 import { AnalyticsProvider } from './providers/AnalyticsProvider';
@@ -179,6 +180,7 @@ const App = (): ReactElement => {
                     <SwitchLoadingOverlay />
                     <InterruptGuard />
                     <WorkspaceSwitchToastListener />
+                    <DependencyGateHost />
                     <AppToaster className='visual-regression-hide' />
                   </TooltipProvider>
                 </ShortcutsProvider>

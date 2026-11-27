@@ -1,3 +1,5 @@
+import { isCancelledDependencyMove } from '../../../services/dependencies/gate';
+import { useDependencyMutation } from '../../../hooks/useDependencyMutation';
 import { DependencyPanel } from '../Dependencies/DependencyPanel';
 import { TicketDependencyBadge } from '../Dependencies/TicketDependencyBadge';
 import { useDependencyData } from '../../../hooks/useDependencyState';
@@ -2225,6 +2227,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
     [currentUser?.id],
   );
 
+  const runDependencyMove = useDependencyMutation(ticket?.id);
   const applyTicketUpdate = useCallback(
     async (
       update: Parameters<typeof mutators.ticket.update>[0],
@@ -2234,9 +2237,11 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
       const before = ticketRef.current;
       const stagesBefore = outcomeStagesRef.current;
       try {
-        const result = await zero.mutate(mutators.ticket.update(update)).server;
+        const result = await runDependencyMove(dependencyOverride =>
+          zero.mutate(mutators.ticket.update({ ...update, ...(dependencyOverride ? { dependencyOverride } : {}) })).server,
+        );
         if (result.type === 'error') {
-          toast.error(result.error.message || errorFallback);
+          if (!isCancelledDependencyMove(result)) toast.error(result.error.message || errorFallback);
           return false;
         }
         trackDetailsOutcome(update, before, stagesBefore);
@@ -2247,7 +2252,7 @@ export const TicketDetails: React.FC<TicketDetailsProps> = ({
         return false;
       }
     },
-    [zero, trackDetailsOutcome],
+    [zero, trackDetailsOutcome, runDependencyMove],
   );
 
   // Debounced auto-save while editing — persist the title as the user types

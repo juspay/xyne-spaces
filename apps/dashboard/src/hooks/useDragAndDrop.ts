@@ -1,3 +1,5 @@
+import { isCancelledDependencyMove } from '../services/dependencies/gate';
+import { useDependencyMutation } from './useDependencyMutation';
 import { useCallback, useRef, useState } from 'react';
 import { DragEndEvent, DragStartEvent } from '@dnd-kit/core';
 import { toast } from 'sonner';
@@ -84,6 +86,7 @@ export const useDragAndDrop = ({
   } | null>(null);
   const { user: currentUser } = useAuth();
   const currentUserRoleIds = useCurrentUserRoleIds();
+  const runDependencyMove = useDependencyMutation();
 
   // Always-current ref so the async .server.then() handler sees up-to-date transitions.
   const transitionsRef = useRef(transitions ?? []);
@@ -450,13 +453,20 @@ export const useDragAndDrop = ({
             // The frontend form/approval gates run before reaching this point, so
             // at this call site the transition is pre-validated (no form required, or
             // approver self-approving). The mutator handles ETA + visitIndex server-side.
-            const transitionResult = zero.mutate(
-              mutators.nonLinear.transition({
-                ticketId: activeTicket.id,
-                toStageName: newStageName,
-                now: Date.now(),
-              }),
-            );
+            const transitionResult = {
+              server: runDependencyMove(
+                dependencyOverride =>
+                  zero.mutate(
+                    mutators.nonLinear.transition({
+                      ticketId: activeTicket.id,
+                      toStageName: newStageName,
+                      now: Date.now(),
+                      ...(dependencyOverride ? { dependencyOverride } : {}),
+                    }),
+                  ).server,
+                revertOptimisticMove,
+              ),
+            };
             // MutatorResult is { client: Promise, server: Promise }, not a Promise itself.
             // Watch .server to catch application errors (e.g. "not allowed", "form required").
             // Capture these for the async callback (closure over current loop iteration).
@@ -544,6 +554,10 @@ export const useDragAndDrop = ({
             ).server;
             void serverPromise
               .then(async result => {
+                if (isCancelledDependencyMove(result)) {
+                  revertOptimisticMove();
+                  return;
+                }
                 if (result?.type === 'error' && result.error?.message) {
                   // Fast path: server included formId in error details — open form directly.
                   const directFormId = result.error.details?.formId;
@@ -575,6 +589,18 @@ export const useDragAndDrop = ({
                   await handleFormRequiredRecovery(result.error.message);
                   return;
                 }
+                setLocalTickets(prev =>
+                  prev.map(t =>
+                    t.id === capturedTicket.id
+                      ? {
+                          ...t,
+                          stageName: newStageName,
+                          ...(newStatus && { statusV2: newStatus }),
+                          ...(kanbanPosition !== undefined && { kanbanPosition }),
+                        }
+                      : t,
+                  ),
+                );
                 trackTicketOutcome('TICKET_STAGE_CHANGED', capturedTicket, {
                   surface: 'kanban_drag',
                   to: newStageName,
@@ -605,19 +631,39 @@ export const useDragAndDrop = ({
               );
             }
           } else {
-            // DEFAULT/RELEASE boards: use Zero mutation for optimistic, instant updates.
-            void zero
-              .mutate(
-                mutators.ticket.update({
-                  id: activeTicket.id,
-                  stageName: newStageName,
-                  ...(newStatus && { statusV2: newStatus }),
-                  ...(kanbanPosition !== undefined && { kanbanPosition }),
-                  updatedAt: Date.now(),
-                }),
-              )
-              .server.then(result => {
-                if (result?.type === 'error') return;
+            // Roll back the separate React DnD state before consent, and again on final refusal.
+            void runDependencyMove(
+              dependencyOverride =>
+                zero.mutate(
+                  mutators.ticket.update({
+                    id: activeTicket.id,
+                    stageName: newStageName,
+                    ...(newStatus && { statusV2: newStatus }),
+                    ...(kanbanPosition !== undefined && { kanbanPosition }),
+                    ...(dependencyOverride ? { dependencyOverride } : {}),
+                    updatedAt: Date.now(),
+                  }),
+                ).server,
+              revertOptimisticMove,
+            )
+              .then(result => {
+                if (result?.type === 'error') {
+                  revertOptimisticMove();
+                  if (!isCancelledDependencyMove(result)) toast.error(result.error.message);
+                  return;
+                }
+                setLocalTickets(prev =>
+                  prev.map(t =>
+                    t.id === activeTicket.id
+                      ? {
+                          ...t,
+                          stageName: newStageName,
+                          ...(newStatus && { statusV2: newStatus }),
+                          ...(kanbanPosition !== undefined && { kanbanPosition }),
+                        }
+                      : t,
+                  ),
+                );
                 trackTicketOutcome('TICKET_STAGE_CHANGED', activeTicket, {
                   surface: 'kanban_drag',
                   to: newStageName,
@@ -629,14 +675,9 @@ export const useDragAndDrop = ({
                     }),
                 });
               })
-              .catch((err: unknown) => {
-                // Transport failure: the optimistic move still stands locally,
-                // matching the pre-tracking `void` behaviour. Log, don't throw.
-                logger.error(LoggerEvent.ZERO_MUTATION_ERROR, {
-                  hook: 'useDragAndDrop',
-                  mutator: 'ticket.update',
-                  error: err instanceof Error ? err.message : String(err),
-                });
+              .catch(() => {
+                revertOptimisticMove();
+                toast.error('Could not update stage');
               });
           }
         }
@@ -730,6 +771,7 @@ export const useDragAndDrop = ({
     [
       localTickets,
       setLocalTickets,
+      runDependencyMove,
       zero,
       stages,
       mode,

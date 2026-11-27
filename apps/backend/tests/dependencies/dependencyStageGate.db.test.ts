@@ -8,8 +8,13 @@ import type { DependencyMoveOptions } from '../../src/bypassAcl/dependencyStageG
 // Isolated SQL integration, NOT application ACL/E2E acceptance. Never truncate application tables.
 test('dependency gate on real PostgreSQL transactions and independent connections', async t => {
   process.env.FORM_FIELD_TEXT_HASH_KEY ??= '1'.repeat(64);
-  const { dependencyTicketWrite, zeroDependencySql, prismaDependencySql } =
-    await import('../../src/bypassAcl/dependencyStageGate');
+  const {
+    dependencyTicketWrite,
+    dependencyBulkStageWrite,
+    dependencyBoardPolicyWrite,
+    zeroDependencySql,
+    prismaDependencySql,
+  } = await import('../../src/bypassAcl/dependencyStageGate');
   const connectionString =
     process.env.TICKET_DEPENDENCY_TEST_DATABASE_URL ?? process.env.DATABASE_URL;
   assert.ok(connectionString, 'A test DATABASE_URL is required; this test must not silently skip');
@@ -144,6 +149,130 @@ test('dependency gate on real PostgreSQL transactions and independent connection
     for (const client of clients) await client.query(`SET search_path TO "${schema}"`);
     for (const [name, definition] of Object.entries(definitions))
       await first.query(`CREATE TABLE ${name} (${definition})`);
+    const changePolicy = async (actorId: string, metadata: unknown) => {
+      await first.query('BEGIN');
+      try {
+        await dependencyBoardPolicyWrite(sql(first), 'board', { metadata }, { actorId, workspaceId: 'ws' },
+          () => first.query('UPDATE boards SET metadata = $1::jsonb WHERE id = $2', [JSON.stringify(metadata), 'board']));
+        await first.query('COMMIT');
+      } catch (error) { await first.query('ROLLBACK'); throw error; }
+    };
+    await t.test('board policy changes require live authority, unrelated metadata does not', async () => {
+      await reset();
+      await changePolicy('actor', { anotherSetting: true });
+      const hard = { dependencyPolicy: { defaultStrength: 'HARD', hardGateStageIds: ['done'], automationOnSoftGate: 'STOP' } };
+      await assert.rejects(changePolicy('actor', hard), { code: 'DEPENDENCY_FORBIDDEN' });
+      await changePolicy('admin', hard);
+      // Null/reset is a policy change too; unrelated settings must preserve the policy.
+      await assert.rejects(changePolicy('actor', null), { code: 'DEPENDENCY_FORBIDDEN' });
+      await changePolicy('actor', { ...hard, anotherSetting: false });
+      await first.query('UPDATE boards SET "createdBy" = $1', ['other-admin']);
+      await assert.rejects(changePolicy('admin', null), { code: 'DEPENDENCY_FORBIDDEN' });
+    });
+    const bulk = async (ids: string[], skip?: string, fail = false) => {
+      await first.query('BEGIN');
+      try {
+        const result = await dependencyBulkStageWrite(
+          sql(first),
+          ids.map(id => ({ id, data: { stageName: 'Done', statusV2: 'COMPLETED' } })),
+          { actorId: 'actor', workspaceId: 'ws' },
+          async () => {
+            for (const id of ids.filter(id => id !== skip))
+              await first.query(
+                'UPDATE tickets SET "stageName" = $1, "statusV2" = $2 WHERE id = $3',
+                ['Done', 'COMPLETED', id],
+              );
+            if (fail) throw new Error('bulk writer failed');
+            return 'bulk written';
+          },
+          async () => true,
+        );
+        await first.query('COMMIT');
+        return result;
+      } catch (error) {
+        await first.query('ROLLBACK');
+        throw error;
+      }
+    };
+    await t.test('nested bulk stage writers emit one private override and redacted activity', async () => {
+      await reset('SOFT');
+      await first.query('BEGIN');
+      const data = { stageName: 'Done', statusV2: 'COMPLETED' };
+      const options = { actorId: 'actor', workspaceId: 'ws', reason: 'Private consent' };
+      try {
+        await dependencyBulkStageWrite(sql(first), [{ id: 'dependent', data }], options,
+          () => dependencyTicketWrite(sql(first), 'dependent', data, options,
+            () => first.query('UPDATE tickets SET "stageName" = $1, "statusV2" = $2 WHERE id = $3', ['Done', 'COMPLETED', 'dependent']),
+            async () => true), async () => true);
+        await first.query('COMMIT');
+      } catch (error) { await first.query('ROLLBACK'); throw error; }
+      const audit = (await first.query('SELECT * FROM ticket_dependency_overrides')).rows;
+      assert.equal(audit.length, 1);
+      assert.equal(audit[0].reason, 'Private consent');
+      const activities = (await first.query('SELECT * FROM ticket_activities')).rows;
+      assert.equal(activities.length, 1);
+      assert.doesNotMatch(JSON.stringify(activities), /Private consent|hidden-blocker/);
+    });
+    await t.test(
+      'atomic bulk evaluates the final graph independently of target order',
+      async () => {
+        for (const ids of [
+          ['dependent', 'hidden-blocker'],
+          ['hidden-blocker', 'dependent'],
+        ]) {
+          await reset();
+          assert.equal(await bulk(ids), 'bulk written');
+          assert.ok((await edge()).satisfiedAt);
+          assert.equal((await edge()).overriddenAt, null);
+          assert.equal(
+            (await first.query('SELECT count(*)::int AS count FROM ticket_dependency_overrides'))
+              .rows[0].count,
+            0,
+          );
+        }
+      },
+    );
+    await t.test(
+      'atomic bulk refuses before writing if any final blocker stays unresolved',
+      async () => {
+        await reset();
+        await assert.rejects(bulk(['dependent']), { code: 'DEPENDENCY_HARD_GATE' });
+        assert.equal(
+          (await first.query('SELECT "stageName" FROM tickets WHERE id = $1', ['dependent']))
+            .rows[0].stageName,
+          'Doing',
+        );
+        assert.equal((await edge()).satisfiedAt, null);
+      },
+    );
+    await t.test(
+      'approval-only or skipped bulk target rolls every requested move back',
+      async () => {
+        await reset();
+        await assert.rejects(bulk(['dependent', 'hidden-blocker'], 'hidden-blocker'), {
+          code: 'DEPENDENCY_STAGE_NOT_APPLIED',
+        });
+        assert.equal(
+          (await first.query('SELECT "stageName" FROM tickets WHERE id = $1', ['dependent']))
+            .rows[0].stageName,
+          'Doing',
+        );
+        assert.equal((await edge()).satisfiedAt, null);
+        assert.equal(
+          (await first.query('SELECT count(*)::int AS count FROM ticket_activities')).rows[0].count,
+          0,
+        );
+      },
+    );
+    await t.test('bulk writer failure and duplicate targets cannot leak satisfaction', async () => {
+      await reset();
+      await assert.rejects(
+        bulk(['dependent', 'hidden-blocker'], undefined, true),
+        /bulk writer failed/,
+      );
+      await assert.rejects(bulk(['dependent', 'dependent']), { code: 'DEPENDENCY_INPUT' });
+      assert.equal((await edge()).satisfiedAt, null);
+    });
     await t.test(
       'hard gate rejects without revealing privileged endpoint or invoking write',
       async () => {

@@ -1,3 +1,9 @@
+import {
+  isCancelledDependencyMove,
+  type DependencyOverride,
+} from '../../../services/dependencies/gate';
+import { useDependencyMutation } from '../../../hooks/useDependencyMutation';
+import { useTicketDependenciesEnabled } from '../../../hooks/useDependencyState';
 import { useCallback, useMemo } from 'react';
 import { toast } from 'sonner';
 import { v4 as uuidv4 } from 'uuid';
@@ -57,6 +63,7 @@ export const useBulkAssignableUsers = (
  * burst. The Desk list view pages at 50 and never reaches this.
  */
 export const MAX_BULK_TICKETS = 100;
+const CANCELLED_STAGE_MOVE = 'Stage move cancelled';
 
 export interface BulkTicketUpdates {
   /** Bare user id — see `assigneeOptionToTicketUpdate` for the encoded picker value. */
@@ -121,7 +128,9 @@ const reportBulkErrors = async (
   pending: ReadonlyArray<Promise<string | null>>,
   plural: string,
 ): Promise<void> => {
-  const failures = (await Promise.all(pending)).filter((message): message is string => !!message);
+  const failures = (await Promise.all(pending)).filter(
+    (message): message is string => !!message && message !== CANCELLED_STAGE_MOVE,
+  );
   const first = failures[0];
   if (first === undefined) return;
   toast.error(
@@ -155,6 +164,8 @@ const capSelection = (
 export const useBulkTicketActions = (): BulkTicketActions => {
   const zero = useZero();
   const noun = useTicketNoun();
+  const dependenciesEnabled = useTicketDependenciesEnabled();
+  const runDependencyMove = useDependencyMutation();
 
   // `boardDetailById` pulls a whole board to read one field, so a bulk action passes a
   // cache — one lookup per board, not per ticket. Per-action, so it can't go stale.
@@ -184,28 +195,36 @@ export const useBulkTicketActions = (): BulkTicketActions => {
       toStageStatusV2?: TicketStatusV2,
       boardTypes?: Map<string, Promise<string | undefined>>,
     ): Promise<string | null> => {
-      if (boardId && (await boardTypeOf(boardId, boardTypes)) === BoardType.NON_LINEAR) {
-        const message = await mutationError(
-          zero.mutate(mutators.nonLinear.transition({ ticketId, toStageName, now: Date.now() })),
-          'Unable to change stage',
-        );
-        return message === 'This transition requires a form to be submitted'
-          ? `Open this ${noun.singular} on its board to fill the required form for this stage`
-          : message;
-      }
-      return mutationError(
-        zero.mutate(
+      const execute = async (dependencyOverride?: DependencyOverride) => {
+        if (boardId && (await boardTypeOf(boardId, boardTypes)) === BoardType.NON_LINEAR) {
+          return zero.mutate(
+            mutators.nonLinear.transition({
+              ticketId,
+              toStageName,
+              now: Date.now(),
+              ...(dependencyOverride ? { dependencyOverride } : {}),
+            }),
+          ).server;
+        }
+        return zero.mutate(
           mutators.ticket.update({
             id: ticketId,
             stageName: toStageName,
             ...(toStageStatusV2 ? { statusV2: toStageStatusV2 } : {}),
+            ...(dependencyOverride ? { dependencyOverride } : {}),
             updatedAt: Date.now(),
           }),
-        ),
-        'Failed to update stage',
-      );
+        ).server;
+      };
+      const result = dependenciesEnabled ? await runDependencyMove(execute) : await execute();
+      if (isCancelledDependencyMove(result)) return CANCELLED_STAGE_MOVE;
+      const message =
+        result?.type === 'error' ? result.error.message || 'Unable to change stage' : null;
+      return message === 'This transition requires a form to be submitted'
+        ? `Open this ${noun.singular} on its board to fill the required form for this stage`
+        : message;
     },
-    [zero, boardTypeOf, noun],
+    [zero, boardTypeOf, noun, dependenciesEnabled, runDependencyMove],
   );
 
   const routeStageChange = useCallback(
@@ -216,6 +235,7 @@ export const useBulkTicketActions = (): BulkTicketActions => {
       toStageStatusV2?: TicketStatusV2,
     ): Promise<void> => {
       const message = await stageChange(ticketId, boardId, toStageName, toStageStatusV2);
+      if (message === CANCELLED_STAGE_MOVE) return;
       if (message) toast.error(message);
       else {
         trackTicketOutcome(
@@ -238,7 +258,7 @@ export const useBulkTicketActions = (): BulkTicketActions => {
       const hasFields = Object.keys(fields).length > 0;
       const pending: Array<Promise<string | null>> = [];
       const boardTypes = new Map<string, Promise<string | undefined>>();
-      const selection = capSelection(tickets, noun.plural);
+      const selection = dependenciesEnabled && stage ? tickets : capSelection(tickets, noun.plural);
       // One outcome row per bulk action (not per ticket), reported once the fan-out
       // settles so a fully rejected batch counts as nothing.
       const trackBulkOutcome = (results: ReadonlyArray<string | null>): void => {
@@ -265,6 +285,54 @@ export const useBulkTicketActions = (): BulkTicketActions => {
           trackTicketOutcome('TICKET_FIELD_UPDATED', null, { ...extra, field: 'eta' });
         }
       };
+      if (dependenciesEnabled && stage && selection.length) {
+        if (tickets.length > MAX_BULK_TICKETS) {
+          toast.error(`Select at most ${MAX_BULK_TICKETS} ${noun.plural} for an atomic stage move`);
+          return;
+        }
+        void (async () => {
+          const result = await runDependencyMove(
+            dependencyOverride =>
+              zero.mutate(
+                mutators.ticket.bulkStageUpdate({
+                  tickets: selection.map(ticket => ({
+                    id: ticket.id,
+                    stageName: stage.name,
+                    ...(stage.statusV2 ? { statusV2: stage.statusV2 } : {}),
+                  })),
+                  updatedAt: Date.now(),
+                  ...(dependencyOverride ? { dependencyOverride } : {}),
+                }),
+              ).server,
+          );
+          if (result?.type === 'error') {
+            if (!isCancelledDependencyMove(result)) toast.error(result.error.message);
+            return;
+          }
+          trackTicketOutcome('TICKET_STAGE_CHANGED', null, {
+            surface: 'bulk',
+            bulkCount: selection.length,
+            succeeded: selection.length,
+            to: stage.name,
+          });
+          // Unrelated field edits retain existing semantics, but never run after a refused stage batch.
+          if (hasFields)
+            await reportBulkErrors(
+              selection.map(ticket =>
+                mutationError(
+                  zero.mutate(
+                    mutators.ticket.update({ id: ticket.id, ...fields, updatedAt: Date.now() }),
+                  ),
+                  `Failed to update ${noun.plural}`,
+                ),
+              ),
+              noun.plural,
+            );
+        })().catch(error =>
+          toast.error(error instanceof Error ? error.message : 'Unable to move tickets'),
+        );
+        return;
+      }
       for (const ticket of selection) {
         if (stage) {
           pending.push(
@@ -285,7 +353,7 @@ export const useBulkTicketActions = (): BulkTicketActions => {
       void reportBulkErrors(pending, noun.plural);
       void Promise.all(pending).then(trackBulkOutcome);
     },
-    [zero, stageChange, noun],
+    [zero, stageChange, noun, dependenciesEnabled, runDependencyMove],
   );
 
   const applyTags = useCallback(

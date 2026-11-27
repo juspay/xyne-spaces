@@ -58,7 +58,7 @@ test('Prisma authorization precedes the privileged dependency continuation', asy
 test('already-authorized interactive transactions still pass through dependency enforcement on the same connection', async () => {
   let handler!: (args: QueryArgs) => Promise<unknown>;
   let written = false;
-  const tx = { marker: 'existing-transaction', ticket: { update: async (args: unknown) => handler({ model: 'Ticket', operation: 'update', args, query: async () => { written = true; return 'result'; } }) } };
+  const tx = { board: {}, marker: 'existing-transaction', ticket: { update: async (args: unknown) => handler({ model: 'Ticket', operation: 'update', args, query: async () => { written = true; return 'result'; } }) } };
   const rawRoot = {} as PrismaClient;
   const fake = {
     $transaction: async (fn: (transaction: unknown) => Promise<unknown>) => fn(tx),

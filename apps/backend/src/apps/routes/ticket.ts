@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { dependencyMoveContext } from '@/services/dependencies/http';
 import { TicketController } from '../controllers/ticketController';
 import { validateChannelAccessForPost } from '../middelware/channelValidation';
 import { requirePermission } from '@/middleware/requirePermission';
@@ -10,7 +11,7 @@ const ticketController = new TicketController();
 router.post('/createTicket', requirePermission('tickets:write'), validateChannelAccessForPost, ticketController.createTicket);
 router.post('/createEmailTicket', requirePermission('tickets:write'), validateChannelAccessForPost, ticketController.createEmailTicket);
 router.post('/appDeskInbound', requirePermission('desk:write'), uploadMultiple, validateChannelAccessForPost, ticketController.appDeskInbound);
-router.post('/updateTicket', requirePermission('tickets:write'), validateChannelAccessForPost, ticketController.updateTicket);
+router.post('/updateTicket', requirePermission('tickets:write'), validateChannelAccessForPost, dependencyMoveContext, ticketController.updateTicket);
 router.post('/updateFormField', requirePermission('tickets:write'), validateChannelAccessForPost, ticketController.updateFormField);
 router.post('/disableEmailSend', requirePermission('tickets:write'), validateChannelAccessForPost, ticketController.disableEmailSend);
 router.post('/enableEmailSend', requirePermission('tickets:write'), validateChannelAccessForPost, ticketController.enableEmailSend);

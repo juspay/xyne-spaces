@@ -2615,6 +2615,7 @@ export class JiraMigrationImportService {
 	    );
 
     const staleMappingsToDelete = existingMappings.filter(mapping => {
+      if (mapping.relationType === TicketReferenceRelation.BLOCKS) return false;
       if (!jiraImportedTicketIds.has(mapping.sourceTicketId)) return false;
       if (!jiraImportedTicketIds.has(mapping.targetTicketId)) return false;
       if (!migratedTicketIds.has(mapping.sourceTicketId) && !migratedTicketIds.has(mapping.targetTicketId)) return false;

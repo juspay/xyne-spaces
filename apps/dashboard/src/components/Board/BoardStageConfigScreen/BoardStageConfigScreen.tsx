@@ -1,3 +1,6 @@
+import { dependencyPolicy, type BoardDependencyPolicy } from '@xyne/shared';
+import { useTicketDependenciesEnabled } from '../../../hooks/useDependencyState';
+import { DependencyPolicyPanel } from '../DependencyPolicyPanel/DependencyPolicyPanel';
 import { logger, Event as LogEvent } from '../../../utils/logger';
 import {
   type ReactElement,
@@ -546,6 +549,9 @@ const BoardStageConfigScreen = ({
   initialBoard,
 }: BoardStageConfigScreenProps): ReactElement | null => {
   const zero = useZero();
+  const dependenciesEnabled = useTicketDependenciesEnabled();
+  const [dependencySettings, setDependencySettings] = useState<BoardDependencyPolicy>(() => dependencyPolicy(null));
+  const dependencySettingsEdited = useRef(false);
   const { confirm, ConfirmDialog } = useConfirmDialog();
 
   // ── Data fetching ──────────────────────────────────────────────────────────
@@ -909,6 +915,7 @@ const BoardStageConfigScreen = ({
   useEffect(() => {
     if (boardId) {
       hasInitializedStages.current = false;
+      dependencySettingsEdited.current = false;
     }
   }, [boardId]);
 
@@ -916,6 +923,7 @@ const BoardStageConfigScreen = ({
   useEffect(() => {
     if (board && typeof board === 'object' && 'metadata' in board) {
       const metadata = board.metadata as Record<string, unknown>;
+      if (!dependencySettingsEdited.current) setDependencySettings(dependencyPolicy(metadata));
       const loadedBoardType =
         'boardType' in board
           ? ((board as { boardType?: BoardType }).boardType ?? BoardType.DEFAULT)
@@ -940,6 +948,7 @@ const BoardStageConfigScreen = ({
   useEffect(() => {
     if (!isOpen) {
       hasInitializedStages.current = false;
+      dependencySettingsEdited.current = false;
       hasLoadedTransitions.current = false;
       transitionsSyncedRef.current = false;
     }
@@ -2506,6 +2515,13 @@ const BoardStageConfigScreen = ({
         name: getBoardName(board),
         metadata: {
           ...otherMetadata,
+          ...(dependenciesEnabled && dependencySettingsEdited.current ? {
+            dependencyPolicy: {
+              ...dependencySettings,
+              hardGateStageIds: stages.flatMap(stage => dependencySettings.hardGateStageIds.includes(stage.id ?? `temporary:${stage.tempId}`)
+                ? [stageIds[stage.sequenceNumber]!] : []),
+            },
+          } : {}),
           ...(transitionGraphLayout
             ? { [TRANSITION_GRAPH_LAYOUT_KEY]: transitionGraphLayout }
             : {}),
@@ -2576,6 +2592,8 @@ const BoardStageConfigScreen = ({
     onClose,
     zero,
     fullRoleAssignment,
+    dependenciesEnabled,
+    dependencySettings,
     slaPolicyType,
     showNextStageFormInTicketDetails,
     boardType,
@@ -2678,6 +2696,15 @@ const BoardStageConfigScreen = ({
             </div>
           </div>
 
+          {dependenciesEnabled && boardType !== BoardType.FLOW && <DependencyPolicyPanel
+            policy={dependencySettings}
+            stages={stages.map(stage => ({ id: stage.id ?? `temporary:${stage.tempId}`, name: stage.name }))}
+            onChange={policy => {
+              dependencySettingsEdited.current = true;
+              boardSettingsEditedRef.current = true;
+              setDependencySettings(policy);
+            }}
+          />}
           {/* ── Priority-based SLA Toggle ── */}
           <div className='px-6 py-3 border-t border-border'>
             <div className='flex items-center justify-between gap-4'>

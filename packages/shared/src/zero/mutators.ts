@@ -4526,6 +4526,44 @@ export const mutators = defineMutators({
     ),
   },
   ticket: {
+    bulkStageUpdate: defineMutator(
+      z
+        .object({
+          tickets: z
+            .array(
+              z
+                .object({
+                  id: z.string().min(1),
+                  stageName: z.string().min(1),
+                  statusV2: z.nativeEnum(TicketStatusV2).optional(),
+                })
+                .strict(),
+            )
+            .min(1)
+            .max(100)
+            .refine(
+              tickets =>
+                new Set(tickets.map(ticket => ticket.id)).size === tickets.length,
+              'Select unique tickets',
+            ),
+          dependencyOverride: z
+            .object({
+              reason: z.string().trim().min(1).max(2000),
+              adminOverride: z.boolean().optional(),
+            })
+            .strict()
+            .optional(),
+          updatedAt: z.number(),
+        })
+        .strict(),
+      async ({ tx, args }) => {
+        for (const ticket of args.tickets)
+          await tx.mutate.tickets.update({
+            ...ticket,
+            updatedAt: args.updatedAt,
+          });
+      },
+    ),
     update: defineMutator(
       z.object({
         id: z.string(),
@@ -13249,6 +13287,10 @@ export const mutators = defineMutators({
       z.object({
         ticketId: z.string(),
         toStageName: z.string(),
+        dependencyOverride: z.object({
+          reason: z.string().trim().min(1).max(2000),
+          adminOverride: z.boolean().optional(),
+        }).strict().optional(),
         // Caller-supplied timestamp. Zero replays this mutator on both the client (optimistic)
         // and the server (authoritative) with the same args, so passing `now` keeps the two runs
         // consistent instead of each calling Date.now() and diverging.

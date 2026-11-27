@@ -28,6 +28,10 @@ export interface DependencyMoveOptions {
   adminOverride?: boolean;
   automation?: boolean;
 }
+// Set only by the server-owned atomic bulk helper, never from transport options.
+const bulkFinalStates = new AsyncLocalStorage<ReadonlyMap<string, StoredTicket>>();
+// Nested registered writers and the outer bulk validator share exactly-once lifecycle stamps.
+const bulkStamps = new AsyncLocalStorage<Set<string>>();
 const moves = new AsyncLocalStorage<DependencyMoveOptions>();
 export function withDependencyMoveOptions<T>(options: DependencyMoveOptions, fn: () => T): T {
   return moves.run(options, fn);
@@ -216,6 +220,9 @@ async function stamp(
   // Identifiers below are closed constants, never values from a request.
   const table = edge.kind === 'BLOCKS' ? 'ticket_reference_mappings' : 'ticket_sub_ticket_mappings';
   if (kind === 'review' && edge.kind !== 'BLOCKS') return;
+  const stamps = bulkStamps.getStore();
+  const stampKey = JSON.stringify([edge.kind, edge.id, kind]);
+  if (stamps?.has(stampKey)) return;
   const assignments =
     kind === 'satisfied'
       ? '"satisfiedAt" = NOW(), "overriddenAt" = NULL, "overriddenBy" = NULL, "overrideReason" = NULL' +
@@ -231,6 +238,7 @@ async function stamp(
     kind === 'override' ? [edge.id, workspaceId, null, null] : [edge.id, workspaceId],
   );
   if (!changed.length) return;
+  stamps?.add(stampKey);
   if (kind === 'override')
     await auditDependencyOverride(sql, workspaceId, edge, actorId, reason ?? '', 'STAGE_OVERRIDE');
   // No other endpoint id or user-authored reason enters a synchronized activity.
@@ -320,7 +328,18 @@ export async function dependencyTicketWrite<T>(
       boardId: targetBoardId,
       stageName: targetBoardId === ticket.boardId ? ticket.stageName : '\u0000previous-board',
     };
-    const gate = dependencyGate(candidate, target.id, edges, context);
+    const finalStates = bulkFinalStates.getStore();
+    const finalContext: DependencyContext = finalStates
+      ? {
+          ...context,
+          ticketsById: new Map(
+            [...context.ticketsById].map(([id, ticket]) => [id, finalStates.get(id) ?? ticket]),
+          ),
+        }
+      : context;
+    // Final-state satisfaction is used only for classification, never latched before persistence.
+    const gatedEdges = finalStates ? edges.filter(edge => !satisfied(edge, finalContext)) : edges;
+    const gate = dependencyGate(candidate, target.id, gatedEdges, context);
     const reason = options.reason?.trim();
     const canAdminOverride =
       gate.hard.length > 0 &&
@@ -394,6 +413,180 @@ export async function dependencyTicketWrite<T>(
       await stamp(sql, ticket.workspaceId, edge, options.actorId, 'review');
   }
   return result;
+}
+
+/** Serialize policy changes with graph/stage writers, after the caller's ordinary board ACL. */
+export async function dependencyBoardPolicyWrite<T>(
+  sql: DependencySql,
+  boardId: string,
+  data: Record<string, unknown>,
+  options: DependencyMoveOptions,
+  write: () => Promise<T>,
+): Promise<T> {
+  if (!('metadata' in data)) return write();
+  const initial = (
+    await rows<{ workspaceId: string }>(sql, 'SELECT "workspaceId" FROM boards WHERE id = $1', [
+      boardId,
+    ])
+  )[0];
+  if (!initial || initial.workspaceId !== options.workspaceId)
+    throw new DependencyError('DEPENDENCY_NOT_FOUND', 'Board not found', 404);
+  const lock = await rows<{ locked: boolean }>(
+    sql,
+    'SELECT pg_try_advisory_xact_lock(hashtext($1)) AS locked',
+    [`link-subticket:ws:${initial.workspaceId}`],
+  );
+  if (!lock[0]?.locked)
+    throw new DependencyError('DEPENDENCY_BUSY', 'Another dependency change is in progress; retry');
+  const current = (
+    await rows<{ metadata: unknown }>(
+      sql,
+      'SELECT metadata FROM boards WHERE id = $1 AND "workspaceId" = $2 FOR UPDATE',
+      [boardId, initial.workspaceId],
+    )
+  )[0];
+  if (!current) throw new DependencyError('DEPENDENCY_NOT_FOUND', 'Board not found', 404);
+  if (
+    JSON.stringify(dependencyPolicy(data.metadata)) !==
+      JSON.stringify(dependencyPolicy(current.metadata)) &&
+    !(await dependencyBoardAdmin(sql, initial.workspaceId, options.actorId, boardId))
+  )
+    throw new DependencyError(
+      'DEPENDENCY_FORBIDDEN',
+      'Only a board administrator can change dependency policy',
+      403,
+    );
+  return write();
+}
+
+/**
+ * Caller preauthorizes every target and supplies one active transaction. Preflight and final
+ * validation make approval-only/no-op writes roll back the whole batch, including private audit.
+ */
+export async function dependencyBulkStageWrite<T>(
+  sql: DependencySql,
+  changes: readonly { id: string; data: Record<string, unknown> }[],
+  options: DependencyMoveOptions,
+  write: () => Promise<T>,
+  enabled: (workspaceId: string) => Promise<boolean> = ticketDependenciesEnabled,
+): Promise<T> {
+  if (
+    !changes.length ||
+    changes.length > 100 ||
+    new Set(changes.map(change => change.id)).size !== changes.length
+  )
+    throw new DependencyError('DEPENDENCY_INPUT', 'Select between 1 and 100 unique tickets', 400);
+  const snapshots = await rows<StoredTicket>(
+    sql,
+    `SELECT ${TICKET_COLUMNS} FROM tickets WHERE id = ANY($1::text[]) ORDER BY id`,
+    [changes.map(change => change.id)],
+  );
+  const workspaceId = snapshots[0]?.workspaceId;
+  if (
+    !workspaceId ||
+    snapshots.length !== changes.length ||
+    snapshots.some(ticket => ticket.workspaceId !== workspaceId) ||
+    (options.workspaceId && options.workspaceId !== workspaceId)
+  )
+    throw new DependencyError('DEPENDENCY_NOT_FOUND', 'Ticket not found', 404);
+  if (!(await enabled(workspaceId))) return write();
+  const lock = await rows<{ locked: boolean }>(
+    sql,
+    'SELECT pg_try_advisory_xact_lock(hashtext($1)) AS locked',
+    [`link-subticket:ws:${workspaceId}`],
+  );
+  if (!lock[0]?.locked)
+    throw new DependencyError('DEPENDENCY_BUSY', 'Another dependency change is in progress; retry');
+  const locked = await rows<StoredTicket>(
+    sql,
+    `SELECT ${TICKET_COLUMNS} FROM tickets WHERE "workspaceId" = $1 AND id = ANY($2::text[]) ORDER BY id FOR UPDATE`,
+    [workspaceId, changes.map(change => change.id)],
+  );
+  if (locked.length !== changes.length)
+    throw new DependencyError('DEPENDENCY_NOT_FOUND', 'Ticket not found', 404);
+  const byId = new Map(changes.map(change => [change.id, change.data]));
+  const finalStates = new Map(
+    locked.map(ticket => {
+      const data = byId.get(ticket.id)!;
+      return [
+        ticket.id,
+        {
+          ...ticket,
+          ...(typeof data.stageName === 'string' ? { stageName: data.stageName } : {}),
+          ...(typeof data.statusV2 === 'string' ? { statusV2: data.statusV2 } : {}),
+          ...(typeof data.boardId === 'string' ? { boardId: data.boardId } : {}),
+          ...(typeof data.isArchived === 'boolean' ? { isArchived: data.isArchived } : {}),
+        },
+      ];
+    }),
+  );
+  return bulkStamps.run(new Set(), () =>
+    bulkFinalStates.run(finalStates, async () => {
+      // All checks run before ANY requested move. Reasons/admin authority are still checked live.
+      let softCount = 0;
+      let hardCount = 0;
+      let canAdminOverride = true;
+      for (const { id, data } of changes) {
+        try {
+          await dependencyTicketWrite(sql, id, data, options, async () => undefined, enabled);
+        } catch (error) {
+          if (
+            !(error instanceof DependencyError) ||
+            !['DEPENDENCY_HARD_GATE', 'DEPENDENCY_REASON_REQUIRED'].includes(error.code)
+          )
+            throw error;
+          const rawDetails = error.details;
+          if (!rawDetails || typeof rawDetails !== 'object' || Array.isArray(rawDetails))
+            throw error;
+          const details = rawDetails as Readonly<Record<string, unknown>>;
+          softCount += typeof details.softCount === 'number' ? details.softCount : 0;
+          hardCount += typeof details.hardCount === 'number' ? details.hardCount : 0;
+          if (typeof details.hardCount === 'number' && details.hardCount > 0)
+            canAdminOverride = canAdminOverride && details.canAdminOverride === true;
+        }
+      }
+      if (softCount || hardCount)
+        throw new DependencyError(
+          hardCount ? 'DEPENDENCY_HARD_GATE' : 'DEPENDENCY_REASON_REQUIRED',
+          hardCount
+            ? 'Unresolved dependencies prevent this stage move'
+            : 'A reason is required to proceed past unresolved dependencies',
+          409,
+          { softCount, hardCount, canAdminOverride: hardCount > 0 && canAdminOverride },
+        );
+      let guarded = async () => {
+        const result = await write();
+        const persisted = await rows<StoredTicket>(
+          sql,
+          `SELECT ${TICKET_COLUMNS} FROM tickets WHERE "workspaceId" = $1 AND id = ANY($2::text[])`,
+          [workspaceId, changes.map(change => change.id)],
+        );
+        if (
+          persisted.length !== changes.length ||
+          persisted.some(ticket => {
+            const expected = finalStates.get(ticket.id);
+            return (
+              !expected ||
+              ticket.boardId !== expected.boardId ||
+              ticket.stageName !== expected.stageName ||
+              ticket.statusV2 !== expected.statusV2 ||
+              ticket.isArchived !== expected.isArchived
+            );
+          })
+        )
+          throw new DependencyError(
+            'DEPENDENCY_STAGE_NOT_APPLIED',
+            'No tickets were updated. Complete required approvals before retrying the bulk move',
+          );
+        return result;
+      };
+      for (const { id, data } of [...changes].reverse()) {
+        const inner = guarded;
+        guarded = () => dependencyTicketWrite(sql, id, data, options, inner, enabled);
+      }
+      return guarded();
+    }),
+  );
 }
 
 /** Zero's pg adapter exposes this same in-flight connection; never open a second transaction. */

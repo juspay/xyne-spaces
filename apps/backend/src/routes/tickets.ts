@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { dependencyMoveContext } from '@/services/dependencies/http';
 import { dependencyController } from '@/controllers/dependencyController';
 import { AccessType } from '@xyne/shared';
 import { TicketController } from '../controllers/ticketController';
@@ -61,7 +62,7 @@ router.post(
 );
 
 // Update a ticket (assignee, stage, group, title, description, priority, status, eta)
-router.patch('/:ticketId', ticketController.updateTicket);
+router.patch('/:ticketId', dependencyMoveContext, ticketController.updateTicket);
 
 // Workflow metrics for tickets dashboard
 router.get('/workflow-metrics', analyticsAuthMiddleware.requireWorkspaceContext, analyticsController.getWorkflowMetrics);

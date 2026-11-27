@@ -1,3 +1,4 @@
+import { sendDependencyError } from '@/services/dependencies/http';
 import { NextFunction, Request, Response } from 'express';
 import { Ticket } from '@prisma/client';
 import { currentWorkspaceId } from '@/database/tenant/context';
@@ -1431,6 +1432,7 @@ export class TicketController {
 
       res.status(200).json({ success: true, updated: updates });
     } catch (error) {
+      if (sendDependencyError(error, res)) return;
       const errorMessage = error instanceof Error ? error.message : String(error);
       logger.error('[TicketController] Error updating ticket:', {
         error: errorMessage,

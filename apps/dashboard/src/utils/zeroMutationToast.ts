@@ -1,3 +1,4 @@
+import { isCancelledDependencyMove } from '../services/dependencies/gate';
 import { toast } from 'sonner';
 
 /**
@@ -37,6 +38,7 @@ export async function surfaceMutationError(
   try {
     const result = await mutation.server;
     if (result?.type === 'error') {
+      if (isCancelledDependencyMove(result)) return false;
       toast.error(result.error?.message || fallback);
       return false;
     }

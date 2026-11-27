@@ -26,6 +26,7 @@ import {
 import { TICKET_DEPENDENCIES_ENFORCEMENT_READY } from '@/services/dependencies/featureFlag';
 import {
   dependencyTicketWrite,
+  dependencyBoardPolicyWrite,
   dependencyRequestMoveOptions,
   zeroDependencySql,
   currentDependencyMoveOptions,
@@ -196,7 +197,12 @@ function wrapMutateWithACL(
             const write = () =>
               (originalOp as (this: unknown, value: unknown) => Promise<unknown>).call(this, args);
             let result: unknown;
-            if (
+            if (tableName === 'boards' && ['update', 'upsert'].includes(operation) && args && typeof args === 'object' && 'metadata' in args) {
+              if (operation === 'upsert') throw new DependencyError('DEPENDENCY_UNSUPPORTED_WRITER', 'Dependency policy updates require an existing board');
+              const row = args as Record<string, unknown>;
+              result = await dependencyBoardPolicyWrite(zeroDependencySql(tx), String(row.id), row,
+                { actorId: ctx.userID, workspaceId: ctx.workspaceId }, write);
+            } else if (
               TICKET_DEPENDENCIES_ENFORCEMENT_READY &&
               tableName === 'tickets' &&
               ['update', 'upsert'].includes(operation) &&
@@ -219,7 +225,13 @@ function wrapMutateWithACL(
                 {
                   ...dependencyRequestMoveOptions(
                     ctx.userID,
-                    input?.id === row.id ? input : undefined,
+                    input?.id === row.id || (input?.ticketId === row.id && input?.toStageName === row.stageName) ||
+                    (Array.isArray(input?.tickets) && input.tickets.some((target: unknown) => {
+                      if (!target || typeof target !== 'object') return false;
+                      const ticket = target as Record<string, unknown>;
+                      return ticket.id === row.id && ticket.stageName === row.stageName;
+                    }))
+                      ? input : undefined,
                     trusted?.automation === true &&
                       trusted.actorId === ctx.userID &&
                       (!trusted.workspaceId || trusted.workspaceId === ctx.workspaceId),

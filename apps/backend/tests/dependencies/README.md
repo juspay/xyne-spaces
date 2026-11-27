@@ -19,6 +19,7 @@ The SQL suite requires PostgreSQL and permission to create an isolated schema. I
 | --- | --- | --- |
 | Shared policy tests | Pure gate, satisfaction, graph and state rules | Application authorization or delivery |
 | Transport and ACL tests | Input schemas, restricted projections, sync exclusions and private audit ACL denial | Live workspace grant revocation |
+| HTTP context tests | Authenticated identity, asynchronous propagation, strict override input and count-only errors | Real REST/SDK routing, atomic multi-service updates or application ACLs |
 | Prisma boundary tests | ACL checks precede the dependency continuation, scoped bulk predicates survive, existing transaction context reaches the guard | A live Prisma engine write with production ACLs |
 | SQL transaction tests | Independent PostgreSQL connections, mixed graph lock contention, gate decisions, latches, rollback, private audit storage and migration SQL | A registered application mutator, authorization or synchronization |
 | Compatibility tests | Legacy reference mutation behavior | Every importer, merge, integration or deletion path |
@@ -40,9 +41,17 @@ Required flag evaluation uses OpenFeature details. Errors and default fallbacks 
 
 - Dependency errors carry only gate counts and live admin eligibility through Zero ApplicationError details. Nested override intent survives the shared encryption contract and registered ticket update validators; malformed/ambiguous intent is refused. This does not establish all-writer UI propagation.
 - BLOCKS and CHILD author/reason values are cleared from mapping stamps; audit text remains private. Automation audit reasons are exactly `automation`; service/system identity and data.updatedBy do not establish automation provenance.
-- Cycle validation walks the incident unsatisfied component in 200-ID frontiers. Graph/context reads fail closed beyond 10,000 nodes or 20,000 rows, and empty explicit selections never scan the workspace. Prisma updateMany refuses more than 100 targets; this is not final-state bulk acceptance.
-- Zero board policy changes recheck live administration before creator/project shortcuts. Prisma board policy enforcement and real grant-revocation acceptance remain outstanding.
+- Cycle validation walks the incident unsatisfied component in 200-ID frontiers. Graph/context reads fail closed beyond 10,000 nodes or 20,000 rows, and empty explicit selections never scan the workspace. Prisma updateMany refuses more than 100 targets; the continuation below adds final-state bulk SQL tests, not registered application acceptance.
+- Zero board policy changes recheck live administration before creator/project shortcuts. Prisma board policy enforcement is implemented in the continuation below; real grant-revocation acceptance remains outstanding.
 - Isolated Prisma rollback tests use the existing SQL adapter, not new raw-query calls. The raw SQL guard is unchanged.
+
+## Consent, bulk and policy continuation
+
+- Shared stage intent and the mounted dashboard host implement one explicit retry, private trimmed reasons, live eligible hard consent, rollback before prompting and cancellation on identity/workspace/intent replacement or unmount. Isolated controller/jsdom tests are not browser acceptance.
+- The bulk server mutator preauthorizes every selected target, then composes existing registered writers on one transaction. Final-state preflight and persisted-state validation reject approval-only/no-op outcomes. Nested lifecycle stamps are deduplicated within that bulk operation; normal authorization and encryption wrappers remain in place.
+- Prisma and Zero policy changes serialize with graph writers and check live board administration. The feature-gated board editor preserves other metadata and maps new stage IDs. SQL tests cover authority/reset/revocation; the actual board editor still needs application acceptance.
+- REST PATCH and SDK update handlers propagate authenticated override intent and typed count-only errors. SDK request logging no longer records the reason-bearing body. **These handlers still call multiple service writes: a later refused stage/status operation may follow an already-committed unrelated update. Atomic request-level behavior and every writer remain release blockers.**
+- Jira stale-link cleanup preserves application-owned BLOCKS mappings. This is not complete Jira import/export acceptance.
 
 ## Remaining release requirements
 
@@ -50,7 +59,7 @@ Required flag evaluation uses OpenFeature details. Errors and default fallbacks 
 - prove real Prisma and Zero authorization, live revocation, board-administrator grant scope and concurrent edits
 - validate graph bounds against production-shaped data and evaluate bulk moves against their atomic final state
 - finish richer transition and ETA context, merge repointing, cancellation and deletion behavior, idempotent notifications and risk watching
-- complete policy settings, gate dialogs, activity rendering, filters, highlighting and shared calendar saved-view definitions; the dashboard dependency editor, shared badges and Created/ETA grouping now have focused tests, not browser acceptance
+- complete policy/gate application acceptance, activity rendering, filters, highlighting and shared calendar saved-view definitions; the dashboard dependency editor, shared badges and Created/ETA grouping now have focused tests, not browser acceptance
 - finish Jira mapping, export and MCP compatibility
 - complete real application end-to-end acceptance; command footage and isolated SQL tests do not count
 
