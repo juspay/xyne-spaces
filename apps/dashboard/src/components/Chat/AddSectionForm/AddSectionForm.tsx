@@ -76,7 +76,7 @@ export const AddSectionForm = ({
         </button>
       </div>
       <div className='space-y-1.5'>
-        <label htmlFor='section-name' className='text-sm font-medium text-foreground'>
+        <label htmlFor='section-name' className='block text-sm font-medium text-foreground'>
           Section name
         </label>
         <div

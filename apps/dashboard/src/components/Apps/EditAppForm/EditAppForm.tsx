@@ -178,7 +178,7 @@ const CommandFormInline = ({
     <div className='p-3 rounded-md border border-ring bg-muted/20 space-y-2'>
       <div className='flex gap-2'>
         <div className='flex-1 space-y-1'>
-          <label htmlFor='command-name' className='text-xs font-medium text-foreground'>
+          <label htmlFor='command-name' className='block text-xs font-medium text-foreground'>
             Command name
           </label>
           <div className='relative'>
@@ -201,7 +201,7 @@ const CommandFormInline = ({
         </div>
       </div>
       <div className='space-y-1'>
-        <label htmlFor='command-description' className='text-xs font-medium text-foreground'>
+        <label htmlFor='command-description' className='block text-xs font-medium text-foreground'>
           Description
         </label>
         <Input
@@ -410,7 +410,10 @@ const ShortcutFormInline = ({
   return (
     <div className='p-3 rounded-md border border-ring bg-muted/20 space-y-2'>
       <div className='space-y-1'>
-        <label htmlFor='shortcut-command-name' className='text-xs font-medium text-foreground'>
+        <label
+          htmlFor='shortcut-command-name'
+          className='block text-xs font-medium text-foreground'
+        >
           Shortcut ID
         </label>
         <Input
@@ -427,7 +430,7 @@ const ShortcutFormInline = ({
         {nameError && <p className='text-xs text-destructive'>{nameError}</p>}
       </div>
       <div className='space-y-1'>
-        <label htmlFor='shortcut-description' className='text-xs font-medium text-foreground'>
+        <label htmlFor='shortcut-description' className='block text-xs font-medium text-foreground'>
           Description
         </label>
         <Input

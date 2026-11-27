@@ -1678,7 +1678,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
             <div className='space-y-2'>
               <label
                 htmlFor={customReminderDatePickerId}
-                className='text-sm font-medium text-foreground'
+                className='block text-sm font-medium text-foreground'
               >
                 When
               </label>
@@ -1696,7 +1696,7 @@ export const ChatBubble: React.FC<ChatBubbleProps> = ({
             <div className='space-y-2'>
               <label
                 htmlFor={customReminderTimeSelectId}
-                className='text-sm font-medium text-foreground'
+                className='block text-sm font-medium text-foreground'
               >
                 Time
               </label>

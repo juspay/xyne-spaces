@@ -1018,10 +1018,6 @@
     background-image: var(--wallpaper-image);
   }
 
-  [data-stream-ground="bleed"] .app-sidenav-frame {
-    border-color: transparent;
-  }
-
   [data-theme="midnight"] input[type="date"]::-webkit-calendar-picker-indicator {
     filter: brightness(0) invert(1);
     opacity: 0.85;
@@ -6430,4 +6426,8 @@
   [role="option"][aria-selected="true"]:not([cmdk-item]):not([data-theme-tokens]) {
   background-color: rgba(37, 99, 235, 0.2) !important;
   color: #60a5fa !important;
+}
+
+[data-stream-ground="bleed"] .app-sidenav-frame {
+  border-color: transparent;
 }

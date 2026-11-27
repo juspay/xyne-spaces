@@ -552,7 +552,10 @@ export const ImpactForm = ({
 
         <div className='space-y-4'>
           <div className='space-y-1.5'>
-            <label htmlFor={impactTypeFieldId} className='text-sm font-medium text-foreground'>
+            <label
+              htmlFor={impactTypeFieldId}
+              className='block text-sm font-medium text-foreground'
+            >
               Impact Type *
             </label>
             <select
@@ -580,7 +583,10 @@ export const ImpactForm = ({
           </div>
 
           <div className='space-y-1.5'>
-            <label htmlFor={impactSummaryFieldId} className='text-sm font-medium text-foreground'>
+            <label
+              htmlFor={impactSummaryFieldId}
+              className='block text-sm font-medium text-foreground'
+            >
               Impact Summary *
             </label>
             <Textarea

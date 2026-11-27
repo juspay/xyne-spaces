@@ -360,7 +360,7 @@ export const RCAForm = ({
 
           {/* Title */}
           <div className='space-y-1.5'>
-            <label htmlFor='rca-title' className='text-sm font-medium text-foreground'>
+            <label htmlFor='rca-title' className='block text-sm font-medium text-foreground'>
               Title *
             </label>
             <input
@@ -380,7 +380,7 @@ export const RCAForm = ({
 
           {/* Summary */}
           <div className='space-y-1.5'>
-            <label htmlFor='rca-summary' className='text-sm font-medium text-foreground'>
+            <label htmlFor='rca-summary' className='block text-sm font-medium text-foreground'>
               Summary *
             </label>
             <Textarea
@@ -399,7 +399,7 @@ export const RCAForm = ({
           {/* Root Cause & Severity */}
           <div className='grid grid-cols-1 md:grid-cols-2 gap-4'>
             <div className='space-y-1.5'>
-              <label htmlFor='rca-root-cause' className='text-sm font-medium text-foreground'>
+              <label htmlFor='rca-root-cause' className='block text-sm font-medium text-foreground'>
                 Root Cause *
               </label>
               <Textarea
@@ -416,7 +416,7 @@ export const RCAForm = ({
             </div>
 
             <div className='space-y-1.5'>
-              <label htmlFor='rca-severity' className='text-sm font-medium text-foreground'>
+              <label htmlFor='rca-severity' className='block text-sm font-medium text-foreground'>
                 Severity *
               </label>
               <select
@@ -444,7 +444,7 @@ export const RCAForm = ({
           {/* Bug Type & Category */}
           <div className='grid grid-cols-1 md:grid-cols-2 gap-4'>
             <div className='space-y-1.5'>
-              <label htmlFor='rca-bug-type' className='text-sm font-medium text-foreground'>
+              <label htmlFor='rca-bug-type' className='block text-sm font-medium text-foreground'>
                 Bug Type *
               </label>
               <select
@@ -469,7 +469,10 @@ export const RCAForm = ({
 
             {formValues.bugType && bugTypeValue !== 'ui_ux' && (
               <div className='space-y-1.5'>
-                <label htmlFor='rca-category-type' className='text-sm font-medium text-foreground'>
+                <label
+                  htmlFor='rca-category-type'
+                  className='block text-sm font-medium text-foreground'
+                >
                   Category Type *
                 </label>
                 <select
@@ -498,7 +501,10 @@ export const RCAForm = ({
           {showIssueCategory && (
             <div className='grid grid-cols-1 md:grid-cols-2 gap-4'>
               <div className='space-y-1.5'>
-                <label htmlFor='rca-issue-category' className='text-sm font-medium text-foreground'>
+                <label
+                  htmlFor='rca-issue-category'
+                  className='block text-sm font-medium text-foreground'
+                >
                   Issue Category *
                 </label>
                 <select
@@ -531,7 +537,10 @@ export const RCAForm = ({
           {/* Issue Start Time */}
           <div className='grid grid-cols-1 md:grid-cols-3 gap-4'>
             <div className='space-y-1.5'>
-              <label htmlFor='rca-issue-start' className='text-sm font-medium text-foreground'>
+              <label
+                htmlFor='rca-issue-start'
+                className='block text-sm font-medium text-foreground'
+              >
                 Issue Start Time *
               </label>
               <input

@@ -468,7 +468,10 @@ const ShareMessageInput: React.FC<ShareMessageInputProps> = ({
         }
       }}
     >
-      <label htmlFor={`share-${subject}-message`} className='text-muted-foreground text-[13px]'>
+      <label
+        htmlFor={`share-${subject}-message`}
+        className='block text-muted-foreground text-[13px]'
+      >
         Add a message (optional)
       </label>
       <InputBox

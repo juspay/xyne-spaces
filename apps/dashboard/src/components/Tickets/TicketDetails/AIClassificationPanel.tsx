@@ -202,7 +202,7 @@ export const AIClassificationPanel: React.FC<AIClassificationPanelProps> = ({
             <div className='space-y-2'>
               <div className='grid grid-cols-2 gap-2'>
                 <div className='space-y-1'>
-                  <label htmlFor='ai-edit-category' className='text-xs text-muted-foreground'>
+                  <label htmlFor='ai-edit-category' className='block text-xs text-muted-foreground'>
                     Category
                   </label>
                   {categoryOptions.length > 0 ? (
@@ -240,7 +240,10 @@ export const AIClassificationPanel: React.FC<AIClassificationPanelProps> = ({
                   )}
                 </div>
                 <div className='space-y-1'>
-                  <label htmlFor='ai-edit-subcategory' className='text-xs text-muted-foreground'>
+                  <label
+                    htmlFor='ai-edit-subcategory'
+                    className='block text-xs text-muted-foreground'
+                  >
                     Sub-Category
                   </label>
                   {subCategoryOptions.length > 0 ? (

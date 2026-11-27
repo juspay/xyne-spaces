@@ -545,7 +545,10 @@ export const COEForm = ({
           />
 
           <div className='space-y-1.5'>
-            <label htmlFor={actionTypeFieldId} className='text-sm font-medium text-foreground'>
+            <label
+              htmlFor={actionTypeFieldId}
+              className='block text-sm font-medium text-foreground'
+            >
               Action Type *
             </label>
             <select
@@ -576,7 +579,7 @@ export const COEForm = ({
           </div>
 
           <div className='space-y-1.5'>
-            <label htmlFor={statusFieldId} className='text-sm font-medium text-foreground'>
+            <label htmlFor={statusFieldId} className='block text-sm font-medium text-foreground'>
               Status *
             </label>
             <select
@@ -608,7 +611,7 @@ export const COEForm = ({
           </div>
 
           <div className='space-y-1.5'>
-            <label htmlFor={actionFieldId} className='text-sm font-medium text-foreground'>
+            <label htmlFor={actionFieldId} className='block text-sm font-medium text-foreground'>
               Action *
             </label>
             <Textarea

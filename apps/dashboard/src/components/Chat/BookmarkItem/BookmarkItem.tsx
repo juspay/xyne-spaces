@@ -365,7 +365,10 @@ export const BookmarkItem = ({
             </button>
           </div>
           <div className='space-y-2'>
-            <label htmlFor={reminderDatePickerId} className='text-sm font-medium text-foreground'>
+            <label
+              htmlFor={reminderDatePickerId}
+              className='block text-sm font-medium text-foreground'
+            >
               When
             </label>
             <DatePicker
@@ -380,7 +383,10 @@ export const BookmarkItem = ({
           </div>
 
           <div className='space-y-2'>
-            <label htmlFor={reminderTimeSelectId} className='text-sm font-medium text-foreground'>
+            <label
+              htmlFor={reminderTimeSelectId}
+              className='block text-sm font-medium text-foreground'
+            >
               Time
             </label>
             <Select

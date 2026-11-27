@@ -666,7 +666,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
       {/* Desk source selector */}
       {requireConnector && (
         <div className='space-y-1.5'>
-          <label htmlFor='desk-source' className='text-sm font-medium text-foreground'>
+          <label htmlFor='desk-source' className='block text-sm font-medium text-foreground'>
             Desk source
           </label>
           <Select value={deskType} onValueChange={value => handleSourceChange(value as DeskType)}>
@@ -745,7 +745,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
 
       {requireConnector && deskType === DeskType.CALL && (
         <div className='space-y-2'>
-          <label htmlFor='call-source-select' className='text-sm font-medium text-foreground'>
+          <label htmlFor='call-source-select' className='block text-sm font-medium text-foreground'>
             Call source <span className='text-muted-foreground'>*</span>
           </label>
           <Select value={selectedCallSource} disabled>
@@ -783,7 +783,10 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
       {/* Slack Channel Selection */}
       {requireConnector && deskType === DeskType.SLACK && (
         <div className='space-y-2'>
-          <label htmlFor='slack-channel-select' className='text-sm font-medium text-foreground'>
+          <label
+            htmlFor='slack-channel-select'
+            className='block text-sm font-medium text-foreground'
+          >
             Slack Channel <span className='text-muted-foreground'>*</span>
           </label>
           {isLoadingSlackChannels ? (
@@ -843,7 +846,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
       {/* Xyne App Selection */}
       {requireConnector && deskType === DeskType.APP && (
         <div className='space-y-2'>
-          <label htmlFor='app-desk-select' className='text-sm font-medium text-foreground'>
+          <label htmlFor='app-desk-select' className='block text-sm font-medium text-foreground'>
             Xyne App <span className='text-muted-foreground'>*</span>
           </label>
           {isLoadingEligibleApps ? (
@@ -900,7 +903,10 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
 
       {requireConnector && deskType === DeskType.CHANNELS && (
         <div className='space-y-2'>
-          <label htmlFor='channels-desk-app-select' className='text-sm font-medium text-foreground'>
+          <label
+            htmlFor='channels-desk-app-select'
+            className='block text-sm font-medium text-foreground'
+          >
             App <span className='text-muted-foreground'>*</span>
           </label>
           {isLoadingChannelsDeskApps ? (
@@ -951,7 +957,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
       {requireConnector && deskType === DeskType.SOCIAL_MEDIA && (
         <div className='space-y-4'>
           <div className='space-y-2'>
-            <label htmlFor='social-provider' className='text-sm font-medium text-foreground'>
+            <label htmlFor='social-provider' className='block text-sm font-medium text-foreground'>
               Source <span className='text-muted-foreground'>*</span>
             </label>
             <Select
@@ -1039,7 +1045,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
                     <div className='space-y-2'>
                       <label
                         htmlFor={`google-play-app-name-${index}`}
-                        className='text-sm text-foreground'
+                        className='block text-sm text-foreground'
                       >
                         App display name
                       </label>
@@ -1062,7 +1068,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
                     <div className='space-y-2'>
                       <label
                         htmlFor={`android-package-name-${index}`}
-                        className='text-sm text-foreground'
+                        className='block text-sm text-foreground'
                       >
                         Android package name
                       </label>
@@ -1102,7 +1108,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
           {socialProvider === 'APP_STORE' && (
             <div className='space-y-3'>
               <div className='space-y-2'>
-                <label htmlFor='app-store-key-id' className='text-sm text-foreground'>
+                <label htmlFor='app-store-key-id' className='block text-sm text-foreground'>
                   Key ID <span className='text-muted-foreground'>*</span>
                 </label>
                 <Input
@@ -1117,7 +1123,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
                 />
               </div>
               <div className='space-y-2'>
-                <label htmlFor='app-store-private-key' className='text-sm text-foreground'>
+                <label htmlFor='app-store-private-key' className='block text-sm text-foreground'>
                   Private key (.p8) <span className='text-muted-foreground'>*</span>
                 </label>
                 <textarea
@@ -1310,7 +1316,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
       >
         {field => (
           <div className='space-y-1.5'>
-            <label htmlFor='channel-name' className='text-sm font-medium text-foreground'>
+            <label htmlFor='channel-name' className='block text-sm font-medium text-foreground'>
               Channel Name <span className='text-muted-foreground'>*</span>
             </label>
             <div className='relative'>
@@ -1401,7 +1407,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
         <form.Field name='boardId'>
           {field => (
             <div className='space-y-1.5'>
-              <label htmlFor='board-select' className='text-sm font-medium text-foreground'>
+              <label htmlFor='board-select' className='block text-sm font-medium text-foreground'>
                 Board
                 {deskType === DeskType.SOCIAL_MEDIA && !isOAuthSocialProvider(socialProvider) && (
                   <span className='text-destructive'> *</span>
@@ -1448,7 +1454,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
             <div className='space-y-1.5'>
               <label
                 htmlFor='assignee-group-select'
-                className='text-sm font-medium text-foreground'
+                className='block text-sm font-medium text-foreground'
               >
                 Assignee User Group (optional)
               </label>
@@ -1491,7 +1497,10 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
       <form.Field name='description'>
         {field => (
           <div className='space-y-1.5'>
-            <label htmlFor='channel-description' className='text-sm font-medium text-foreground'>
+            <label
+              htmlFor='channel-description'
+              className='block text-sm font-medium text-foreground'
+            >
               Description (optional)
             </label>
             <Textarea
@@ -1543,7 +1552,7 @@ export const AddChannelForm: React.FC<AddChannelFormProps> = ({
       <form.Field name='topicTags'>
         {field => (
           <div className='space-y-1.5'>
-            <label htmlFor='topic-tags' className='text-sm font-medium text-foreground'>
+            <label htmlFor='topic-tags' className='block text-sm font-medium text-foreground'>
               Topic Tags (optional)
             </label>
             {field.state.value.length > 0 && (

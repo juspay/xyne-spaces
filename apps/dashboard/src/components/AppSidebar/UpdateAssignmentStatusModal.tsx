@@ -137,7 +137,7 @@ export const UpdateAssignmentStatusModal: React.FC<UpdateAssignmentStatusModalPr
         {/* Datetime Input */}
         <div className='space-y-4 pt-2'>
           <div className='space-y-2'>
-            <span className='text-sm font-medium text-foreground'>Available after</span>
+            <span className='block text-sm font-medium text-foreground'>Available after</span>
             <Select.Root value={expiryOption} onValueChange={setExpiryOption}>
               <Select.Trigger className='w-full flex items-center justify-between px-3 py-2 rounded-lg border border-input hover:bg-muted transition-colors focus:outline-hidden focus:ring-2 focus:ring-blue-500'>
                 <Select.Value />

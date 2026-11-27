@@ -112,7 +112,7 @@ export const AddDmForm: React.FC<AddDmFormProps> = ({ onSubmit, loading, onCance
         >
           {field => (
             <div className='space-y-1.5'>
-              <label htmlFor='dm-message' className='text-sm font-medium text-foreground'>
+              <label htmlFor='dm-message' className='block text-sm font-medium text-foreground'>
                 Message (optional)
               </label>
               <Textarea

@@ -589,7 +589,10 @@ export const QueryDashboardScreen: React.FC = () => {
               <div className='flex-1 min-h-0 overflow-y-auto border-r border-border/30 p-6 space-y-6 bg-linear-to-b from-background/50 to-background'>
                 {/* Query Name */}
                 <div className='space-y-2'>
-                  <label htmlFor='query-name' className='text-sm font-semibold text-foreground'>
+                  <label
+                    htmlFor='query-name'
+                    className='block text-sm font-semibold text-foreground'
+                  >
                     Query Name
                   </label>
                   <Input
@@ -603,7 +606,10 @@ export const QueryDashboardScreen: React.FC = () => {
 
                 {/* Entity Type Selection */}
                 <div className='space-y-2'>
-                  <label htmlFor='entity-type' className='text-sm font-semibold text-foreground'>
+                  <label
+                    htmlFor='entity-type'
+                    className='block text-sm font-semibold text-foreground'
+                  >
                     Entity Type
                   </label>
                   <select
@@ -633,7 +639,7 @@ export const QueryDashboardScreen: React.FC = () => {
                     <div className='space-y-2'>
                       <label
                         htmlFor='select-fields'
-                        className='text-sm font-semibold text-foreground'
+                        className='block text-sm font-semibold text-foreground'
                       >
                         Select Fields
                       </label>
@@ -993,7 +999,7 @@ export const QueryDashboardScreen: React.FC = () => {
 
                 {/* Filters */}
                 <div className='space-y-2'>
-                  <label htmlFor='filters' className='text-sm font-semibold text-foreground'>
+                  <label htmlFor='filters' className='block text-sm font-semibold text-foreground'>
                     Filters
                   </label>
                   <div

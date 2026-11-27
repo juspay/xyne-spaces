@@ -149,7 +149,7 @@ export function AIInviteDialog({
 
         {/* User Selection */}
         <div className='space-y-2'>
-          <span className='text-sm font-medium text-foreground'>Users to Invite</span>
+          <span className='block text-sm font-medium text-foreground'>Users to Invite</span>
           <div
             className='border border-border rounded-lg divide-y divide-border max-h-48 overflow-y-auto'
             role='group'
@@ -195,7 +195,7 @@ export function AIInviteDialog({
 
         {/* Message Input */}
         <div className='space-y-2'>
-          <label htmlFor='invite-message' className='text-sm font-medium text-foreground'>
+          <label htmlFor='invite-message' className='block text-sm font-medium text-foreground'>
             Message (optional)
           </label>
           <textarea

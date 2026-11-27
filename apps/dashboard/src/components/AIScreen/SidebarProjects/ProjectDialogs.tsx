@@ -139,7 +139,7 @@ export function ProjectDialogs({
         <DialogHeader title={heading} onClose={close} trackName='CLOSE_PROJECT_DIALOG' />
         <div className='space-y-4 px-5 pb-5'>
           <div className='space-y-1.5'>
-            <label htmlFor='project-name' className='text-sm font-medium text-foreground'>
+            <label htmlFor='project-name' className='block text-sm font-medium text-foreground'>
               Project name
             </label>
             <div

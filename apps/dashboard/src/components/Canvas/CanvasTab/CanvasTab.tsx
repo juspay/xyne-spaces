@@ -1070,7 +1070,10 @@ const CanvasTab: React.FC<CanvasTabProps> = ({ channelId, getCanvasRoute }): Rea
             </div>
 
             <div className='space-y-2'>
-              <label htmlFor='channel-folder-name' className='text-sm font-medium text-foreground'>
+              <label
+                htmlFor='channel-folder-name'
+                className='block text-sm font-medium text-foreground'
+              >
                 Folder name
               </label>
               <Input

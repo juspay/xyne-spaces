@@ -408,7 +408,9 @@ const DateField: React.FC<DateFieldProps> = ({
   const [open, setOpen] = useState(false);
   return (
     <div className='space-y-1'>
-      <span className='text-[11px] uppercase tracking-wide text-muted-foreground'>{label}</span>
+      <span className='block text-[11px] uppercase tracking-wide text-muted-foreground'>
+        {label}
+      </span>
       <Popover.Root open={open} onOpenChange={setOpen}>
         <Popover.Trigger asChild>
           <button
