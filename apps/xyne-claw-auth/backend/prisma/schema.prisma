@@ -2946,15 +2946,23 @@ model SandboxRepoConfig {
   id              String   @id @default(cuid())
   key             String   @unique
   config          Json
+  // Copies of config.template, config.repoUrl and config.auxRepos, so a profile can be found by template
+  // without parsing config. config stays complete; sandboxRepoConfigRepository writes both together.
+  // Optional in the database; the code requires it on every write (repoSetupConfigSchema).
+  template        String?
+  repoUrl         String?
+  auxRepos        Json?
   enabled         Boolean  @default(true)
   // Spaces workspace that owns it. Null: shows nowhere until assigned, unless the key overrides a built-in.
   workspaceId     String?
+  // Both null on the copy of a built-in that start-up keeps here: nobody has edited it.
   createdByUserId String?
   updatedByUserId String?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
   @@index([workspaceId])
+  @@index([template])
   @@map("sandbox_repo_configs")
 }
 
