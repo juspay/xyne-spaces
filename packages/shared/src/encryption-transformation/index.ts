@@ -12,6 +12,7 @@ import { keptExtensionOf } from '../sdlc.js';
 import { parseSlashCommandArtifactMessage } from '../utils/slashCommandArtifact.js';
 import { parseForwardedMessageXml } from '../forwardedMessage.js';
 import { getMessageContentLength } from '../utils/messageContent.js';
+import { parseParentMessageMd, resolveConversationAnchorType } from '../utils/activityMetadataParser.js';
 
 export { extractMentions, extractSpecialMentionFlags } from './mentions.js';
 export {
@@ -92,6 +93,10 @@ const EXTRACTOR_FNS: { [K in ExtractorName]: (g: Groups) => ExtractorOutput[K] }
   forwardedOptionalTextGroupIds: g => extractAllMentions(forwardedOptionalTextOf(g.raw)).groupIds,
   forwardedOptionalTextLength: g => getMessageContentLength(forwardedOptionalTextOf(g.raw)),
   forwardedHasOptionalText: g => forwardedOptionalTextOf(g.raw) !== '',
+  parentAnchorType: g => {
+    const parent = parseParentMessageMd(g.raw);
+    return parent ? resolveConversationAnchorType(parent) : null;
+  },
 };
 
 /** A forwarded message's optional text ('' when none, or when the text is not a forward). */

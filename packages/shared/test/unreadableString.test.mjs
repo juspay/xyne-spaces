@@ -8,7 +8,7 @@ import {
   reveal,
   makeUnreadable,
   replyToConversationClient,
-  conversationsSendClient,
+  mutatorContracts,
 } from '../dist/enc-contracts/index.js';
 
 test('an UnreadableString shows nothing through any way of printing it', () => {
@@ -32,7 +32,7 @@ test('reveal returns the value and rejects anything that is not an UnreadableStr
 
 test('contracts list their unreadable fields, through .optional() too', () => {
   assert.deepEqual(replyToConversationClient.unreadableFields, ['content']);
-  assert.deepEqual(conversationsSendClient.unreadableFields, ['content']);
+  assert.deepEqual(mutatorContracts['conversations.send'].unreadableFields, ['content']);
 });
 
 test('makeUnreadable wraps only the unreadable fields and leaves the input untouched', () => {

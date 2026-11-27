@@ -36,6 +36,7 @@ export const EXTRACTORS = [
   'forwardedOptionalTextLength',
   'forwardedHasOptionalText',
   'rawLength',
+  'parentAnchorType',
 ] as const;
 export type ExtractorName = (typeof EXTRACTORS)[number];
 
@@ -78,6 +79,8 @@ export interface ExtractorOutput {
    * where `textLength` (visible characters) would let mostly-markup text through.
    */
   rawLength: number;
+  /** What a conversation's `parent_message_md` anchors: a thread reply or a sub-ticket; null when there is none. */
+  parentAnchorType: 'THREAD_REPLY' | 'SUBTICKET' | null;
   /** The message carries FlowJSON (a card, a plan, a slash-command artifact). */
   flowJsonPresent: boolean;
   /** Forwarded message: the original message id; null when the content is not a forward. */
@@ -175,6 +178,7 @@ export const fieldFactsSchema: z.ZodType<FieldFacts> = z.object({
   textLength: z.number().int().nonnegative().optional(),
   textIsEmpty: z.boolean().optional(),
   rawLength: z.number().int().nonnegative().optional(),
+  parentAnchorType: z.enum(['THREAD_REPLY', 'SUBTICKET']).nullable().optional(),
   flowJsonPresent: z.boolean().optional(),
   forwardedMessageId: z.string().nullable().optional(),
   forwardedConversationId: z.string().nullable().optional(),

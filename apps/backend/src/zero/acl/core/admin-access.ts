@@ -2,11 +2,12 @@ import { Transaction } from '@rocicorp/zero';
 import { Schema, AccessType, WorkspaceRole, type UserGroup } from '@xyne/shared';
 import { zql } from '../../queries';
 import { MutationACLError, QueryContext } from './types';
+import type { AnyTransaction } from '../../unreadableTransaction';
 
 /**
  * Checks if the current user has ADMIN access to the PROJECTS resource (direct or via group).
  */
-export async function hasProjectAdminAccess(ctx: { userID: string }, tx: Transaction<Schema>): Promise<boolean> {
+export async function hasProjectAdminAccess(ctx: { userID: string }, tx: AnyTransaction): Promise<boolean> {
   const projectsResource = await tx.run(
     (zql.resources).where('name', 'LISTPROJECTS').one()
   );

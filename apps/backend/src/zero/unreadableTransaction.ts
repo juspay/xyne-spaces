@@ -97,7 +97,7 @@ export type UnreadableTransaction = Tx extends infer X
     : never
   : never;
 
-/** A helper that both defineContractMutator and plain mutators call takes either transaction. */
+/** A helper that mutators and code holding the raw transaction (the ACL layer) both call takes either. */
 export type AnyTransaction = Tx | UnreadableTransaction;
 
 /** Wraps `row`'s unreadable columns; adds each column it wrapped to `wrappedColumns`. */
@@ -205,7 +205,7 @@ function unreadableMutate(mutate: Tx['mutate']): UnreadableMutate {
 
 /**
  * The facts `spec` asks for, for each row, from the stored values (before they are wrapped).
- * With DB encryption on, one encryption-service call for all of them (a value may be
+ * With client encryption on, one encryption-service call for all of them (a value may be
  * workspace-DEK ciphertext); off, extracted here from the plaintext.
  */
 async function deriveRowFacts(
@@ -234,7 +234,7 @@ async function deriveRowFacts(
   if (items.length === 0) return facts;
 
   let results: FieldFacts[];
-  const source: FactsSource = config.enc.enableDbEncryption ? 'encryption-service' : 'local';
+  const source: FactsSource = config.enc.apiClientEncryptionEnabled ? 'encryption-service' : 'local';
   const metricSource = source === 'local' ? 'local' : 'enc-rust';
   try {
     if (source === 'encryption-service') {
@@ -248,7 +248,7 @@ async function deriveRowFacts(
       }
     } else {
       results = items.map(({ column, value, derive }) => {
-        if (isCiphertextValue(value)) throw new Error(`tx.read: ${table}.${column} is ciphertext and DB encryption is off`);
+        if (isCiphertextValue(value)) throw new Error(`tx.read: ${table}.${column} is ciphertext and client encryption is off`);
         return runExtractors(value, derive);
       });
     }

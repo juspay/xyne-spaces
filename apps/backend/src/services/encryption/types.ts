@@ -230,8 +230,6 @@ export type TransitEncryptResult<T> = {
 export interface EncryptionProvider {
   getClientConfig(): Promise<ClientEncryptionConfig>;
   getEncryptedFieldsConfig(): Promise<Record<string, EncryptedFieldConfig>>;
-  /** Zero mutators with a manifest rule: each one is sent to the encryption service to be checked. */
-  getClientEncryptedMutators(): Promise<string[]>;
   /** The encryption service's public keys; the client derives its transit keys from them. */
   getTransitServerKeys(): Promise<TransitServerKeys>;
   /**
