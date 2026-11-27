@@ -31,13 +31,7 @@ import { callController as callsController } from '@/controllers/callController'
 import { affinityController } from '@/controllers/affinityController';
 import { userManagementController } from '@/controllers/userManagementController';
 import * as dailyBriefController from '@/controllers/dailyBriefController';
-import { ContractError } from '@/framework/api';
-import * as channelsApi from '@/api/channels/channels.controller';
-import * as dailyBriefApi from '@/api/daily-brief/daily-brief.controller';
-import * as notificationsApi from '@/api/notifications/notifications.controller';
-import * as emojisApi from '@/api/emojis/emojis.controller';
-import * as subTicketsApi from '@/api/sub-tickets/sub-tickets.controller';
-import type { AuthenticatedUser } from '@/types/express';
+import { callTyped, ContractError, type TypedAnswer } from '@/framework/api';
 import { customEmojiController } from '@/controllers/customEmojiController';
 import { CanvasController } from '@/controllers/canvasController';
 import { deskMetricsController } from '@/controllers/deskMetricsController';
@@ -188,27 +182,14 @@ type DirectRoute =
   | (BaseRoute & { readonly service: Service; readonly controller?: never; readonly typed?: never })
   | (BaseRoute & { readonly typed: TypedHandler; readonly controller?: never; readonly service?: never });
 
-/** What a typed handler gets: the request, checked against its contract. No req, no res. */
-interface TypedContext {
-  readonly user: AuthenticatedUser;
-  readonly params: never;
-  readonly query: never;
-  readonly body: never;
-  readonly headers: Request['headers'];
-  readonly userAgent: string | undefined;
-}
-
 /**
- * A route backed by the typed framework's handler (the same function the product's typed route
- * calls), so the SDK and the product cannot drift. The contract's params, query and body are
- * checked here as the typed route checks them; a `ContractError` becomes the SDK error envelope
- * exactly as a controller's 4xx/5xx does.
+ * A route served by the product's typed route itself (callTyped): its request check, its access
+ * checks (its routers' included), its controller and its answer check, so the SDK and the product
+ * cannot drift. A `ContractError` becomes the SDK error envelope exactly as a controller's 4xx/5xx
+ * does.
  */
 interface TypedHandler {
   readonly contract: AnyRouteContract;
-  readonly controller: (ctx: TypedContext) => Promise<unknown>;
-  /** Status of the success answer (default 200); 204 sends no body. */
-  readonly successStatus?: number;
 }
 
 /** A query-string parameter the desk metrics controller decodes as a JSON array of strings. */
@@ -329,10 +310,7 @@ const ROUTES: readonly DirectRoute[] = [
   {
     method: 'post',
     path: '/channels/check-duplicate',
-    typed: {
-      contract: api.channels.checkDuplicate,
-      controller: ({ body, user }) => channelsApi.checkDuplicate({ body, user }),
-    },
+    typed: { contract: api.channels.checkDuplicate },
   },
   /**
    * Channels desk tickets for the caller's own threads: status fields only, and only for threads the caller
@@ -612,10 +590,7 @@ const ROUTES: readonly DirectRoute[] = [
   {
     method: 'get',
     path: '/notifications/workspace-counts',
-    typed: {
-      contract: api.notifications.workspaceCounts,
-      controller: ({ user }) => notificationsApi.workspaceCounts({ user }),
-    },
+    typed: { contract: api.notifications.workspaceCounts },
   },
   {
     method: 'patch',
@@ -628,10 +603,7 @@ const ROUTES: readonly DirectRoute[] = [
   {
     method: 'patch',
     path: '/notifications/:id/read',
-    typed: {
-      contract: api.notifications.read,
-      controller: ({ params, body, user }) => notificationsApi.markRead({ params, body, user }),
-    },
+    typed: { contract: api.notifications.read },
     body: z.object({
       channelId: z.string().min(1).optional(),
       conversationId: z.string().min(1).optional(),
@@ -641,29 +613,20 @@ const ROUTES: readonly DirectRoute[] = [
   {
     method: 'patch',
     path: '/notifications/:id/dismiss',
-    typed: {
-      contract: api.notifications.dismiss,
-      controller: ({ params, user }) => notificationsApi.dismiss({ params, user }),
-    },
+    typed: { contract: api.notifications.dismiss },
     unwrap: unwrapEnvelope,
   },
   {
     method: 'get',
     path: '/notifications/preferences',
-    typed: {
-      contract: api.notifications.preferences,
-      controller: ({ user }) => notificationsApi.getPreferences({ user }),
-    },
+    typed: { contract: api.notifications.preferences },
   },
   {
     method: 'put',
     path: '/notifications/preferences',
     // Validated by the controller against its own preferencesSchema, after it
     // drops retired notification types — so a stale client still saves.
-    typed: {
-      contract: api.notifications.preferencesSet,
-      controller: ({ body, user }) => notificationsApi.updatePreferences({ body, user }),
-    },
+    typed: { contract: api.notifications.preferencesSet },
     unwrap: unwrapEnvelope,
   },
 
@@ -697,18 +660,12 @@ const ROUTES: readonly DirectRoute[] = [
   {
     method: 'get',
     path: '/daily-brief/config',
-    typed: {
-      contract: api.dailyBrief.config,
-      controller: ({ user, headers }) => dailyBriefApi.getConfig({ user, headers }),
-    },
+    typed: { contract: api.dailyBrief.config },
   },
   {
     method: 'put',
     path: '/daily-brief/config',
-    typed: {
-      contract: api.dailyBrief.configSet,
-      controller: ({ body, user, headers }) => dailyBriefApi.saveConfig({ body, user, headers }),
-    },
+    typed: { contract: api.dailyBrief.configSet },
     body: z.object({
       enabled: z.boolean().optional(),
       instructions: z.string().optional(),
@@ -718,18 +675,12 @@ const ROUTES: readonly DirectRoute[] = [
   {
     method: 'get',
     path: '/daily-brief/settings',
-    typed: {
-      contract: api.dailyBrief.settings,
-      controller: ({ user, headers }) => dailyBriefApi.getSettings({ user, headers }),
-    },
+    typed: { contract: api.dailyBrief.settings },
   },
   {
     method: 'put',
     path: '/daily-brief/settings',
-    typed: {
-      contract: api.dailyBrief.settingsSet,
-      controller: ({ body, user, headers }) => dailyBriefApi.saveSettings({ body, user, headers }),
-    },
+    typed: { contract: api.dailyBrief.settingsSet },
     body: z.object({ agentSlug: z.string().min(1).nullable() }),
   },
 
@@ -816,10 +767,7 @@ const ROUTES: readonly DirectRoute[] = [
   {
     method: 'get',
     path: '/channels/search',
-    typed: {
-      contract: api.channels.search,
-      controller: ({ query, user }) => channelsApi.searchForMentions({ query, user }),
-    },
+    typed: { contract: api.channels.search },
     query: z.object({
       q: z.string().min(1),
       limit: z.string().regex(/^\d+$/).optional(),
@@ -829,20 +777,14 @@ const ROUTES: readonly DirectRoute[] = [
   {
     method: 'post',
     path: '/channels/member-counts',
-    typed: {
-      contract: api.channels.memberCounts,
-      controller: ({ body, user }) => channelsApi.memberCounts({ body, user }),
-    },
+    typed: { contract: api.channels.memberCounts },
     body: z.object({ channelIds: z.array(z.string()).max(10000) }),
     unwrap: unwrapEnvelope,
   },
   {
     method: 'get',
     path: '/channels/:channelId/members',
-    typed: {
-      contract: api.channels.members,
-      controller: ({ params, user }) => channelsApi.channelMembers({ params, user }),
-    },
+    typed: { contract: api.channels.members },
     unwrap: unwrapEnvelope,
   },
 
@@ -876,13 +818,13 @@ const ROUTES: readonly DirectRoute[] = [
   {
     method: 'get',
     path: '/emojis',
-    typed: { contract: api.emojis.list, controller: () => emojisApi.listEmojis() },
+    typed: { contract: api.emojis.list },
     unwrap: (body) => field(body, 'emojis'),
   },
   {
     method: 'get',
     path: '/emojis/:emojiId',
-    typed: { contract: api.emojis.get, controller: ({ params }) => emojisApi.getEmoji({ params }) },
+    typed: { contract: api.emojis.get },
     unwrap: (body) => field(body, 'emoji'),
   },
   {
@@ -895,7 +837,7 @@ const ROUTES: readonly DirectRoute[] = [
   {
     method: 'delete',
     path: '/emojis/:emojiId',
-    typed: { contract: api.emojis.delete, controller: ({ params, user }) => emojisApi.deleteEmoji({ params, user }) },
+    typed: { contract: api.emojis.delete },
     unwrap: () => ({}),
   },
 
@@ -983,11 +925,7 @@ const ROUTES: readonly DirectRoute[] = [
   {
     method: 'post',
     path: '/sub-tickets/link',
-    typed: {
-      contract: api.subTickets.link,
-      successStatus: 201,
-      controller: ({ body, user }) => subTicketsApi.linkSubTicket({ body, user }),
-    },
+    typed: { contract: api.subTickets.link },
     body: z.object({
       ticketId: z.string().min(1),
       mappedTicketId: z.string().min(1),
@@ -997,11 +935,7 @@ const ROUTES: readonly DirectRoute[] = [
   {
     method: 'post',
     path: '/sub-tickets/unlink',
-    typed: {
-      contract: api.subTickets.unlink,
-      successStatus: 204,
-      controller: ({ body, user }) => subTicketsApi.unlinkSubTicketHandler({ body, user }),
-    },
+    typed: { contract: api.subTickets.unlink },
     body: z.object({ mappingId: z.string().min(1) }),
   },
 
@@ -1083,13 +1017,13 @@ export function createDirectRouter(): Router {
         for (const guard of route.guards ?? []) await guard(req);
 
         if (route.typed) {
-          const result = await runTyped(route, req);
-          const status = route.typed.successStatus ?? 200;
-          if (status === 204 || result === undefined) {
+          const { status, body, headers } = await runTyped(route, req);
+          if (headers) res.set(headers);
+          if (status === 204 || body === undefined) {
             res.status(status).end();
             return;
           }
-          res.status(status).json(result);
+          res.status(status).json(body);
           return;
         }
 
@@ -1143,33 +1077,20 @@ export function createDirectRouter(): Router {
  * Run a route backed by a typed handler: validate with the route's own schemas first (then the
  * contract's), call the handler with the checked request, and answer in the SDK shape.
  */
-async function runTyped(route: DirectRoute & { typed: TypedHandler }, req: Request): Promise<unknown> {
-  const user = req.user;
-  if (!user) throw new SdkApiError('unauthenticated', 'Missing authenticated principal.');
-  const { contract } = route.typed;
+async function runTyped(route: DirectRoute & { typed: TypedHandler }, req: Request): Promise<TypedAnswer> {
+  if (!req.user) throw new SdkApiError('unauthenticated', 'Missing authenticated principal.');
+  // The SDK's own checks first (its query coercions, its body shape), then the typed route's.
+  const query = route.query ? (route.query.parse(req.query) as Record<string, unknown>) : req.query;
+  const body: unknown = route.body ? route.body.parse(req.body ?? {}) : req.body;
 
-  const routeQuery = route.query ? (route.query.parse(req.query) as Record<string, unknown>) : req.query;
-  const routeBody: unknown = route.body ? route.body.parse(req.body ?? {}) : req.body;
-  const parse = (schema: unknown, value: unknown): unknown =>
-    schema ? (schema as ZodTypeAny).parse(value ?? {}) : value;
-
-  const ctx: TypedContext = {
-    user,
-    params: parse(contract.params, req.params) as never,
-    query: parse(contract.query, routeQuery) as never,
-    body: parse(contract.body, routeBody) as never,
-    headers: req.headers,
-    userAgent: req.get('user-agent'),
-  };
-
-  let result: unknown;
+  let answer: TypedAnswer;
   try {
-    result = await route.typed.controller(ctx);
+    answer = await callTyped(route.typed.contract, req, { params: req.params, query, body });
   } catch (error) {
     if (error instanceof ContractError) throw controllerError(error.status, error.body);
     throw error;
   }
-  return route.unwrap ? route.unwrap(result) : result;
+  return { ...answer, body: route.unwrap ? route.unwrap(answer.body) : answer.body };
 }
 
 interface ControllerResult {

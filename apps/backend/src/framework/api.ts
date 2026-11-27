@@ -19,7 +19,6 @@ import {
   type RouteTable,
   type RouteQuery,
   type RouteResponse } from '@xyne/shared';
-import { config } from '@/config/env';
 import { authMiddleware } from '@/middleware/auth';
 import { encryptedRoute } from '@/middleware/encryptedRoute';
 import { isDekPassthrough } from '@/services/encryption/dekPassthrough';
@@ -172,9 +171,48 @@ function appCaller(req: Request): AppCaller | undefined {
     permissionsStale: auth.permissionsStale === true };
 }
 
-function validationError(res: Response, issues: z.core.$ZodIssue[]): void {
+/** The refusal of a request that breaks its contract: the route's own wire format, else the default. */
+function refusal(issues: z.core.$ZodIssue[], invalidRequest?: () => ContractError): ContractError {
+  if (invalidRequest) return invalidRequest();
   // The shape the Xyne Apps controllers have always answered with.
-  res.status(400).json({ error: 'Validation error', code: 'VALIDATION_ERROR', details: issues });
+  return new ContractError(400, { error: 'Validation error', code: 'VALIDATION_ERROR', details: issues });
+}
+
+type RequestParts = { params: unknown; query: unknown; body: unknown };
+
+/**
+ * Params, query and body checked against the contract (the checked copies), or the refusal as a
+ * ContractError. The one request check: the typed route's `validate` step and `callTyped` use it.
+ */
+function checkRequest(contract: AnyRouteContract, raw: RequestParts, invalidRequest?: () => ContractError): RequestParts {
+  const params = contract.params ? (contract.params as z.ZodType).safeParse(raw.params) : undefined;
+  if (params && !params.success) throw refusal(params.error.issues, invalidRequest);
+  const query = contract.query ? (contract.query as z.ZodType).safeParse(raw.query) : undefined;
+  if (query && !query.success) throw refusal(query.error.issues, invalidRequest);
+  let body: unknown = raw.body;
+  if (contract.body) {
+    const rawBody = (raw.body ?? {}) as Record<string, unknown>;
+    const parsed = (contract.body as z.ZodType).safeParse(rawBody);
+    if (!parsed.success) throw refusal(parsed.error.issues, invalidRequest);
+    // The parsed body, except the encrypted fields: their value as sent (plaintext, or the
+    // client's ciphertext), which the encryption service transforms and the facts step reads.
+    // They are wrapped in UnreadableString after the encryption steps (makeUnreadable).
+    const data = parsed.data as Record<string, unknown>;
+    for (const field of requestContractOf(contract)?.unreadableFields ?? []) {
+      if (field in rawBody) data[field] = rawBody[field];
+    }
+    body = data;
+  }
+  return { params: params?.data, query: query?.data, body };
+}
+
+/** Runs the access checks in order; their results by name, or the first refusal thrown. */
+async function runChecks(checks: AccessChecks, input: CheckInput<AnyRouteContract>): Promise<Record<string, unknown>> {
+  const results: Record<string, unknown> = {};
+  for (const [name, check] of Object.entries(checks)) {
+    results[name] = await check(input);
+  }
+  return results;
 }
 
 /** Only the contract the gate matched may serve the request: a typed route is never reached past the gate. */
@@ -194,29 +232,16 @@ function throughGate(contract: AnyRouteContract): RequestHandler {
 /** Checks params, query and body against the contract; everything after gets the checked copies. */
 function validate(contract: AnyRouteContract, invalidRequest?: () => ContractError): RequestHandler {
   return function validateMiddleware(req, res, next) {
-    const refuse = (issues: z.core.$ZodIssue[]): void => {
-      if (!invalidRequest) return validationError(res, issues);
-      const answer = invalidRequest();
-      res.status(answer.status).json(answer.body);
-    };
-    const params = contract.params ? (contract.params as z.ZodType).safeParse(req.params) : undefined;
-    if (params && !params.success) return refuse(params.error.issues);
-    const query = contract.query ? (contract.query as z.ZodType).safeParse(req.query) : undefined;
-    if (query && !query.success) return refuse(query.error.issues);
-    if (contract.body) {
-      const raw = (req.body ?? {}) as Record<string, unknown>;
-      const body = (contract.body as z.ZodType).safeParse(raw);
-      if (!body.success) return refuse(body.error.issues);
-      // The parsed body, except the encrypted fields: their value as sent (plaintext, or the
-      // client's ciphertext), which the encryption service transforms and the facts step reads.
-      // They are wrapped in UnreadableString after the encryption steps (makeUnreadable).
-      const parsed = body.data as Record<string, unknown>;
-      for (const field of requestContractOf(contract)?.unreadableFields ?? []) {
-        if (field in raw) parsed[field] = raw[field];
-      }
-      req.body = parsed;
+    let parts: RequestParts;
+    try {
+      parts = checkRequest(contract, { params: req.params, query: req.query, body: req.body }, invalidRequest);
+    } catch (error) {
+      if (!(error instanceof ContractError)) return next(error);
+      res.status(error.status).json(error.body);
+      return;
     }
-    checked.set(req, { params: params?.data, query: query?.data, access: {} });
+    if (contract.body) req.body = parts.body;
+    checked.set(req, { params: parts.params, query: parts.query, access: {} });
     next();
   };
 }
@@ -237,10 +262,8 @@ function runAccess(checks: AccessChecks): RequestHandler {
   return async function accessMiddleware(req, res, next) {
     const state = checked.get(req);
     try {
-      for (const [name, check] of Object.entries(checks)) {
-        const result = await check(checkInput(req));
-        if (state) state.access[name] = result;
-      }
+      const results = await runChecks(checks, checkInput(req));
+      if (state) state.access = results;
     } catch (error) {
       if (error instanceof ContractError) {
         res.status(error.status).json(error.body);
@@ -253,14 +276,18 @@ function runAccess(checks: AccessChecks): RequestHandler {
   };
 }
 
-function checkResponse(contract: AnyRouteContract, result: unknown): void {
-  if (config.env === 'production') return;
-  const parsed = (contract.response as z.ZodType).safeParse(result);
+/**
+ * The answer exactly as its contract describes it, in every environment: fields the contract does
+ * not list are removed (a controller handing back a whole row sends only the contract's fields),
+ * and a missing or wrong-type field is a server error, logged with the issues, not sent.
+ */
+function shapeAnswer(contract: AnyRouteContract, answer: unknown): unknown {
+  const parsed = (contract.response as z.ZodType).safeParse(answer);
   if (!parsed.success) {
-    // Logged only: a drift between the handler and its contract shows up in dev/sandbox logs
-    // without failing the caller.
-    logger.warn('[api] response does not match its contract', { route: contract.key, issues: parsed.error.issues });
+    logger.error('[api] answer does not match its contract; not sent', { route: contract.key, issues: parsed.error.issues });
+    throw new ContractError(500, { error: 'Internal server error', code: 'RESPONSE_CONTRACT_VIOLATION' });
   }
+  return parsed.data;
 }
 
 /**
@@ -357,9 +384,8 @@ function respond<C extends AnyRouteContract, A extends AccessChecks>(contract: C
         files: Array.isArray(files) ? files : files ? Object.values(files).flat() : undefined,
         ip: req.ip,
         userAgent: req.get('user-agent') });
-      const readable = makeReadable(result);
-      checkResponse(contract, readable);
-      res.status(impl.successStatus ?? 200).json(readable);
+      const shaped = shapeAnswer(contract, makeReadable(result));
+      res.status(impl.successStatus ?? 200).json(shaped);
     } catch (error) {
       if (error instanceof ContractError) {
         res.status(error.status).json(error.body);
@@ -413,13 +439,55 @@ function build<C extends AnyRouteContract, A extends AccessChecks>(contract: C, 
     // answer here, in the route itself, so a typed request never reaches anything app.ts adds.
     errorHandler as unknown as RequestHandler,
   ];
-  return { contract, handlers } as unknown as MountedRoute<C>;
+  return { contract, handlers, impl } as unknown as MountedRoute<C>;
 }
+
+/** Every mounted route's setup, with its routers' defaults merged in (access checks included), for callTyped. */
+const mountedImpls = new Map<AnyRouteContract, RouteImpl<AnyRouteContract, AccessChecks>>();
 
 function mount(route: MountedRoute<AnyRouteContract>): void {
   if (!registerContract(route.contract)) return;
   const method = route.contract.method.toLowerCase() as 'get' | 'post' | 'put' | 'patch' | 'delete';
   typedRouter[method](route.contract.path, ...route.handlers);
+  mountedImpls.set(route.contract, (route as unknown as { impl: RouteImpl<AnyRouteContract, AccessChecks> }).impl);
+}
+
+/** A typed route's answer for another caller of the same API: status, the shaped body, headers. */
+export type TypedAnswer = { status: number; body: unknown; headers?: Record<string, string> };
+
+/**
+ * Runs a mounted typed route's own steps for another caller of the same API (the SDK
+ * dispatcher), so the two cannot drift: the request check, the route's access checks (its
+ * routers' included), its controller, and the answer check. The caller has already logged the
+ * user in and passes the raw params, query and body. A ContractError is the route's refusal.
+ *
+ * Not for routes with encrypted fields (their encryption pipeline is Express middleware) or for
+ * app-token routes (`app`, `slack-app`): those throw, so they fail loudly instead of running
+ * without their steps.
+ */
+export async function callTyped(contract: AnyRouteContract, req: Request, raw: RequestParts): Promise<TypedAnswer> {
+  const impl = mountedImpls.get(contract);
+  if (!impl) throw new Error(`[api] ${contract.key} is not a mounted typed route`);
+  if (requestContractOf(contract)) throw new Error(`[api] ${contract.key} has encrypted fields; callTyped has no encryption step`);
+  if (impl.auth === 'app' || impl.auth === 'slack-app') throw new Error(`[api] ${contract.key} is an app-token route; callTyped serves user routes`);
+
+  const parts = checkRequest(contract, raw, impl.invalidRequest);
+  const input: CheckInput<AnyRouteContract> = {
+    params: parts.params as never,
+    query: parts.query as never,
+    body: parts.body as never,
+    user: req.user,
+    app: appCaller(req),
+    route: { method: req.method, path: req.originalUrl.split('?')[0] },
+    headers: req.headers,
+  };
+  const access = impl.access ? await runChecks(impl.access, input) : {};
+  const result = await impl.controller({ ...input, derived: undefined as never, access, files: undefined, ip: req.ip, userAgent: req.get('user-agent') });
+  return {
+    status: impl.successStatus ?? 200,
+    body: shapeAnswer(contract, makeReadable(result)),
+    ...(impl.responseHeaders ? { headers: impl.responseHeaders } : {}),
+  };
 }
 
 // ─── Routers: a tree of routes, as Express's routers nest ───────────────────────

@@ -89,12 +89,17 @@ type RouteSpec<
   query?: Query;
   body?: Body;
   response: Res;
-  /**
-   * Required when the body has `unreadableString()` fields: one entry per encrypted field, and
-   * no other key (a key that is not an encrypted field of the body is a type error).
-   */
-  facts?: F & { readonly [K in Exclude<keyof F, UnreadableKeys<Body>>]: never };
-};
+} & FactsSpec<Body, F>;
+
+/**
+ * `facts` is required when the body has `unreadableString()` fields: one entry per encrypted field
+ * (`{}` when nothing is derived from it), and no other key (a key that is not an encrypted field
+ * of the body is a type error). Leaving it out would also leave the route without its encryption
+ * steps, so it is a type error too. A body without encrypted fields may leave it out.
+ */
+type FactsSpec<Body extends z.ZodType | undefined, F> = [UnreadableKeys<Body>] extends [never]
+  ? { facts?: F & { readonly [K in Exclude<keyof F, UnreadableKeys<Body>>]: never } }
+  : { facts: F & { readonly [K in Exclude<keyof F, UnreadableKeys<Body>>]: never } };
 
 /** The shape of an object body schema (also when refined), else undefined. */
 function bodyShape(body: unknown): Record<string, unknown> | undefined {

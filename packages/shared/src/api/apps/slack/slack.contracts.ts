@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { defineRoute } from '../../../enc-contracts/api-route.js';
+import { defineRoute, type RouteContract } from '../../../enc-contracts/api-route.js';
 import { derive } from '../../../enc-contracts/extractors.js';
 import { hasText, unreadableString, type UnreadableString } from '../../../enc-contracts/unreadable-string.js';
 
@@ -153,11 +153,24 @@ const usergroupsListArgs = z.object({
   team_id: z.string().optional(),
 });
 
-/** A Slack read method as its GET (query) and POST (body) contracts. */
+/**
+ * A Slack read method as its GET (query) and POST (body) contracts. Read args are plain (never
+ * `unreadableString()`), so the POST needs no `facts`. While `A` is generic the compiler cannot
+ * see that, so the body is passed widened and the contract is typed with `A`; the API table's
+ * test (routeSpecProblems) still checks every contract's encrypted fields at run time.
+ */
 function slackRead<A extends z.ZodType, P extends string>(path: P, args: A) {
   return {
     get: defineRoute({ method: 'GET', path, query: args, response: slackOk }),
-    post: defineRoute({ method: 'POST', path, body: args, response: slackOk }),
+    post: defineRoute({ method: 'POST', path, body: args as z.ZodType, response: slackOk }) as unknown as RouteContract<
+      'POST',
+      P,
+      undefined,
+      undefined,
+      A,
+      typeof slackOk,
+      undefined
+    >,
   };
 }
 
