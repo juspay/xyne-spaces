@@ -6,6 +6,7 @@ import { serversRouter } from "../routes/servers.js";
 import { connectionsRouter } from "../routes/connections.js";
 import { mcpRouter } from "../routes/mcp.js";
 import { sdlcRuntimeCredentialsRouter } from "../routes/sdlc-runtime-credentials.js";
+import { gitScopeRouter } from "../routes/git-scope.js";
 import { awakeningRouter } from "../routes/awakening.js";
 import { agentProactivityRouter } from "../routes/agent-proactivity.js";
 import { runRouter } from "../routes/run.js";
@@ -169,6 +170,7 @@ function mountCoreApi(app: Express): void {
   // access-token barrier to apply; add the guard inside the router instead.
   app.use(`${BASE}/sessions`, mcpRouter);
   app.use(`${BASE}/sessions`, sdlcRuntimeCredentialsRouter);
+  app.use(`${BASE}/sessions`, gitScopeRouter); // sandbox git scope signer: runtime proof + session token, inside the router
   app.use(`${BASE}/gateways`, requireAuth, requireNoAccessToken, requireClawAdmin, gatewaysRouter);
   // allowReadAccessToken (NOT the hard barrier): device-flow CLI tokens are
   // minted with agents:read (routes/cli-auth.ts) so the CLI can list agents.

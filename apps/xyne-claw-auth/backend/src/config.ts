@@ -88,6 +88,14 @@ export const CONFIG = {
   // The xyne-claw runtime's public keys ({"<kid>": "<SPKI PEM>"}): verify its service assertions.
   clawRuntimePublicKeys: parseDelegationPublicKeys(process.env["CLAW_RUNTIME_PUBLIC_KEYS"]),
   /**
+   * EC P-256 private key (PKCS#8 PEM) that signs sandbox git scopes (routes/git-scope.ts).
+   * Its own key, never the service-assertion key: the git-gateway holds only its public
+   * half (print it with scripts/git-scope-public-key.ts). Empty: the route answers 503.
+   */
+  clawGitScopePrivateKey: (process.env["CLAW_GIT_SCOPE_PRIVATE_KEY"] ?? "").replace(/\\n/g, "\n").trim(),
+  /** `kid` of the git-scope key; the gateway keys its public-key set by it. Empty: the route answers 503. */
+  clawGitScopeKeyId: (process.env["CLAW_GIT_SCOPE_KEY_ID"] ?? "").trim(),
+  /**
    * Claw agent (prisma.agent.id) that "import from Spaces" eval jobs act as, on
    * behalf of the importing user. It must be added to the workspace in Spaces;
    * the import route primes it from the user's cookie (2-hour window), or the
