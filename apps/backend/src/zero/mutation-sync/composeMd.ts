@@ -1,16 +1,15 @@
 import type { Transaction } from '@rocicorp/zero';
 import {
   UnreadableString,
+  derive,
   initialMessageMdTemplate,
   parentMessageMdTemplate,
-  parseParentMessageMd,
-  resolveConversationAnchorType,
   updateParentSubTicketsMdFromZero,
 } from '@xyne/shared';
 import type { Schema } from '@xyne/shared';
 import { compose } from '@/services/encryption/compose';
 import { zql } from '../queries';
-import { unreadableTransaction } from '../unreadableTransaction';
+import { type UnreadableTransaction, unreadableTransaction } from '../unreadableTransaction';
 
 // Md columns made from a message's text (and a sub-ticket's anchor), built by compose so ciphertext
 // never ends up inside an md and they are stored already encrypted.
@@ -119,7 +118,7 @@ export async function composeParentMessageMd(
  * `linkSubTicketConversationToParentFromZero` on the server, with the md built by compose.
  */
 export async function composeSubTicketAnchorMd(
-  tx: Transaction<Schema>,
+  tx: UnreadableTransaction,
   childTicketId: string,
   parentTicketId: string,
 ): Promise<void> {
@@ -131,12 +130,14 @@ export async function composeSubTicketAnchorMd(
 
   const parentConversation = await tx.run(zql.conversations.where('conversationId', parent.conversationId).one());
   if (!parentConversation?.initialMessageId) return;
-  const conversation = await tx.run(zql.conversations.where('conversationId', child.conversationId).one());
-  if (!conversation) return;
+  const read = await tx.read(zql.conversations.where('conversationId', child.conversationId).one(), {
+    parent_message_md: { parentAnchorType: derive.parentAnchorType },
+  });
+  const conversation = read?.row;
+  if (!read || !conversation) return;
 
   // A thread's anchor is kept (writeConversationAnchorFromZero).
-  const existing = parseParentMessageMd(conversation.parent_message_md);
-  if (existing && resolveConversationAnchorType(existing) !== 'SUBTICKET') return;
+  if (read.facts.parent_message_md?.parentAnchorType === 'THREAD_REPLY') return;
 
   const result = await compose(
     {
@@ -151,13 +152,12 @@ export async function composeSubTicketAnchorMd(
         createdAt: parent.createdAt,
         anchorType: 'SUBTICKET',
       },
-      current: seal(conversation.parent_message_md),
+      current: conversation.parent_message_md,
     },
     { workspaceId: conversation.workspaceId },
   );
   if (result.unchanged) return;
-  // Written sealed: unreadableTransaction unwraps it for the database.
-  await unreadableTransaction(tx, conversation.workspaceId).mutate.conversations.update({
+  await tx.mutate.conversations.update({
     conversationId: child.conversationId,
     parentMessageId: parentConversation.initialMessageId,
     parent_message_md: result.value,
@@ -172,7 +172,7 @@ export async function syncTicketRelatives(tx: Transaction<Schema>, ticketId: str
   for (const mapping of childMappings) {
     const subTicket = await tx.run(zql.sub_tickets.where('id', mapping.subTicketId).one());
     if (subTicket?.mappedTicketId && subTicket.mappedTicketId !== ticketId) {
-      await composeSubTicketAnchorMd(tx, subTicket.mappedTicketId, ticketId);
+      await composeSubTicketAnchorMd(unreadableTransaction(tx, subTicket.workspaceId), subTicket.mappedTicketId, ticketId);
     }
   }
 }

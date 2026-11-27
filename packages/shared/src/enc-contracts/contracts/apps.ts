@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { defineRequestContract, type RequestOf } from '../define.js';
-import { conversationsSendClient } from './conversations.js';
+import { mutatorContracts } from '../mutator-contracts.js';
 
 /**
  * Xyne Apps `POST /apps/chat/postMessage`, sent by bots through the transit proxy, which
@@ -13,7 +13,7 @@ import { conversationsSendClient } from './conversations.js';
  * it, which cannot run on ciphertext until that processing moves into the extractor.
  */
 export const appsChatPostMessageClient = defineRequestContract({
-  sourceToDerived: { markdownText: conversationsSendClient.sourceToDerived.content },
+  sourceToDerived: { markdownText: mutatorContracts['conversations.send'].sourceToDerived.content },
   schema: z.object({
     channelId: z.string().optional(),
     channelName: z.string().optional(),

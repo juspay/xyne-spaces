@@ -1,10 +1,10 @@
-import { Channel, MessageType, Schema } from '@xyne/shared';
-import { Transaction } from '@rocicorp/zero';
+import { Channel, MessageType } from '@xyne/shared';
 import { AuthData, ParticipantOperationType } from '@/zero/mutators';
 import { v4 as uuidv4 } from 'uuid';
 import { zql } from '../queries';
 import { repositories } from '@/database/repositories';
 import { Call, Prisma } from '@prisma/client';
+import type { UnreadableTransaction } from '../unreadableTransaction';
 
 type ParticipantMetadata = {
   operationType: ParticipantOperationType;
@@ -44,14 +44,14 @@ export function formatSystemGenerateMessage(
 }
 
 export async function sendAddAndRemoveParticipantsSystemMessage(
-  tx: Transaction<Schema>,
+  tx: UnreadableTransaction,
   {
     channel,
     newParticipants,
     authData,
     operationType,
   }: {
-    channel: Channel;
+    channel: Pick<Channel, 'id' | 'workspaceId'>;
     newParticipants: Array<{ userId: string; userName: string }>;
     authData: AuthData;
     operationType: ParticipantOperationType;
@@ -217,7 +217,7 @@ function formatFinalCallMessage(
  * The message ID is stored in call.metadata for later updates.
  */
 export async function sendCallSystemMessage(
-  tx: Transaction<Schema>,
+  tx: UnreadableTransaction,
   {
     callExternalId,
     channelId,
@@ -288,7 +288,7 @@ export async function sendCallSystemMessage(
  * Calculates duration and formats the final message based on participants.
  */
 export async function updateCallSystemMessageOnEnd(
-  tx: Transaction<Schema>,
+  tx: UnreadableTransaction,
   {
     messageId,
     participants,
