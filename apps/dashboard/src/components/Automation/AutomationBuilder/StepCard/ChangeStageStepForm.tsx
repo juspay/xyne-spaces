@@ -129,7 +129,7 @@ function StageFormValuesField({
       ? 'Pick a stage to see the fields of the form the move needs.'
       : forms.length === 0
         ? `No form is set up for moves into "${stageName}". Values are only used when the move needs a form.`
-        : `Fills the form for moves into "${stageName}" (${forms.map(f => f.label).join(' · ')}). Required fields need a value or the step fails; fields not on the ticket's form are skipped.`;
+        : `Fills the form for moves into "${stageName}" (${forms.map(f => f.label).join(' · ')}). Required fields need a value or the step fails; fields not on the ticket's form are skipped. The step also fails if the ticket is already in "${stageName}".`;
 
   return (
     <div className='flex flex-col gap-2 rounded-lg border border-border bg-background/40 px-3 py-3'>

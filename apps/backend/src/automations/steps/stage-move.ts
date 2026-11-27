@@ -52,7 +52,7 @@ export const StageFormValuesSchema = z
     }),
   )
   .describe(
-    'Fills the form this move needs: the transition form on non-linear boards, the stage form on linear boards. Required fields need a value; fields not on the form are skipped. Leave empty to move without a form.',
+    'Fills the form this move needs: the transition form on non-linear boards, the stage form on linear boards. Required fields need a value; fields not on the form are skipped. Fails if the ticket is already in the stage, since nothing moves. Leave empty to move without a form.',
   );
 
 export interface StageFormValueInput {
@@ -106,7 +106,14 @@ export async function moveTicketToStage(args: StageMoveArgs): Promise<StageMoveR
     },
   });
 
-  // Without form values (or when nothing moves) the step behaves exactly as before.
+  // A ticket already in the stage doesn't move, so there's no form to fill. Fail rather than
+  // report success while dropping the values.
+  if (ticket?.stageName === stageName && formValues.some(v => !isEmptyFormValue(v.value))) {
+    throw new Error(
+      `${stepType}: the ticket is already in "${stageName}", so its form values weren't saved. Form values are only saved when the step moves the ticket.`,
+    );
+  }
+  // Without form values the step behaves exactly as before.
   const fillForm = ticket !== null && formValues.length > 0 && ticket.stageName !== stageName;
   const toResult = (form: PreparedForm | null): StageMoveResult => {
     const result = form
@@ -181,17 +188,30 @@ export async function moveTicketToStage(args: StageMoveArgs): Promise<StageMoveR
       ? await prepareFormValues(target.formId, formValues, ticket.workspaceId, stepType)
       : null;
 
-  await repositories.tickets.updateTicketStage(ticketId, stageName, updatedBy, ActivitySource.AUTOMATION);
-  // Saved only after the move works, so a failed move leaves the form untouched and fires no events.
-  if (ticket && target && form) {
-    const changed = await saveStageFormValues(ticketId, ticket.workspaceId, target.stageId, form).catch(
+  // Saved before the move, like the stage form modal: automations started by the move already see
+  // the filled form. If the move then fails, the ticket stays put, so running the step again saves
+  // the values again and moves it.
+  let changed: ChangedCustomField[] | null = null;
+  if (ticket && target && form && form.values.length > 0) {
+    changed = await saveStageFormValues(ticketId, ticket.workspaceId, target.stageId, form).catch(
       (err: unknown) => {
         throw new Error(
-          `${stepType}: moved the ticket to "${stageName}" but couldn't save its form values: ${err instanceof Error ? err.message : String(err)}`,
+          `${stepType}: couldn't save the form values for "${stageName}", so the ticket wasn't moved: ${err instanceof Error ? err.message : String(err)}`,
         );
       },
     );
-    await emitFormSideEffects(ticketId, changed, updatedBy);
+  }
+  try {
+    await repositories.tickets.updateTicketStage(ticketId, stageName, updatedBy, ActivitySource.AUTOMATION);
+  } catch (err) {
+    if (!changed) throw err;
+    throw new Error(
+      `${stepType}: saved the form values for "${stageName}" but couldn't move the ticket: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  } finally {
+    // The values are saved whether or not the move worked, so search, counts and other automations
+    // hear about them either way.
+    if (changed) await emitFormSideEffects(ticketId, changed, updatedBy);
   }
   return toResult(form);
 }
