@@ -2155,7 +2155,9 @@ export async function processTask(
     // Load context7/playwright MCP tool groups (stdio transport, cached).
     // Playwright doesn't get its own subagent — its tools are spliced into the
     // sandbox subagent's palette via bonusToolsBySubagent below.
-    const context7Group = await loadContext7Tools();
+    // Answer from Context mounts no tools, so it never waits on Context7: a pod whose last load
+    // failed retries it on the next run, and a load that times out holds that run for a minute.
+    const context7Group = answerFromContext ? null : await loadContext7Tools();
 
     // Extract skill triggers from agent config (needed by both subagent tools and runTask)
     const rawTriggers =
