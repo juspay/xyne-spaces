@@ -68,19 +68,30 @@ export type StorageObjectKey = {
   wrappedKey: string;
 };
 
+/** Where a sealed request goes, and how (see EncryptionProvider.sealEvent). */
+export type SealEventTarget =
+  /** An app's bot webhook, signed with the app's signing secret (`X-Xyne-Signature`). */
+  | { type: 'webhook'; url: string; signingSecret: string }
+  /**
+   * Call AI on LiteLLM: the encryption service's `LITELLM_TARGET` base URL + `path`, with its key.
+   * The egress proxy encrypts every string of the answer for this lane.
+   */
+  | { type: 'call-litellm'; path: string };
+
+export type SealEventInput = {
+  proxyClient: { role: 'egress'; version: number };
+  /** The request body exactly as the target will receive it. */
+  body: string;
+  /** Whose workspace-DEK values `body` may carry; they are decrypted inside the seal. */
+  workspaceId?: string;
+  target: SealEventTarget;
+};
+
 /**
  * Whom a transit operation is for. `authToken` (the caller's access token) names its auth
  * session, whose registered transit key the encryption service looks up and uses; `clientKey`
  * (the public key the request itself carried) applies when that session registered none.
  */
-export type SealEventInput = {
-  /** The event JSON exactly as the bot will receive it. */
-  event: string;
-  webhookUrl: string;
-  signingSecret: string;
-  proxyClient: { role: 'egress'; version: number };
-};
-
 export type TransitCaller = {
   /**
    * Xyne Apps traffic relayed by the ingress or egress proxy. The encryption service then
@@ -88,12 +99,6 @@ export type TransitCaller = {
    * refuses `clientKey` / `authToken` alongside it.
    */
   proxyClient?: { role: 'ingress' | 'egress'; version: number };
-  /**
-   * transformResponse for the egress proxy only: the result also carries `llmTarget`,
-   * `{ url: <LiteLLM base URL> + path, apiKey }` built by the encryption service and sealed
-   * for the proxy's `POST /llm`.
-   */
-  llmTarget?: { name: 'calllitellm'; path: string };
   clientKey?: string;
   authToken?: string;
   /**
@@ -200,8 +205,6 @@ export type ComposeItemResult = { unchanged: true } | { unchanged: false; value:
 
 export type TransitEncryptResult<T> = {
   body: T;
-  /** With `llmTarget` asked for: the sealed LiteLLM target, to relay to the egress proxy as is. */
-  llmTarget?: string;
 };
 
 export interface EncryptionProvider {
@@ -252,9 +255,10 @@ export interface EncryptionProvider {
    */
   getTransitClientManifest(params: { tag: string } & TransitCaller): Promise<{ clientManifest: string } | null>;
   /**
-   * Seal an outbound app event for the egress transit proxy: the encryption service signs
-   * `event` with the app's signing secret and encrypts `{ url, body, signature }` to the
-   * pinned egress proxy key. Only the proxy can open it.
+   * Seal an outbound request for the egress transit proxy's `POST /deliver`: the encryption
+   * service decrypts `body`'s workspace-DEK values, resolves `target` (URL, headers, whether the
+   * answer comes back encrypted) and encrypts it all to the pinned egress proxy key. Only the
+   * proxy can open it, and whoever relays it can't change where it goes or what it says.
    */
   sealEvent(input: SealEventInput): Promise<{ sealed: string }>;
   /**

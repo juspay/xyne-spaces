@@ -2,7 +2,7 @@
 import { config } from '@/config/env';
 // import { extractAgentContent } from '@/utils/agentUtils';
 import { logger } from '@/utils/logger';
-// import { repositories } from '@/database/repositories';
+import { repositories } from '@/database/repositories';
 // import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
 // import { OrgLLMServiceAccountPurpose } from '@xyne/shared';
 import { runCallAiTask } from '@/services/callAi/callAiGateway';
@@ -255,7 +255,7 @@ async function emitFinalDelta(options: ExecuteStreamingLlmOptions, content: stri
 // import { config } from '@/config/env';
 // import { extractAgentContent } from '@/utils/agentUtils';
 // import { logger } from '@/utils/logger';
-import { repositories } from '@/database/repositories';
+// import { repositories } from '@/database/repositories';
 // import { orgLLMCredentialService } from '@/services/orgLLMCredentialService';
 // import { OrgLLMServiceAccountPurpose } from '@xyne/shared';
 // import { runCallAiTask } from '@/services/callAi/callAiGateway';

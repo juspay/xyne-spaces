@@ -4,20 +4,18 @@ import { getEncryptionProvider } from '@/services/encryption';
 import { logger } from '@/utils/logger';
 
 /**
- * Non-Claw call AI through the egress transit proxy, so the reply is never plaintext here:
- * prompt → workspace DEK → CEK for the proxy (encryptBatch + transformResponse), which with
- * `llmTarget` also has the encryption service build and seal the LiteLLM endpoint and key for the
- * proxy. The chat-completions request and answer are built and read here; the proxy's
- * `POST /llm` only decrypts, posts the request to that endpoint and returns the answer with
- * every string encrypted (CEK). transformRequest turns the reply into workspace-DEK ciphertext
- * (apps manifest rule `POST /internal/call-ai/result`) to store as-is.
+ * Non-Claw call AI through the egress transit proxy, so the reply is never plaintext here: the
+ * chat-completions request is sealed for the proxy by the encryption service (sealEvent, target
+ * `call-litellm`: it adds LiteLLM's URL and key), the proxy's `POST /deliver` opens it, calls
+ * LiteLLM and returns the answer with every string encrypted (CEK), and transformRequest turns
+ * the reply into workspace-DEK ciphertext (apps manifest rule `POST /internal/call-ai/result`)
+ * to store as-is.
  *
  * runLlmOnGatewayForPlaintext is the same call for outputs the backend has to process (the
  * detailed-summary canvas): the reply is decrypted here instead.
  *
- * Logs (`call_ai_gateway_*`) share one `gatewayCallId` per call, also sent to the proxy as
- * `X-Call-Ai-Id` and printed in its log lines. They carry sizes, key ids, statuses and timings,
- * never prompt or reply text.
+ * Logs (`call_ai_gateway_*`) share one `gatewayCallId` per call. They carry sizes, key ids,
+ * statuses and timings, never prompt or reply text.
  */
 
 const LLM_TIMEOUT_MS = 16 * 60_000;
@@ -140,9 +138,8 @@ function begin(task: GatewayLlmTask, replyAs: 'dek' | 'plaintext'): GatewayRun {
   };
 }
 
-/** The proxy's `POST /llm`; the reply content as the proxy encrypted it (CEK). */
+/** The egress proxy's `POST /deliver` with a sealed call-litellm request; the reply content as the proxy encrypted it (CEK). */
 async function callGateway(task: GatewayLlmTask, run: GatewayRun): Promise<string> {
-  const provider = getEncryptionProvider();
   const messages = [
     ...(task.systemPrompt ? [{ role: 'system', content: task.systemPrompt }] : []),
     { role: 'user', content: task.userPrompt },
@@ -155,56 +152,32 @@ async function callGateway(task: GatewayLlmTask, run: GatewayRun): Promise<strin
     egressKeyVersion: config.internal.transitProxyEgressKeyVersion,
   });
 
-  // 1. Prompt → workspace DEK.
+  // 1. Seal the chat-completions request for the proxy: the encryption service adds LiteLLM's URL
+  // and key and encrypts it all to the proxy's key, so from here on it is ciphertext.
   let stepStarted = Date.now();
-  let sealed: string[];
+  let sealed: string;
   try {
-    sealed = await provider.encryptBatch(
-      messages.map((m) => ({ value: m.content, entityId: task.workspaceId, entityType: 'WORKSPACE' })),
-    );
+    ({ sealed } = await getEncryptionProvider().sealEvent({
+      proxyClient: proxyClient(),
+      body: JSON.stringify({ model: task.model, stream: false, messages }),
+      target: { type: 'call-litellm', path: LLM_PATH },
+    }));
   } catch (error) {
-    throw run.fail('prompt_to_dek', errorMessage(error));
-  }
-  const dekKeyIds = [...new Set(sealed.map(keyIdOf))];
-  run.log('call_ai_gateway_prompt_dek_encrypted', { dekKeyIds, ms: Date.now() - stepStarted });
-
-  // 2. DEK → CEK for the proxy, and the sealed LiteLLM target.
-  stepStarted = Date.now();
-  let forProxy: { messages: { role: string; content: string }[] };
-  let target: string | undefined;
-  try {
-    ({ body: forProxy, llmTarget: target } = await provider.transformResponse(
-      { messages: messages.map((m, i) => ({ role: m.role, content: sealed[i] })) },
-      { proxyClient: proxyClient(), llmTarget: { name: 'calllitellm', path: LLM_PATH } },
-    ));
-  } catch (error) {
-    throw run.fail('prompt_to_cek', errorMessage(error));
-  }
-  if (!target) {
-    throw run.fail('prompt_to_cek', 'Encryption service returned no LLM target', {
-      hint: 'is API client encryption on in the backend, and LITELLM_TARGET set in the encryption service?',
+    throw run.fail('seal_request', errorMessage(error), {
+      hint: 'is LITELLM_TARGET set in the encryption service?',
     });
   }
-  const cekKeyIds = [...new Set(forProxy.messages.map((m) => keyIdOf(m.content)))];
-  if (cekKeyIds.some((keyId) => keyId === 'not_ciphertext' || dekKeyIds.includes(keyId))) {
-    throw run.fail('prompt_to_cek', 'Messages were not converted to transit ciphertext', { cekKeyIds });
-  }
-  run.log('call_ai_gateway_prompt_cek_ready', {
-    cekKeyIds,
-    targetKeyId: keyIdOf(target),
-    llmPath: LLM_PATH,
-    ms: Date.now() - stepStarted,
-  });
+  run.log('call_ai_gateway_request_sealed', { sealedKeyId: keyIdOf(sealed), llmPath: LLM_PATH, ms: Date.now() - stepStarted });
 
-  // 3. The proxy's POST /llm.
+  // 2. The proxy's POST /deliver: it opens the seal, calls LiteLLM and encrypts the answer.
   stepStarted = Date.now();
   const timeout = AbortSignal.timeout(LLM_TIMEOUT_MS);
   let response: Response;
   try {
-    response = await fetch(`${config.internal.transitProxyEgressUrl}/llm`, {
+    response = await fetch(`${config.internal.transitProxyEgressUrl}/deliver`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Call-Ai-Id': run.id },
-      body: JSON.stringify({ target, request: { model: task.model, stream: false, ...forProxy } }),
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sealed }),
       redirect: 'manual',
       signal: task.abortSignal ? AbortSignal.any([task.abortSignal, timeout]) : timeout,
     });
@@ -212,7 +185,7 @@ async function callGateway(task: GatewayLlmTask, run: GatewayRun): Promise<strin
     throw run.fail('gateway_request', errorMessage(error), { ms: Date.now() - stepStarted });
   }
   if (!response.ok) {
-    // The proxy's own errors are short reasons; an LLM error body comes back encrypted.
+    // The proxy's own errors are short reasons, never prompt text.
     const detail = (await response.text().catch(() => '')).slice(0, 300);
     throw run.fail('gateway_response', `Egress proxy answered ${response.status}`, {
       status: response.status,
@@ -220,23 +193,35 @@ async function callGateway(task: GatewayLlmTask, run: GatewayRun): Promise<strin
       ms: Date.now() - stepStarted,
     });
   }
-  const answer = (await response.json()) as {
-    choices?: { message?: { content?: unknown } }[];
-    usage?: { prompt_tokens?: number; completion_tokens?: number };
+  let delivered: {
+    status?: number;
+    body?: { choices?: { message?: { content?: unknown } }[]; usage?: { prompt_tokens?: number; completion_tokens?: number } };
   };
-  const content = answer.choices?.[0]?.message?.content;
+  try {
+    delivered = (await response.json()) as typeof delivered;
+  } catch (error) {
+    // Reading can also time out or be aborted. A JSON parse error can quote the body: not logged.
+    const reason = error instanceof SyntaxError ? 'Egress proxy answer is not JSON' : errorMessage(error);
+    throw run.fail('gateway_response', reason, { ms: Date.now() - stepStarted });
+  }
+  const { status, body: answer } = delivered;
+  if (typeof status !== 'number' || status < 200 || status >= 300) {
+    // LiteLLM's error body comes back encrypted, so only its status is logged.
+    throw run.fail('gateway_response', `LiteLLM answered ${status}`, { status, ms: Date.now() - stepStarted });
+  }
+  const content = answer?.choices?.[0]?.message?.content;
   if (typeof content !== 'string' || keyIdOf(content) === 'not_ciphertext') {
     throw run.fail('gateway_response', 'Reply content is missing or not transit ciphertext', {
-      choices: answer.choices?.length ?? 0,
+      choices: answer?.choices?.length ?? 0,
       replyKeyId: keyIdOf(content),
     });
   }
   run.log('call_ai_gateway_llm_answered', {
-    status: response.status,
-    choices: answer.choices?.length ?? 0,
+    status,
+    choices: answer?.choices?.length ?? 0,
     replyKeyId: keyIdOf(content),
-    promptTokens: answer.usage?.prompt_tokens,
-    completionTokens: answer.usage?.completion_tokens,
+    promptTokens: answer?.usage?.prompt_tokens,
+    completionTokens: answer?.usage?.completion_tokens,
     ms: Date.now() - stepStarted,
   });
   return content;

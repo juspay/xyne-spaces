@@ -244,13 +244,51 @@ class NoteTakerTranscriptService {
     const sealed = { workspaceId: call.workspaceId };
     const modelType = await this.getSummaryModelPreference(call);
     const { numbered } = numberTranscriptSegments(formattedTranscript);
-    const [aiSummary, title, detailedSummary] = await Promise.all([
-      transcriptService.generateCallSummary(numbered, callId, modelType, undefined, { sealed }).catch(() => null),
+    const threw = (event: string) => (error: unknown): null => {
+      logger.error(`[${callId}] ${event}`, {
+        path: 'note_taker',
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return null;
+    };
+    const [aiSummary, generatedTitle, detailedSummary] = await Promise.all([
+      transcriptService.generateCallSummary(numbered, callId, modelType, undefined, { sealed }).catch(threw('generate_summary_threw')),
       call.title
         ? null
-        : transcriptService.generateRecordingTitle(formattedTranscript, callId, modelType, { sealed }).catch(() => null),
+        : transcriptService
+            .generateRecordingTitle(formattedTranscript, callId, modelType, { sealed })
+            .catch(threw('generate_title_threw')),
       this.generateDetailedSummaryCanvas(call, formattedTranscript, undefined, modelType),
     ]);
+
+    // Re-read the title so a user rename made while the LLM was working wins. (The title is
+    // ciphertext here, so unlike the Claw path it is stored as the model wrote it and the notes
+    // canvas title is not synced.)
+    let title = generatedTitle;
+    if (title && (await repositories.calls.findByExternalId(callId))?.title) {
+      logger.info(`[${callId}] ai_title_discarded`, { reason: 'renamed_during_processing', path: 'note_taker' });
+      title = null;
+    }
+    const data = { ...(aiSummary ? { aiSummary } : {}), ...(title ? { title } : {}) };
+    if (Object.keys(data).length === 0) {
+      logger.error(`[${callId}] ai_summary_skipped`, { reason: 'generation_failed', path: 'note_taker' });
+    } else {
+      try {
+        await runWithDekPassthrough(() => repositories.calls.update(call.id, data));
+        logger.info(`[${callId}] call_record_updated`, {
+          fields_updated: Object.keys(data).join(','),
+          path: 'note_taker',
+          engine: 'gateway',
+          // Stored as-is: each must be workspace-DEK ciphertext (ENC:v1|<dekId>|…), never plaintext.
+          stored: Object.fromEntries(
+            Object.entries(data).map(([field, value]) => [field, /^ENC:v\d+\|[^|]+\|/.exec(value)?.[0] ?? 'NOT_CIPHERTEXT']),
+          ),
+        });
+      } catch (error) {
+        logger.error(`[${callId}] call_record_update_failed`, { stage: 'sealed_summary_save', path: 'note_taker', error });
+      }
+    }
+
     await this.finalizeCallUpdates(call, {
       metadata: {
         transcriptEntryCount: entryCount,
@@ -265,34 +303,17 @@ class NoteTakerTranscriptService {
     logger.info(`[${callId}] call_ai_gateway_outputs`, {
       path: 'note_taker',
       summary: aiSummary ? 'ok' : 'failed',
-      title: call.title ? 'kept' : title ? 'ok' : 'failed',
+      title: call.title ? 'kept' : title ? 'ok' : generatedTitle ? 'discarded' : 'failed',
       detailedSummary: detailedSummary ? 'ok' : 'failed',
       detailedSummaryCanvasId: detailedSummary?.canvasId,
       markedItems: detailedSummary?.markedItems.length ?? 0,
     });
+    // Notified once everything is stored, as on the Claw path.
     if (detailedSummary) {
       await this.notifySummaryReady(call, detailedSummary.rawSummary);
     }
-    const data = { ...(aiSummary ? { aiSummary } : {}), ...(title ? { title } : {}) };
-    if (Object.keys(data).length === 0) {
-      logger.error(`[${callId}] ai_summary_skipped`, { reason: 'generation_failed', path: 'note_taker' });
-      return;
-    }
-    try {
-      await runWithDekPassthrough(() => repositories.calls.update(call.id, data));
-      logger.info(`[${callId}] call_record_updated`, {
-        fields_updated: Object.keys(data).join(','),
-        path: 'note_taker',
-        engine: 'gateway',
-        // Stored as-is: each must be workspace-DEK ciphertext (ENC:v1|<dekId>|…), never plaintext.
-        stored: Object.fromEntries(
-          Object.entries(data).map(([field, value]) => [field, /^ENC:v\d+\|[^|]+\|/.exec(value)?.[0] ?? 'NOT_CIPHERTEXT']),
-        ),
-      });
-    } catch (error) {
-      logger.error(`[${callId}] call_record_update_failed`, { stage: 'sealed_summary_save', path: 'note_taker', error });
-    }
   }
+
 
   /**
    * Regenerate only the detailed-summary canvas with an explicitly selected
