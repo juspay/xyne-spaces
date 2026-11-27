@@ -1,4 +1,4 @@
-import express, { Router, type Request, type Response } from 'express';
+import { Router, type Request, type Response } from 'express';
 import { AccessType } from '@xyne/shared';
 import { z } from 'zod';
 import { config } from '@/config/env';
@@ -10,7 +10,6 @@ import { redisService } from '@/services/redisService';
 import { logger } from '@/utils/logger';
 
 const router = Router();
-router.use(express.json());
 
 const supportAdminAuth = authorize('SUPPORT', AccessType.ADMIN);
 const supportReadAuth = authorize('SUPPORT', AccessType.READ);

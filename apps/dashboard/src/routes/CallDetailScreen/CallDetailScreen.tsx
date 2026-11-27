@@ -31,7 +31,11 @@ import { useCachedQuery } from '../../hooks/useCachedQuery';
 import { queries } from '../../zero/queries';
 import { cn } from '../../utils/classNames';
 import Tooltip from '../../components/ui/Tooltip/Tooltip';
-import { hasCallEnded, type Call } from '../CallHistoryScreen/callHistoryItem.utils';
+import {
+  hasCallEnded,
+  isExternalCalendarEvent,
+  type Call,
+} from '../CallHistoryScreen/callHistoryItem.utils';
 import { xyneAIActor } from '../../machines/xyneAIMachine';
 import { usePlatform } from '../../hooks/usePlatform';
 import { useTranscriptTranslation } from '../../hooks/useTranscriptTranslation';
@@ -961,6 +965,8 @@ export default function CallDetailScreen(): ReactElement {
             // Disabled (LLM)
             // onLanguageChange={setSelectedTranscriptLanguage}
             isTranslating={transcript.isTranslating}
+            // A calendar meeting's transcript is Google Meet's own, which names each speaker.
+            {...(call && isExternalCalendarEvent(call) ? { showSpeakers: true } : {})}
             onClose={(): void => {
               setShowTranscriptPanel(false);
               setCitationRef(null);

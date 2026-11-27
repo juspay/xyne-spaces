@@ -1,7 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { TransitKeyring, generateTransitKeyPair, parseTransitKeyId, transitKeyId } from '../dist/crypto/keyring.js';
+import {
+  TransitKeyring,
+  generateTransitKeyPair,
+  parseTransitKeyId,
+  transitKeyId,
+  webCryptoTransitKeyPair,
+} from '../dist/crypto/keyring.js';
 
 const ECDH = { name: 'ECDH', namedCurve: 'P-256' };
 
@@ -108,7 +114,7 @@ test('socket key matches the cross-service vector', async () => {
     ['deriveBits'],
   );
   const serverPoint = 'BFUPRxAD89+Xw99QaseX9nIfsaH7e49vg9IkSYplyI4kE2CT1wEuUJpzcVy9CwCjzA/0tcAbP/oZarH7MnA2uOY=';
-  const ring = new TransitKeyring({ privateKey, publicKey: toBase64(clientPoint) }, { current: 1, keys: [{ version: 1, publicKey: serverPoint }] }, async () => {
+  const ring = new TransitKeyring(webCryptoTransitKeyPair(privateKey, toBase64(clientPoint)), { current: 1, keys: [{ version: 1, publicKey: serverPoint }] }, async () => {
     throw new Error('no refetch');
   });
   const key = await ring.socketKey(1, Buffer.from('000102030405060708090a0b0c0d0e0f', 'hex').toString('base64'), 'doc-123');

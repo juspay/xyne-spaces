@@ -1,6 +1,7 @@
 import { Event } from '../logger/events.js';
 import { getCryptoLogger } from './crypto-logger.js';
 import { parseTransitKeyId, toBase64, type TransitKeyring } from './keyring.js';
+import { getTransitPlatform } from './transit-platform.js';
 
 const IV_LENGTH = 12;
 const CIPHERTEXT_VERSION = 'v1';
@@ -16,7 +17,7 @@ export async function encryptField(
     const { key, keyId } = await keyring.current();
     const iv = crypto.getRandomValues(new Uint8Array(IV_LENGTH));
     const encoded = new TextEncoder().encode(plaintext);
-    const encrypted = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, encoded);
+    const encrypted = await getTransitPlatform().crypto.encrypt(key, iv, encoded);
 
     const combined = new Uint8Array(IV_LENGTH + encrypted.byteLength);
     combined.set(iv, 0);
@@ -52,9 +53,9 @@ export async function decryptField(encoded: string, keyring: TransitKeyring): Pr
   }
 
   const key = await keyring.forKeyId(keyId);
-  const decrypted = await crypto.subtle.decrypt(
-    { name: 'AES-GCM', iv: combined.slice(0, IV_LENGTH) },
+  const decrypted = await getTransitPlatform().crypto.decrypt(
     key,
+    combined.slice(0, IV_LENGTH),
     combined.slice(IV_LENGTH),
   );
   return new TextDecoder().decode(decrypted);

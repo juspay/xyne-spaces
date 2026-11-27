@@ -125,6 +125,8 @@ export class MutationEncryptionError extends Error {
   constructor(
     readonly code: string,
     message: string,
+    /** The encryption service's HTTP status, when the verdict came from it. */
+    readonly status?: number,
   ) {
     super(`${code}: ${message}`);
     this.name = 'MutationEncryptionError';

@@ -27,6 +27,7 @@ import {
 } from '../window/manager';
 import { setupMTLSIpcHandlers } from './mtls-handlers';
 import { setupSpacesMcpIpcHandlers } from './spaces-mcp-handlers';
+import { setupTransitKeyIpcHandlers } from './transit-key-handlers';
 import { config, ENABLE_LOCAL_HARNESS, FIRST_PARTY_HOSTS, isFirstPartyHostname } from '../app/config';
 import { performHardReload } from '../services/version-checker';
 import { Logger, errorLogger } from '../services/logger/Logger';
@@ -229,6 +230,9 @@ export function setupIpcHandlers(): void {
 
   // Spaces MCP sign-in and status for the Developers tab
   setupSpacesMcpIpcHandlers();
+
+  // Transit encryption key (Secure Enclave on macOS) for the dashboard's windows
+  setupTransitKeyIpcHandlers();
 
   // Webview preload path handler
   ipcMain.on('get-webview-preload-path', (event) => {

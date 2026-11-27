@@ -87,10 +87,10 @@ async function deliverViaEgressProxy(
     event: BaseAppEvent,
 ): Promise<{ status: number; body: unknown }> {
     const { sealed } = await getEncryptionProvider().sealEvent({
-        event: payload,
-        webhookUrl,
-        signingSecret,
         proxyClient: { role: 'egress', version: config.internal.transitProxyEgressKeyVersion },
+        body: payload,
+        ...('workspaceId' in event.payload && event.payload.workspaceId ? { workspaceId: event.payload.workspaceId } : {}),
+        target: { type: 'webhook', url: webhookUrl, signingSecret },
     });
     const response = await fetch(`${config.internal.transitProxyEgressUrl}/deliver`, {
         method: 'POST',

@@ -81,3 +81,8 @@ const DESK_CHANNEL_TYPES: ReadonlySet<string> = new Set([
 export function isDeskChannelType(type: string | null | undefined): boolean {
   return type !== null && type !== undefined && DESK_CHANNEL_TYPES.has(type);
 }
+
+/** apiClient decrypts transit fields; tests have no transit key, so values pass through. */
+export async function decryptTransitFields(value: unknown): Promise<unknown> {
+  return value;
+}

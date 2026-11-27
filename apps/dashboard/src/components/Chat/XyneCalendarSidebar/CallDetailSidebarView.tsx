@@ -477,6 +477,7 @@ const CallDetailSidebarView = ({
   onEditCall,
   onDeleteCall,
 }: CallDetailSidebarViewProps): ReactElement => {
+  const navigate = useNavigate();
   const callDetails = call as CallWithDetails;
 
   const isGoogleCalendar = isGoogleCalendarCall(call);
@@ -688,6 +689,23 @@ const CallDetailSidebarView = ({
             <VideoCallDefault className='size-4' aria-hidden='true' />
             Join call
           </a>
+        )}
+
+        {/* A calendar meeting's own page: shows its Google Meet transcript once Xyne has fetched it. */}
+        {isExternalCalendar && (
+          <Button
+            variant='outline'
+            onClick={() =>
+              void navigate(
+                `/calls/${encodeURIComponent(call.externalId)}/detail${call.transcript ? '?lang=original' : ''}`,
+              )
+            }
+            data-track-category='Calendar'
+            data-track-name='CALL_DETAIL_VIEW_EXTERNAL'
+            className='mt-2 h-8 w-full rounded-lg text-xs font-medium'
+          >
+            View
+          </Button>
         )}
 
         {/* ── Ended call resources ── */}

@@ -10,6 +10,7 @@ import { useSelector } from '@xstate/react';
 import { stateMachineActor } from '../machines/stateMachine';
 import { useEncryptionBootstrap } from '@xyne/shared/hooks';
 import { isElectronApp } from '../utils/electronApp';
+import { EncryptionSetupError } from '../components/EncryptionSetupError';
 
 interface ZeroProviderProps {
   children: ReactNode;
@@ -17,7 +18,13 @@ interface ZeroProviderProps {
 
 const ZeroProvider: React.FC<ZeroProviderProps> = ({ children }): ReactElement | null => {
   const { user } = useAuth();
-  const { isReady: encryptionReady, keyring, config: encryptionConfig } = useEncryptionBootstrap();
+  const {
+    isReady: encryptionReady,
+    keyring,
+    config: encryptionConfig,
+    error: encryptionError,
+    reset: retryEncryption,
+  } = useEncryptionBootstrap();
   const isRefreshing = useRef(false);
   const isRecoveringRef = useRef(false);
   const refreshCount = useSelector(stateMachineActor, state => state.context.zeroRefreshCounter);
@@ -113,7 +120,10 @@ const ZeroProvider: React.FC<ZeroProviderProps> = ({ children }): ReactElement |
   }, [user, refreshCount, encryptionReady]);
 
   if (!zero) {
-    return null;
+    // A failed setup keeps Zero closed; without this the app would sit blank.
+    return encryptionError ? (
+      <EncryptionSetupError error={encryptionError} onRetry={retryEncryption} />
+    ) : null;
   }
 
   return <ZeroReactProvider zero={zero}>{children}</ZeroReactProvider>;

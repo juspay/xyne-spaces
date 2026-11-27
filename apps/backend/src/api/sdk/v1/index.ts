@@ -23,13 +23,13 @@ import { Router, type Request, type Response } from 'express';
 import { z } from 'zod';
 import type { Context } from '@xyne/shared';
 import { db } from '@/database/client';
+import { mutationEncryptionContext } from '@/middleware/decryptionMiddleware';
 import type { AuthData } from '@/zero/mutators';
 import { handle } from '../handler';
 import { callQuery } from '../query';
 import { callMutator } from '../mutation';
 import { createDirectRouter } from '../direct';
 import { SdkApiError } from '../errors';
-import { resolveV1Operation } from './mapper';
 import { parseV1Args } from './parser';
 import type { V1Kind, V1Target } from './types';
 
@@ -103,7 +103,7 @@ async function buildAuthContext(req: Request): Promise<{ ctx: Context; authData:
  * routes only it serves, never a copy of this file.
  */
 export interface SdkVersion {
-  readonly label: 'v1' | 'v2';
+  readonly label: 'v3';
   readonly resolve: (op: string) => V1Target | undefined;
   /** Routes only this version serves, matched before the shared direct routes. */
   readonly routers?: readonly Router[];
@@ -153,7 +153,7 @@ function operationHandler(version: SdkVersion, endpoint: Extract<V1Kind, 'query'
       return;
     }
 
-    await callMutator(target.name, parsed.args, authData);
+    await callMutator(target.name, parsed.args, authData, mutationEncryptionContext(req));
     // `generated` carries any id this layer minted, so a caller that just created
     // a row learns its id without having had to supply one.
     res.status(200).json({ success: true, ...(parsed.generated ? { generated: parsed.generated } : {}) });
@@ -211,15 +211,6 @@ export function createSdkVersionRouter(version: SdkVersion): Router {
   router.use(directRouter);
 
   return router;
-}
-
-/**
- * The authenticated v1 surface. Mounted behind authMiddleware.authenticate
- * (cookie-based auth, same as dashboard) — see `app.ts`. Frozen: published
- * 0.1.x clients call it, so new routes go to v2.
- */
-export function createSdkV1Router(): Router {
-  return createSdkVersionRouter({ label: 'v1', resolve: resolveV1Operation });
 }
 
 export { V1_MAPPER, v1OperationIds, resolveV1Operation } from './mapper';

@@ -1,8 +1,8 @@
 /**
- * v2 `POST /claw/runs`: start an agent run as the caller, and return at once.
+ * v3 `POST /claw/runs`: start an agent run as the caller, and return at once.
  *
  * v1 dispatches through the agent's Spaces app (a signed webhook), so an agent
- * without one — any agent just created — cannot run there. v2 calls claw-auth's
+ * without one — any agent just created — cannot run there. v3 calls claw-auth's
  * own `POST /run` instead, as the caller's session (see `session.ts`): any agent
  * the caller can see runs, attributed to them, exactly as from the Claw UI.
  * `detached: true` makes claw-auth answer as soon as the run is queued; the

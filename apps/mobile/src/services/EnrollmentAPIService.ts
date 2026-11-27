@@ -1,244 +1,83 @@
-import axios from 'axios';
-import type { DeviceInfo } from '../modules/certificate';
+import type { CSRResult } from '../modules/certificate';
 
-const REQUEST_TIMEOUT = 30_000;
-
-/**
- * Origins allowed to issue enrollment QR codes. Callers pass the configured set
- * (`ENROLLMENT_ORIGINS` in `src/config.ts`); an empty set fails closed.
- */
-export interface EnrollmentRequestOptions {
-  trustedOrigins: ReadonlySet<string>;
-}
-
-export type EnrollmentFailureReason =
-  | 'invalid_qr'
-  | 'invalid_url'
-  | 'unsupported_origin'
-  | 'invalid_token'
-  | 'ca_unavailable'
-  | 'server_error'
-  | 'timeout'
-  | 'network'
-  | 'invalid_response'
-  | 'unknown';
+export type EnrollmentFailureReason = 'invalid_qr' | 'unsupported_flow';
 
 export class EnrollmentFlowError extends Error {
   readonly reason: EnrollmentFailureReason;
-  readonly status: number | undefined;
-  readonly code: string | undefined;
 
-  constructor(
-    message: string,
-    reason: EnrollmentFailureReason,
-    options?: { status?: number | undefined; code?: string | undefined },
-  ) {
+  constructor(message: string, reason: EnrollmentFailureReason) {
     super(message);
     this.name = 'EnrollmentFlowError';
     this.reason = reason;
-    this.status = options?.status;
-    this.code = options?.code;
     Object.setPrototypeOf(this, EnrollmentFlowError.prototype);
   }
 }
 
-export interface EnrollmentQrPayload {
-  url: string;
-  token: string;
+/** The signed certificate the enrollment page shows back after scanning the CSR QR. */
+export interface CertificateQrPayload {
+  certificate: string;
+  caChain: string | null;
 }
 
-export interface EnrollmentCertificateResponse {
-  certificate: string;
-  ca_chain: string;
-}
+const INVALID_QR_MESSAGE =
+  'Invalid QR code. Please scan the certificate QR code shown on the enrollment page.';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
 }
 
-function buildRequestUrl(rawUrl: string, trustedOrigins: ReadonlySet<string>): string {
-  let requestUrl: URL;
-
-  try {
-    requestUrl = new URL(rawUrl.trim());
-  } catch {
-    throw new EnrollmentFlowError(
-      'Invalid enrollment QR code: the enrollment URL is malformed.',
-      'invalid_url',
-    );
-  }
-
-  if (requestUrl.protocol !== 'https:') {
-    throw new EnrollmentFlowError('Invalid enrollment URL: HTTPS is required.', 'invalid_url');
-  }
-
-  if (!trustedOrigins.has(requestUrl.origin)) {
-    throw new EnrollmentFlowError(
-      'Unsupported enrollment URL. Please scan a QR code from Xyne Spaces.',
-      'unsupported_origin',
-    );
-  }
-
-  return requestUrl.toString();
-}
-
-/** Parse and validate the `{ url, token }` payload displayed by the laptop. */
-export function validateEnrollmentQrPayload(
-  rawData: string,
-  options: EnrollmentRequestOptions,
-): EnrollmentQrPayload {
-  let parsedData: unknown;
-
-  try {
-    parsedData = JSON.parse(rawData);
-  } catch {
-    throw new EnrollmentFlowError(
-      'Invalid QR code format. Please scan the enrollment QR code from your laptop.',
-      'invalid_qr',
-    );
-  }
-
-  if (!isRecord(parsedData)) {
-    throw new EnrollmentFlowError(
-      'Invalid QR code format. Please scan the enrollment QR code from your laptop.',
-      'invalid_qr',
-    );
-  }
-
-  const url = typeof parsedData['url'] === 'string' ? parsedData['url'].trim() : '';
-  const token = typeof parsedData['token'] === 'string' ? parsedData['token'].trim() : '';
-
-  if (!url || !token) {
-    throw new EnrollmentFlowError(
-      'Invalid enrollment QR code. The URL or token is missing.',
-      'invalid_qr',
-    );
-  }
-
-  const resolvedUrl = buildRequestUrl(url, options.trustedOrigins);
-
-  return { url: resolvedUrl, token };
+function isCertificatePem(value: unknown): value is string {
+  return typeof value === 'string' && value.includes('BEGIN CERTIFICATE');
 }
 
 /**
- * Submit a device CSR using the token from the laptop QR code.
- * The private key is generated and retained by the native keystore; it is never sent here.
+ * The QR the phone shows for the enrollment page to scan. It holds only the CSR and device
+ * details; the private key never leaves the keystore.
  */
-export async function submitCSRWithToken(
-  url: string,
-  token: string,
-  csrPem: string,
-  deviceInfo: DeviceInfo,
-  options: EnrollmentRequestOptions,
-): Promise<EnrollmentCertificateResponse> {
-  const requestUrl = buildRequestUrl(url, options.trustedOrigins);
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT);
+export function buildCsrQrData(csr: CSRResult): string {
+  return JSON.stringify({ csr_pem: csr.csr, device: csr.deviceInfo });
+}
+
+/**
+ * Parse the certificate QR the enrollment page shows after signing the CSR. It needs no origin
+ * check: a certificate is public, and it only works when it matches the key this device
+ * generated for the CSR.
+ */
+export function parseCertificateQrPayload(rawData: string): CertificateQrPayload {
+  let data: unknown;
 
   try {
-    const response = await axios.post<unknown>(
-      requestUrl,
-      {
-        token,
-        csr_pem: csrPem,
-        device: deviceInfo,
-      },
-      {
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        signal: controller.signal,
-        timeout: REQUEST_TIMEOUT,
-      },
-    );
-
-    const responseData: unknown = response.data;
-    const certificate = isRecord(responseData) ? responseData['certificate'] : undefined;
-    const caChain = isRecord(responseData) ? responseData['ca_chain'] : undefined;
-
-    if (typeof certificate !== 'string' || !certificate.includes('BEGIN CERTIFICATE')) {
-      throw new EnrollmentFlowError(
-        'Invalid enrollment response: missing certificate data.',
-        'invalid_response',
-      );
-    }
-
-    return {
-      certificate,
-      ca_chain: typeof caChain === 'string' ? caChain : '',
-    };
-  } catch (error: unknown) {
-    if (error instanceof EnrollmentFlowError) {
-      throw error;
-    }
-
-    if (
-      axios.isAxiosError(error) &&
-      (error.code === 'ERR_CANCELED' || error.code === 'ECONNABORTED')
-    ) {
-      throw new EnrollmentFlowError(
-        'Enrollment request timed out. Please check your network connection.',
-        'timeout',
-        { code: error.code },
-      );
-    }
-
-    if (axios.isAxiosError(error)) {
-      const status = error.response?.status;
-      const responseData: unknown = error.response?.data;
-      const serverMessage =
-        isRecord(responseData) &&
-        (typeof responseData['message'] === 'string'
-          ? responseData['message']
-          : typeof responseData['error'] === 'string'
-            ? responseData['error']
-            : undefined);
-      const errorMessage = serverMessage || (status ? `Enrollment failed: ${status}` : '');
-
-      if (status === 400 || status === 401) {
-        throw new EnrollmentFlowError(
-          `Invalid enrollment token: ${errorMessage}`,
-          'invalid_token',
-          {
-            status,
-            code: error.code,
-          },
-        );
-      }
-
-      if (status === 502) {
-        throw new EnrollmentFlowError(
-          `Certificate authority unavailable: ${errorMessage}`,
-          'ca_unavailable',
-          { status, code: error.code },
-        );
-      }
-
-      if (!status) {
-        throw new EnrollmentFlowError(
-          'Network error. Please check your internet connection.',
-          'network',
-          { code: error.code },
-        );
-      }
-
-      throw new EnrollmentFlowError(
-        errorMessage || 'Failed to submit enrollment request.',
-        'server_error',
-        { status, code: error.code },
-      );
-    }
-
-    throw error instanceof Error
-      ? error
-      : new EnrollmentFlowError('Failed to submit enrollment request.', 'unknown');
-  } finally {
-    clearTimeout(timeoutId);
+    data = JSON.parse(rawData);
+  } catch {
+    throw new EnrollmentFlowError(INVALID_QR_MESSAGE, 'invalid_qr');
   }
+
+  if (!isRecord(data)) {
+    throw new EnrollmentFlowError(INVALID_QR_MESSAGE, 'invalid_qr');
+  }
+
+  const certificate = data['pem'] ?? data['certificate'];
+
+  if (certificate === undefined && 'url' in data && 'token' in data) {
+    // A single-QR enrollment page: this app only supports the two-QR flow.
+    throw new EnrollmentFlowError(
+      'This enrollment page uses an enrollment flow this app version does not support. Please contact support.',
+      'unsupported_flow',
+    );
+  }
+
+  if (!isCertificatePem(certificate)) {
+    throw new EnrollmentFlowError(INVALID_QR_MESSAGE, 'invalid_qr');
+  }
+
+  const caChain = data['ca_chain'];
+  return {
+    certificate: certificate.trim(),
+    caChain: isCertificatePem(caChain) ? caChain.trim() : null,
+  };
 }
 
 export const EnrollmentAPIService = {
-  validateEnrollmentQrPayload,
-  submitCSRWithToken,
+  buildCsrQrData,
+  parseCertificateQrPayload,
 };

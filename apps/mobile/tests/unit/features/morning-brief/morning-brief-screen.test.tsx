@@ -11,6 +11,9 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react-nativ
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 
+// apiClient imports the shared barrel, whose Zero schema jest cannot parse.
+jest.mock('@xyne/shared', () => require('../../../mocks/xyne-shared'));
+
 jest.mock('react-native-reanimated', () => {
   const { View } = require('react-native') as typeof import('react-native');
   return {
