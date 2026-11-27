@@ -96,6 +96,10 @@ import Avatar from '../ui/Avatar/Avatar';
 import { Tooltip } from '../ui/Tooltip';
 import { globalClickTracker } from '../../services/Analytics/globalClickTracker';
 import { usePageCoverage, watchShown } from '../../hooks/usePageCoverage';
+import {
+  isUndecryptableMessage,
+  UNDECRYPTABLE_MESSAGE_TEXT,
+} from '../../utils/undecryptableMessage';
 
 type RadarTab = 'all' | 'pending' | 'waiting';
 
@@ -817,6 +821,7 @@ const RadarPanel = (): ReactElement => {
   // before display, never shown as-is) rather than the human text it wraps.
   // Unwrap it to that real content when present.
   const cleanText = (text: string): string => {
+    if (isUndecryptableMessage(text)) return UNDECRYPTABLE_MESSAGE_TEXT;
     const unwrapped = text.trimStart().startsWith(':::initialMessage')
       ? parseInitialMessageMd(text)?.content || text
       : text;

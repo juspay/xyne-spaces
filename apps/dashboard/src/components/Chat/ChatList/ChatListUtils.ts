@@ -2,6 +2,10 @@ import { QueryResultType } from '@rocicorp/zero';
 import { queries } from '../../../zero/queries';
 import { MessageType, parseAppliedTags, visibleTags } from '@xyne/shared';
 import { getInitialMessageFromConversation } from '../../../utils/conversationMessageHelpers';
+import {
+  isUndecryptableMessage,
+  UNDECRYPTABLE_MESSAGE_TEXT,
+} from '../../../utils/undecryptableMessage';
 
 // Type definitions for utility functions
 export type ThreadMessage = QueryResultType<typeof queries.channelAndThreadMessagesV2>[number];
@@ -160,6 +164,7 @@ export const shouldShowAvatar = (
  */
 export const createMessagePreview = (content: string | undefined): string => {
   if (!content) return '';
+  if (isUndecryptableMessage(content)) return UNDECRYPTABLE_MESSAGE_TEXT;
 
   const getPlainText = (html: string): string => {
     if (typeof DOMParser === 'undefined') return ''; // Handle server-side rendering

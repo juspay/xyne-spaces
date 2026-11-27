@@ -1,3 +1,8 @@
+import {
+  isUndecryptableMessage,
+  UNDECRYPTABLE_MESSAGE_TEXT,
+} from '../../../utils/undecryptableMessage';
+
 export type ReminderStatus = 'PENDING' | 'SENT' | 'DISMISSED';
 
 export interface ReminderNotificationContext {
@@ -250,6 +255,10 @@ export const upsertReminderMetadataWithContext = (
 export const createReminderMessagePreview = (content: string | undefined): string | undefined => {
   if (!content) {
     return undefined;
+  }
+
+  if (isUndecryptableMessage(content)) {
+    return UNDECRYPTABLE_MESSAGE_TEXT;
   }
 
   if (typeof DOMParser === 'undefined') {
