@@ -30,9 +30,10 @@ export type ComposeRequest<T extends ComposeTemplate = ComposeTemplate> = {
  * (ciphertext under `workspaceId`'s key, to store as it is), or `unchanged`. It never reads the
  * text.
  *
- * With DB encryption on, the encryption service decrypts the parts, runs the template and
+ * With client encryption on, the encryption service decrypts the parts, runs the template and
  * encrypts the result. With it off, the parts are plaintext and the template runs here, on the
- * values held; a part that is ciphertext then is an error, as in tx.read.
+ * values held (the result is encrypted at rest on write); a part that is ciphertext then is an
+ * error, as in tx.read.
  */
 export async function compose<T extends ComposeTemplate>(
   request: ComposeRequest<T>,
@@ -53,7 +54,7 @@ export async function composeBatch(
     inputs: heldInputs(template, inputs as Record<string, unknown>),
     current: current ? reveal(current) : null,
   }));
-  const source: MetricSource = config.enc.enableDbEncryption ? 'enc-rust' : 'local';
+  const source: MetricSource = config.enc.apiClientEncryptionEnabled ? 'enc-rust' : 'local';
 
   let results: ComposeItemResult[];
   try {
@@ -97,11 +98,11 @@ function heldInputs(template: ComposeTemplate, inputs: Record<string, unknown>):
   return wire;
 }
 
-/** The template run here, on plaintext parts (DB encryption off). */
+/** The template run here, on plaintext parts (client encryption off). */
 function composeLocally(item: { template: string; inputs: Record<string, unknown>; current: string | null }): ComposeItemResult {
   for (const [field, value] of Object.entries(item.inputs)) {
     if (isCiphertextValue(value)) {
-      throw new Error(`compose ${item.template}: ${field} is ciphertext and DB encryption is off`);
+      throw new Error(`compose ${item.template}: ${field} is ciphertext and client encryption is off`);
     }
   }
   const value = runComposeTemplate(item.template, item.inputs);

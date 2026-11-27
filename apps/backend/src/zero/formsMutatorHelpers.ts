@@ -1,11 +1,9 @@
-import { Transaction } from '@rocicorp/zero';
 import { z } from 'zod';
 import {
   AttachmentEntityType,
   FormEntityType,
   assertFormFieldType,
   FormFieldType,
-  Schema,
   formEntityValueItemId,
   readFormEntityValue,
   resolveParentOption,
@@ -15,6 +13,8 @@ import {
 import { stringFromFormValue } from '@xyne/shared/zero';
 import { formEntityValueTextHash } from '@/utils/formEntityValueHash';
 import { zql } from './queries';
+import type { UnreadableTransaction } from './unreadableTransaction';
+import { mutatorContracts } from '@xyne/shared';
 
 export type BranchableMutatorField = {
   fieldName: string;
@@ -73,7 +73,7 @@ export const validateUniqueFieldNames = (fields: readonly BranchableMutatorField
 // write path (ticket-detail inline edits, stage forms) that REST validation never sees, so a
 // branch-scoped field's parent value has to be checked here too, not just on field definitions.
 export async function assertFieldIsCurrentlyActive(
-  tx: Transaction<Schema>,
+  tx: UnreadableTransaction,
   field: { id: string; formId: string; fieldName: string; parentOptionId?: string | null },
   entityId: string,
   entityType: string,
@@ -199,7 +199,7 @@ const toDocCheck = (
 // (POST /attachments/upload writes it with entityType=FORM_ENTITY_VALUE and entityId = the row
 // id pre-allocated client-side), so no claim happens here — only a check that it matches.
 async function assertDocAttachmentBound(
-  tx: Transaction<Schema>,
+  tx: UnreadableTransaction,
   check: DocAttachmentCheck,
 ): Promise<void> {
   if (check.entityType !== FormEntityType.TICKET || check.fieldType !== FormFieldType.DOC) return;
@@ -232,7 +232,7 @@ export type CreateFormEntityValueInput = {
 // Inserts a form value. Validation is left to assertFormEntityValueWrites, which callers must
 // run once every write in the transaction is done.
 export async function writeFormEntityValueCreate(
-  tx: Transaction<Schema>,
+  tx: UnreadableTransaction,
   input: CreateFormEntityValueInput,
 ): Promise<FormEntityValueWrite> {
   const { workspaceId, id, entityId, entityType, fieldId, formId, newValue, timestamp, contextId, version } = input;
@@ -315,7 +315,7 @@ export type FormEntityValueBatchScope = {
 // saves), the row must belong to that entity and context and its field to that form; the
 // branch check then uses the field's placement in that form.
 export async function writeFormEntityValueUpdate(
-  tx: Transaction<Schema>,
+  tx: UnreadableTransaction,
   input: UpdateFormEntityValueInput,
   scope?: FormEntityValueBatchScope,
 ): Promise<FormEntityValueWrite> {
@@ -390,7 +390,7 @@ export async function writeFormEntityValueUpdate(
 // Validates writes against the transaction's final state: every branch-activity check first,
 // then every DOC attachment check (the same error precedence the single-value mutators had).
 export async function assertFormEntityValueWrites(
-  tx: Transaction<Schema>,
+  tx: UnreadableTransaction,
   writes: readonly FormEntityValueWrite[],
 ): Promise<void> {
   for (const write of writes) {
@@ -407,58 +407,8 @@ export async function assertFormEntityValueWrites(
   }
 }
 
-export const upsertManyFormEntityValuesArgs = z
-  .object({
-    entityId: z.string(),
-    entityType: z.nativeEnum(FormEntityType),
-    formId: z.string(),
-    timestamp: z.number(),
-    contextId: z.string().optional(),
-    version: z.number().optional(),
-    values: z
-      .array(
-        z.discriminatedUnion('op', [
-          z.object({
-            op: z.literal('create'),
-            id: z.string(),
-            fieldId: z.string(),
-            newValue: z.array(z.string()),
-          }),
-          z.object({
-            op: z.literal('update'),
-            formEntityValueId: z.string(),
-            newValue: z.array(z.string()),
-            expectedValueUpdatedAt: z.number().nullable().optional(),
-          }),
-        ]),
-      )
-      .min(1),
-  })
-  .superRefine(({ values }, ctx) => {
-    const seenValueIds = new Set<string>();
-    const seenCreateFieldIds = new Set<string>();
-    values.forEach((value, index) => {
-      const valueId = value.op === 'create' ? value.id : value.formEntityValueId;
-      if (seenValueIds.has(valueId)) {
-        ctx.addIssue({
-          code: 'custom',
-          path: ['values', index],
-          message: `Form value ${valueId} appears more than once in this save`,
-        });
-      }
-      seenValueIds.add(valueId);
-
-      if (value.op !== 'create') return;
-      if (seenCreateFieldIds.has(value.fieldId)) {
-        ctx.addIssue({
-          code: 'custom',
-          path: ['values', index],
-          message: `Field ${value.fieldId} appears more than once in this save`,
-        });
-      }
-      seenCreateFieldIds.add(value.fieldId);
-    });
-  });
+/** The args of `formEntityValue.upsertMany`: its contract's schema. */
+export const upsertManyFormEntityValuesArgs = mutatorContracts['formEntityValue.upsertMany'].schema;
 
 export type UpsertManyFormEntityValuesArgs = z.infer<typeof upsertManyFormEntityValuesArgs>;
 
@@ -466,7 +416,7 @@ export type UpsertManyFormEntityValuesArgs = z.infer<typeof upsertManyFormEntity
 // A child field is checked against its parent's new value no matter where either sits in
 // `values`, and any failure rolls the whole form back.
 export async function upsertManyFormEntityValues(
-  tx: Transaction<Schema>,
+  tx: UnreadableTransaction,
   workspaceId: string,
   args: UpsertManyFormEntityValuesArgs,
 ): Promise<FormEntityValueWrite[]> {
@@ -528,7 +478,7 @@ const storedFormEntityValueFields = (fieldType: FormFieldType, value: unknown, f
 // Makes the value's form_entity_value_items rows exactly `items`. Item ids are derived, so
 // re-adding an item keeps its row and the client's optimistic rows match the server's.
 async function replaceFormEntityValueItems(
-  tx: Transaction<Schema>,
+  tx: UnreadableTransaction,
   value: { id: string; workspaceId: string },
   items: readonly string[],
   createdAt: number,
@@ -557,7 +507,7 @@ async function replaceFormEntityValueItems(
  * local-rules/form-entity-values-through-repository lint rule enforces it.
  */
 export async function insertFormEntityValue(
-  tx: Transaction<Schema>,
+  tx: UnreadableTransaction,
   input: {
     id: string;
     workspaceId: string;
@@ -591,7 +541,7 @@ export async function insertFormEntityValue(
 }
 
 export async function updateFormEntityValue(
-  tx: Transaction<Schema>,
+  tx: UnreadableTransaction,
   input: { id: string; workspaceId: string; fieldType: FormFieldType; value: unknown; updatedAt: number },
 ): Promise<void> {
   const stored = storedFormEntityValueFields(input.fieldType, input.value, input.id);
@@ -601,7 +551,7 @@ export async function updateFormEntityValue(
 
 /** Moves a row to another field or version without touching its value. */
 export async function moveFormEntityValue(
-  tx: Transaction<Schema>,
+  tx: UnreadableTransaction,
   input: { id: string; fieldId?: string; version?: number; updatedAt: number },
 ): Promise<void> {
   await tx.mutate.form_entity_values.update({
@@ -613,7 +563,7 @@ export async function moveFormEntityValue(
 }
 
 // Zero deletes do not cascade (relationMode = "prisma"), so items are removed explicitly.
-export async function deleteFormEntityValue(tx: Transaction<Schema>, id: string): Promise<void> {
+export async function deleteFormEntityValue(tx: UnreadableTransaction, id: string): Promise<void> {
   const items = await tx.run(zql.form_entity_value_items.where('valueId', id));
   for (const row of items) await tx.mutate.form_entity_value_items.delete({ id: row.id });
   await tx.mutate.form_entity_values.delete({ id });

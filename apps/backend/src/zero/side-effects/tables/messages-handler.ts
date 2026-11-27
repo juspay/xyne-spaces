@@ -1,11 +1,10 @@
 import { v4 as uuidv4 } from 'uuid';
 import { BaseSideEffectHandler } from '../base-handler';
 import type { SideEffectJobConfig, MessagePreviousValue } from '../types';
-import type { DerivedFacts, RequestDerived } from '@xyne/shared';
-import type { conversationsSendClient } from '@xyne/shared';
+import type { DerivedFacts, RequestDerived, mutatorContracts } from '@xyne/shared';
 
 /** The content facts a message insert job carries, as the message contract picks them. */
-type MessageContentFacts = NonNullable<RequestDerived<typeof conversationsSendClient>['fields']['content']>;
+type MessageContentFacts = NonNullable<RequestDerived<(typeof mutatorContracts)['conversations.send']>['fields']['content']>;
 
 /** The message content facts on a job, typed by the message contract. */
 function messageContentFacts(derived: DerivedFacts | undefined): MessageContentFacts | undefined {

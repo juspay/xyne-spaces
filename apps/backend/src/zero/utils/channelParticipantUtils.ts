@@ -2,6 +2,7 @@ import { Transaction } from '@rocicorp/zero';
 import { Schema, ChannelRole, ChannelType } from '@xyne/shared';
 import { v4 as uuidv4 } from 'uuid';
 import { zql } from '../queries'
+import type { UnreadableTransaction } from '../unreadableTransaction';
 
 /**
  * Per-(channel, user) unread count for email channels.
@@ -16,7 +17,7 @@ import { zql } from '../queries'
  * Returns 0 for non-email channels (their unread is derived elsewhere).
  */
 async function computeUnreadCountForUser(
-  tx: Transaction<Schema>,
+  tx: UnreadableTransaction,
   channelId: string,
   userId: string,
 ): Promise<number> {
@@ -47,7 +48,7 @@ async function computeUnreadCountForUser(
 }
 
 async function getConversationSeenCutoffAt(
-  tx: Transaction<Schema>,
+  tx: UnreadableTransaction,
   channelId: string,
   fallbackTimestamp: number,
 ): Promise<number> {
@@ -74,7 +75,7 @@ async function getConversationSeenCutoffAt(
  * @returns Object with added status and participantId
  */
 export async function addChannelParticipant(
-  tx: Transaction<Schema>,
+  tx: UnreadableTransaction,
   channelId: string,
   userId: string,
   role: ChannelRole = ChannelRole.MEMBER,
@@ -178,7 +179,7 @@ export async function addChannelParticipant(
  * @returns Object with count and list of added user IDs
  */
 export async function addChannelParticipants(
-  tx: Transaction<Schema>,
+  tx: UnreadableTransaction,
   channelId: string,
   userIds: string[],
   role: ChannelRole = ChannelRole.MEMBER,
@@ -293,7 +294,7 @@ export async function addChannelParticipants(
  * @returns Object with removed status and participantId
  */
 export async function removeChannelParticipant(
-  tx: Transaction<Schema>,
+  tx: UnreadableTransaction,
   channelId: string,
   userId: string,
   timestamp: number

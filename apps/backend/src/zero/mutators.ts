@@ -1,14 +1,12 @@
-import { ReadonlyJSONValue, Transaction, defineMutator, defineMutators, ApplicationError } from '@rocicorp/zero';
+import { ReadonlyJSONValue, defineMutators, ApplicationError } from '@rocicorp/zero';
 import { AutomationStatus } from '../automations/types/status';
 import { toDisplayFilename } from '@/utils/filename';
 import { buildAutomationMetadata, parseAutomationMetadata } from '../automations/types/workflow-adapter';
 import {
   ChannelRole,
-  AgentProactivityMode,
   ChannelType,
   ChannelVisibility,
   MessageType,
-  CallType,
   CallStatus,
   CallVisibility,
   RecurringCallSeriesStatus,
@@ -17,11 +15,9 @@ import {
   RingStatus,
   MeetingStatus,
   NotificationLevel,
-  Schema,
   ChannelScopeType,
   ChannelAddUserPolicy,
   ChannelSortOrder,
-  ChannelFilterMode,
   ConversationParticipation,
   TicketStatusV2,
   MailboxState,
@@ -39,8 +35,6 @@ import {
   FormEntityType,
   QueryVisualizationType,
   DocType,
-  ActivityClassification,
-  PRStatusEvent,
   UserResponsibility,
   AccessType,
   BoardType,
@@ -48,12 +42,8 @@ import {
   VisitSlaMode,
   ApproverType,
   TicketStageRequestStatus,
-  COEStatus,
-  RCAStatus,
-  SEVERITY,
   AttachmentEntityType,
   AttachmentUploadStatus,
-  AttributionConfidence,
   BaseTicketType,
   isReleaseTicket,
   getNudgeActionBehavior,
@@ -62,7 +52,6 @@ import {
   NudgeState,
   SurfaceAreaType,
   SurfaceLinkKind,
-  RotationInterval,
   ReleaseEventType,
   parseReactionsMd,
   removeReactionFromData,
@@ -71,8 +60,6 @@ import {
   type BoardMetadata,
   SavedConfigContextType,
   SavedConfigVisibility,
-  SavedConfigEntityName,
-  ViewAccessEntityType,
   WorkspaceRole,
   Status,
   OrgRole,
@@ -87,8 +74,6 @@ import {
   ReleaseTrackingMode,
   type CallParticipantMetadata,
   SUMMARY_PROMPT_MAX_LENGTH,
-  MAX_NOTIFICATION_KEYWORDS,
-  MAX_NOTIFICATION_KEYWORD_LENGTH,
   normalizeNotificationKeywords,
   isDeskChannelType,
   deskTypeForChannelType,
@@ -99,8 +84,6 @@ import {
   SDLC_STRUCTURAL_RELATIONS,
   SDLC_TRACK_FLAT_RELATION,
   SDLC_TRACK_MEMBERSHIP_RELATION,
-  createSdlcLinkSchema,
-  entityLinkContextSchema,
   withExtension,
   updateSubTicketsMdFromZero,
   parseBoardEtaManagement,
@@ -130,58 +113,12 @@ import { ConnectEntityType } from '@xyne/shared';
 import type { ExtractorOutput } from '@xyne/shared';
 import { forwardedMessageEditTemplate, forwardedMessageTemplate, repliesMdAddReplierTemplate } from '@xyne/shared';
 import {
-  conversationsForwardMessageClient,
-  messagesUpdateClient,
-  messagesSendClient,
-  ticketUpdateClient,
-  markChannelAsViewedClient,
-  markThreadActivitiesAsReadV2Client,
-  recapSetCustomRecapPromptClient,
-  userPresenceUpsertClient,
-  draftCreateAttachmentsClient,
-  sdlcAddSdlcFolderItemClient,
-  sdlcCreateTrackClient,
-  sdlcUpdateTrackClient,
-  channelUpdateCallSummaryPromptClient,
-  emailChannelPreferenceUpsertClassificationClient,
-  emailChannelPreferenceUpsertPriorityClassificationClient,
-  workspaceUpdateClient,
-  canvasCreateClient,
-  canvasUpdateClient,
-  coeCreateClient,
-  coeUpdateClient,
-  impactCreateClient,
-  impactUpdateClient,
-  rcaCreateClient,
-  rcaUpdateClient,
-  dashboardUpsertClient,
-  delayedMessagesCreateClient,
-  delayedMessagesEditClient,
-  draftMessagesEditClient,
-  subTicketCreateClient,
-  emailDraftUpsertClient,
-  emailDraftUpsertComposeDraftClient,
-  canvasCommentCreateThreadClient,
-  canvasCommentReplyClient,
-  canvasCommentUpdateClient,
-  collectionCreateClient,
-  collectionUpdateClient,
-  conversationsSendClient,
   derive,
-  emailSignatureCreateClient,
-  emailSignatureUpdateClient,
-  linksCreateClient,
-  linksUpdateClient,
-  roleCreateClient,
-  roleUpdateClient,
 } from '@xyne/shared';
-import { SDLC_HUB_KNOWLEDGE_FOLDER, sdlcIconNameSchema, sdlcTrackStatusSchema } from '@xyne/shared';
+import { SDLC_HUB_KNOWLEDGE_FOLDER } from '@xyne/shared';
 import { isSdlcTreeItemType, refileSdlcFolderEdges } from '@xyne/shared';
 import {
   ChannelPublishedEntityType,
-  MAX_DUPLICATE_LOOKBACK_DAYS,
-  MAX_DUPLICATE_SCOPE_FIELDS,
-  MAX_PUBLISHED_APP_ID_LENGTH,
   MAX_PUBLISHED_APPS,
   canPublishAppsTo,
   type ChannelPublishedTab,
@@ -198,7 +135,6 @@ import {
 } from '@/services/etaManagement';
 import {
   FLOW_STAGE_NAMES,
-  FlowPlanSchema,
   deserializeFlowPlan,
   serializeFlowPlan,
   validateFlowPlan,
@@ -213,15 +149,14 @@ import {
   validateUniqueFieldNames,
   assertFormEntityValueWrites,
   upsertManyFormEntityValues,
-  upsertManyFormEntityValuesArgs,
   writeFormEntityValueCreate,
   writeFormEntityValueUpdate,
   deleteFormEntityValue,
   moveFormEntityValue,
 } from './formsMutatorHelpers';
 import { v4 as uuidv4 } from 'uuid';
-import { defineContractMutator, getMutationFacts } from './encryptedMutation';
-import type { AnyTransaction } from './unreadableTransaction';
+import { defineContractMutator } from './encryptedMutation';
+import type { AnyTransaction, UnreadableTransaction } from './unreadableTransaction';
 import { composeSubTicketAnchorMd } from './mutation-sync/composeMd';
 import { detectVcsProvider } from '@/utils/repoUrlParser';
 import { getStorageService } from '@/services/storage';
@@ -273,7 +208,6 @@ import {
   unifiedBotUserService,
 } from '@/bots/unified/index.js';
 
-import { z } from 'zod';
 import { generateKeyBetween } from 'fractional-indexing';
 import { zql } from './queries';
 import { hasGuestChannelAccess } from './acl/core/guest-access';
@@ -327,7 +261,7 @@ function sortCallParticipantsForPreview<T extends {
 }
 
 async function updateCallParticipantPreview(
-  tx: Transaction<Schema>,
+  tx: UnreadableTransaction,
   callId: string,
 ): Promise<void> {
   const participants = await tx.run(zql.call_participants.where('callId', callId));
@@ -356,7 +290,7 @@ const serializeCanvasCommentMentionedUserIds = (mentionedUserIds: string[]): str
 
 /** Checks the caller may change the channel's published apps; returns its current rows. */
 async function loadChannelForAppPublish(
-  tx: Transaction<Schema>,
+  tx: UnreadableTransaction,
   channelId: string,
   userId: string,
 ): Promise<ChannelPublishedTab[]> {
@@ -451,7 +385,7 @@ function computeStageEtaDeadline(
 // keep them on the target stage. A user is an approver if they are listed as a USER approver OR
 // they hold any role listed as a ROLE approver (via user_role_mappings). Throws if not authorized.
 async function assertCanReviewStageRequest(
-  tx: Transaction<Schema>,
+  tx: UnreadableTransaction,
   ticket: { boardId: string; stageName: string | null },
   stageId: string,
   userId: string,
@@ -540,7 +474,7 @@ async function getConversationSeenCutoffAt(
 }
 
 async function decrementSurfaceNudgeCountRow(
-  tx: Transaction<Schema>,
+  tx: UnreadableTransaction,
   surfaceNudgeCountId: string | null | undefined,
   timestamp: number,
 ): Promise<void> {
@@ -849,7 +783,7 @@ async function assertCanvasCommentEditAccess(
 }
 
 async function assertCanvasThreadManageAccess(
-  tx: Transaction<Schema>,
+  tx: UnreadableTransaction,
   thread: { canvasId: string; createdBy: string },
   userId: string,
   workspaceId: string,
@@ -1214,7 +1148,7 @@ export function createMutators(
       .where('entityType', entityType);
 
   const getBookmarkIncludingDeleted = async (
-    tx: Transaction<Schema>,
+    tx: UnreadableTransaction,
     entityId: string,
     entityType: BookmarkEntityType,
   ) => {
@@ -1225,7 +1159,7 @@ export function createMutators(
   };
 
   const getActiveBookmark = async (
-    tx: Transaction<Schema>,
+    tx: UnreadableTransaction,
     entityId: string,
     entityType: BookmarkEntityType,
   ) => {
@@ -1313,15 +1247,7 @@ export function createMutators(
 
   return defineMutators({
     notificationSettings: {
-       setChannelNotificationLevel: defineMutator(
-         z.object({
-           channelId: z.string(),
-           desktopNotificationLevel: z.enum(['ALL', 'MENTIONS_ONLY', 'THREADS_ONLY', 'NONE']).nullable().optional(),
-           mobileNotificationLevel: z.enum(['ALL', 'MENTIONS_ONLY', 'THREADS_ONLY', 'NONE']).nullable().optional(),
-           threadReplyNotificationsEnabled: z.boolean().nullable().optional(),
-           channelWideMentionsEnabled: z.boolean().nullable().optional(),
-           timestamp: z.number(),
-         }),
+       setChannelNotificationLevel: defineContractMutator('notificationSettings.setChannelNotificationLevel',
          async ({ tx, args: { channelId, desktopNotificationLevel, mobileNotificationLevel, threadReplyNotificationsEnabled, channelWideMentionsEnabled, timestamp } }) => {
            // Get channel user status
            const userStatus = await tx.run(
@@ -1349,13 +1275,7 @@ export function createMutators(
        ),
      },
     channel: {
-      joinChannel: defineMutator(
-        z.object({
-          channelId: z.string(),
-          channelParticipantId: z.string(),
-          channelUserStatusId: z.string(),
-          timestamp: z.number(),
-        }),
+      joinChannel: defineContractMutator('channel.joinChannel',
         async ({ tx, args: { channelId, channelParticipantId, channelUserStatusId, timestamp } }) => {
           const channel = await tx.run(zql.channels.where('id', channelId).one());
           if (!channel) {
@@ -1390,17 +1310,7 @@ export function createMutators(
           await sendAddAndRemoveParticipantsSystemMessage(tx, { channel, newParticipants, authData: messageSender, operationType: 'participants_joined' })
         },
       ),
-      promoteToChannel: defineMutator(
-        z.object({
-          channelId: z.string(),
-          name: z.string().min(2).max(80),
-          description: z.string().optional(),
-          visibility: z.enum([ChannelVisibility.PUBLIC, ChannelVisibility.PRIVATE]),
-          projectId: z.string(),
-          conversationId: z.string(),
-          messageId: z.string(),
-          timestamp: z.number(),
-        }),
+      promoteToChannel: defineContractMutator('channel.promoteToChannel',
         async ({
           tx,
           args: { channelId, name, description, visibility, projectId, conversationId, messageId, timestamp },
@@ -1535,14 +1445,7 @@ export function createMutators(
           });
         },
       ),
-      addParticipants: defineMutator(
-        z.object({
-          channelId: z.string(),
-          userIds: z.array(z.string()),
-          timestamp: z.number(),
-          participantIds: z.record(z.string(), z.string()), // Map userId -> participantId
-          userStatusIds: z.record(z.string(), z.string()), // Map userId -> userStatusId
-        }),
+      addParticipants: defineContractMutator('channel.addParticipants',
         async ({ tx, args: { userIds, channelId, timestamp, participantIds, userStatusIds } }) => {
           const channel = await tx.run(zql.channels.where('id', channelId).one());
           if (!channel) {
@@ -1617,8 +1520,7 @@ export function createMutators(
           });
         },
       ),
-      removeParticipant: defineMutator(
-        z.object({ targetUserId: z.string(), channelId: z.string(), updatedAt: z.number() }),
+      removeParticipant: defineContractMutator('channel.removeParticipant',
         async ({ tx, args: { targetUserId, channelId, updatedAt } }) => {
           const channel = await tx.run(zql.channels.where('id', channelId).one());
           if (!channel) {
@@ -1680,8 +1582,7 @@ export function createMutators(
           }
         },
       ),
-      leaveChannel: defineMutator(
-        z.object({ channelId: z.string(), updatedAt: z.number() }),
+      leaveChannel: defineContractMutator('channel.leaveChannel',
         async ({ tx, args: { channelId, updatedAt } }) => {
           const channel = await tx.run(zql.channels.where('id', channelId).one());
           if (!channel) {
@@ -1701,11 +1602,7 @@ export function createMutators(
           await removeChannelParticipant(tx, channelId, authData.sub, updatedAt);
         },
       ),
-      updateAddUserPolicy: defineMutator(
-        z.object({
-          channelId: z.string(),
-          policy: z.nativeEnum(ChannelAddUserPolicy),
-        }),
+      updateAddUserPolicy: defineContractMutator('channel.updateAddUserPolicy',
         async ({ tx, args: { channelId, policy } }) => {
           const channel = await tx.run(zql.channels.where('id', channelId).one());
           if (!channel) {
@@ -1730,13 +1627,7 @@ export function createMutators(
           });
         },
       ),
-      publishApp: defineMutator(
-        z.object({
-          id: z.string().min(1).max(64),
-          channelId: z.string(),
-          appId: z.string().min(1).max(MAX_PUBLISHED_APP_ID_LENGTH),
-          timestamp: z.number(),
-        }),
+      publishApp: defineContractMutator('channel.publishApp',
         async ({ tx, args: { id, channelId, appId, timestamp } }) => {
           const rows = await loadChannelForAppPublish(tx, channelId, authData.sub);
           if (rows.some(row => row.entityId === appId)) return;
@@ -1755,8 +1646,7 @@ export function createMutators(
           });
         },
       ),
-      unpublishApp: defineMutator(
-        z.object({ channelId: z.string(), appId: z.string().min(1).max(MAX_PUBLISHED_APP_ID_LENGTH) }),
+      unpublishApp: defineContractMutator('channel.unpublishApp',
         async ({ tx, args: { channelId, appId } }) => {
           const rows = await loadChannelForAppPublish(tx, channelId, authData.sub);
           const row = rows.find(r => r.entityId === appId);
@@ -1764,11 +1654,7 @@ export function createMutators(
           await tx.mutate.channel_published_tabs.delete({ id: row.id });
         },
       ),
-      updateAgentProactivityMode: defineMutator(
-        z.object({
-          channelId: z.string(),
-          mode: z.nativeEnum(AgentProactivityMode),
-        }),
+      updateAgentProactivityMode: defineContractMutator('channel.updateAgentProactivityMode',
         async ({ tx, args: { channelId, mode } }) => {
           const channel = await tx.run(zql.channels.where('id', channelId).one());
           if (!channel) {
@@ -1790,11 +1676,7 @@ export function createMutators(
           await tx.mutate.channels.update({ id: channelId, agentProactivityMode: mode });
         },
       ),
-      updateShowTicketsTabTicketsInChat: defineMutator(
-        z.object({
-          channelId: z.string(),
-          show: z.boolean(),
-        }),
+      updateShowTicketsTabTicketsInChat: defineContractMutator('channel.updateShowTicketsTabTicketsInChat',
         async ({ tx, args: { channelId, show } }) => {
           const channel = await tx.run(zql.channels.where('id', channelId).one());
           if (!channel) {
@@ -1820,14 +1702,8 @@ export function createMutators(
         },
       ),
       updateCallSummaryPrompt: defineContractMutator(
-        channelUpdateCallSummaryPromptClient,
-        z.object({
-          channelId: z.string(),
-          // The length limit is checked on the rawLength fact below: zod cannot measure ciphertext.
-          prompt: z.string().nullable(),
-        }),
-        async ({ tx, args: { channelId, prompt } }) => {
-          const facts = getMutationFacts(channelUpdateCallSummaryPromptClient, 'prompt');
+        'channel.updateCallSummaryPrompt',
+        async ({ tx, args: { channelId, prompt }, facts: { prompt: facts } }) => {
           if ((facts?.rawLength ?? 0) > SUMMARY_PROMPT_MAX_LENGTH) {
             throw new Error('Call summary template must be 20000 characters or less');
           }
@@ -1851,10 +1727,8 @@ export function createMutators(
           });
         },
       ),
-      makeChannelPublic: defineMutator(
-        z.object({
-          channelId: z.string(),
-        }),
+      makeChannelPublic: defineContractMutator(
+        'channel.makeChannelPublic',
         async ({ tx, args: { channelId } }) => {
           const channel = await tx.run(zql.channels.where('id', channelId).one());
           if (!channel) {
@@ -1883,15 +1757,8 @@ export function createMutators(
         },
       ),
       markChannelAsViewed: defineContractMutator(
-        markChannelAsViewedClient,
-        z.object({
-          channelId: z.string(),
-          conversationId: z.string().optional(),
-          timestamp: z.number(),
-          draftMessage: z.string().optional(),
-          draftMessageId: z.string().optional(),
-        }),
-        async ({ tx, args: { channelId, conversationId, timestamp, draftMessage, draftMessageId } }) => {
+        'channel.markChannelAsViewed',
+        async ({ tx, facts, args: { channelId, conversationId, timestamp, draftMessage, draftMessageId } }) => {
           const participant = await tx.run(zql.channel_user_status
             .where('channelId', channelId)
             .where('userId', authData.sub)
@@ -1939,7 +1806,7 @@ export function createMutators(
             const draft = channelDrafts.find(d => d.conversationId === null);
 
             // No facts means the draft text was empty.
-            const draftIsEmpty = getMutationFacts(markChannelAsViewedClient, 'draftMessage')?.textIsEmpty ?? true;
+            const draftIsEmpty = facts.draftMessage?.textIsEmpty ?? true;
             if (draft && draftIsEmpty && !draft.hasAttachment) {
               await tx.mutate.draft_messages.delete({ id: draft.id });
             } else if (!draftIsEmpty) {
@@ -2002,13 +1869,7 @@ export function createMutators(
           }
         },
       ),
-      markChannelUnreadFrom: defineMutator(
-        z.object({
-          channelId: z.string(),
-          messageId: z.string(),
-          conversationId: z.string().optional(),
-          timestamp: z.number(),
-        }),
+      markChannelUnreadFrom: defineContractMutator('channel.markChannelUnreadFrom',
         async ({ tx, args: { channelId, messageId, conversationId, timestamp } }) => {
           const participant = await tx.run(zql.channel_user_status
             .where('channelId', channelId)
@@ -2168,8 +2029,7 @@ export function createMutators(
           }
         },
       ),
-      toggleStarred: defineMutator(
-        z.object({ channelId: z.string(), updatedAt: z.number() }),
+      toggleStarred: defineContractMutator('channel.toggleStarred',
         async ({ tx, args: { channelId, updatedAt } }) => {
           const participation = await tx.run(zql.channel_user_status
             .where('channelId', channelId)
@@ -2188,8 +2048,7 @@ export function createMutators(
           });
         },
       ),
-      closeDm: defineMutator(
-        z.object({ channelId: z.string(), updatedAt: z.number() }),
+      closeDm: defineContractMutator('channel.closeDm',
         async ({ tx, args: { channelId, updatedAt } }) => {
           const participation = await tx.run(zql.channel_user_status
             .where('channelId', channelId)
@@ -2208,15 +2067,7 @@ export function createMutators(
           });
         },
       ),
-      updateDescription: defineMutator(
-        z.object({
-          channelId: z.string(),
-          description: z.string(),
-          messageId: z.string(),
-          conversationId: z.string(),
-          timestamp: z.number(),
-          conversationParticipantId: z.string(),
-        }),
+      updateDescription: defineContractMutator('channel.updateDescription',
         async ({ tx, args: { channelId, description, messageId, conversationId, timestamp, conversationParticipantId } }) => {
           const channel = await tx.run(zql.channels.where('id', channelId).one());
           if (!channel) {
@@ -2297,12 +2148,7 @@ export function createMutators(
           });
         },
       ),
-      renameChannel: defineMutator(
-        z.object({
-          channelId: z.string(),
-          name: z.string().min(2).max(80),
-          timestamp: z.number(),
-        }),
+      renameChannel: defineContractMutator('channel.renameChannel',
         async ({ tx, args: { channelId, name, timestamp } }) => {
           const channel = await tx.run(zql.channels.where('id', channelId).one());
           if (!channel) {
@@ -2340,8 +2186,7 @@ export function createMutators(
 
         },
       ),
-      reopenDm: defineMutator(
-        z.object({ channelId: z.string(), updatedAt: z.number() }),
+      reopenDm: defineContractMutator('channel.reopenDm',
         async ({ tx, args: { channelId, updatedAt } }) => {
           const participation = await tx.run(zql.channel_user_status
             .where('channelId', channelId)
@@ -2364,17 +2209,7 @@ export function createMutators(
       // removes a mapping, so a board that is already linked is silently skipped
       // rather than erroring — the unique (channelId, boardId) index would reject it,
       // and a partially-applied batch is worse than an idempotent one.
-      linkBoards: defineMutator(
-        z.object({
-          channelId: z.string(),
-          // Ids are generated client-side (uuid) so the mutation stays idempotent
-          // across optimistic apply + server replay.
-          boards: z
-            .array(z.object({ mappingId: z.string(), boardId: z.string() }))
-            .min(1)
-            .max(100),
-          timestamp: z.number(),
-        }),
+      linkBoards: defineContractMutator('channel.linkBoards',
         // Permission and tenancy live in ChannelBoardMappingsACL.canInsert, which the
         // transaction wrapper runs on every insert below — same as every other table.
         async ({ tx, args: { channelId, boards, timestamp } }) => {
@@ -2415,8 +2250,7 @@ export function createMutators(
           }
         },
       ),
-      updateSelectedBoardId: defineMutator(
-        z.object({ channelId: z.string(), boardId: z.string().nullable(), updatedAt: z.number() }),
+      updateSelectedBoardId: defineContractMutator('channel.updateSelectedBoardId',
         async ({ tx, args: { channelId, boardId, updatedAt } }) => {
           const userStatus = await tx.run(zql.channel_user_status
             .where('channelId', channelId)
@@ -2435,16 +2269,7 @@ export function createMutators(
           });
         },
       ),
-      updateParticipantRole: defineMutator(
-        z.object({
-          channelId: z.string(),
-          targetUserId: z.string(),
-          newRole: z.nativeEnum(ChannelRole),
-          timestamp: z.number(),
-          conversationId: z.string(),
-          messageId: z.string(),
-          conversationParticipantId: z.string(),
-        }),
+      updateParticipantRole: defineContractMutator('channel.updateParticipantRole',
         async ({ tx, args: { channelId, targetUserId, newRole, timestamp, conversationId, messageId, conversationParticipantId } }) => {
           const channel = await tx.run(zql.channels.where('id', channelId).one());
           if (!channel) {
@@ -2562,10 +2387,7 @@ export function createMutators(
           });
         },
       ),
-      archiveChannel: defineMutator(
-        z.object({
-          channelId: z.string(),
-        }),
+      archiveChannel: defineContractMutator('channel.archiveChannel',
         async ({ tx, args: { channelId } }) => {
           const channel = await tx.run(zql.channels.where('id', channelId).one());
           if (!channel) {
@@ -2624,10 +2446,7 @@ export function createMutators(
           logger.info(`✅ [ARCHIVE-CHANNEL] Channel ${channelId} archived by ${authData.sub}`);
         },
       ),
-      unarchiveChannel: defineMutator(
-        z.object({
-          channelId: z.string(),
-        }),
+      unarchiveChannel: defineContractMutator('channel.unarchiveChannel',
         async ({ tx, args: { channelId } }) => {
           const channel = await tx.run(zql.channels.where('id', channelId).one());
           if (!channel) {
@@ -2686,13 +2505,7 @@ export function createMutators(
           logger.info(`✅ [UNARCHIVE-CHANNEL] Channel ${channelId} unarchived by ${authData.sub}`);
         },
       ),
-      moveToSection: defineMutator(
-        z.object({
-          channelId: z.string(),
-          sectionId: z.string().nullable(),
-          position: z.string(),
-          timestamp: z.number(),
-        }),
+      moveToSection: defineContractMutator('channel.moveToSection',
         async ({ tx, args: { channelId, sectionId, position, timestamp } }) => {
           const userStatus = await tx.run(
             zql.channel_user_status
@@ -2728,15 +2541,7 @@ export function createMutators(
           });
         },
       ),
-      moveManyToSection: defineMutator(
-        z.object({
-          sectionId: z.string().nullable(),
-          items: z
-            .array(z.object({ channelId: z.string(), position: z.string() }))
-            .min(1)
-            .max(200),
-          timestamp: z.number(),
-        }),
+      moveManyToSection: defineContractMutator('channel.moveManyToSection',
         async ({ tx, args: { sectionId, items, timestamp } }) => {
           if (sectionId) {
             const section = await tx.run(
@@ -2780,15 +2585,7 @@ export function createMutators(
       ),
     },
     channelSection: {
-      create: defineMutator(
-        z.object({
-          id: z.string(),
-          name: z.string(),
-          emoji: z.string().nullable().optional(),
-          position: z.string(),
-          filterMode: z.nativeEnum(ChannelFilterMode).nullable().optional(),
-          timestamp: z.number(),
-        }),
+      create: defineContractMutator('channelSection.create',
         async ({ tx, args: { id, name, emoji, position, filterMode, timestamp } }) => {
           // Reject a name this user already uses in this workspace (case-insensitive).
           const siblings = await tx.run(
@@ -2817,17 +2614,7 @@ export function createMutators(
         },
       ),
       // One mutator for rename/emoji, collapse state, reorder, and sort order (all are field updates).
-      update: defineMutator(
-        z.object({
-          id: z.string(),
-          name: z.string().optional(),
-          emoji: z.string().nullable().optional(),
-          isCollapsed: z.boolean().optional(),
-          position: z.string().optional(),
-          sortOrder: z.nativeEnum(ChannelSortOrder).nullable().optional(),
-          filterMode: z.nativeEnum(ChannelFilterMode).nullable().optional(),
-          timestamp: z.number(),
-        }),
+      update: defineContractMutator('channelSection.update',
         async ({
           tx,
           args: { id, name, emoji, isCollapsed, position, sortOrder, filterMode, timestamp },
@@ -2863,8 +2650,7 @@ export function createMutators(
           });
         },
       ),
-      remove: defineMutator(
-        z.object({ id: z.string(), timestamp: z.number() }),
+      remove: defineContractMutator('channelSection.remove',
         async ({ tx, args: { id, timestamp } }) => {
           const section = await tx.run(
             zql.channel_sections.where('id', id).where('userId', authData.sub).where('isDeleted', false).one(),
@@ -2892,19 +2678,10 @@ export function createMutators(
     },
     conversations: {
       send: defineContractMutator(
-        conversationsSendClient,
-        z.object({
-          channelId: z.string(),
-          content: z.string(),
-          type: z.nativeEnum(MessageType),
-          conversationId: z.string(),
-          messageId: z.string(),
-          timestamp: z.number(),
-          attachmentIds: z.array(z.string()).optional(),
-          entityLinkContext: entityLinkContextSchema.optional(),
-        }),
+        'conversations.send',
         async ({
           tx,
+          facts: { content: facts },
           args: {
             channelId,
             content,
@@ -2920,7 +2697,6 @@ export function createMutators(
           // the mutator still never parses. Every fact comes from the contract's picks, extracted by
           // the encryption service for ciphertext and locally for plaintext (encryptedMutation.ts).
           // No facts means there was no text to derive them from: the content is empty.
-          const facts = getMutationFacts(conversationsSendClient, 'content');
           if (!facts) {
             throw new Error('Message content or files are required to start a conversation');
           }
@@ -3327,8 +3103,7 @@ export function createMutators(
           });
         },
       ),
-      togglePin: defineMutator(
-        z.object({ conversationId: z.string() }),
+      togglePin: defineContractMutator('conversations.togglePin',
         async ({ tx, args: { conversationId } }) => {
           const conversation = await tx.run(
             zql.conversations.where('conversationId', conversationId).one(),
@@ -3345,19 +3120,9 @@ export function createMutators(
         },
       ),
       forwardMessage: defineContractMutator(
-        conversationsForwardMessageClient,
-        z.object({
-          targetChannelId: z.string(),
-          originalMessageId: z.string(),
-          // What the forwarder wrote; the rest of the forward is built from the original here.
-          optionalMessage: z.string().optional(),
-          conversationId: z.string(),
-          messageId: z.string(),
-          timestamp: z.number(),
-          conversationParticipantId: z.string()
-        }),
+        'conversations.forwardMessage',
         async ({
-          tx,
+          tx, facts,
           args: {
             targetChannelId,
             originalMessageId,
@@ -3414,7 +3179,7 @@ export function createMutators(
           }
 
           // The optional text is the only part of the forward the client sends.
-          const optionalFacts = getMutationFacts(conversationsForwardMessageClient, 'optionalMessage');
+          const optionalFacts = facts.optionalMessage;
           if (optionalFacts && optionalFacts.rawLength > 10000) {
             throw new Error('Optional message too long');
           }
@@ -3673,12 +3438,7 @@ export function createMutators(
           );
         }
       ),
-      subscribeToConversation: defineMutator(
-        z.object({
-          conversationId: z.string(),
-          timestamp: z.number(),
-          participantId: z.string(),
-        }),
+      subscribeToConversation: defineContractMutator('conversations.subscribeToConversation',
         async ({ tx, args: { conversationId, timestamp, participantId } }) => {
           // Check if conversation exists
           const conversation = await tx.run(
@@ -3736,10 +3496,7 @@ export function createMutators(
           });
         }
       ),
-      unsubscribeFromConversation: defineMutator(
-        z.object({
-          conversationId: z.string(),
-        }),
+      unsubscribeFromConversation: defineContractMutator('conversations.unsubscribeFromConversation',
         async ({ tx, args: { conversationId } }) => {
           // Find user's subscription
           const subscription = await tx.run(
@@ -3769,21 +3526,10 @@ export function createMutators(
     },
     messages: {
       send: defineContractMutator(
-        messagesSendClient,
-        z.object({
-          conversationId: z.string(),
-          content: z.string(),
-          type: z.nativeEnum(MessageType),
-          showInChannel: z.boolean().optional(),
-          timestamp: z.number(),
-          messageId: z.string(),
-          childConversationId: z.string().optional(),
-          attachmentIds: z.array(z.string()).optional(),
-        }),
-        async ({ tx, args: { conversationId, content, type, showInChannel = false, timestamp, messageId, childConversationId, attachmentIds } }) => {
+        'messages.send',
+        async ({ tx, args: { conversationId, content, type, showInChannel = false, timestamp, messageId, childConversationId, attachmentIds }, facts: { content: facts } }) => {
           // `content` is unreadable: decisions come from the contract's facts. No facts means the
           // content was empty.
-          const facts = getMutationFacts(messagesSendClient, 'content');
           if (!facts) {
             throw new Error('Message content or files are required to start a conversation');
           }
@@ -4229,9 +3975,8 @@ export function createMutators(
         },
       ),
       update: defineContractMutator(
-        messagesUpdateClient,
-        z.object({ messageId: z.string(), content: z.string().optional() }),
-        async ({ tx, args: { messageId, content } }) => {
+        'messages.update',
+        async ({ tx, facts: { content: facts }, args: { messageId, content } }) => {
           // The stored content is unreadable: its mentions (for a forward, its optional text's)
           // come as facts.
           const messageRead = await tx.read(zql.messages.where('messageId', messageId).one(), {
@@ -4247,8 +3992,7 @@ export function createMutators(
             throw new Error('Message not available');
           }
           const stored = messageRead.facts.content;
-          // The new content's facts; none when it was empty (or not sent).
-          const facts = content !== undefined ? getMutationFacts(messagesUpdateClient, 'content') : undefined;
+          // `facts`: the new content's; none when it was empty (or not sent).
 
           const isForwardedMessage = message.msgType === MessageType.FORWARDED;
           if (content !== undefined && !facts && !isForwardedMessage) {
@@ -4404,15 +4148,7 @@ export function createMutators(
 
         },
       ),
-      react: defineMutator(
-        z.object({
-          messageId: z.string(),
-          emojiName: z.string(),
-          action: z.enum(['add', 'remove']),
-          timestamp: z.number(),
-          reactionId: z.string().optional(),
-          countId: z.string().optional(),
-        }),
+      react: defineContractMutator('messages.react',
         async ({ tx, args: { messageId, emojiName, action, timestamp, reactionId, countId } }) => {
           const decodedEmoji = decodeURIComponent(emojiName);
           if (!decodedEmoji.trim() || decodedEmoji.length > 100) {
@@ -4543,8 +4279,7 @@ export function createMutators(
        * is baked into the message's FlowJSON so the card still renders as finished
        * once the row has left the ACTIVE-only artifact subscription.
        */
-      closeSlashCommandArtifact: defineContractMutator(
-        z.object({ messageId: z.string(), timestamp: z.number() }),
+      closeSlashCommandArtifact: defineContractMutator('messages.closeSlashCommandArtifact',
         async ({ tx, args: { messageId, timestamp } }) => {
           // Whether the content is a slash-command card comes as a fact: the content is unreadable.
           const messageRead = await tx.read(zql.messages.where('messageId', messageId).one(), {
@@ -4588,13 +4323,7 @@ export function createMutators(
           });
         },
       ),
-      updateShowInChannel: defineMutator(
-        z.object({
-          messageId: z.string(),
-          showInChannel: z.boolean(),
-          childConversationId: z.string(),
-          timestamp: z.number(),
-        }),
+      updateShowInChannel: defineContractMutator('messages.updateShowInChannel',
         async ({ tx, args: { messageId, showInChannel, childConversationId, timestamp } }) => {
           if (!showInChannel) {
             throw new Error('This action only supports sending messages to the channel.');
@@ -4662,13 +4391,7 @@ export function createMutators(
 
         },
       ),
-      handleNonParticipantAction: defineMutator(
-        z.object({
-          messageId: z.string(),
-          action: z.enum(['add', 'add_all', 'ignore', 'ignore_all']),
-          userIds: z.array(z.string()),
-          channelId: z.string()
-        }),
+      handleNonParticipantAction: defineContractMutator('messages.handleNonParticipantAction',
         async ({ tx, args: { messageId, action, userIds, channelId } }) => {
           // Get and validate the system message with visibility filter
           const message = await tx.run(zql.messages
@@ -4759,8 +4482,7 @@ export function createMutators(
 
         },
       ),
-      delete: defineContractMutator(
-        z.object({ messageId: z.string() }),
+      delete: defineContractMutator('messages.delete',
         async ({ tx, args: { messageId } }) => {
           // Who the message mentions, by the participant-cleanup rule (extractAllMentions).
           const messageRead = await tx.read(zql.messages.where("messageId", messageId).one(), {
@@ -5024,8 +4746,7 @@ export function createMutators(
       ),
     },
     messageAttachment: {
-      delete: defineContractMutator(
-        z.object({ attachmentId: z.string() }),
+      delete: defineContractMutator('messageAttachment.delete',
         async ({ tx, args: { attachmentId } }) => {
           const read = await tx.read(
             zql.message_attachments.where('id', attachmentId).one(),
@@ -5126,8 +4847,7 @@ export function createMutators(
           });
         },
       ),
-      deleteMany: defineMutator(
-        z.object({ attachmentIds: z.array(z.string()) }),
+      deleteMany: defineContractMutator('messageAttachment.deleteMany',
         async ({ tx, args: { attachmentIds } }) => {
           for (const attachmentId of attachmentIds) {
             const attachment = await tx.run(zql.message_attachments.where('id', attachmentId).one());
@@ -5157,18 +4877,7 @@ export function createMutators(
       ),
     },
     calls: {
-      initiate: defineMutator(
-        z.object({
-          channelId: z.string(),
-          callType: z.nativeEnum(CallType),
-          targetUserIds: z.array(z.string()).optional(),
-          externalId: z.string(),
-          roomLink: z.string(),
-          timestamp: z.number(),
-          callId: z.string(),
-          creatorParticipantId: z.string(),
-          targetParticipantIds: z.record(z.string(), z.string()).optional(),
-        }),
+      initiate: defineContractMutator('calls.initiate',
         async ({ tx, args: { channelId, callType, targetUserIds, externalId, roomLink, timestamp, callId, creatorParticipantId, targetParticipantIds = {} } }) => {
           const now = timestamp;
           // Written ACTIVE straight away, so the key version is pinned here too.
@@ -5280,12 +4989,7 @@ export function createMutators(
           }
         },
       ),
-      join: defineMutator(
-        z.object({
-          callId: z.string(),
-          timestamp: z.number(),
-          participantId: z.string().optional()
-        }),
+      join: defineContractMutator('calls.join',
         async ({ tx, args: { callId, timestamp, participantId } }) => {
           const call = await tx.run(zql.calls.where('externalId', callId).one());
 
@@ -5381,8 +5085,7 @@ export function createMutators(
           }
         },
       ),
-      leave: defineMutator(
-        z.object({ callId: z.string(), timestamp: z.number() }),
+      leave: defineContractMutator('calls.leave',
         async ({ tx, args: { callId, timestamp } }) => {
           const call = await tx.run(zql.calls.where('externalId', callId).one());
 
@@ -5465,8 +5168,7 @@ export function createMutators(
       // Persist the notes-canvas id onto the call as soon as the user creates the
       // canvas mid-recording. The link is posted to the thread later by the automatic summary
       // pipeline (transcriptService.postSummaryAsReply), so it survives any stop path.
-      linkNotesCanvas: defineMutator(
-        z.object({ callId: z.string(), notesCanvasId: z.string().min(1) }),
+      linkNotesCanvas: defineContractMutator('calls.linkNotesCanvas',
         async ({ tx, args: { callId, notesCanvasId } }) => {
           const call = await tx.run(zql.calls.where('externalId', callId).one());
           if (!call) {
@@ -5491,13 +5193,7 @@ export function createMutators(
       // entries are told apart by `type`. `timestampSeconds` is measured from the first
       // transcript line, matching how transcriptService.formatTranscript timestamps the
       // transcript itself.
-      markMoment: defineMutator(
-        z.object({
-          callId: z.string(),
-          type: z.literal('moment'),
-          timestampSeconds: z.number().nonnegative(),
-          text: z.string(),
-        }),
+      markMoment: defineContractMutator('calls.markMoment',
         async ({ tx, args: { callId, type, timestampSeconds, text } }) => {
           const call = await tx.run(zql.calls.where('externalId', callId).one());
           if (!call) {
@@ -5529,8 +5225,7 @@ export function createMutators(
           });
         },
       ),
-      reject: defineMutator(
-        z.object({ callId: z.string(), timestamp: z.number() }),
+      reject: defineContractMutator('calls.reject',
         async ({ tx, args: { callId, timestamp } }) => {
           const call = await tx.run(zql.calls.where('externalId', callId).one());
 
@@ -5552,8 +5247,7 @@ export function createMutators(
           }
         },
       ),
-      updateRingStatus: defineMutator(
-        z.object({ callId: z.string(), ringStatus: z.enum([RingStatus.RINGING, RingStatus.BUSY]) }),
+      updateRingStatus: defineContractMutator('calls.updateRingStatus',
         async ({ tx, args: { callId, ringStatus } }) => {
           const call = await tx.run(zql.calls.where('externalId', callId).one());
           if (!call) return;
@@ -5571,8 +5265,7 @@ export function createMutators(
           await tx.mutate.call_participants.update({ id: participant.id, ringStatus });
         },
       ),
-      invite: defineMutator(
-        z.object({ callId: z.string(), userIds: z.array(z.string()), timestamp: z.number(), participantIds: z.record(z.string(), z.string()) }),
+      invite: defineContractMutator('calls.invite',
         async ({ tx, args: { callId, userIds, timestamp, participantIds = {} } }) => {
           const call = await tx.run(zql.calls.where('externalId', callId).one());
           if (!call || call.status !== CallStatus.ACTIVE) {
@@ -5640,8 +5333,7 @@ export function createMutators(
           });
         },
       ),
-      cancel: defineMutator(
-        z.object({ callId: z.string(), timestamp: z.number(), cancelEntireSeries: z.boolean().optional() }),
+      cancel: defineContractMutator('calls.cancel',
         async ({ tx, args: { callId, timestamp, cancelEntireSeries } }) => {
           const call = await tx.run(zql.calls.where('externalId', callId).one());
           if (!call || call.status !== CallStatus.SCHEDULED) {
@@ -5668,8 +5360,7 @@ export function createMutators(
           }
         }
       ),
-      approveLobbyRequest: defineMutator(
-        z.object({ callId: z.string(), participantId: z.string() }),
+      approveLobbyRequest: defineContractMutator('calls.approveLobbyRequest',
         async ({ tx, args: { callId, participantId } }) => {
           const call = await tx.run(zql.calls.where('id', callId).one());
           if (!call) throw new Error('Call not found');
@@ -5680,8 +5371,7 @@ export function createMutators(
           });
         }
       ),
-      rejectLobbyRequest: defineMutator(
-        z.object({ callId: z.string(), participantId: z.string() }),
+      rejectLobbyRequest: defineContractMutator('calls.rejectLobbyRequest',
         async ({ tx, args: { callId, participantId } }) => {
           const call = await tx.run(zql.calls.where('id', callId).one());
           if (!call) throw new Error('Call not found');
@@ -5692,12 +5382,7 @@ export function createMutators(
           });
         }
       ),
-      requestToJoin: defineMutator(
-        z.object({
-          callId: z.string(),
-          participantId: z.string(),
-          timestamp: z.number(),
-        }),
+      requestToJoin: defineContractMutator('calls.requestToJoin',
         async ({ tx, args: { callId, participantId, timestamp } }) => {
           const call = await tx.run(zql.calls.where('externalId', callId).one());
           if (!call || call.status !== CallStatus.ACTIVE) {
@@ -5773,11 +5458,7 @@ export function createMutators(
           }
         }
       ),
-      cancelJoinRequest: defineMutator(
-        z.object({
-          callId: z.string(),
-          timestamp: z.number(),
-        }),
+      cancelJoinRequest: defineContractMutator('calls.cancelJoinRequest',
         async ({ tx, args: { callId, timestamp } }) => {
           const call = await tx.run(zql.calls.where('externalId', callId).one());
           if (!call) {
@@ -5809,8 +5490,7 @@ export function createMutators(
       ),
     },
     activities: {
-      markAsRead: defineMutator(
-        z.object({ activityId: z.string() }),
+      markAsRead: defineContractMutator('activities.markAsRead',
         async ({ tx, args: { activityId } }) => {
           const activity = await tx.run(zql.activities.where('id', activityId).one());
 
@@ -5828,13 +5508,7 @@ export function createMutators(
           });
         },
       ),
-      markAsReadByFilter: defineMutator(
-        z.object({
-          actorAction: z.string().optional(),
-          classification: z.nativeEnum(ActivityClassification).optional(),
-          channelIds: z.array(z.string()).optional(),
-          timestamp: z.number(),
-        }),
+      markAsReadByFilter: defineContractMutator('activities.markAsReadByFilter',
         async ({ tx, args: { actorAction, classification, channelIds, timestamp } }) => {
           let query = zql.activities
             .where('userId', authData.sub)
@@ -5890,8 +5564,7 @@ export function createMutators(
           }
         },
       ),
-      markActivitiesSeenByMessageId: defineMutator(
-        z.object({ messageId: z.string() }),
+      markActivitiesSeenByMessageId: defineContractMutator('activities.markActivitiesSeenByMessageId',
         async ({ tx, args: { messageId } }) => {
           const messageActivities = await tx.run(zql.activities
             .where(({ or, cmp }) => or(
@@ -5930,8 +5603,7 @@ export function createMutators(
           }
         },
       ),
-      markMissedCallsAsRead: defineMutator(
-        z.object({}),
+      markMissedCallsAsRead: defineContractMutator('activities.markMissedCallsAsRead',
         async ({ tx, ctx, }) => {
           const query = zql.activities
             .where('userId', ctx.userID)
@@ -5951,9 +5623,8 @@ export function createMutators(
         },
       ),
       markThreadActivitiesAsReadV2: defineContractMutator(
-        markThreadActivitiesAsReadV2Client,
-        z.object({ conversationId: z.string(), draftMessage: z.string(), draftMessageId: z.string(), timestamp: z.number(), participantId: z.string() }),
-        async ({ tx, args: { conversationId, draftMessage, draftMessageId, timestamp, participantId } }) => {
+        'activities.markThreadActivitiesAsReadV2',
+        async ({ tx, facts, args: { conversationId, draftMessage, draftMessageId, timestamp, participantId } }) => {
           const conversation = await tx.run(zql.conversations
             .where('conversationId', conversationId)
             .one());
@@ -5975,7 +5646,7 @@ export function createMutators(
           );
 
           // No facts means the draft text was empty.
-          const draftIsEmpty = getMutationFacts(markThreadActivitiesAsReadV2Client, 'draftMessage')?.textIsEmpty ?? true;
+          const draftIsEmpty = facts.draftMessage?.textIsEmpty ?? true;
           if (draft && draftIsEmpty && !draft.hasAttachment) {
             await tx.mutate.draft_messages.delete({ id: draft.id });
           } else if (!draftIsEmpty) {
@@ -6087,8 +5758,7 @@ export function createMutators(
           }
         },
       ),
-      markAsUnread: defineMutator(
-        z.object({ activityId: z.string(), timestamp: z.number() }),
+      markAsUnread: defineContractMutator('activities.markAsUnread',
         async ({ tx, ctx, args: { activityId, timestamp } }) => {
           // 1. FETCH & VALIDATE ACTIVITY
           const activity = await tx.run(zql.activities.where('id', activityId).one());
@@ -6248,13 +5918,7 @@ export function createMutators(
       ),
     },
     conversation: {
-      markThreadUnreadFrom: defineMutator(
-        z.object({
-          conversationId: z.string(),
-          messageId: z.string(),
-          participantId: z.string(),
-          timestamp: z.number(),
-        }),
+      markThreadUnreadFrom: defineContractMutator('conversation.markThreadUnreadFrom',
         async ({ tx, args: { conversationId, messageId, participantId, timestamp } }) => {
           // Fetch the conversation
           const conversation = await tx.run(
@@ -6365,25 +6029,7 @@ export function createMutators(
     },
     ticket: {
       update: defineContractMutator(
-        ticketUpdateClient,
-        z.object({
-          id: z.string(),
-          title: z.string().optional(),
-          description: z.string().optional(),
-          statusV2: z.string().optional(),
-          priority: z.string().optional(),
-          stageName: z.string().optional(),
-          assignedTo: z.string().nullable().optional(),
-          ticketType: z.string().optional(),
-          userGroupId: z.string().nullable().optional(),
-          eta: z.number().optional(),
-          boardId: z.string().optional(),
-          metadata: z.any().optional(),
-          isArchived: z.boolean().optional(),
-          kanbanPosition: z.string().nullable().optional(),
-          updatedAt: z.number(),
-          // Optional optimistic-concurrency guard + audit reason for a manual `eta` edit.
-        }),
+        'ticket.update',
         async ({ tx, args: params }) => {
           const ticket = await tx.run(zql.tickets.where('id', params.id).one());
           if (!ticket) throw new Error('Ticket not found');
@@ -7445,13 +7091,7 @@ export function createMutators(
        * concurrency - a stale client must refetch and retry rather than silently
        * acknowledging a condition that has since changed).
        */
-      acknowledgeEtaRisk: defineMutator(
-        z.object({
-          ticketId: z.string(),
-          expectedFingerprint: z.string(),
-          reason: z.string().min(1),
-          clientTimestamp: z.number(),
-        }),
+      acknowledgeEtaRisk: defineContractMutator('ticket.acknowledgeEtaRisk',
         async ({ tx, args: { ticketId, expectedFingerprint, reason, clientTimestamp } }) => {
           const ticket = await tx.run(zql.tickets.where('id', ticketId).one());
           if (!ticket) throw new Error('Ticket not found');
@@ -7529,11 +7169,7 @@ export function createMutators(
           void clientTimestamp; // display-consistency hint only; server timestamp (`now`) is authoritative for persistence.
         },
       ),
-      archiveDeskTicket: defineMutator(
-        z.object({
-          id: z.string(),
-          updatedAt: z.number(),
-        }),
+      archiveDeskTicket: defineContractMutator('ticket.archiveDeskTicket',
         async ({ tx, args: { id, updatedAt } }) => {
           const ticket = await tx.run(zql.tickets.where("id", id).one());
           if (!ticket) {
@@ -7600,12 +7236,7 @@ export function createMutators(
           }
         },
       ),
-      updateAssignment: defineMutator(
-        z.object({
-          ticketId: z.string(),
-          assignedTo: z.string().nullable(),
-          timestamp: z.number(),
-        }),
+      updateAssignment: defineContractMutator('ticket.updateAssignment',
         async ({ tx, args: { ticketId, assignedTo, timestamp } }) => {
           // Validate ticket exists
           const ticket = await tx.run(zql.tickets.where("id", ticketId).one());
@@ -7648,14 +7279,7 @@ export function createMutators(
       ),
     },
     ticketStageEta: {
-      update: defineMutator(
-        z.object({
-          id: z.string(),
-          stageEta: z.number(),
-          updatedAt: z.number(),
-          ticketId: z.string().optional(),
-          stageId: z.string().optional(),
-        }),
+      update: defineContractMutator('ticketStageEta.update',
         async ({ tx, args }) => {
           const { id, stageEta, updatedAt, ticketId, stageId } = args;
 
@@ -7878,18 +7502,8 @@ export function createMutators(
     },
     subTicket: {
       create: defineContractMutator(
-        subTicketCreateClient,
-        z.object({
-          subTicketId: z.string(),
-          mappingId: z.string(),
-          timestamp: z.number(),
-          title: z.string(),
-          description: z.string().optional(),
-          ticketId: z.string(),
-          conversationId: z.string().optional(),
-          subTicketXyneId: z.string().optional(),
-        }),
-        async ({ tx, args: { subTicketId, mappingId, timestamp, title, description, ticketId, conversationId, subTicketXyneId } }) => {
+        'subTicket.create',
+        async ({ tx, facts, args: { subTicketId, mappingId, timestamp, title, description, ticketId, conversationId, subTicketXyneId } }) => {
           // Parent ticket is also needed below to denormalize channelId onto the activity.
           const parentTicket = await tx.run(zql.tickets.where('id', ticketId).one());
           // Create the subticket
@@ -7897,7 +7511,7 @@ export function createMutators(
             id: subTicketId,
             title,
             // No facts means the description was empty (or missing), as `description || null` had it.
-            description: getMutationFacts(subTicketCreateClient, 'description') ? description : null,
+            description: facts.description ? description : null,
             mappedTicketId: null,
             createdBy: authData.sub,
             updatedBy: authData.sub,
@@ -7959,14 +7573,7 @@ export function createMutators(
           }
         },
       ),
-      update: defineMutator(
-        z.object({
-          subTicketId: z.string(),
-          timestamp: z.number(),
-          mappedTicketId: z.string().optional(),
-          conversationId: z.string().optional(),
-          assignedTo: z.string().optional().nullable(),
-        }),
+      update: defineContractMutator('subTicket.update',
         async ({ tx, args: { subTicketId, timestamp, mappedTicketId, conversationId, assignedTo } }) => {
           // Update the subticket
           await tx.mutate.sub_tickets.update({
@@ -7994,8 +7601,7 @@ export function createMutators(
       ),
     },
     project: {
-      update: defineMutator(
-        z.object({ projectId: z.string(), name: z.string().optional(), description: z.string().optional(), timestamp: z.number() }),
+      update: defineContractMutator('project.update',
         async ({ tx, args: { projectId, name, description, timestamp } }) => {
           // Validate project exists
           const project = await tx.run(zql.projects.where('id', projectId).one());
@@ -8021,8 +7627,7 @@ export function createMutators(
           });
         },
       ),
-      delete: defineMutator(
-        z.object({ projectId: z.string() }),
+      delete: defineContractMutator('project.delete',
         async ({ tx, args: { projectId } }) => {
           // Validate project exists
           const project = await tx.run(zql.projects.where('id', projectId).one());
@@ -8053,27 +7658,7 @@ export function createMutators(
       // explicitly owned by that board through Application.mainReleaseBoardId.
       // The config belongs to an SDLC hub (hubChannelId) and releases one of the hub's
       // repositories; release tickets are created in the chosen release channel (channelId).
-      saveReleaseBoardConfig: defineMutator(
-        z.object({
-          mainBoardId: z.string(),
-          mainBoardName: z.string(),
-          releaseTrackingMode: z.nativeEnum(ReleaseTrackingMode),
-          channelId: z.string(),
-          hubChannelId: z.string(),
-          repoId: z.string(),
-          applications: z.array(
-            z.object({
-              id: z.string(),
-              boardId: z.string(),
-              boardName: z.string(),
-              name: z.string(),
-              regex: z.string(),
-              ownerTeam: z.string(),
-              envPaths: z.array(z.string()),
-              migrationPaths: z.array(z.string()),
-            }),
-          ),
-        }),
+      saveReleaseBoardConfig: defineContractMutator('project.saveReleaseBoardConfig',
         async ({
           tx,
           args: {
@@ -8602,20 +8187,7 @@ export function createMutators(
     },
 
     userGroup: {
-      update: defineMutator(
-        z.object({
-          userGroupId: z.string(),
-          name: z.string().optional(),
-          alias: z.string().optional(),
-          description: z.string().optional(),
-          reassignOnUnavailable: z.boolean().optional(),
-          maxWorkload: z.number().int().positive().nullable().optional(),
-          userResponsibilityUpdates: z
-            .record(z.string(), z.nativeEnum(UserResponsibility))
-            .optional(),
-          userRoleUpdates: z.record(z.string(), z.string()).optional(),
-          timestamp: z.number(),
-        }),
+      update: defineContractMutator('userGroup.update',
         async ({
           tx,
           args: {
@@ -8714,8 +8286,7 @@ export function createMutators(
           }
         },
       ),
-      delete: defineMutator(
-        z.object({ userGroupId: z.string() }),
+      delete: defineContractMutator('userGroup.delete',
         async ({ tx, args: { userGroupId } }) => {
           // Validate user group exists
           const userGroup = await tx.run(zql.user_groups.where('id', userGroupId).one());
@@ -8751,8 +8322,7 @@ export function createMutators(
           });
         },
       ),
-      deactivate: defineMutator(
-        z.object({ userGroupId: z.string(), timestamp: z.number() }),
+      deactivate: defineContractMutator('userGroup.deactivate',
         async ({ tx, args: { userGroupId, timestamp } }) => {
           const userGroup = await tx.run(zql.user_groups.where('id', userGroupId).one());
           if (!userGroup) {
@@ -8769,8 +8339,7 @@ export function createMutators(
           });
         },
       ),
-      reactivate: defineMutator(
-        z.object({ userGroupId: z.string(), timestamp: z.number() }),
+      reactivate: defineContractMutator('userGroup.reactivate',
         async ({ tx, args: { userGroupId, timestamp } }) => {
           const userGroup = await tx.run(zql.user_groups.where('id', userGroupId).one());
           if (!userGroup) {
@@ -8787,8 +8356,7 @@ export function createMutators(
           });
         },
       ),
-      addUsers: defineMutator(
-        z.object({ userGroupId: z.string(), userIds: z.array(z.string()), timestamp: z.number(), mappingIds: z.record(z.string(), z.string()), roleIds: z.array(z.string()).optional() }),
+      addUsers: defineContractMutator('userGroup.addUsers',
         async ({ tx, args: { userGroupId, userIds, timestamp, mappingIds, roleIds } }) => {
           const userGroup = await tx.run(zql.user_groups.where('id', userGroupId).one());
           if (!userGroup) {
@@ -8851,12 +8419,7 @@ export function createMutators(
           }
         },
       ),
-      removeUsers: defineMutator(
-        z.object({
-          userGroupId: z.string(),
-          userIds: z.array(z.string()),
-          reassignTickets: z.boolean().optional(),
-        }),
+      removeUsers: defineContractMutator('userGroup.removeUsers',
         async ({ tx, args: { userGroupId, userIds, reassignTickets } }) => {
           // Validate user group exists
           const userGroup = await tx.run(zql.user_groups.where('id', userGroupId).one());
@@ -8911,12 +8474,7 @@ export function createMutators(
       ),
     },
     board: {
-      updateFlowPlan: defineMutator(
-        z.object({
-          boardId: z.string(),
-          plan: FlowPlanSchema,
-          timestamp: z.number(),
-        }),
+      updateFlowPlan: defineContractMutator('board.updateFlowPlan',
         async ({ tx, args: { boardId, plan, timestamp } }) => {
           const board = await tx.run(zql.boards.where('id', boardId).one());
           if (!board) {
@@ -8938,52 +8496,7 @@ export function createMutators(
           });
         },
       ),
-      update: defineMutator(
-        z.object({
-          boardId: z.string(),
-          name: z.string().optional(),
-          description: z.string().optional(),
-          projectId: z.string().optional(),
-          boardType: z.nativeEnum(BoardType).optional(),
-          metadata: z.any().optional(),
-          // Automatic ETA management. Merged into `metadata.etaManagement` below rather
-          // than going through the raw `metadata` arg above, which is a whole-column
-          // overwrite and would drop sibling keys.
-          autoRecomputeEnabled: z.boolean().optional(),
-          // Standard Path (NON_LINEAR only). Omitted = leave the existing path untouched;
-          // [] explicitly clears it (disables Standard Path forecasting without changing
-          // allowed transitions).
-          standardPathStageIds: z.array(z.string()).optional(),
-          // Release-board dev-ticket column picks. Merged into the freshly read metadata so a
-          // stale client snapshot can't overwrite sibling keys (same reason as the ETA args).
-          devTicketColumns: z.array(z.string()).optional(),
-          stages: z
-            .array(
-              z.object({
-                id: z.string().optional(),
-                name: z.string(),
-                eta: z.number().optional(),
-                sequenceNumber: z.number(),
-                defaultTicketStatusV2: z.string().optional(),
-                prStatuses: z.array(z.nativeEnum(PRStatusEvent)).optional(),
-                approverIds: z.array(z.string()).optional(),
-                approvers: z
-                  .array(
-                    z.object({
-                      approverId: z.string(),
-                      approverType: z.enum(['USER', 'ROLE']),
-                    })
-                  )
-                  .optional(),
-                formId: z.string().optional(),
-                requestApprovalOnEntry: z.boolean().optional(),
-              })
-            )
-            .optional(),
-          timestamp: z.number(),
-          stageIds: z.record(z.string(), z.string()).optional(),
-          prStatusMappingIds: z.record(z.string(), z.string()).optional(),
-        }),
+      update: defineContractMutator('board.update',
         async ({
           tx,
           args: {
@@ -9452,8 +8965,7 @@ export function createMutators(
           }
         }
       ),
-      delete: defineMutator(
-        z.object({ boardId: z.string() }),
+      delete: defineContractMutator('board.delete',
         async ({ tx, args: { boardId } }) => {
           // Validate board exists
           const board = await tx.run(zql.boards.where('id', boardId).one());
@@ -9571,8 +9083,7 @@ export function createMutators(
       ),
     },
     ticketTag: {
-      create: defineMutator(
-        z.object({ ticketId: z.string(), tagName: z.string(), tagId: z.string() }),
+      create: defineContractMutator('ticketTag.create',
         async ({ tx, args: { ticketId, tagName, tagId } }) => {
           // Validate tag name
           if (!tagName || !tagName.trim()) {
@@ -9629,8 +9140,7 @@ export function createMutators(
           }
         },
       ),
-      delete: defineMutator(
-        z.object({ tagId: z.string() }),
+      delete: defineContractMutator('ticketTag.delete',
         async ({ tx, args: { tagId } }) => {
           // Validate tag exists
           const tag = await tx.run(zql.ticket_tags.where('id', tagId).one());
@@ -9657,15 +9167,7 @@ export function createMutators(
       ),
     },
     ticketTagV2: {
-      create: defineMutator(
-        z.object({
-          ticketId: z.string(),
-          tagName: z.string(),
-          tagId: z.string(),
-          projectTagId: z.string(),
-          mappingId: z.string(),
-          projectId: z.string(),
-        }),
+      create: defineContractMutator('ticketTagV2.create',
         async ({ tx, args: { ticketId, tagName, tagId, projectTagId, mappingId, projectId } }) => {
           if (!tagName || !tagName.trim()) {
             throw new Error('Tag name cannot be empty');
@@ -9715,8 +9217,7 @@ export function createMutators(
           }
         },
       ),
-      delete: defineMutator(
-        z.object({ tagId: z.string(), mappingId: z.string() }),
+      delete: defineContractMutator('ticketTagV2.delete',
         async ({ tx, args: { tagId, mappingId } }) => {
           const mapping = await tx.run(zql.ticket_tag_mappings.where('id', mappingId).one());
           if (mapping) {
@@ -9750,14 +9251,7 @@ export function createMutators(
       ),
     },
     ticketReference: {
-      create: defineMutator(
-        z.object({
-          sourceTicketId: z.string(),
-          targetTicketId: z.string(),
-          relationType: z.nativeEnum(TicketReferenceRelation),
-          timestamp: z.number(),
-          referenceId: z.string(),
-        }),
+      create: defineContractMutator('ticketReference.create',
         async ({ tx, ctx, args: { sourceTicketId, targetTicketId, relationType, timestamp, referenceId } }) => {
           const existingReference = await tx.run(zql.ticket_reference_mappings
             .where('sourceTicketId', sourceTicketId)
@@ -9834,12 +9328,7 @@ export function createMutators(
           }
         },
       ),
-      updateRelationType: defineMutator(
-        z.object({
-          id: z.string(),
-          relationType: z.nativeEnum(TicketReferenceRelation),
-          timestamp: z.number(),
-        }),
+      updateRelationType: defineContractMutator('ticketReference.updateRelationType',
         async ({ tx, args: { id, relationType, timestamp } }) => {
           const reference = await tx.run(zql.ticket_reference_mappings.where('id', id).one());
           if (!reference) {
@@ -9909,8 +9398,7 @@ export function createMutators(
           }
         },
       ),
-      delete: defineMutator(
-        z.object({ id: z.string() }),
+      delete: defineContractMutator('ticketReference.delete',
         async ({ tx, args: { id } }) => {
           const reference = await tx.run(zql.ticket_reference_mappings.where('id', id).one());
           if (!reference) {
@@ -9979,25 +9467,7 @@ export function createMutators(
     },
     canvas: {
       create: defineContractMutator(
-        canvasCreateClient,
-        z.object({
-          id: z.string(),
-          title: z.string(),
-          channelId: z.string().optional(),
-          folderId: z.string().optional(),
-          projectId: z.string().optional(),
-          visibility: z.nativeEnum(CanvasVisibility).optional(),
-          content: z.any().optional(),
-          timestamp: z.number(),
-          participantId: z.string(),
-          // Slack Connect: caller-generated connectId (id == connectId for the private row).
-          connectId: z.string().optional(),
-          // Legacy fields (pre-XYNE-17290). Accepted so old clients don't get
-          // Zod validation errors during a rolling deploy; intentionally
-          // ignored — the canonical `id` is the only identity we write.
-          viewAccessId: z.string().optional(),
-          editAccessId: z.string().optional(),
-        }),
+        'canvas.create',
         async ({ tx, args: { id, title, channelId, folderId, projectId, visibility, content, timestamp, participantId, connectId } }) => {
           const now = timestamp;
           const {
@@ -10076,14 +9546,7 @@ export function createMutators(
           });
         },
       ),
-      addParticipants: defineMutator(
-        z.object({
-          canvasId: z.string(),
-          userIds: z.array(z.string()),
-          role: z.nativeEnum(CanvasRole),
-          timestamp: z.number(),
-          participantIds: z.record(z.string(), z.string()).optional(),
-        }),
+      addParticipants: defineContractMutator('canvas.addParticipants',
         async ({ tx, args: { canvasId, userIds, role, timestamp, participantIds = {} } }) => {
           const canvas = await tx.run(zql.canvases.where('id', canvasId).one());
           if (!canvas) {
@@ -10149,14 +9612,7 @@ export function createMutators(
           }
         },
       ),
-      addGroupParticipant: defineMutator(
-        z.object({
-          canvasId: z.string(),
-          userGroupId: z.string(),
-          role: z.nativeEnum(CanvasRole),
-          participantId: z.string(),
-          timestamp: z.number(),
-        }),
+      addGroupParticipant: defineContractMutator('canvas.addGroupParticipant',
         async ({ tx, args: { canvasId, userGroupId, role, participantId, timestamp } }) => {
           const canvas = await tx.run(zql.canvases.where('id', canvasId).one());
           if (!canvas) {
@@ -10209,14 +9665,7 @@ export function createMutators(
           });
         },
       ),
-      addChannelParticipant: defineMutator(
-        z.object({
-          canvasId: z.string(),
-          channelId: z.string(),
-          role: z.nativeEnum(CanvasRole),
-          participantId: z.string(),
-          timestamp: z.number(),
-        }),
+      addChannelParticipant: defineContractMutator('canvas.addChannelParticipant',
         async ({ tx, args: { canvasId, channelId, role, participantId, timestamp } }) => {
           const canvas = await tx.run(zql.canvases.where('id', canvasId).one());
           if (!canvas) {
@@ -10276,11 +9725,7 @@ export function createMutators(
           });
         },
       ),
-      removeParticipant: defineMutator(
-        z.object({
-          canvasId: z.string(),
-          userId: z.string(),
-        }),
+      removeParticipant: defineContractMutator('canvas.removeParticipant',
         async ({ tx, args: { canvasId, userId } }) => {
           const canvas = await tx.run(zql.canvases.where('id', canvasId).one());
           if (!canvas) {
@@ -10328,11 +9773,7 @@ export function createMutators(
           });
         },
       ),
-      removeGroupParticipant: defineMutator(
-        z.object({
-          canvasId: z.string(),
-          userGroupId: z.string(),
-        }),
+      removeGroupParticipant: defineContractMutator('canvas.removeGroupParticipant',
         async ({ tx, args: { canvasId, userGroupId } }) => {
           const canvas = await tx.run(zql.canvases.where('id', canvasId).one());
           if (!canvas) {
@@ -10367,11 +9808,7 @@ export function createMutators(
           await tx.mutate.canvas_participants.delete({ id: targetParticipant.id });
         },
       ),
-      removeChannelParticipant: defineMutator(
-        z.object({
-          canvasId: z.string(),
-          channelId: z.string(),
-        }),
+      removeChannelParticipant: defineContractMutator('canvas.removeChannelParticipant',
         async ({ tx, args: { canvasId, channelId } }) => {
           const canvas = await tx.run(zql.canvases.where('id', canvasId).one());
           if (!canvas) {
@@ -10413,13 +9850,7 @@ export function createMutators(
           await tx.mutate.canvas_participants.delete({ id: targetParticipant.id });
         },
       ),
-      updateParticipantRole: defineMutator(
-        z.object({
-          canvasId: z.string(),
-          userId: z.string(),
-          role: z.nativeEnum(CanvasRole),
-          timestamp: z.number(),
-        }),
+      updateParticipantRole: defineContractMutator('canvas.updateParticipantRole',
         async ({ tx, args: { canvasId, userId, role, timestamp } }) => {
           const canvas = await tx.run(zql.canvases.where('id', canvasId).one());
           if (!canvas) {
@@ -10475,13 +9906,7 @@ export function createMutators(
           });
         },
       ),
-      updateGroupParticipantRole: defineMutator(
-        z.object({
-          canvasId: z.string(),
-          userGroupId: z.string(),
-          role: z.nativeEnum(CanvasRole),
-          timestamp: z.number(),
-        }),
+      updateGroupParticipantRole: defineContractMutator('canvas.updateGroupParticipantRole',
         async ({ tx, args: { canvasId, userGroupId, role, timestamp } }) => {
           const canvas = await tx.run(zql.canvases.where('id', canvasId).one());
           if (!canvas) {
@@ -10526,13 +9951,7 @@ export function createMutators(
           });
         },
       ),
-      updateChannelParticipantRole: defineMutator(
-        z.object({
-          canvasId: z.string(),
-          channelId: z.string(),
-          role: z.nativeEnum(CanvasRole),
-          timestamp: z.number(),
-        }),
+      updateChannelParticipantRole: defineContractMutator('canvas.updateChannelParticipantRole',
         async ({ tx, args: { canvasId, channelId, role, timestamp } }) => {
           const canvas = await tx.run(zql.canvases.where('id', canvasId).one());
           if (!canvas) {
@@ -10585,24 +10004,7 @@ export function createMutators(
         },
       ),
       update: defineContractMutator(
-        canvasUpdateClient,
-        z.object({
-          id: z.string(),
-          title: z.string().optional(),
-          content: z.any().optional(),
-          visibility: z.nativeEnum(CanvasVisibility).optional(),
-          isCollaborative: z.boolean().optional(),
-          folderId: z.string().nullable().optional(),
-          projectId: z.string().nullable().optional(),
-          channelId: z.string().nullable().optional(),
-          timestamp: z.number(),
-          // Legacy fields (pre-XYNE-17290). Accepted so old clients don't get
-          // Zod validation errors during a rolling deploy; intentionally
-          // ignored. Note: editAccessId no longer grants edit privileges —
-          // authorization flows through the participant checks below.
-          viewAccessId: z.string().optional(),
-          editAccessId: z.string().optional(),
-        }),
+        'canvas.update',
         async ({ tx, args: params }) => {
           const getGuestSharedCanvasEditRole = async (
             canvasId: string,
@@ -10775,8 +10177,7 @@ export function createMutators(
           }
         },
       ),
-      delete: defineMutator(
-        z.object({ id: z.string() }),
+      delete: defineContractMutator('canvas.delete',
         async ({ tx, args: { id } }) => {
           const canvas = await tx.run(zql.canvases.where('id', id).one());
           if (!canvas) {
@@ -10800,10 +10201,7 @@ export function createMutators(
           await tx.mutate.canvases.delete({ id });
         },
       ),
-      archiveCanvas: defineMutator(
-        z.object({
-          canvasId: z.string(),
-        }),
+      archiveCanvas: defineContractMutator('canvas.archiveCanvas',
         async ({ tx, args: { canvasId } }) => {
           const canvas = await tx.run(zql.canvases.where('id', canvasId).one());
           if (!canvas) {
@@ -10820,10 +10218,7 @@ export function createMutators(
           });
         },
       ),
-      unarchiveCanvas: defineMutator(
-        z.object({
-          canvasId: z.string(),
-        }),
+      unarchiveCanvas: defineContractMutator('canvas.unarchiveCanvas',
         async ({ tx, args: { canvasId } }) => {
           const canvas = await tx.run(zql.canvases.where('id', canvasId).one());
           if (!canvas) {
@@ -10842,12 +10237,7 @@ export function createMutators(
       ),
     },
     canvasUserStatus: {
-      toggleStarred: defineMutator(
-        z.object({
-          id: z.string(),
-          canvasId: z.string(),
-          timestamp: z.number(),
-        }),
+      toggleStarred: defineContractMutator('canvasUserStatus.toggleStarred',
         async ({ tx, args: { id, canvasId, timestamp } }) => {
           const canvas = await tx.run(zql.canvases.where('id', canvasId).one());
           if (!canvas) {
@@ -10914,18 +10304,8 @@ export function createMutators(
     },
     canvasComment: {
       createThread: defineContractMutator(
-        canvasCommentCreateThreadClient,
-        z.object({
-          threadId: z.string(),
-          commentId: z.string(),
-          canvasId: z.string(),
-          blockId: z.string().min(1),
-          anchorText: z.string().optional(),
-          body: z.string().min(1),
-          mentionedUserIds: z.array(z.string()).default([]),
-          timestamp: z.number(),
-        }),
-        async ({ tx, args: { threadId, commentId, canvasId, blockId, anchorText, body, mentionedUserIds, timestamp } }) => {
+        'canvasComment.createThread',
+        async ({ tx, facts, args: { threadId, commentId, canvasId, blockId, anchorText, body, mentionedUserIds, timestamp } }) => {
           await assertCanvasCommentEditAccess(
             tx,
             canvasId,
@@ -10942,7 +10322,7 @@ export function createMutators(
             canvasId,
             blockId,
             // No facts means the anchor text was empty (or missing), as `anchorText || null` had it.
-            anchorText: getMutationFacts(canvasCommentCreateThreadClient, 'anchorText') ? anchorText : null,
+            anchorText: facts.anchorText ? anchorText : null,
             initialCommentId: commentId,
             commentCount: 1,
             status: CanvasCommentThreadStatus.OPEN,
@@ -10970,15 +10350,7 @@ export function createMutators(
         },
       ),
       reply: defineContractMutator(
-        canvasCommentReplyClient,
-        z.object({
-          commentId: z.string(),
-          threadId: z.string(),
-          canvasId: z.string(),
-          body: z.string().min(1),
-          mentionedUserIds: z.array(z.string()).default([]),
-          timestamp: z.number(),
-        }),
+        'canvasComment.reply',
         async ({ tx, args: { commentId, threadId, canvasId, body, mentionedUserIds, timestamp } }) => {
           const thread = await tx.run(
             zql.canvas_comment_threads
@@ -11038,13 +10410,7 @@ export function createMutators(
         },
       ),
       updateComment: defineContractMutator(
-        canvasCommentUpdateClient,
-        z.object({
-          commentId: z.string(),
-          body: z.string().min(1),
-          mentionedUserIds: z.array(z.string()).default([]),
-          timestamp: z.number(),
-        }),
+        'canvasComment.updateComment',
         async ({ tx, args: { commentId, body, mentionedUserIds, timestamp } }) => {
           const comment = await tx.run(
             zql.canvas_comments
@@ -11070,11 +10436,7 @@ export function createMutators(
           });
         },
       ),
-      deleteComment: defineMutator(
-        z.object({
-          commentId: z.string(),
-          timestamp: z.number(),
-        }),
+      deleteComment: defineContractMutator('canvasComment.deleteComment',
         async ({ tx, args: { commentId, timestamp } }) => {
           const comment = await tx.run(
             zql.canvas_comments
@@ -11118,12 +10480,7 @@ export function createMutators(
           }
         },
       ),
-      setThreadStatus: defineMutator(
-        z.object({
-          threadId: z.string(),
-          status: z.nativeEnum(CanvasCommentThreadStatus),
-          timestamp: z.number(),
-        }),
+      setThreadStatus: defineContractMutator('canvasComment.setThreadStatus',
         async ({ tx, args: { threadId, status, timestamp } }) => {
           const thread = await tx.run(
             zql.canvas_comment_threads
@@ -11152,15 +10509,7 @@ export function createMutators(
       ),
     },
     canvasVersion: {
-      save: defineMutator(
-        z.object({
-          id: z.string(),
-          canvasId: z.string(),
-          name: z.string().min(1).max(120),
-          content: z.any(),
-          contentHash: z.string().min(1),
-          timestamp: z.number(),
-        }),
+      save: defineContractMutator('canvasVersion.save',
         async ({ tx, args: { id, canvasId, name, content, contentHash, timestamp } }) => {
           const canvas = await tx.run(zql.canvases.where('id', canvasId).one());
           if (!canvas) {
@@ -11202,11 +10551,7 @@ export function createMutators(
           });
         },
       ),
-      rename: defineMutator(
-        z.object({
-          id: z.string(),
-          name: z.string().min(1).max(120),
-        }),
+      rename: defineContractMutator('canvasVersion.rename',
         async ({ tx, args: { id, name } }) => {
           const version = await tx.run(zql.canvas_versions.where('id', id).one());
           if (!version) {
@@ -11230,11 +10575,7 @@ export function createMutators(
           });
         },
       ),
-      restore: defineMutator(
-        z.object({
-          id: z.string(),
-          timestamp: z.number(),
-        }),
+      restore: defineContractMutator('canvasVersion.restore',
         async ({ tx, args: { id, timestamp } }) => {
           const version = await tx.run(zql.canvas_versions.where('id', id).one());
           if (!version) {
@@ -11278,14 +10619,7 @@ export function createMutators(
       ),
     },
     canvasFolder: {
-      create: defineMutator(
-        z.object({
-          id: z.string(),
-          projectId: z.string().nullable().optional(),
-          channelId: z.string().optional(),
-          name: z.string(),
-          timestamp: z.number(),
-        }),
+      create: defineContractMutator('canvasFolder.create',
         async ({ tx, args: { id, name, projectId, channelId, timestamp } }) => {
           const cleanName = name.trim();
           if (!cleanName) {
@@ -11352,12 +10686,7 @@ export function createMutators(
           }
         },
       ),
-      update: defineMutator(
-        z.object({
-          id: z.string(),
-          name: z.string().optional(),
-          timestamp: z.number().optional(),
-        }),
+      update: defineContractMutator('canvasFolder.update',
         async ({ tx, args: { id, name, timestamp } }) => {
           const folder = await tx.run(zql.canvas_folders.where('id', id).one());
           if (!folder) {
@@ -11445,8 +10774,7 @@ export function createMutators(
           }
         },
       ),
-      delete: defineMutator(
-        z.object({ id: z.string() }),
+      delete: defineContractMutator('canvasFolder.delete',
         async ({ tx, args: { id } }) => {
           const folder = await tx.run(zql.canvas_folders.where('id', id).one());
           if (!folder) {
@@ -11489,14 +10817,7 @@ export function createMutators(
       ),
     },
     bookmark: {
-      add: defineMutator(
-        z.object({
-          entityId: z.string(),
-          entityType: z.nativeEnum(BookmarkEntityType),
-          metadata: z.any().optional(),
-          timestamp: z.number(),
-          bookmarkId: z.string(),
-        }),
+      add: defineContractMutator('bookmark.add',
         async ({ tx, args: { entityId, entityType, metadata, timestamp, bookmarkId } }) => {
           const existing = await getBookmarkIncludingDeleted(tx, entityId, entityType);
 
@@ -11545,13 +10866,7 @@ export function createMutators(
           });
         },
       ),
-      remove: defineMutator(
-        z.object({
-          entityId: z.string(),
-          entityType: z.nativeEnum(BookmarkEntityType),
-          timestamp: z.number().optional(),
-          markAsDone: z.boolean().optional(),
-        }),
+      remove: defineContractMutator('bookmark.remove',
         async ({ tx, args: { entityId, entityType, timestamp, markAsDone } }) => {
           const bookmark = await getActiveBookmark(tx, entityId, entityType);
 
@@ -11577,12 +10892,7 @@ export function createMutators(
           });
         },
       ),
-      updateMetadata: defineMutator(
-        z.object({
-          entityId: z.string(),
-          entityType: z.nativeEnum(BookmarkEntityType),
-          metadata: z.any(),
-        }),
+      updateMetadata: defineContractMutator('bookmark.updateMetadata',
         async ({ tx, args: { entityId, entityType, metadata } }) => {
           const bookmark = await getActiveBookmark(tx, entityId, entityType);
 
@@ -11606,11 +10916,7 @@ export function createMutators(
       ),
     },
     nudges: {
-      dismiss: defineMutator(
-        z.object({
-          nudgeId: z.string(),
-          timestamp: z.number(),
-        }),
+      dismiss: defineContractMutator('nudges.dismiss',
         async ({ tx, ctx, args: { nudgeId, timestamp } }) => {
           const nudge = await tx.run(zql.surface_nudges.where('id', nudgeId).one());
           if (!nudge) {
@@ -11657,12 +10963,7 @@ export function createMutators(
           }
         },
       ),
-      act: defineMutator(
-        z.object({
-          nudgeId: z.string(),
-          actionResult: z.any().optional(),
-          timestamp: z.number(),
-        }),
+      act: defineContractMutator('nudges.act',
         async ({ tx, ctx, args: { nudgeId, actionResult, timestamp } }) => {
           const nudge = await tx.run(zql.surface_nudges.where('id', nudgeId).one());
           if (!nudge) {
@@ -11750,18 +11051,7 @@ export function createMutators(
       ),
     },
     userProfile: {
-      upsert: defineMutator(
-        z.object({
-          displayName: z.string().nullable().optional(),
-          role: z.string().nullable().optional(),
-          pronunciation: z.string().nullable().optional(),
-          team: z.string().nullable().optional(),
-          phoneNumber: z.string().nullable().optional(),
-          dob: z.number().nullable().optional(),
-          manager: z.string().nullable().optional(),
-          timestamp: z.number(),
-          profileId: z.string(),
-        }),
+      upsert: defineContractMutator('userProfile.upsert',
         async ({ tx, args: params }) => {
           // Check if profile already exists to get the ID
           const existingProfile = await tx.run(zql.user_profiles
@@ -11815,16 +11105,7 @@ export function createMutators(
     },
     userPresence: {
       upsert: defineContractMutator(
-        userPresenceUpsertClient,
-        z.object({
-          statusEmoji: z.string().nullable().optional(),
-          statusContent: z.string().nullable().optional(),
-          statusExpiryAt: z.number().nullable().optional(),
-          assignmentUnavailableUntil: z.number().nullable().optional(),
-          notificationsPausedUntil: z.number().nullable().optional(),
-          timestamp: z.number(),
-          presenceId: z.string(),
-        }),
+        'userPresence.upsert',
         async ({ tx, args: { statusEmoji, statusContent, statusExpiryAt, assignmentUnavailableUntil, notificationsPausedUntil, timestamp, presenceId } }) => {
           // Decode and validate emoji if provided
           let validatedEmoji: string | undefined;
@@ -11887,49 +11168,7 @@ export function createMutators(
       ),
     },
     assignmentConfig: {
-      batchUpdate: defineMutator(
-        z.object({
-          userGroupId: z.string(),
-          userStates: z.array(
-            z.object({
-              userId: z.string(),
-              onCall: z.boolean(),
-              isActive: z.boolean(),
-            })
-          ),
-          userMappings: z.array(
-            z.object({
-              userId: z.string(),
-              onCallSetNumbers: z.array(z.number()),
-              isNotified: z.boolean().optional(),
-            })
-          ).optional(),
-          boardWeight: z.object({
-            boardId: z.string(),
-            weight: z.number(),
-            usePercentage: z.boolean(),
-            percentageWindowDays: z.number().int().min(1).max(90).optional(),
-            percentageShareBasis: z.enum(['ALL', 'OPEN']).optional(),
-            // Start of the first share window (ms); null clears it. Omit to keep the current start.
-            percentageWindowStartAt: z.number().nullable().optional(),
-          }).optional(),
-          expertiseMappings: z.object({
-            boardId: z.string(),
-            userConfigs: z.array(
-              z.object({
-                userId: z.string(),
-                hasExpertise: z.boolean(),
-                percentage: z.number(),
-                maxTickets: z.number(),
-              })
-            ),
-          }).optional(),
-          timestamp: z.number(),
-          stateIds: z.record(z.string(), z.string()).optional(),
-          complexityScoreId: z.string().optional(),
-          mappingIds: z.record(z.string(), z.string()).optional(),
-          reassignUserIds: z.array(z.string()).optional(),
-        }),
+      batchUpdate: defineContractMutator('assignmentConfig.batchUpdate',
         async ({ tx, args: { userGroupId, userStates, userMappings, boardWeight, expertiseMappings, timestamp, stateIds = {}, complexityScoreId, mappingIds = {}, reassignUserIds = [] } }) => {
           const now = timestamp;
 
@@ -12127,14 +11366,7 @@ export function createMutators(
           }
         },
       ),
-      toggleGroupAutoRotation: defineMutator(
-        z.object({
-          userGroupId: z.string(),
-          autoRotationEnabled: z.boolean(),
-          rotationInterval: z.nativeEnum(RotationInterval).optional(),
-          rotationStartDate: z.number().optional(),
-          timestamp: z.number(),
-        }),
+      toggleGroupAutoRotation: defineContractMutator('assignmentConfig.toggleGroupAutoRotation',
         async ({
           tx,
           args: { userGroupId, autoRotationEnabled, rotationInterval, rotationStartDate, timestamp },
@@ -12181,14 +11413,7 @@ export function createMutators(
       ),
     },
     repo: {
-      create: defineMutator(
-        z.object({
-          id: z.string(),
-          name: z.string(),
-          url: z.string(),
-          baseBranch: z.array(z.string()),
-          prefix: z.string(),
-        }),
+      create: defineContractMutator('repo.create',
         async ({ tx, args: { id, name, url, baseBranch, prefix } }) => {
           await tx.mutate.repos.insert({
             workspaceId: authData.workspaceId,
@@ -12201,14 +11426,7 @@ export function createMutators(
           });
         },
       ),
-      update: defineMutator(
-        z.object({
-          id: z.string(),
-          name: z.string().optional(),
-          url: z.string().optional(),
-          baseBranch: z.array(z.string()).optional(),
-          prefix: z.string().optional(),
-        }),
+      update: defineContractMutator('repo.update',
         async ({ tx, args: { id, name, url, baseBranch, prefix } }) => {
           const repo = await tx.run(zql.repos.where('id', id).one());
           if (!repo) {
@@ -12228,8 +11446,7 @@ export function createMutators(
           });
         },
       ),
-      delete: defineMutator(
-        z.object({ id: z.string() }),
+      delete: defineContractMutator('repo.delete',
         async ({ tx, args: { id } }) => {
           const repo = await tx.run(zql.repos.where('id', id).one());
           if (!repo) {
@@ -12242,8 +11459,7 @@ export function createMutators(
           await tx.mutate.repos.delete({ id });
         },
       ),
-      addBranch: defineMutator(
-        z.object({ id: z.string(), branchName: z.string() }),
+      addBranch: defineContractMutator('repo.addBranch',
         async ({ tx, args: { id, branchName } }) => {
           const repo = await tx.run(zql.repos.where('id', id).one());
           if (!repo) {
@@ -12260,12 +11476,7 @@ export function createMutators(
       ),
     },
     sdlc: {
-      createLink: defineMutator(
-        createSdlcLinkSchema.extend({
-          id: z.string(),
-          channelId: z.string(),
-          timestamp: z.number(),
-        }),
+      createLink: defineContractMutator('sdlc.createLink',
         async ({ tx, args }) => {
           // Links belong to the hub. createSdlcLinkSchema already excludes the
           // membership relation, so this cannot forge a CHANNEL -> REPOSITORY edge.
@@ -12311,8 +11522,7 @@ export function createMutators(
           });
         },
       ),
-      deleteLink: defineMutator(
-        z.object({ channelId: z.string(), linkId: z.string() }),
+      deleteLink: defineContractMutator('sdlc.deleteLink',
         async ({ tx, args: { channelId, linkId } }) => {
           const participant = await tx.run(
             zql.channel_participants
@@ -12371,13 +11581,7 @@ export function createMutators(
        * same track, which is the whole point of keeping that edge separate.
        */
       /** Rename a folder. Its placement and contents are untouched. */
-      renameSdlcFolder: defineMutator(
-        z.object({
-          folderId: z.string(),
-          channelId: z.string(),
-          name: z.string().trim().min(1).max(120),
-          timestamp: z.number(),
-        }),
+      renameSdlcFolder: defineContractMutator('sdlc.renameSdlcFolder',
         async ({ tx, args }) => {
           const participant = await tx.run(
             zql.channel_participants
@@ -12414,14 +11618,7 @@ export function createMutators(
        * still opens and previews as what it is. Artifacts are renamed through
        * canvas.update, under their own edit access.
        */
-      renameSdlcItem: defineContractMutator(
-        z.object({
-          itemType: z.enum(['LINK', 'ATTACHMENT']),
-          itemId: z.string(),
-          channelId: z.string(),
-          name: z.string().trim().min(1).max(300),
-          timestamp: z.number(),
-        }),
+      renameSdlcItem: defineContractMutator('sdlc.renameSdlcItem',
         async ({ tx, args }) => {
           const participant = await tx.run(
             zql.channel_participants
@@ -12470,14 +11667,7 @@ export function createMutators(
       ),
 
       /** A folder's icon; null goes back to the folder mark. */
-      setSdlcFolderIcon: defineMutator(
-        z.object({
-          folderId: z.string(),
-          channelId: z.string(),
-          // Null goes back to the folder mark.
-          icon: sdlcIconNameSchema.nullable(),
-          timestamp: z.number(),
-        }),
+      setSdlcFolderIcon: defineContractMutator('sdlc.setSdlcFolderIcon',
         async ({ tx, args }) => {
           const participant = await tx.run(
             zql.channel_participants
@@ -12508,16 +11698,7 @@ export function createMutators(
         }
       ),
 
-      moveSdlcItem: defineMutator(
-        z.object({
-          linkId: z.string(),
-          channelId: z.string(),
-          itemType: z.enum(['FOLDER', 'CANVAS', 'LINK', 'ATTACHMENT']),
-          itemId: z.string(),
-          parentType: z.enum(['TRACK', 'FOLDER']),
-          parentId: z.string(),
-          timestamp: z.number(),
-        }),
+      moveSdlcItem: defineContractMutator('sdlc.moveSdlcItem',
         async ({ tx, args }) => {
           const participant = await tx.run(
             zql.channel_participants
@@ -12617,18 +11798,7 @@ export function createMutators(
         },
       ),
 
-      createSdlcFolder: defineMutator(
-        z.object({
-          id: z.string(),
-          containmentLinkId: z.string(),
-          flatLinkId: z.string(),
-          channelId: z.string(),
-          trackId: z.string(),
-          parentType: z.enum(['TRACK', 'FOLDER']),
-          parentId: z.string(),
-          name: z.string().trim().min(1).max(120),
-          timestamp: z.number(),
-        }),
+      createSdlcFolder: defineContractMutator('sdlc.createSdlcFolder',
         async ({ tx, args }) => {
           const participant = await tx.run(
             zql.channel_participants
@@ -12718,32 +11888,9 @@ export function createMutators(
        * flat for which track it belongs to however deep it is filed.
        */
       addSdlcFolderItem: defineContractMutator(
-        sdlcAddSdlcFolderItemClient,
-        z.object({
-          itemType: z.enum(['ATTACHMENT', 'LINK']),
-          itemId: z.string(),
-          containmentLinkId: z.string(),
-          flatLinkId: z.string(),
-          channelId: z.string(),
-          trackId: z.string(),
-          parentType: z.enum(['TRACK', 'FOLDER']),
-          parentId: z.string(),
-          /** Present only when itemType is LINK; the row does not exist yet. */
-          link: z
-            .object({
-              url: z.string().min(1),
-              title: z.string().trim().min(1).max(300),
-              description: z.string().trim().max(2000).optional(),
-              favicon: z.string().optional(),
-            })
-            .optional(),
-          // The link's description, top-level so it can arrive encrypted (`link.description` is the
-          // older place, still accepted). Its limit is checked on the rawLength fact below.
-          linkDescription: z.string().trim().optional(),
-          timestamp: z.number(),
-        }),
-        async ({ tx, args }) => {
-          if ((getMutationFacts(sdlcAddSdlcFolderItemClient, 'linkDescription')?.rawLength ?? 0) > 2000) {
+        'sdlc.addSdlcFolderItem',
+        async ({ tx, facts, args }) => {
+          if ((facts.linkDescription?.rawLength ?? 0) > 2000) {
             throw new Error('Description must be 2000 characters or less');
           }
           const participant = await tx.run(
@@ -12851,18 +11998,9 @@ export function createMutators(
       ),
 
       createTrack: defineContractMutator(
-        sdlcCreateTrackClient,
-        z.object({
-          id: z.string(),
-          linkId: z.string(),
-          channelId: z.string(),
-          name: z.string().trim().min(1).max(120),
-          // The 2000-character limit is checked on the rawLength fact below: zod cannot measure ciphertext.
-          description: z.string().trim().optional(),
-          timestamp: z.number(),
-        }),
-        async ({ tx, args }) => {
-          if ((getMutationFacts(sdlcCreateTrackClient, 'description')?.rawLength ?? 0) > 2000) {
+        'sdlc.createTrack',
+        async ({ tx, facts, args }) => {
+          if ((facts.description?.rawLength ?? 0) > 2000) {
             throw new Error('Description must be 2000 characters or less');
           }
           // Tracks belong to the hub, never to one repository in it.
@@ -12901,19 +12039,9 @@ export function createMutators(
         },
       ),
       updateTrack: defineContractMutator(
-        sdlcUpdateTrackClient,
-        z.object({
-          trackId: z.string(),
-          name: z.string().trim().min(1).max(120).optional(),
-          // The 2000-character limit is checked on the rawLength fact below: zod cannot measure ciphertext.
-          description: z.string().trim().nullable().optional(),
-          status: sdlcTrackStatusSchema.optional(),
-          // Null goes back to the track mark.
-          icon: sdlcIconNameSchema.nullable().optional(),
-          timestamp: z.number(),
-        }),
-        async ({ tx, args }) => {
-          if ((getMutationFacts(sdlcUpdateTrackClient, 'description')?.rawLength ?? 0) > 2000) {
+        'sdlc.updateTrack',
+        async ({ tx, facts, args }) => {
+          if ((facts.description?.rawLength ?? 0) > 2000) {
             throw new Error('Description must be 2000 characters or less');
           }
           const track = await tx.run(zql.sdlc_tracks.where('id', args.trackId).one());
@@ -12952,28 +12080,7 @@ export function createMutators(
       ),
     },
     form: {
-      update: defineMutator(
-        z.object({
-          formId: z.string(),
-          projectId: z.string().optional(),
-          formDescription: z.string().optional(),
-          fields: z
-            .array(
-              z.object({
-                id: z.string().optional(), // Existing resolved definition id (global or legacy) when editing
-                membershipId: z.string().optional(), // client id for the form_fields membership row
-                fieldName: z.string(),
-                fieldType: z.nativeEnum(FormFieldType),
-                fieldEnum: z.array(z.string()).optional(),
-                fieldOptions: z.array(z.object({ id: z.string(), value: z.string() })).optional(),
-                isOptional: z.boolean().optional(),
-                parentOptionId: z.string().nullable().optional(),
-              }),
-            )
-            .optional(),
-          timestamp: z.number(),
-          fieldIds: z.record(z.string(), z.string()).optional(),
-        }),
+      update: defineContractMutator('form.update',
         async ({
           tx,
           args: { formId, projectId, formDescription, fields, timestamp, fieldIds = {} },
@@ -13358,14 +12465,7 @@ export function createMutators(
       ),
     },
     formContextMapping: {
-      upsert: defineMutator(
-        z.object({
-          contextId: z.string(),
-          contextType: z.nativeEnum(FormContextType),
-          entityType: z.nativeEnum(FormEntityType),
-          formId: z.string(),
-          mappingId: z.string(),
-        }),
+      upsert: defineContractMutator('formContextMapping.upsert',
         async ({ tx, args: { contextId, contextType, entityType, formId, mappingId } }) => {
           // Check if a mapping already exists for this context
           const existingMapping = await tx.run(
@@ -13395,12 +12495,7 @@ export function createMutators(
           }
         },
       ),
-      delete: defineMutator(
-        z.object({
-          contextId: z.string(),
-          contextType: z.nativeEnum(FormContextType),
-          entityType: z.nativeEnum(FormEntityType),
-        }),
+      delete: defineContractMutator('formContextMapping.delete',
         async ({ tx, args: { contextId, contextType, entityType } }) => {
           // Find and delete the mapping
           const existingMapping = await tx.run(
@@ -13420,17 +12515,7 @@ export function createMutators(
       ),
     },
     formEntityValue: {
-      create: defineMutator(
-        z.object({
-          id: z.string(),
-          entityId: z.string(),
-          entityType: z.nativeEnum(FormEntityType),
-          fieldId: z.string(),
-          newValue: z.array(z.string()),
-          timestamp: z.number(),
-          contextId: z.string().optional(),
-          version: z.number().optional(),
-        }),
+      create: defineContractMutator('formEntityValue.create',
         async ({ tx, args }) => {
           // Legacy create path: older clients only know form_fields ids, so resolve formId from the
           // legacy row. Global fields must use createV2.
@@ -13446,30 +12531,13 @@ export function createMutators(
           await assertFormEntityValueWrites(tx, [write]);
         },
       ),
-      createV2: defineMutator(
-        z.object({
-          id: z.string(),
-          entityId: z.string(),
-          entityType: z.nativeEnum(FormEntityType),
-          fieldId: z.string(),
-          formId: z.string(),
-          newValue: z.array(z.string()),
-          timestamp: z.number(),
-          contextId: z.string().optional(),
-          version: z.number().optional(),
-        }),
+      createV2: defineContractMutator('formEntityValue.createV2',
         async ({ tx, args }) => {
           const write = await writeFormEntityValueCreate(tx, { ...args, workspaceId: authData.workspaceId });
           await assertFormEntityValueWrites(tx, [write]);
         },
       ),
-      update: defineMutator(
-        z.object({
-          formEntityValueId: z.string(),
-          newValue: z.array(z.string()),
-          updatedAt: z.number(),
-          expectedValueUpdatedAt: z.number().nullable().optional(),
-        }),
+      update: defineContractMutator('formEntityValue.update',
         async ({ tx, args }) => {
           const write = await writeFormEntityValueUpdate(tx, args);
           await assertFormEntityValueWrites(tx, [write]);
@@ -13478,20 +12546,13 @@ export function createMutators(
       // Saves a whole form (e.g. a stage form) in one transaction. Use this instead of one
       // createV2/update per field whenever several values change together: branch fields are
       // validated after every value is written, so their order doesn't matter.
-      upsertMany: defineMutator(upsertManyFormEntityValuesArgs, async ({ tx, args }) => {
+      upsertMany: defineContractMutator('formEntityValue.upsertMany', async ({ tx, args }) => {
         await upsertManyFormEntityValues(tx, authData.workspaceId, args);
       }),
     },
     dashboard: {
       upsert: defineContractMutator(
-        dashboardUpsertClient,
-        z.object({
-          id: z.string(),
-          name: z.string(),
-          description: z.string().optional(),
-          createdBy: z.string(),
-          timestamp: z.number(),
-        }),
+        'dashboard.upsert',
         async ({ tx, args: { id, name, description, createdBy, timestamp } }) => {
           const now = timestamp;
 
@@ -13508,10 +12569,7 @@ export function createMutators(
           });
         },
       ),
-      delete: defineMutator(
-        z.object({
-          id: z.string(),
-        }),
+      delete: defineContractMutator('dashboard.delete',
         async ({ tx, args: { id } }) => {
           const mappings = await tx.run(zql.dashboard_queries_mapping.where('dashboardId', id));
           for (const mapping of mappings) {
@@ -13523,16 +12581,7 @@ export function createMutators(
       ),
     },
     resourceAccess: {
-      grant: defineMutator(
-        z.object({
-          grants: z.array(z.object({
-            id: z.string(),
-            userId: z.string(),
-            resourceId: z.string(),
-            accessType: z.nativeEnum(AccessType),
-          })),
-          timestamp: z.number(),
-        }),
+      grant: defineContractMutator('resourceAccess.grant',
         async ({ tx, args: { grants, timestamp } }) => {
           for (const grant of grants) {
             await tx.mutate.resource_access.insert({
@@ -13547,24 +12596,14 @@ export function createMutators(
           }
         },
       ),
-      revoke: defineMutator(
-        z.object({
-          ids: z.array(z.string()),
-        }),
+      revoke: defineContractMutator('resourceAccess.revoke',
         async ({ tx, args: { ids } }) => {
           for (const id of ids) {
             await tx.mutate.resource_access.delete({ id });
           }
         },
       ),
-      update: defineMutator(
-        z.object({
-          updates: z.array(z.object({
-            id: z.string(),
-            accessType: z.nativeEnum(AccessType),
-          })),
-          timestamp: z.number(),
-        }),
+      update: defineContractMutator('resourceAccess.update',
         async ({ tx, args: { updates, timestamp } }) => {
           for (const update of updates) {
             await tx.mutate.resource_access.update({
@@ -13578,18 +12617,7 @@ export function createMutators(
     },
     emailDraft: {
       upsert: defineContractMutator(
-        emailDraftUpsertClient,
-        z.object({
-          id: z.string(),
-          conversationId: z.string(),
-          channelId: z.string(),
-          draftContent: z.string().optional(),
-          attachmentIds: z.array(z.string()).optional(),
-          toRecipients: z.array(z.string()).optional(),
-          ccRecipients: z.array(z.string()).optional(),
-          bccRecipients: z.array(z.string()).optional(),
-          updatedAt: z.number(),
-        }),
+        'emailDraft.upsert',
         async ({
           tx,
           ctx,
@@ -13646,10 +12674,7 @@ export function createMutators(
           }
         },
       ),
-      delete: defineMutator(
-        z.object({
-          conversationId: z.string(),
-        }),
+      delete: defineContractMutator('emailDraft.delete',
         async ({ tx, ctx, args: { conversationId } }) => {
           const existing = await tx.run(
             zql.email_drafts
@@ -13664,19 +12689,7 @@ export function createMutators(
       ),
       // KEEP IN SYNC with shared. Compose drafts (no thread yet), keyed by draft id.
       upsertComposeDraft: defineContractMutator(
-        emailDraftUpsertComposeDraftClient,
-        z.object({
-          id: z.string(),
-          channelId: z.string(),
-          subject: z.string().optional(),
-          fromAddress: z.string().optional(),
-          draftContent: z.string().optional(),
-          attachmentIds: z.array(z.string()).optional(),
-          toRecipients: z.array(z.string()).optional(),
-          ccRecipients: z.array(z.string()).optional(),
-          bccRecipients: z.array(z.string()).optional(),
-          updatedAt: z.number(),
-        }),
+        'emailDraft.upsertComposeDraft',
         async ({ tx, ctx, args }) => {
           const existing = await tx.run(zql.email_drafts.where('id', args.id).one());
           // Owner-only on the update path (mirrors deleteComposeDraft and the reply upsert):
@@ -13726,8 +12739,7 @@ export function createMutators(
           }
         },
       ),
-      deleteComposeDraft: defineMutator(
-        z.object({ id: z.string() }),
+      deleteComposeDraft: defineContractMutator('emailDraft.deleteComposeDraft',
         async ({ tx, ctx, args: { id } }) => {
           const existing = await tx.run(zql.email_drafts.where('id', id).one());
           if (existing && existing.userId === ctx.userID) {
@@ -13740,14 +12752,7 @@ export function createMutators(
     // Gmail-style labels for desk/support conversations. Labels are private to their
     // creator: catalog is per-channel, per-user (createdBy); mappings attach to a thread.
     conversationLabel: {
-      createLabel: defineMutator(
-        z.object({
-          id: z.string(),
-          name: z.string(),
-          color: z.string().optional(),
-          channelId: z.string(),
-          timestamp: z.number(),
-        }),
+      createLabel: defineContractMutator('conversationLabel.createLabel',
         async ({ tx, ctx, args: { id, name, color, channelId, timestamp } }) => {
           const trimmed = name.trim();
           if (!trimmed) throw new Error('Label name cannot be empty');
@@ -13776,16 +12781,7 @@ export function createMutators(
           });
         },
       ),
-      applyLabel: defineMutator(
-        z.object({
-          labelId: z.string(),
-          labelName: z.string(),
-          color: z.string().optional(),
-          conversationId: z.string(),
-          channelId: z.string(),
-          mappingId: z.string(),
-          timestamp: z.number(),
-        }),
+      applyLabel: defineContractMutator('conversationLabel.applyLabel',
         async ({ tx, ctx, args }) => {
           const trimmed = args.labelName.trim();
           if (!trimmed) throw new Error('Label name cannot be empty');
@@ -13838,8 +12834,7 @@ export function createMutators(
         },
       ),
       // Scoped to the caller so an agent can only remove their own mapping.
-      removeLabel: defineMutator(
-        z.object({ conversationId: z.string(), labelId: z.string() }),
+      removeLabel: defineContractMutator('conversationLabel.removeLabel',
         async ({ tx, ctx, args: { conversationId, labelId } }) => {
           const existing = await tx.run(
             zql.conversation_label_mappings
@@ -13860,19 +12855,7 @@ export function createMutators(
     //
     // KEEP IN SYNC with apps/backend/src/zero/mutators.ts threadTag.
     threadTag: {
-      setTypes: defineMutator(
-        z.object({
-          conversationId: z.string(),
-          // Free-form, not z.enum: the workspace vocabulary is a starting point, and people
-          // type their own. Length-capped so a tag stays a label rather than a paragraph.
-          types: z.array(z.string().trim().min(1).max(40)),
-          /**
-           * What a newly invented tag means. Stored as the vocabulary candidate's
-           * description, not on the thread — see the candidate write below.
-           */
-          note: z.string().trim().max(280).optional(),
-          timestamp: z.number(),
-        }),
+      setTypes: defineContractMutator('threadTag.setTypes',
         async ({ tx, ctx, args: { conversationId, types, note, timestamp } }) => {
           const conversation = await tx.run(
             zql.conversations.where('conversationId', conversationId).one(),
@@ -13976,14 +12959,7 @@ export function createMutators(
     // Gmail-style per-user mailbox overlay over shared desk tickets. Sparse: a row exists
     // only once the agent acts; absence means { INBOX, not starred }.
     ticketMailbox: {
-      setState: defineMutator(
-        z.object({
-          id: z.string(),
-          ticketId: z.string(),
-          channelId: z.string(),
-          state: z.nativeEnum(MailboxState),
-          timestamp: z.number(),
-        }),
+      setState: defineContractMutator('ticketMailbox.setState',
         async ({ tx, ctx, args: { id, ticketId, channelId, state, timestamp } }) => {
           const channel = await tx.run(zql.channels.where('id', channelId).one());
           if (!channel) throw new Error('Channel not found');
@@ -14015,14 +12991,7 @@ export function createMutators(
           }
         },
       ),
-      setStarred: defineMutator(
-        z.object({
-          id: z.string(),
-          ticketId: z.string(),
-          channelId: z.string(),
-          starred: z.boolean(),
-          timestamp: z.number(),
-        }),
+      setStarred: defineContractMutator('ticketMailbox.setStarred',
         async ({ tx, ctx, args: { id, ticketId, channelId, starred, timestamp } }) => {
           const channel = await tx.run(zql.channels.where('id', channelId).one());
           if (!channel) throw new Error('Channel not found');
@@ -14059,13 +13028,7 @@ export function createMutators(
       // KEEP IN SYNC with shared/src/zero/mutators.ts emailRead.markAsRead.
       // The shared copy runs client-side (optimistic); this copy runs
       // server-side (authoritative). Diverging logic causes state drift.
-      markAsRead: defineMutator(
-        z.object({
-          id: z.string(),
-          ticketId: z.string(),
-          lastReadEmailId: z.string(),
-          updatedAt: z.number(),
-        }),
+      markAsRead: defineContractMutator('emailRead.markAsRead',
         async ({ tx, ctx, args: { id, ticketId, lastReadEmailId, updatedAt } }) => {
           const ticket = await tx.run(zql.tickets.where('id', ticketId).one());
           const lastReadEmailAt = ticket?.lastEmailAt ?? updatedAt;
@@ -14102,16 +13065,7 @@ export function createMutators(
         },
       ),
 
-      bulkMarkAsRead: defineMutator(
-        z.object({
-          items: z.array(
-            z.object({
-              id: z.string(),
-              ticketId: z.string(),
-            }),
-          ),
-          timestamp: z.number(),
-        }),
+      bulkMarkAsRead: defineContractMutator('emailRead.bulkMarkAsRead',
         async ({ tx, ctx, args: { items, timestamp } }) => {
           if (items.length === 0) return;
 
@@ -14173,10 +13127,7 @@ export function createMutators(
           );
         },
       ),
-      bulkMarkAsUnread: defineMutator(
-        z.object({
-          ticketIds: z.array(z.string()).max(50, 'Cannot mark more than 50 tickets at once'),
-        }),
+      bulkMarkAsUnread: defineContractMutator('emailRead.bulkMarkAsUnread',
         async ({ tx, ctx, args: { ticketIds } }) => {
           if (ticketIds.length === 0) return;
           const existing = await tx.run(
@@ -14190,24 +13141,9 @@ export function createMutators(
     },
     draft: {
       createAttachments: defineContractMutator(
-        draftCreateAttachmentsClient,
-        z.object({
-          draftMessageId: z.string(),
-          attachments: z.array(z.object({
-            attachmentId: z.string(),
-            originalFilename: z.string(),
-            mimetype: z.string(),
-            size: z.number(),
-            width: z.number().optional(),
-            height: z.number().optional(),
-          })),
-          channelId: z.string(),
-          conversationId: z.string().optional(),
-          content: z.string().optional(),
-          timestamp: z.number(),
-        }),
+        'draft.createAttachments',
         async ({
-          tx,
+          tx, facts,
           args: {
             draftMessageId,
             attachments,
@@ -14248,7 +13184,7 @@ export function createMutators(
               conversationId: conversationId || null,
               userId: authData.sub,
               // No facts means the text was empty (or missing), as `content || ''` had it.
-              content: content && getMutationFacts(draftCreateAttachmentsClient, 'content') ? content : '',
+              content: content && facts.content ? content : '',
               hasAttachment: true,
               origin: DraftOrigin.user,
               createdAt: timestamp,
@@ -14260,7 +13196,7 @@ export function createMutators(
               await tx.mutate.draft_messages.update({
                 id: existingDraft.id,
                 // No facts means the text was empty: keep the draft's own text (copied as read).
-                content: content && getMutationFacts(draftCreateAttachmentsClient, 'content') ? content : existingDraft.content,
+                content: content && facts.content ? content : existingDraft.content,
                 hasAttachment: true,
               });
             }
@@ -14355,12 +13291,7 @@ export function createMutators(
           }
         },
       ),
-      clearContent: defineMutator(
-        z.object({
-          channelId: z.string(),
-          conversationId: z.string().optional(),
-          timestamp: z.number(),
-        }),
+      clearContent: defineContractMutator('draft.clearContent',
         async ({ tx, args: { channelId, conversationId, timestamp } }) => {
           // Called at send-time to detach the draft from the queued message:
           // zeroes content and hasAttachment so `markChannelAsViewed` can
@@ -14387,11 +13318,7 @@ export function createMutators(
       ),
     },
     dashboardComponent: {
-      updatePositions: defineMutator(
-        z.object({
-          updates: z.array(z.object({ id: z.string(), position: z.string() })).min(1),
-          timestamp: z.number(),
-        }),
+      updatePositions: defineContractMutator('dashboardComponent.updatePositions',
         async ({ tx, args: { updates, timestamp } }) => {
           for (const u of updates) {
             await tx.mutate.queries.update({
@@ -14404,19 +13331,7 @@ export function createMutators(
       ),
     },
     query: {
-      upsert: defineMutator(
-        z.object({
-          id: z.string(),
-          title: z.string(),
-          queryJson: z.any(),
-          entityType: z.nativeEnum(FormEntityType).optional(),
-          targetEntity: z.string().optional(),
-          visualType: z.string().optional(),
-          dashboardId: z.string().optional(),
-          createdBy: z.string(),
-          timestamp: z.number(),
-          mappingId: z.string().optional(),
-        }),
+      upsert: defineContractMutator('query.upsert',
         async ({ tx, args: { id, title, queryJson, entityType, targetEntity, visualType, dashboardId, createdBy, timestamp, mappingId } }) => {
           const now = timestamp;
 
@@ -14465,10 +13380,7 @@ export function createMutators(
           }
         },
       ),
-      delete: defineMutator(
-        z.object({
-          id: z.string(),
-        }),
+      delete: defineContractMutator('query.delete',
         async ({ tx, args: { id } }) => {
           const mapping = await tx.run(zql.dashboard_queries_mapping.where('queryId', id).one());
           const dashboardId = mapping?.dashboardId;
@@ -14496,11 +13408,7 @@ export function createMutators(
           }
         },
       ),
-      reorder: defineMutator(
-        z.object({
-          orderedMappingIds: z.array(z.string()),
-          timestamp: z.number(),
-        }),
+      reorder: defineContractMutator('query.reorder',
         async ({ tx, args: { orderedMappingIds, timestamp } }) => {
           for (let i = 0; i < orderedMappingIds.length; i++) {
             const mappingId = orderedMappingIds[i]!;
@@ -14514,22 +13422,7 @@ export function createMutators(
       ),
     },
     ticketStageRequest: {
-      upsert: defineMutator(
-        z.object({
-          id: z.string(),
-          ticketId: z.string(),
-          stageId: z.string(),
-          formId: z.string().optional(),
-          status: z.nativeEnum(TicketStageRequestStatus),
-          updatedBy: z.string(),
-          updatedAt: z.number(),
-          reviewedBy: z.string().optional(),
-          requestActivityId: z.string().optional(),
-          approvedActivityId: z.string().optional(),
-          rejectedActivityId: z.string().optional(),
-          comment: z.string().optional(),
-          commentMessageId: z.string().optional(),
-        }),
+      upsert: defineContractMutator('ticketStageRequest.upsert',
         async ({
           tx,
           args: {
@@ -15085,10 +13978,7 @@ export function createMutators(
           }
         },
       ),
-      deleteByTicketId: defineMutator(
-        z.object({
-          ticketId: z.string(),
-        }),
+      deleteByTicketId: defineContractMutator('ticketStageRequest.deleteByTicketId',
         async ({ tx, args: { ticketId } }) => {
           const requests = await tx.run(
             zql.ticket_stage_requests.where('ticketId', ticketId),
@@ -15099,11 +13989,7 @@ export function createMutators(
         },
       ),
     },
-    cleanupStageApprovals: defineMutator(
-      z.object({
-        ticketId: z.string(),
-        fromSequenceNumber: z.number(),
-      }),
+    cleanupStageApprovals: defineContractMutator('cleanupStageApprovals',
       async ({ tx, args: { ticketId, fromSequenceNumber } }) => {
         // Get all stages for this ticket's board
         const ticket = await tx.run(zql.tickets.where('id', ticketId).one());
@@ -15138,24 +14024,9 @@ export function createMutators(
     ),
     rca: {
       create: defineContractMutator(
-        rcaCreateClient,
-        z.object({
-          id: z.string(),
-          ticketId: z.string(),
-          ownerId: z.string().optional(),
-          title: z.string(),
-          summary: z.string().optional(),
-          rootCause: z.string().optional(),
-          severity: z.nativeEnum(SEVERITY),
-          bugTypeId: z.string(),
-          categoryTypeId: z.string(),
-          issueCategoryId: z.string().optional(),
-          issueStartAt: z.number().optional().nullable(),
-          status: z.nativeEnum(RCAStatus),
-          timestamp: z.number(),
-        }),
+        'rca.create',
         async ({
-          tx,
+          tx, facts,
           args: {
             id,
             ticketId,
@@ -15194,8 +14065,8 @@ export function createMutators(
             ownerId: resolvedOwnerId,
             title,
             // No facts means empty (or missing), as `x || null` had it.
-            summary: getMutationFacts(rcaCreateClient, 'summary') ? summary : null,
-            rootCause: getMutationFacts(rcaCreateClient, 'rootCause') ? rootCause : null,
+            summary: facts.summary ? summary : null,
+            rootCause: facts.rootCause ? rootCause : null,
             severity,
             bugTypeId,
             categoryTypeId,
@@ -15208,21 +14079,7 @@ export function createMutators(
         },
       ),
       update: defineContractMutator(
-        rcaUpdateClient,
-        z.object({
-          id: z.string(),
-          ticketId: z.string().optional(),
-          title: z.string().optional(),
-          summary: z.string().optional(),
-          rootCause: z.string().optional(),
-          severity: z.nativeEnum(SEVERITY).optional(),
-          bugTypeId: z.string().optional(),
-          categoryTypeId: z.string().optional(),
-          issueCategoryId: z.string().optional(),
-          issueStartAt: z.number().optional().nullable(),
-          status: z.nativeEnum(RCAStatus).optional(),
-          timestamp: z.number(),
-        }),
+        'rca.update',
         async ({
           tx,
           args: {
@@ -15269,16 +14126,7 @@ export function createMutators(
       ),
     },
     releaseAttribution: {
-      create: defineMutator(
-        z.object({
-          id: z.string(),
-          ticketId: z.string(),
-          releaseId: z.string(),
-          releaseApplicationId: z.string().optional().nullable(),
-          rootCauseTicketId: z.string().optional().nullable(),
-          confidence: z.nativeEnum(AttributionConfidence),
-          timestamp: z.number(),
-        }),
+      create: defineContractMutator('releaseAttribution.create',
         async ({
           tx,
           args: {
@@ -15342,14 +14190,7 @@ export function createMutators(
           });
         },
       ),
-      update: defineMutator(
-        z.object({
-          id: z.string(),
-          releaseId: z.string().optional(),
-          releaseApplicationId: z.string().optional().nullable(),
-          rootCauseTicketId: z.string().optional().nullable(),
-          confidence: z.nativeEnum(AttributionConfidence).optional(),
-        }),
+      update: defineContractMutator('releaseAttribution.update',
         async ({
           tx,
           args: { id, releaseId, releaseApplicationId, rootCauseTicketId, confidence },
@@ -15405,8 +14246,7 @@ export function createMutators(
           });
         },
       ),
-      delete: defineMutator(
-        z.object({ id: z.string() }),
+      delete: defineContractMutator('releaseAttribution.delete',
         async ({ tx, args: { id } }) => {
           const attribution = await tx.run(zql.release_attributions.where('id', id).one());
           if (!attribution) {
@@ -15425,14 +14265,7 @@ export function createMutators(
       // setTestedBy — the QA-assignment picker on the Testing tab). The live
       // dev ticket is resolved via ART.ticketId and updated in the same
       // mutation so the stage change reflects on the actual ticket.
-      updateStatus: defineMutator(
-        z.object({
-          id: z.string(),
-          stageName: z.string().optional(),
-          defaultTicketStatusV2: z.nativeEnum(TicketStatusV2).optional(),
-          failureReason: z.string().optional().nullable(),
-          timestamp: z.number(),
-        }),
+      updateStatus: defineContractMutator('applicationReleaseTicket.updateStatus',
         async ({ tx, args: { id, stageName, defaultTicketStatusV2, failureReason, timestamp } }) => {
           const row = await tx.run(zql.application_release_tickets.where('id', id).one());
           if (!row) {
@@ -15502,12 +14335,7 @@ export function createMutators(
       ),
       // Set the QA assigned to test this ART row. Independent of status; users
       // can assign before testing starts. Pass userId=null to unassign.
-      setTestedBy: defineMutator(
-        z.object({
-          id: z.string(),
-          userId: z.string().nullable(),
-          timestamp: z.number(),
-        }),
+      setTestedBy: defineContractMutator('applicationReleaseTicket.setTestedBy',
         async ({ tx, args: { id, userId, timestamp } }) => {
           const row = await tx.run(zql.application_release_tickets.where('id', id).one());
           if (!row) {
@@ -15531,15 +14359,7 @@ export function createMutators(
     },
     impact: {
       create: defineContractMutator(
-        impactCreateClient,
-        z.object({
-          id: z.string(),
-          ticketId: z.string(),
-          impactTypeId: z.string(),
-          impact: z.string(),
-          rcaId: z.string(),
-          timestamp: z.number(),
-        }),
+        'impact.create',
         async ({
           tx,
           args: {
@@ -15578,12 +14398,7 @@ export function createMutators(
         },
       ),
       update: defineContractMutator(
-        impactUpdateClient,
-        z.object({
-          id: z.string(),
-          impactTypeId: z.string().optional(),
-          impact: z.string().optional(),
-        }),
+        'impact.update',
         async ({ tx, args: { id, impactTypeId, impact } }) => {
           const existingImpact = await tx.run(zql.impacts.where('id', id).one());
           if (!existingImpact) {
@@ -15597,10 +14412,7 @@ export function createMutators(
           });
         },
       ),
-      delete: defineMutator(
-        z.object({
-          id: z.string(),
-        }),
+      delete: defineContractMutator('impact.delete',
         async ({ tx, args: { id } }) => {
           const existingImpact = await tx.run(zql.impacts.where('id', id).one());
           if (!existingImpact) {
@@ -15613,17 +14425,7 @@ export function createMutators(
     },
     coe: {
       create: defineContractMutator(
-        coeCreateClient,
-        z.object({
-          id: z.string(),
-          rcaId: z.string(),
-          ownerId: z.string(),
-          actionTypeId: z.string(),
-          action: z.string(),
-          status: z.nativeEnum(COEStatus),
-          dueDate: z.number().optional(),
-          timestamp: z.number(),
-        }),
+        'coe.create',
         async ({
           tx,
           args: {
@@ -15664,16 +14466,7 @@ export function createMutators(
         },
       ),
       update: defineContractMutator(
-        coeUpdateClient,
-        z.object({
-          id: z.string(),
-          ownerId: z.string().optional(),
-          actionTypeId: z.string().optional(),
-          action: z.string().optional(),
-          status: z.nativeEnum(COEStatus).optional(),
-          dueDate: z.number().optional(),
-          completedAt: z.number().optional(),
-        }),
+        'coe.update',
         async ({
           tx,
           args: {
@@ -15711,10 +14504,7 @@ export function createMutators(
           });
         },
       ),
-      delete: defineMutator(
-        z.object({
-          id: z.string(),
-        }),
+      delete: defineContractMutator('coe.delete',
         async ({ tx, args: { id } }) => {
           const existingCoe = await tx.run(zql.coes.where('id', id).one());
           if (!existingCoe) {
@@ -15726,11 +14516,7 @@ export function createMutators(
       ),
     },
     recap: {
-      saveSubscriptions: defineMutator(
-        z.object({
-          channelIds: z.array(z.string()),
-          timestamp: z.number(),
-        }),
+      saveSubscriptions: defineContractMutator('recap.saveSubscriptions',
         async ({ tx, ctx, args: { channelIds, timestamp } }) => {
           // Get all channel user status entries for this user
           const userChannelStatuses = await tx.run(
@@ -15755,12 +14541,7 @@ export function createMutators(
         },
       ),
       setCustomRecapPrompt: defineContractMutator(
-        recapSetCustomRecapPromptClient,
-        z.object({
-          channelId: z.string(),
-          prompt: z.string().nullable(),
-          timestamp: z.number(),
-        }),
+        'recap.setCustomRecapPrompt',
         async ({ tx, ctx, args: { channelId, prompt, timestamp: _timestamp } }) => {
           const status = await tx.run(
             zql.channel_user_status.where('userId', ctx.userID).where('channelId', channelId).one(),
@@ -15776,11 +14557,7 @@ export function createMutators(
           });
         },
       ),
-      markSeen: defineMutator(
-        z.object({
-          recapDate: z.number(),
-          timestamp: z.number(),
-        }),
+      markSeen: defineContractMutator('recap.markSeen',
         async ({ tx, ctx, args: { recapDate, timestamp } }) => {
           // Update all subscribed channels for this user with the seen date
           const subscribedChannels = await tx.run(
@@ -15805,12 +14582,7 @@ export function createMutators(
           }
         },
       ),
-      markChannelRecapAsRead: defineMutator(
-        z.object({
-          channelId: z.string(),
-          recapDate: z.number(),
-          timestamp: z.number(),
-        }),
+      markChannelRecapAsRead: defineContractMutator('recap.markChannelRecapAsRead',
         async ({ tx, ctx, args: { channelId, recapDate, timestamp } }) => {
           // Find the channel user status for this channel
           const status = await tx.run(
@@ -15835,11 +14607,7 @@ export function createMutators(
           }
         },
       ),
-      markChannelRecapAsUnread: defineMutator(
-        z.object({
-          channelId: z.string(),
-          timestamp: z.number(),
-        }),
+      markChannelRecapAsUnread: defineContractMutator('recap.markChannelRecapAsUnread',
         async ({ tx, ctx, args: { channelId, timestamp } }) => {
           // Find the channel user status for this channel
           const status = await tx.run(
@@ -15865,19 +14633,8 @@ export function createMutators(
     },
     links: {
       create: defineContractMutator(
-        linksCreateClient,
-        z.object({
-          id: z.string(),
-          url: z.string().url(),
-          title: z.string().min(1),
-          description: z.string().optional(),
-          favicon: z.string().optional(),
-          channelId: z.string(),
-          visibility: z.enum(['DEFAULT', 'PERSONAL']).default('DEFAULT'),
-          createdAt: z.number(),
-          updatedAt: z.number(),
-        }),
-        async ({ tx, ctx, args }) => {
+        'links.create',
+        async ({ tx, facts, ctx, args }) => {
           const { id, url, title, description, favicon, channelId, visibility, createdAt, updatedAt } = args;
           const userId = ctx.userID;
 
@@ -15899,7 +14656,7 @@ export function createMutators(
             id,
             url,
             title,
-            description: getMutationFacts(linksCreateClient, 'description') ? description : null,
+            description: facts.description ? description : null,
             favicon: favicon || null,
             channelId,
             createdBy: userId,
@@ -15911,16 +14668,8 @@ export function createMutators(
       ),
 
       update: defineContractMutator(
-        linksUpdateClient,
-        z.object({
-          id: z.string(),
-          title: z.string().min(1).optional(),
-          description: z.string().optional(),
-          favicon: z.string().optional(),
-          visibility: z.enum(['DEFAULT', 'PERSONAL']).optional(),
-          updatedAt: z.number(),
-        }),
-        async ({ tx, ctx, args }) => {
+        'links.update',
+        async ({ tx, facts, ctx, args }) => {
           const { id, title, description, favicon, visibility, updatedAt } = args;
           const userId = ctx.userID;
 
@@ -15939,7 +14688,7 @@ export function createMutators(
             ...(title !== undefined && { title }),
             // No facts means the description was empty, as `description || null` had it.
             ...(description !== undefined && {
-              description: getMutationFacts(linksUpdateClient, 'description') ? description : null,
+              description: facts.description ? description : null,
             }),
             ...(favicon !== undefined && { favicon: favicon || null }),
             ...(visibility !== undefined && {
@@ -15949,8 +14698,7 @@ export function createMutators(
         }
       ),
 
-      delete: defineMutator(
-        z.object({ id: z.string() }),
+      delete: defineContractMutator('links.delete',
         async ({ tx, ctx, args: { id } }) => {
           const userId = ctx.userID;
 
@@ -15968,13 +14716,7 @@ export function createMutators(
         }
       ),
 
-      shareWith: defineMutator(
-        z.object({
-          linkId: z.string(),
-          userIds: z.array(z.string()),
-          accessIds: z.array(z.string()),
-          createdAt: z.number(),
-        }),
+      shareWith: defineContractMutator('links.shareWith',
         async ({ tx, ctx, args: { linkId, userIds, accessIds, createdAt } }) => {
           const userId = ctx.userID;
 
@@ -16013,11 +14755,7 @@ export function createMutators(
         }
       ),
 
-      unshare: defineMutator(
-        z.object({
-          linkId: z.string(),
-          userId: z.string(),
-        }),
+      unshare: defineContractMutator('links.unshare',
         async ({ tx, ctx, args: { linkId, userId: targetUserId } }) => {
           const userId = ctx.userID;
 
@@ -16045,24 +14783,7 @@ export function createMutators(
       ),
     },
     savedUserConfiguration: {
-      create: defineMutator(
-        z.object({
-          id: z.string(),
-          name: z.string().min(1),
-          contextType: z.nativeEnum(SavedConfigContextType),
-          contextId: z.string(),
-          channelId: z.string(),
-          visibility: z.nativeEnum(SavedConfigVisibility),
-          timestamp: z.number(),
-          values: z.array(
-            z.object({
-              id: z.string(),
-              entityName: z.nativeEnum(SavedConfigEntityName),
-              fieldName: z.string(),
-              fieldValue: z.string(),
-            })
-          ),
-        }),
+      create: defineContractMutator('savedUserConfiguration.create',
         async ({
           tx,
           args: { id, name, contextType, contextId, visibility, timestamp, values },
@@ -16122,24 +14843,7 @@ export function createMutators(
           };
         },
       ),
-      update: defineMutator(
-        z.object({
-          configId: z.string(),
-          name: z.string().min(1).optional(),
-          visibility: z.nativeEnum(SavedConfigVisibility).optional(),
-          isStarred: z.boolean().optional(),
-          timestamp: z.number(),
-          values: z
-            .array(
-              z.object({
-                id: z.string(),
-                entityName: z.nativeEnum(SavedConfigEntityName),
-                fieldName: z.string(),
-                fieldValue: z.string(),
-              })
-            )
-            .optional(),
-        }),
+      update: defineContractMutator('savedUserConfiguration.update',
         async ({ tx, args: { configId, name, visibility, isStarred, timestamp, values } }) => {
           const config = await tx.run(zql.saved_user_configurations.where('id', configId).one());
           if (!config) {
@@ -16228,10 +14932,7 @@ export function createMutators(
           }
         }
       ),
-      delete: defineMutator(
-        z.object({
-          configId: z.string(),
-        }),
+      delete: defineContractMutator('savedUserConfiguration.delete',
         async ({ tx, args: { configId } }) => {
           const config = await tx.run(zql.saved_user_configurations.where('id', configId).one());
           if (!config) {
@@ -16254,14 +14955,7 @@ export function createMutators(
       ),
     },
     viewAccess: {
-      grant: defineMutator(
-        z.object({
-          id: z.string(),
-          viewId: z.string(),
-          entityType: z.nativeEnum(ViewAccessEntityType),
-          entityId: z.string(),
-          timestamp: z.number(),
-        }),
+      grant: defineContractMutator('viewAccess.grant',
         async ({ tx, args: { id, viewId, entityType, entityId, timestamp } }) => {
           const existing = await tx.run(
             zql.view_access
@@ -16283,10 +14977,7 @@ export function createMutators(
           });
         },
       ),
-      revoke: defineMutator(
-        z.object({
-          id: z.string(),
-        }),
+      revoke: defineContractMutator('viewAccess.revoke',
         async ({ tx, args: { id } }) => {
           await tx.mutate.view_access.delete({ id });
         },
@@ -16294,20 +14985,7 @@ export function createMutators(
     },
     workspace: {
       update: defineContractMutator(
-        workspaceUpdateClient,
-        z.object({
-          workspaceId: z.string(),
-          timestamp: z.number(),
-          name: z.string().optional(),
-          description: z.string().optional(),
-          // Older clients send the fields nested here (plaintext; nothing in it is encrypted).
-          updates: z
-            .object({
-              name: z.string().optional(),
-              description: z.string().optional(),
-            })
-            .optional(),
-        }),
+        'workspace.update',
         async ({ tx, args: { workspaceId, timestamp, name, description, updates } }) => {
           const nextName = name ?? updates?.name;
           const nextDescription = description ?? updates?.description;
@@ -16322,14 +15000,7 @@ export function createMutators(
       ),
     },
     apps: {
-      update: defineMutator(
-        z.object({
-          appId: z.string(),
-          name: z.string().optional(),
-          description: z.string().optional(),
-          webhookUrl: z.string().optional(),
-          timestamp: z.number(),
-        }),
+      update: defineContractMutator('apps.update',
         async ({ tx, args: { appId, name, description, webhookUrl, timestamp } }) => {
           const app = await tx.run(zql.apps.where('id', appId).one());
           if (!app) {
@@ -16361,13 +15032,7 @@ export function createMutators(
 
     emailSignature: {
       create: defineContractMutator(
-        emailSignatureCreateClient,
-        z.object({
-          id: z.string(),
-          name: z.string(),
-          content: z.string(),
-          timestamp: z.number(),
-        }),
+        'emailSignature.create',
         async ({ tx, args: { id, name, content, timestamp } }) => {
           await tx.mutate.email_signatures.insert({
             workspaceId: authData.workspaceId,
@@ -16383,13 +15048,7 @@ export function createMutators(
       ),
 
       update: defineContractMutator(
-        emailSignatureUpdateClient,
-        z.object({
-          id: z.string(),
-          name: z.string(),
-          content: z.string(),
-          timestamp: z.number(),
-        }),
+        'emailSignature.update',
         async ({ tx, args: { id, name, content, timestamp } }) => {
           const existing = await tx.run(
             zql.email_signatures.where('id', id).where('userId', authData.sub).one(),
@@ -16406,10 +15065,7 @@ export function createMutators(
         },
       ),
 
-      delete: defineMutator(
-        z.object({
-          id: z.string(),
-        }),
+      delete: defineContractMutator('emailSignature.delete',
         async ({ tx, args: { id } }) => {
           const existing = await tx.run(
             zql.email_signatures.where('id', id).where('userId', authData.sub).one(),
@@ -16421,11 +15077,7 @@ export function createMutators(
         },
       ),
 
-      setDefault: defineMutator(
-        z.object({
-          id: z.string(),
-          timestamp: z.number(),
-        }),
+      setDefault: defineContractMutator('emailSignature.setDefault',
         async ({ tx, args: { id, timestamp } }) => {
           const existing = await tx.run(
             zql.email_signatures.where('id', id).where('userId', authData.sub).one(),
@@ -16455,15 +15107,7 @@ export function createMutators(
     },
 
     users: {
-      updateRole: defineMutator(
-        z.object({
-          workspaceId: z.string(),
-          userId: z.string(),
-          updates: z.object({
-            role: z.enum([WorkspaceRole.ADMIN, WorkspaceRole.MEMBER]).optional(),
-          }),
-          timestamp: z.number(),
-        }),
+      updateRole: defineContractMutator('users.updateRole',
         async ({ tx, args: { userId, updates, timestamp } }) => {
           // ACL check is handled by UsersACL
           await tx.mutate.users.update({
@@ -16480,12 +15124,7 @@ export function createMutators(
         }
       ),
 
-      remove: defineMutator(
-        z.object({
-          workspaceId: z.string(),
-          userId: z.string(),
-          timestamp: z.number(),
-        }),
+      remove: defineContractMutator('users.remove',
         async ({ tx, args: { userId, timestamp } }) => {
           // ACL check is handled by UsersACL
           await tx.mutate.users.update({
@@ -16497,16 +15136,7 @@ export function createMutators(
       ),
     },
     org: {
-      create: defineMutator(
-        z.object({
-          orgId: z.string(),
-          orgName: z.string(),
-          orgDescription: z.string().optional(),
-          workspaceId: z.string(),
-          workspaceOrgId: z.string(),
-          memberId: z.string(),
-          timestamp: z.number(),
-        }),
+      create: defineContractMutator('org.create',
         async ({
           tx,
           args: { orgId, orgName, orgDescription, workspaceId, workspaceOrgId, memberId, timestamp },
@@ -16567,13 +15197,7 @@ export function createMutators(
       ),
     },
     workspaceOrg: {
-      add: defineMutator(
-        z.object({
-          workspaceId: z.string(),
-          orgId: z.string(),
-          id: z.string(),
-          timestamp: z.number(),
-        }),
+      add: defineContractMutator('workspaceOrg.add',
         async ({ tx, args: { workspaceId, orgId, id, timestamp } }) => {
           const admin = await tx.run(
             zql.users
@@ -16623,12 +15247,7 @@ export function createMutators(
           }
         }
       ),
-      remove: defineMutator(
-        z.object({
-          workspaceId: z.string(),
-          orgId: z.string(),
-          timestamp: z.number(),
-        }),
+      remove: defineContractMutator('workspaceOrg.remove',
         async ({ tx, args: { workspaceId, orgId, timestamp } }) => {
           const admin = await tx.run(
             zql.users
@@ -16657,11 +15276,7 @@ export function createMutators(
       ),
     },
     invitation: {
-      revoke: defineMutator(
-        z.object({
-          invitationId: z.string(),
-          timestamp: z.number(),
-        }),
+      revoke: defineContractMutator('invitation.revoke',
         async ({ tx, args: { invitationId, timestamp } }) => {
           const invitation = await tx.run(
             zql.invitations.where('id', invitationId).one()
@@ -16686,14 +15301,7 @@ export function createMutators(
       ),
     },
     orgMember: {
-      add: defineMutator(
-        z.object({
-          memberId: z.string(),
-          orgId: z.string(),
-          email: z.string(),
-          role: z.string(),
-          timestamp: z.number(),
-        }),
+      add: defineContractMutator('orgMember.add',
         async ({ tx, args: { memberId, orgId, email, role, timestamp } }) => {
           // Reactivate a previously soft-deleted membership if one exists
           const existing = await tx.run(
@@ -16724,13 +15332,7 @@ export function createMutators(
           asyncTasks.push(() => syncOrgResourceAdminAccess(orgId, email, authData.sub));
         },
       ),
-      updateRole: defineMutator(
-        z.object({
-          memberId: z.string(),
-          updates: z.object({
-            role: z.enum([OrgRole.OWNER, OrgRole.ADMIN, OrgRole.MEMBER, OrgRole.VIEWER]).optional(),
-          }),
-        }),
+      updateRole: defineContractMutator('orgMember.updateRole',
         async ({ tx, args: { memberId, updates } }) => {
           await tx.mutate.org_members.update({
             memberId,
@@ -16748,11 +15350,7 @@ export function createMutators(
           }
         },
       ),
-      remove: defineMutator(
-        z.object({
-          memberId: z.string(),
-          timestamp: z.number(),
-        }),
+      remove: defineContractMutator('orgMember.remove',
         // Soft-delete: set leftAt so the member is excluded from active queries
         async ({ tx, args: { memberId, timestamp } }) => {
           await tx.mutate.org_members.update({
@@ -16763,14 +15361,7 @@ export function createMutators(
       ),
     },
     userPreference: {
-      setSidebarGroupPreference: defineMutator(
-        z.object({
-          id: z.string(),
-          group: z.enum(['starred', 'channels', 'dms']),
-          filterMode: z.nativeEnum(ChannelFilterMode).optional(),
-          sortOrder: z.nativeEnum(ChannelSortOrder).optional(),
-          timestamp: z.number(),
-        }),
+      setSidebarGroupPreference: defineContractMutator('userPreference.setSidebarGroupPreference',
         async ({ tx, args: { id, group, filterMode, sortOrder, timestamp } }) => {
           const filterField = {
             starred: 'starredFilterMode',
@@ -16811,12 +15402,7 @@ export function createMutators(
           }
         },
       ),
-      setChannelSortOrder: defineMutator(
-        z.object({
-          id: z.string(),
-          channelSortOrder: z.nativeEnum(ChannelSortOrder),
-          timestamp: z.number(),
-        }),
+      setChannelSortOrder: defineContractMutator('userPreference.setChannelSortOrder',
         async ({ tx, args: { id, channelSortOrder, timestamp } }) => {
           const existing = await tx.run(
             zql.user_preferences.where('userId', authData.sub).one(),
@@ -16847,12 +15433,7 @@ export function createMutators(
           }
         },
       ),
-      setEnterSendsMessage: defineMutator(
-        z.object({
-          id: z.string(),
-          enterSendsMessage: z.boolean(),
-          timestamp: z.number(),
-        }),
+      setEnterSendsMessage: defineContractMutator('userPreference.setEnterSendsMessage',
         async ({ tx, args: { id, enterSendsMessage, timestamp } }) => {
           const existing = await tx.run(
             zql.user_preferences.where('userId', authData.sub).one(),
@@ -16883,12 +15464,7 @@ export function createMutators(
           }
         },
       ),
-      setShowThreadTags: defineMutator(
-        z.object({
-          id: z.string(),
-          showThreadTags: z.boolean(),
-          timestamp: z.number(),
-        }),
+      setShowThreadTags: defineContractMutator('userPreference.setShowThreadTags',
         async ({ tx, ctx, args: { id, showThreadTags, timestamp } }) => {
           const existing = await tx.run(
             zql.user_preferences.where('userId', ctx.userID).one(),
@@ -16919,12 +15495,7 @@ export function createMutators(
           }
         },
       ),
-      setAllowThreadBroadcastMentions: defineMutator(
-        z.object({
-          id: z.string(),
-          allowThreadBroadcastMentions: z.boolean(),
-          timestamp: z.number(),
-        }),
+      setAllowThreadBroadcastMentions: defineContractMutator('userPreference.setAllowThreadBroadcastMentions',
         async ({ tx, args: { id, allowThreadBroadcastMentions, timestamp } }) => {
           const existing = await tx.run(
             zql.user_preferences.where('userId', authData.sub).one(),
@@ -16955,15 +15526,7 @@ export function createMutators(
           }
         },
       ),
-      setGlobalNotificationSettings: defineMutator(
-        z.object({
-          id: z.string(),
-          globalDesktopNotificationLevel: z.enum(['ALL', 'MENTIONS_ONLY', 'THREADS_ONLY', 'NONE']).optional(),
-          globalMobileNotificationLevel: z.enum(['ALL', 'MENTIONS_ONLY', 'THREADS_ONLY', 'NONE']).optional(),
-          threadReplyNotificationsEnabled: z.boolean().optional(),
-          channelWideMentionsEnabled: z.boolean().optional(),
-          timestamp: z.number(),
-        }),
+      setGlobalNotificationSettings: defineContractMutator('userPreference.setGlobalNotificationSettings',
         async ({
           tx,
           args: {
@@ -17007,12 +15570,7 @@ export function createMutators(
           }
         },
       ),
-      setNotificationKeywords: defineMutator(
-        z.object({
-          id: z.string(),
-          keywords: z.array(z.string().min(1).max(MAX_NOTIFICATION_KEYWORD_LENGTH)).max(MAX_NOTIFICATION_KEYWORDS),
-          timestamp: z.number(),
-        }),
+      setNotificationKeywords: defineContractMutator('userPreference.setNotificationKeywords',
         async ({ tx, args: { id, keywords, timestamp } }) => {
           const notificationKeywords = JSON.stringify(normalizeNotificationKeywords(keywords));
           const existing = await tx.run(
@@ -17044,13 +15602,7 @@ export function createMutators(
           }
         },
       ),
-      setRecordingDefaultSummaryTemplate: defineMutator(
-        z.object({
-          id: z.string(),
-          // `null` clears the default so recordings go back to the automatic pick.
-          recordingDefaultSummaryTemplateId: z.string().min(1).nullable(),
-          timestamp: z.number(),
-        }),
+      setRecordingDefaultSummaryTemplate: defineContractMutator('userPreference.setRecordingDefaultSummaryTemplate',
         async ({ tx, ctx, args: { id, recordingDefaultSummaryTemplateId, timestamp } }) => {
           // The default must be a template the user can use today: the same service
           // check generation time relies on, which also covers the code-backed
@@ -17099,36 +15651,7 @@ export function createMutators(
     },
 
     emailChannelPreference: {
-      upsert: defineMutator(
-        z.object({
-          channelId: z.string(),
-          ownerUserId: z.string().optional(),
-          assigneeUserGroupId: z.string().optional().nullable(),
-          sendAsEmail: z.string().optional().nullable(),
-          dlAliases: z.string().optional().nullable(),
-          defaultCc: z.string().optional().nullable(),
-          emailMergeMode: z.nativeEnum(EmailMergeMode).optional(),
-          twoStepSendEnabled: z.boolean().optional(),
-          autoDraftMode: z.nativeEnum(AutoDraftMode).optional(),
-          autoDraftAgentSlug: z.string().optional().nullable(),
-          metricsEnabled: z.boolean().optional(),
-          frtStageNames: z.string().optional().nullable(),
-          metricsGuestVisibility: z.string().optional().nullable(),
-          metricsMinAccess: z.nativeEnum(AccessType).optional().nullable(),
-          appWebhookDeliveryEnabled: z.boolean().optional(),
-          deskReportEnabled: z.boolean().optional(),
-          deskReportAgentSlug: z.string().optional().nullable(),
-          deskReportRangeDays: z.number().optional(),
-          // Scoped duplicate detection config (see EmailChannelPreference.duplicateScopeConfig)
-          duplicateScopeConfig: z
-            .object({
-              enabled: z.boolean(),
-              scopeFieldGlobalIds: z.array(z.string()).max(MAX_DUPLICATE_SCOPE_FIELDS),
-              lookbackDays: z.number().int().min(0).max(MAX_DUPLICATE_LOOKBACK_DAYS).nullable().optional(),
-            })
-            .nullable()
-            .optional(),
-        }),
+      upsert: defineContractMutator('emailChannelPreference.upsert',
         async ({
           tx,
           args: {
@@ -17238,14 +15761,7 @@ export function createMutators(
         },
       ),
       upsertClassificationConfig: defineContractMutator(
-        emailChannelPreferenceUpsertClassificationClient,
-        z.object({
-          channelId: z.string(),
-          classificationEnabled: z.boolean(),
-          classificationPrompt: z.string(),
-          categoryField: z.string(),
-          subCategoryField: z.string().optional().nullable(),
-        }),
+        'emailChannelPreference.upsertClassificationConfig',
         async ({ tx, ctx, args }) => {
           const { channelId, classificationEnabled, classificationPrompt, categoryField, subCategoryField } = args;
           const existing = await tx.run(
@@ -17283,13 +15799,7 @@ export function createMutators(
         },
       ),
       upsertPriorityClassificationConfig: defineContractMutator(
-        emailChannelPreferenceUpsertPriorityClassificationClient,
-        z.object({
-          channelId: z.string(),
-          priorityClassificationEnabled: z.boolean(),
-          priorityClassificationPrompt: z.string().optional().nullable(),
-          priorityClassificationThreshold: z.number().optional(),
-        }),
+        'emailChannelPreference.upsertPriorityClassificationConfig',
         async ({ tx, ctx, args }) => {
           const { channelId, priorityClassificationEnabled, priorityClassificationPrompt, priorityClassificationThreshold } = args;
           const existing = await tx.run(
@@ -17327,32 +15837,17 @@ export function createMutators(
       ),
     },
     classificationMapping: {
-      create: defineMutator(
-        z.object({
-          id: z.string(),
-          channelId: z.string(),
-          category: z.string(),
-          subCategory: z.string().optional().nullable(),
-          userGroupId: z.string(),
-          createdAt: z.number(),
-        }),
+      create: defineContractMutator('classificationMapping.create',
         async ({ tx, args }) => {
           await tx.mutate.classification_mappings.insert({ ...args, workspaceId: authData.workspaceId });
         },
       ),
-      update: defineMutator(
-        z.object({
-          id: z.string(),
-          category: z.string().optional(),
-          subCategory: z.string().optional().nullable(),
-          userGroupId: z.string().optional(),
-        }),
+      update: defineContractMutator('classificationMapping.update',
         async ({ tx, args: { id, ...fields } }) => {
           await tx.mutate.classification_mappings.update({ id, ...fields });
         },
       ),
-      delete: defineMutator(
-        z.object({ id: z.string() }),
+      delete: defineContractMutator('classificationMapping.delete',
         async ({ tx, args: { id } }) => {
           await tx.mutate.classification_mappings.delete({ id });
         },
@@ -17360,19 +15855,7 @@ export function createMutators(
     },
 
     boardSlaPolicy: {
-      upsert: defineMutator(
-        z.object({
-          id: z.string(),
-          boardId: z.string(),
-          priority: z.enum(['LOW', 'MEDIUM', 'HIGH', 'CRITICAL']),
-          responseHours: z.number().min(0),
-          resolutionHours: z.number().min(0),
-          businessHoursOnly: z.boolean(),
-          timezone: z.string(),
-          workdayStart: z.number().int().min(0).max(23),
-          workdayEnd: z.number().int().min(1).max(24),
-          isActive: z.boolean(),
-        }),
+      upsert: defineContractMutator('boardSlaPolicy.upsert',
         async ({
           tx,
           args: { id, boardId, priority, responseHours, resolutionHours, businessHoursOnly, timezone, workdayStart, workdayEnd, isActive },
@@ -17415,8 +15898,7 @@ export function createMutators(
           }
         },
       ),
-      delete: defineMutator(
-        z.object({ id: z.string() }),
+      delete: defineContractMutator('boardSlaPolicy.delete',
         async ({ tx, args: { id } }) => {
           await tx.mutate.board_sla_policies.update({ id, isActive: false, updatedAt: Date.now() });
         },
@@ -17424,17 +15906,7 @@ export function createMutators(
     },
     collection: {
       createCollection: defineContractMutator(
-        collectionCreateClient,
-        z.object({
-          id: z.string(),
-          scopeType: z.string(),
-          scopeId: z.string(),
-          name: z.string(),
-          description: z.string().nullable().optional(),
-          isPrivate: z.boolean().optional(),
-          permissionId: z.string(),
-          timestamp: z.number(),
-        }),
+        'collection.createCollection',
         async ({ tx, args: { id, scopeType, scopeId, name, description, isPrivate, permissionId, timestamp } }) => {
           // Verify user is a channel participant (for CHANNEL scope)
           if (scopeType === 'CHANNEL') {
@@ -17488,14 +15960,7 @@ export function createMutators(
       ),
 
       updateCollection: defineContractMutator(
-        collectionUpdateClient,
-        z.object({
-          id: z.string(),
-          name: z.string().optional(),
-          description: z.string().nullable().optional(),
-          isPrivate: z.boolean().optional(),
-          timestamp: z.number(),
-        }),
+        'collection.updateCollection',
         async ({ tx, args: { id, name, description, isPrivate, timestamp } }) => {
           const collection = await tx.run(zql.collections.where('id', id).one());
           if (!collection) {
@@ -17549,11 +16014,7 @@ export function createMutators(
         },
       ),
 
-      deleteCollection: defineMutator(
-        z.object({
-          id: z.string(),
-          timestamp: z.number(),
-        }),
+      deleteCollection: defineContractMutator('collection.deleteCollection',
         async ({ tx, args: { id, timestamp } }) => {
           const collection = await tx.run(zql.collections.where('id', id).one());
           if (!collection) {
@@ -17602,13 +16063,7 @@ export function createMutators(
         },
       ),
 
-      createFolder: defineMutator(
-        z.object({
-          id: z.string(),
-          parentId: z.string(),
-          name: z.string(),
-          timestamp: z.number(),
-        }),
+      createFolder: defineContractMutator('collection.createFolder',
         async ({ tx, args: { id, parentId, name, timestamp } }) => {
           const parentCollection = await tx.run(zql.collections.where('id', parentId).one());
           if (!parentCollection) {
@@ -17641,12 +16096,7 @@ export function createMutators(
         },
       ),
 
-      deleteItem: defineMutator(
-        z.object({
-          id: z.string(),
-          collectionId: z.string(),
-          timestamp: z.number(),
-        }),
+      deleteItem: defineContractMutator('collection.deleteItem',
         async ({ tx, args: { id, collectionId, timestamp } }) => {
           const collection = await tx.run(zql.collections.where('id', collectionId).one());
           if (!collection) {
@@ -17706,13 +16156,7 @@ export function createMutators(
         },
       ),
 
-      renameItem: defineMutator(
-        z.object({
-          id: z.string(),
-          collectionId: z.string(),
-          name: z.string(),
-          timestamp: z.number(),
-        }),
+      renameItem: defineContractMutator('collection.renameItem',
         async ({ tx, args: { id, collectionId, name, timestamp } }) => {
           const collection = await tx.run(zql.collections.where('id', collectionId).one());
           if (!collection) {
@@ -17739,16 +16183,7 @@ export function createMutators(
         },
       ),
 
-      grantPermission: defineMutator(
-        z.object({
-          id: z.string(),
-          collectionId: z.string(),
-          userId: z.string().optional(),
-          userGroupId: z.string().optional(),
-          channelId: z.string().optional(),
-          role: z.nativeEnum(CollectionRole),
-          timestamp: z.number(),
-        }),
+      grantPermission: defineContractMutator('collection.grantPermission',
         async ({ tx, args: { id, collectionId, userId, userGroupId, channelId, role, timestamp } }) => {
           const collection = await tx.run(zql.collections.where('id', collectionId).one());
           if (!collection) {
@@ -17911,11 +16346,7 @@ export function createMutators(
         },
       ),
 
-      revokePermission: defineMutator(
-        z.object({
-          id: z.string(),
-          collectionId: z.string(),
-        }),
+      revokePermission: defineContractMutator('collection.revokePermission',
         async ({ tx, args: { id, collectionId } }) => {
           const collection = await tx.run(zql.collections.where('id', collectionId).one());
           if (!collection) {
@@ -17969,17 +16400,9 @@ export function createMutators(
     delayedMessages: {
       /** Create a new delayed message */
       create: defineContractMutator(
-        delayedMessagesCreateClient,
-        z.object({
-          id: z.string(),
-          channelId: z.string(),
-          conversationId: z.string().optional(),
-          content: z.string(),
-          scheduledFor: z.number(),
-          timestamp: z.number(),
-        }),
+        'delayedMessages.create',
         async ({
-          tx,
+          tx, facts,
           ctx,
           args: { id, channelId, conversationId, content, scheduledFor, timestamp },
         }) => {
@@ -18013,7 +16436,7 @@ export function createMutators(
             : [];
 
           // No facts means the content was empty.
-          if ((getMutationFacts(delayedMessagesCreateClient, 'content')?.textIsEmpty ?? true) && scheduledAttachments.length === 0) {
+          if ((facts.content?.textIsEmpty ?? true) && scheduledAttachments.length === 0) {
             throw new Error('Message content is required');
           }
 
@@ -18052,11 +16475,7 @@ export function createMutators(
       ),
 
       /** Cancel a pending delayed message */
-      cancel: defineContractMutator(
-        z.object({
-          id: z.string(),
-          timestamp: z.number(),
-        }),
+      cancel: defineContractMutator('delayedMessages.cancel',
         async ({ tx, ctx, args: { id, timestamp } }) => {
           const scheduled = await tx.run(
             zql.delayed_messages.where('id', id).where('senderId', ctx.userID).one(),
@@ -18082,12 +16501,7 @@ export function createMutators(
       ),
 
       /** Update the scheduled time for a pending message */
-      reschedule: defineMutator(
-        z.object({
-          id: z.string(),
-          scheduledFor: z.number(),
-          timestamp: z.number(),
-        }),
+      reschedule: defineContractMutator('delayedMessages.reschedule',
         async ({ tx, ctx, args: { id, scheduledFor, timestamp } }) => {
           const scheduled = await tx.run(
             zql.delayed_messages.where('id', id).where('senderId', ctx.userID).one(),
@@ -18109,12 +16523,7 @@ export function createMutators(
         },
       ),
       edit: defineContractMutator(
-        delayedMessagesEditClient,
-        z.object({
-          id: z.string(),
-          content: z.string().min(1),
-          updatedAt: z.number(),
-        }),
+        'delayedMessages.edit',
         async ({ tx, ctx, args: { id, content, updatedAt } }) => {
           const scheduled = await tx.run(
             zql.delayed_messages.where('id', id).where('senderId', ctx.userID).one()
@@ -18143,11 +16552,7 @@ export function createMutators(
         }
       ),
 
-      convertToDraft: defineContractMutator(
-        z.object({
-          id: z.string(),
-          timestamp: z.number(),
-        }),
+      convertToDraft: defineContractMutator('delayedMessages.convertToDraft',
         async ({ tx, ctx, args: { id, timestamp } }) => {
           const scheduled = await tx.run(
             zql.delayed_messages.where('id', id).where('senderId', ctx.userID).one()
@@ -18209,11 +16614,7 @@ export function createMutators(
         }
       ),
 
-      sendNow: defineMutator(
-        z.object({
-          id: z.string(),
-          timestamp: z.number(),
-        }),
+      sendNow: defineContractMutator('delayedMessages.sendNow',
         async ({ tx, ctx, args: { id, timestamp } }) => {
           const scheduled = await tx.run(
             zql.delayed_messages.where('id', id).where('senderId', ctx.userID).one()
@@ -18238,7 +16639,7 @@ export function createMutators(
 
     draftMessages: {
       /** Delete a draft message by ID (only the owner can delete their own draft) */
-      delete: defineContractMutator(z.object({ id: z.string() }), async ({ tx, ctx, args: { id } }) => {
+      delete: defineContractMutator('draftMessages.delete', async ({ tx, ctx, args: { id } }) => {
         const draft = await tx.run(
           zql.draft_messages.where('id', id).where('userId', ctx.userID).where(({ or, cmp }) => or(cmp('origin', '=', DraftOrigin.user), cmp('origin', 'IS', null))).one()
         );
@@ -18251,12 +16652,7 @@ export function createMutators(
 
       /** Edit a draft message content */
       edit: defineContractMutator(
-        draftMessagesEditClient,
-        z.object({
-          id: z.string(),
-          content: z.string().min(1),
-          timestamp: z.number(),
-        }),
+        'draftMessages.edit',
         async ({ tx, ctx, args: { id, content, timestamp } }) => {
           const draft = await tx.run(
             zql.draft_messages.where('id', id).where('userId', ctx.userID).where(({ or, cmp }) => or(cmp('origin', '=', DraftOrigin.user), cmp('origin', 'IS', null))).one()
@@ -18274,11 +16670,7 @@ export function createMutators(
       ),
 
       /** Send a draft message immediately (converts to sent message) */
-      send: defineContractMutator(
-        z.object({
-          id: z.string(),
-          timestamp: z.number(),
-        }),
+      send: defineContractMutator('draftMessages.send',
         async ({ tx, ctx, args: { id, timestamp } }) => {
           const read = await tx.read(
             zql.draft_messages.where('id', id).where('userId', ctx.userID).where(({ or, cmp }) => or(cmp('origin', '=', DraftOrigin.user), cmp('origin', 'IS', null))).one(),
@@ -18337,16 +16729,7 @@ export function createMutators(
       // Create a fresh PROPOSAL row. New automation: omit `automationSeriesId`, row
       // uses its own id as the lineage seed. Edit existing LIVE: pass
       // `automationSeriesId` from the LIVE row + a copy of its config/metadata.
-      createProposal: defineMutator(
-        z.object({
-          id: z.string(),
-          name: z.string().min(1).max(80),
-          configJson: z.string(),
-          metadataJson: z.string(),
-          eventType: z.string(),
-          automationSeriesId: z.string().optional(),
-          timestamp: z.number(),
-        }),
+      createProposal: defineContractMutator('automations.createProposal',
         async ({
           ctx,
           tx,
@@ -18391,15 +16774,7 @@ export function createMutators(
           });
         },
       ),
-      update: defineMutator(
-        z.object({
-          id: z.string(),
-          name: z.string().min(1).max(80).optional(),
-          configJson: z.string().optional(),
-          metadataJson: z.string().optional(),
-          eventType: z.string().optional(),
-          timestamp: z.number(),
-        }),
+      update: defineContractMutator('automations.update',
         async ({
           ctx,
           tx,
@@ -18437,8 +16812,7 @@ export function createMutators(
           logger.info(`[Mutator] automations.update OK id=${id}`);
         },
       ),
-      delete: defineMutator(
-        z.object({ id: z.string() }),
+      delete: defineContractMutator('automations.delete',
         async ({ tx, args: { id } }) => {
           const existing = await tx.run(zql.workflows.where('id', id).one());
           if (existing && existing.workflowType === 'Automations' && existing.status !== 'DRAFT') {
@@ -18449,8 +16823,7 @@ export function createMutators(
           await tx.mutate.workflows.delete({ id });
         },
       ),
-      submitForApproval: defineMutator(
-        z.object({ id: z.string(), timestamp: z.number() }),
+      submitForApproval: defineContractMutator('automations.submitForApproval',
         async ({ tx, args: { id, timestamp } }) => {
           logger.info(`[Mutator] automations.submitForApproval START id=${id}`);
           const existing = await tx.run(zql.workflows.where('id', id).one());
@@ -18478,8 +16851,7 @@ export function createMutators(
           });
         },
       ),
-      revoke: defineMutator(
-        z.object({ id: z.string(), timestamp: z.number() }),
+      revoke: defineContractMutator('automations.revoke',
         async ({ tx, args: { id, timestamp } }) => {
           logger.info(`[Mutator] automations.revoke START id=${id}`);
           const existing = await tx.run(zql.workflows.where('id', id).one());
@@ -18507,12 +16879,7 @@ export function createMutators(
           });
         },
       ),
-      approve: defineMutator(
-        z.object({
-          id: z.string(),
-          note: z.string().nullable().optional(),
-          timestamp: z.number(),
-        }),
+      approve: defineContractMutator('automations.approve',
         async ({ tx, args: { id, note, timestamp } }) => {
           logger.info(`[Mutator] automations.approve START id=${id}`);
           const existing = await tx.run(zql.workflows.where('id', id).one());
@@ -18544,12 +16911,7 @@ export function createMutators(
           });
         },
       ),
-      reject: defineMutator(
-        z.object({
-          id: z.string(),
-          note: z.string().min(1),
-          timestamp: z.number(),
-        }),
+      reject: defineContractMutator('automations.reject',
         async ({ tx, args: { id, note, timestamp } }) => {
           logger.info(`[Mutator] automations.reject START id=${id}`);
           const existing = await tx.run(zql.workflows.where('id', id).one());
@@ -18577,8 +16939,7 @@ export function createMutators(
           });
         },
       ),
-      activate: defineMutator(
-        z.object({ id: z.string(), timestamp: z.number() }),
+      activate: defineContractMutator('automations.activate',
         async ({ tx, args: { id, timestamp } }) => {
           logger.info(`[Mutator] automations.activate START id=${id}`);
           const existing = await tx.run(zql.workflows.where('id', id).one());
@@ -18618,12 +16979,7 @@ export function createMutators(
           });
         },
       ),
-      disable: defineMutator(
-        z.object({
-          id: z.string(),
-          timestamp: z.number(),
-          cancelQueued: z.boolean().optional(),
-        }),
+      disable: defineContractMutator('automations.disable',
         async ({ tx, args: { id, timestamp, cancelQueued } }) => {
           logger.info(`[Mutator] automations.disable START id=${id}`);
           const existing = await tx.run(zql.workflows.where('id', id).one());
@@ -18677,8 +17033,7 @@ export function createMutators(
       // Admin-only: permanently retire a live automation. ARCHIVED is gated to
       // admins by the workflows ACL, and the event-router only matches ACTIVE
       // rows, so archiving immediately stops it from firing.
-      archive: defineMutator(
-        z.object({ id: z.string(), timestamp: z.number() }),
+      archive: defineContractMutator('automations.archive',
         async ({ tx, args: { id, timestamp } }) => {
           logger.info(`[Mutator] automations.archive START id=${id}`);
           const existing = await tx.run(zql.workflows.where('id', id).one());
@@ -18701,35 +17056,7 @@ export function createMutators(
       ),
     },
     nonLinear: {
-      syncTransitions: defineMutator(
-        z.object({
-          boardId: z.string(),
-          transitions: z.array(
-            z.object({
-              id: z.string(),
-              fromStageId: z.string().nullable().optional(),
-              toStageId: z.string(),
-              formId: z.string().nullable().optional(),
-              requiresApproval: z.boolean().optional(),
-              bypassApprovalForAutomation: z.boolean().optional(),
-              requestApprovalOnEntry: z.boolean().optional(),
-              visitSlaMode: z.string().optional(),
-              fixedEtaHours: z.number().nullable().optional(),
-              onReenter: z.string().optional(),
-              approvers: z
-                .array(
-                  z.object({
-                    id: z.string(),
-                    approverId: z.string(),
-                    approverType: z.string(),
-                  }),
-                )
-                .optional(),
-            }),
-          ),
-          // Caller-supplied timestamp — keeps client/server runs aligned (see nonLinear.transition).
-          now: z.number(),
-        }),
+      syncTransitions: defineContractMutator('nonLinear.syncTransitions',
         async ({ tx, args: { boardId, transitions, now } }) => {
           const board = await tx.run(zql.boards.where('id', boardId).one());
           if (!board) throw new Error('Board not found');
@@ -18833,16 +17160,7 @@ export function createMutators(
        * The frontend is responsible for showing the form modal before calling this mutator.
        * formValues being present signals the form was acknowledged (even if empty); undefined triggers the form gate.
        */
-      transition: defineMutator(
-        z.object({
-          ticketId: z.string(),
-          toStageName: z.string(),
-          // Caller-supplied timestamp. Passed from the client so the optimistic and
-          // authoritative (server) runs of this mutator persist identical timestamps.
-          now: z.number(),
-          // JSON-encoded Record<string, unknown> — encoding avoids ReadonlyJSONValue incompatibility
-          formValuesJson: z.string().optional(),
-        }),
+      transition: defineContractMutator('nonLinear.transition',
         async ({ tx, args: { ticketId, toStageName, now, formValuesJson } }) => {
           const formValues: Record<string, unknown> | undefined = formValuesJson
             ? (JSON.parse(formValuesJson) as Record<string, unknown>)
@@ -19262,13 +17580,7 @@ export function createMutators(
     },
     role: {
       create: defineContractMutator(
-        roleCreateClient,
-        z.object({
-          id: z.string(),
-          name: z.string(),
-          description: z.string().optional(),
-          timestamp: z.number(),
-        }),
+        'role.create',
         async ({ tx, args: { id, name, description, timestamp } }) => {
           const trimmedName = name.trim();
           if (!trimmedName) {
@@ -19302,13 +17614,7 @@ export function createMutators(
         },
       ),
       update: defineContractMutator(
-        roleUpdateClient,
-        z.object({
-          id: z.string(),
-          name: z.string().optional(),
-          description: z.string().optional(),
-          timestamp: z.number(),
-        }),
+        'role.update',
         async ({ tx, args: { id, name, description, timestamp } }) => {
           const role = await tx.run(zql.roles.where('id', id).one());
           if (!role) {
@@ -19348,13 +17654,7 @@ export function createMutators(
           });
         },
       ),
-      addMembers: defineMutator(
-        z.object({
-          roleId: z.string(),
-          userIds: z.array(z.string()),
-          mappingIds: z.record(z.string(), z.string()),
-          timestamp: z.number(),
-        }),
+      addMembers: defineContractMutator('role.addMembers',
         async ({ tx, args: { roleId, userIds, mappingIds, timestamp } }) => {
           if (userIds.length === 0) return;
 
@@ -19390,10 +17690,7 @@ export function createMutators(
           );
         },
       ),
-      removeMembers: defineMutator(
-        z.object({
-          mappingIds: z.array(z.string()),
-        }),
+      removeMembers: defineContractMutator('role.removeMembers',
         async ({ tx, args: { mappingIds } }) => {
           if (mappingIds.length === 0) return;
           await Promise.all(
