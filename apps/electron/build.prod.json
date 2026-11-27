@@ -36,6 +36,7 @@
   ],
   "asarUnpack": [
     "native/mic-monitor/mic-monitor",
+    "native/keychain-label/keychain-label",
     "native/transit-key/transit-key",
     "native/transit-key/transit-key.exe"
   ],
@@ -43,7 +44,7 @@
   "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
 
   "mac": {
-    "files": ["native/transit-key/transit-key"],
+    "files": ["native/transit-key/transit-key", "native/keychain-label/keychain-label"],
     "icon": "assets/images/xyne.png",
     "category": "public.app-category.productivity",
     "hardenedRuntime": true,

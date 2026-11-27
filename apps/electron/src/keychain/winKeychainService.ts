@@ -11,7 +11,7 @@ import { devicePasswordPopup } from '../services/enrollmentMetrics';
 import { safeRecordMetric } from '../services/telemetry';
 import { IKeychain } from './IKeychain';
 import { config } from '../app/config';
-import { deviceCaCommonName } from './deviceCa';
+import { deviceCaCommonName, deviceIdentityDisplayName } from './deviceCa';
 
 const writeFileAsync = promisify(fs.writeFile);
 const unlinkAsync = promisify(fs.unlink);
@@ -176,6 +176,9 @@ class WinKeychainService implements IKeychain {
                     # Stitch the pending private key back to this certificate
                     # certutil will output text, so we redirect it to Out-Null to avoid clutter
                     certutil -user -repairstore my $($cert.Thumbprint) | Out-Null
+
+                    # Name it after the device so certificate prompts show more than the deviceId
+                    $cert.FriendlyName = '${deviceIdentityDisplayName(certPem).replace(/'/g, "''")}'
                     
                     Write-Output $cert.Thumbprint
                 } catch {
