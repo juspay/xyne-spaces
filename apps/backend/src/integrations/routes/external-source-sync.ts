@@ -25,6 +25,8 @@ import { db } from '@/database/client';
 import { ingestExternalSource } from '@/bypassAcl/webhookIngestServices';
 import { resolveAppDeskInstalledAppId } from '@/integrations/core/deskSources';
 import { ChannelEmailAliasService } from '@/services/channelEmailAliasService';
+import { isCallProviderSourceType } from '@/services/telephony/callProviderIds';
+import { deskCallSettingsService } from '@/services/telephony/deskCallSettingsService';
 
 /**
  * The mailbox a desk channel fetches through, with the job parameters that go
@@ -73,10 +75,13 @@ export async function resolveChannelMailbox(
       select: { workspaceId: true, type: true },
     });
     if (channel?.type === ChannelType.CALL && channel.workspaceId) {
-      mailbox = await db.externalSource.findFirst({
-        where: { workspaceId: channel.workspaceId, sourceType: 'ozonetel', isActive: true },
-        orderBy: { createdAt: 'desc' },
-      });
+      // A call desk fetches through the call connection it is bound to.
+      const callSettings = await deskCallSettingsService.get(channel.workspaceId, channelId);
+      mailbox = callSettings
+        ? await db.externalSource.findFirst({
+            where: { id: callSettings.connectionId, workspaceId: channel.workspaceId, isActive: true },
+          })
+        : null;
       if (mailbox) targetChannelId = channelId;
     } else if (channel?.workspaceId) {
       const channelEmailSource = await channelEmailAliasService.getWorkspaceChannelEmailSource(
@@ -553,7 +558,7 @@ router.post(
       // dead-letter key from wedging that source+range permanently.
       const jobs: Array<{ sourceId: string; installedAppId: string | null; jobId: string }> = [];
       for (const { source, installedAppId, jobData } of actionable) {
-        const isCallPull = source.sourceType === 'ozonetel';
+        const isCallPull = isCallProviderSourceType(source.sourceType);
         // Ozonetel allows 2 requests a minute per account, so only one call pull may run per source.
         const callPullJobId = `ozonetel-refetch:${source.id}`;
         if (isCallPull && (await emailFetchQueue.getQueue().getJob(callPullJobId))) {

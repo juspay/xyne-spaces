@@ -1,6 +1,7 @@
 import { ExternalSource } from '@prisma/client';
 import { BaseFlow } from '../../core/baseFlow';
 import { logger } from '@/utils/logger';
+import { callConnectionService } from '@/services/telephony/callConnectionService';
 import { telephonyEmailService } from '@/services/ozonetel/telephonyEmailService';
 import {
   mapOzonetelSubscribeCallEvent,
@@ -8,16 +9,15 @@ import {
 } from '@/services/ozonetel/ozonetelEventMapper';
 import type { OzonetelPreprocessedPayload } from './types';
 
+// Logs name the connection by id: source.name contains the webhook secret.
 export class OzonetelFlow extends BaseFlow {
   async preprocess(rawPayload: unknown, source?: ExternalSource): Promise<unknown> {
     const workspaceId = source?.workspaceId;
-    if (!workspaceId) {
+    if (!source || !workspaceId) {
       return { __skipIngestion: true, __skipReason: 'missing_workspace' };
     }
-    logger.info('[telephony] ingest_received', {
-      workspaceId,
-      sourceName: source.name,
-    });
+    const connectionId = source.id;
+    logger.info('[telephony] ingest_received', { workspaceId, connectionId });
 
     try {
       const subscribeEvent = mapOzonetelSubscribeCallEvent(workspaceId, rawPayload);
@@ -25,20 +25,30 @@ export class OzonetelFlow extends BaseFlow {
       if (!event) {
         logger.info('[telephony] ingest_skipped', {
           workspaceId,
-          sourceName: source.name,
+          connectionId,
           reason: 'unrecognized_payload',
         });
         return { __skipIngestion: true, __skipReason: 'ozonetel_unrecognized_payload' };
       }
 
-      const prepared = await telephonyEmailService.prepareCoreIngestion(event, source.id);
+      const connection = await callConnectionService.fromSource(source);
+      if (!connection) {
+        logger.warn('[telephony] ingest_skipped', {
+          workspaceId,
+          connectionId,
+          reason: 'connection_unavailable',
+        });
+        return { __skipIngestion: true, __skipReason: 'ozonetel_connection_unavailable' };
+      }
+
+      const prepared = await telephonyEmailService.prepareCoreIngestion(event, connection);
       if (!prepared) {
         return { __skipIngestion: true, __skipReason: 'ozonetel_event_deferred' };
       }
 
       logger.info('[telephony] ingest_preprocessed', {
         workspaceId,
-        sourceName: source.name,
+        connectionId,
         externalId: event.externalId,
         mode: subscribeEvent ? 'subscribe' : 'primary',
         status: event.status,
@@ -56,7 +66,7 @@ export class OzonetelFlow extends BaseFlow {
     } catch (error) {
       logger.error('[telephony] ingest_apply_failed', {
         workspaceId,
-        sourceName: source.name,
+        connectionId,
         error,
       });
       throw error;

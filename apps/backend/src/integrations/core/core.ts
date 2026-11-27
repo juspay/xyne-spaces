@@ -34,6 +34,7 @@ import { findDuplicateEmailConversation } from '../../utils/vespaDuplicateDetect
 import { collectDlCandidates, dlAddressesFor } from '@/services/dlResolver';
 import { db } from '@/database/client';
 import { ChannelEmailAliasService } from '@/services/channelEmailAliasService';
+import { isCallProviderSourceType } from '@/services/telephony/callProviderIds';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service.js';
 import {
   buildChannelEmailMessageMetadata,
@@ -306,7 +307,7 @@ export class ExternalSourceCore {
 
     if (existingExtMsg && isDeskChannel) {
       const existingEmail =
-        source.sourceType === 'ozonetel' &&
+        isCallProviderSourceType(source.sourceType) &&
         existingExtMsg.entityType === ExternalEntityType.EMAIL &&
         existingExtMsg.entityId
           ? await this.emailRepo.findById(existingExtMsg.entityId)
@@ -434,10 +435,10 @@ export class ExternalSourceCore {
     normalizedData: NormalizedData,
   ): Promise<string[]> {
     const workspaceId = source.workspaceId;
-    if (source.sourceType === 'ozonetel') {
+    if (isCallProviderSourceType(source.sourceType)) {
       const channelId =
-        typeof normalizedData.metadata.ozonetelChannelId === 'string'
-          ? normalizedData.metadata.ozonetelChannelId.trim()
+        typeof normalizedData.metadata.telephonyChannelId === 'string'
+          ? normalizedData.metadata.telephonyChannelId.trim()
           : '';
       if (!channelId) return [];
 
