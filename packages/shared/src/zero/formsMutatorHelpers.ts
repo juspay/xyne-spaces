@@ -4,6 +4,7 @@ import { AttachmentEntityType, FormEntityType, FormFieldType, type FormFieldValu
 import { stringFromFormValue } from '../tickets/utils.js';
 import { resolveParentOption } from '../utils/formFieldOptions.js';
 import {
+  assertFormEntityValueFitsType,
   assertFormFieldType,
   formEntityValueItemId,
   readFormEntityValue,
@@ -264,7 +265,7 @@ export async function writeFormEntityValueCreate(
   const fieldName =
     globalField?.fieldName ?? legacyField?.globalField?.fieldName ?? legacyField?.fieldName ?? null;
 
-  const actualFieldValue = toStoredFormValue(fieldType, newValue);
+  const valueToStore = toStoredFormValue(fieldType, newValue);
   await insertFormEntityValue(tx, {
     id,
     workspaceId,
@@ -275,7 +276,7 @@ export async function writeFormEntityValueCreate(
     contextId,
     version: version ?? 1,
     fieldType: assertFormFieldType(fieldType, resolvedFieldId),
-    value: actualFieldValue,
+    value: valueToStore,
     timestamp,
   });
 
@@ -286,7 +287,7 @@ export async function writeFormEntityValueCreate(
     entityType,
     fieldName,
     activeCheckField: toActiveCheckField(membership, fieldName),
-    docCheck: toDocCheck(entityType, fieldType, actualFieldValue, id),
+    docCheck: toDocCheck(entityType, fieldType, valueToStore, id),
   };
 }
 
@@ -518,6 +519,7 @@ const legacyJsonValue = (value: unknown): FormFieldValue => {
 // server's write fills it.
 const storedFormEntityValueFields = (fieldType: FormFieldType, value: unknown, fieldId: string) => {
   const typed = toTypedFormEntityValue(assertFormFieldType(fieldType, fieldId), value);
+  assertFormEntityValueFitsType(fieldType, value, typed);
   return { fields: { ...typed.columns, textHash: null, actualFieldValue: legacyJsonValue(value) }, items: typed.items };
 };
 

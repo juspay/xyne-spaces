@@ -1,4 +1,4 @@
-import { FormFieldType, readFormEntityValue, type TypedFormEntityValueRow } from '@xyne/shared';
+import { FormFieldType, type TypedFormEntityValueRow } from '@xyne/shared';
 
 export type DynamicFieldFilterValue = string[] | { start?: number; end?: number };
 
@@ -11,8 +11,8 @@ export interface DynamicFieldFilterEntry {
 export interface DynamicFieldQueryFilter {
   fieldId: string;
   values?: (string | number | boolean)[];
-  // When set, the query matches on the typed value columns (textHash, numberValue, items, ...).
-  fieldType?: FormFieldType;
+  // The query matches on this type's value columns (textHash / textValue, numberValue, items, ...).
+  fieldType: FormFieldType;
   dateRange?: { start?: number; end?: number };
 }
 
@@ -103,34 +103,23 @@ export const buildDynamicFieldFilterEntries = (
 export const toDynamicFieldQueryFilters = (
   entries: readonly DynamicFieldFilterEntry[],
 ): DynamicFieldQueryFilter[] | undefined => {
-  if (entries.length === 0) return undefined;
-  return entries.map(entry => {
-    if (entry.fieldType === undefined) return { fieldId: entry.fieldId };
+  // A field whose type isn't known (definitions still loading, or the field is gone) can't be
+  // matched, so it is left out.
+  const filters = entries.flatMap((entry): DynamicFieldQueryFilter[] => {
+    if (entry.fieldType === undefined) return [];
     if (Array.isArray(entry.value)) {
-      return { fieldId: entry.fieldId, fieldType: entry.fieldType, values: [...entry.value] };
+      return [{ fieldId: entry.fieldId, fieldType: entry.fieldType, values: [...entry.value] }];
     }
     const { start, end } = entry.value;
-    return {
-      fieldId: entry.fieldId,
-      fieldType: entry.fieldType,
-      dateRange: { ...(start !== undefined && { start }), ...(end !== undefined && { end }) },
-    };
+    return [
+      {
+        fieldId: entry.fieldId,
+        fieldType: entry.fieldType,
+        dateRange: { ...(start !== undefined && { start }), ...(end !== undefined && { end }) },
+      },
+    ];
   });
+  return filters.length > 0 ? filters : undefined;
 };
 
 export type FormEntityValueLike = TypedFormEntityValueRow & { fieldId: string };
-
-export const ticketMatchesDynamicFieldEntries = (
-  formEntityValues: readonly FormEntityValueLike[] | null | undefined,
-  entries: readonly DynamicFieldFilterEntry[],
-): boolean => {
-  for (const entry of entries) {
-    if (entry.fieldType === undefined) continue;
-    const fieldValue = formEntityValues?.find(v => v.fieldId === entry.fieldId);
-    if (!fieldValue) return false;
-    if (!matchesDynamicFieldValue(entry.fieldType, entry.value, readFormEntityValue(fieldValue))) {
-      return false;
-    }
-  }
-  return true;
-};

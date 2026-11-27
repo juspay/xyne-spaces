@@ -3,6 +3,7 @@ import { z } from 'zod';
 import {
   AttachmentEntityType,
   FormEntityType,
+  assertFormEntityValueFitsType,
   assertFormFieldType,
   FormFieldType,
   Schema,
@@ -269,7 +270,7 @@ export async function writeFormEntityValueCreate(
   const fieldName =
     globalField?.fieldName ?? legacyField?.globalField?.fieldName ?? legacyField?.fieldName ?? null;
 
-  const actualFieldValue = toStoredFormValue(fieldType, newValue);
+  const valueToStore = toStoredFormValue(fieldType, newValue);
   await insertFormEntityValue(tx, {
     id,
     workspaceId,
@@ -280,7 +281,7 @@ export async function writeFormEntityValueCreate(
     contextId,
     version: version ?? 1,
     fieldType: assertFormFieldType(fieldType, resolvedFieldId),
-    value: actualFieldValue,
+    value: valueToStore,
     timestamp,
   });
 
@@ -291,7 +292,7 @@ export async function writeFormEntityValueCreate(
     entityType,
     fieldName,
     activeCheckField: toActiveCheckField(membership, fieldName),
-    docCheck: toDocCheck(entityType, fieldType, actualFieldValue, id),
+    docCheck: toDocCheck(entityType, fieldType, valueToStore, id),
   };
 }
 
@@ -521,6 +522,7 @@ const legacyJsonValue = (value: unknown): FormFieldValue => {
 
 const storedFormEntityValueFields = (fieldType: FormFieldType, value: unknown, fieldId: string) => {
   const typed = toTypedFormEntityValue(assertFormFieldType(fieldType, fieldId), value);
+  assertFormEntityValueFitsType(fieldType, value, typed);
   const textHash = typed.textHashInput === null ? null : formEntityValueTextHash(typed.textHashInput);
   return { fields: { ...typed.columns, textHash, actualFieldValue: legacyJsonValue(value) }, items: typed.items };
 };

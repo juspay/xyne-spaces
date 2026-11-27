@@ -527,7 +527,6 @@ export const SupportKanbanBoard = ({
           onTicketsChange={handleColumnTicketsChange}
           deskPaginationConfig={{
             pageArgs,
-            dynamicFieldEntries,
             onPageComplete: setCompletedPageArgs,
           }}
           onTicketClick={onTicketClick}

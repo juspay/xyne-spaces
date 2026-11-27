@@ -15,11 +15,7 @@ import {
 } from '../utils/map-support-tickets-to-list-items';
 import { filterSupportTicketsByMailboxFolder } from '../utils/filter-support-tickets-by-mailbox-folder';
 import { expandAssignedToQueryValues } from '../utils/expand-assigned-to-query-values';
-import {
-  filterSupportTicketsByDynamicFieldClientFilters,
-  type DynamicFieldClientFilter,
-  type DynamicFieldQueryFilter,
-} from '../utils/dynamic-field-filters';
+import type { DynamicFieldQueryFilter } from '../utils/dynamic-field-filters';
 import {
   computeTicketsListPaging,
   nextTicketsListPages,
@@ -47,8 +43,6 @@ export type UseTicketsListDataOptions = {
   userGroups?: readonly string[];
   conversationLabelId?: string;
   dynamicFieldFilters?: readonly DynamicFieldQueryFilter[];
-  /** MULTI_SELECT values — V4 only checks field presence; thin the page here. */
-  dynamicFieldClientFilters?: readonly DynamicFieldClientFilter[];
   /** EMAIL desk folder pill → V4 `mailboxFolder` (+ client Inbox/All Mail refine). */
   mailboxFolder?: TicketMailboxFolder;
   /** Also sent as V4 createdAtStart/End; client fallback until shared dates land. */
@@ -77,7 +71,8 @@ function stableDynamicFieldKey(filters: readonly DynamicFieldQueryFilter[] | und
   return filters
     .map(f => {
       const values = f.values?.length ? [...f.values].map(String).sort().join(',') : '';
-      return `${f.fieldId}:${values}`;
+      const range = f.dateRange ? `${f.dateRange.start ?? ''}~${f.dateRange.end ?? ''}` : '';
+      return `${f.fieldId}:${f.fieldType}:${values}:${range}`;
     })
     .sort()
     .join('\0');
@@ -142,23 +137,11 @@ export function useTicketsListData(
     if (!dynamicFieldKey || !options?.dynamicFieldFilters?.length) return undefined;
     return options.dynamicFieldFilters.map(f => ({
       fieldId: f.fieldId,
+      fieldType: f.fieldType,
       ...(f.values?.length ? { values: [...f.values] } : {}),
+      ...(f.dateRange ? { dateRange: { ...f.dateRange } } : {}),
     }));
   }, [dynamicFieldKey, options?.dynamicFieldFilters]);
-
-  const dynamicFieldClientKey = stableDynamicFieldKey(
-    options?.dynamicFieldClientFilters?.map(f => ({
-      fieldId: f.fieldId,
-      values: [...f.values],
-    })),
-  );
-  const dynamicFieldClientFilters = useMemo(() => {
-    if (!dynamicFieldClientKey || !options?.dynamicFieldClientFilters?.length) return [];
-    return options.dynamicFieldClientFilters.map(f => ({
-      fieldId: f.fieldId,
-      values: [...f.values],
-    }));
-  }, [dynamicFieldClientKey, options?.dynamicFieldClientFilters]);
 
   const hasAiDraft = options?.hasAiDraft === true;
   const hasSubTickets = options?.hasSubTickets === true;
@@ -179,8 +162,7 @@ export function useTicketsListData(
     mailboxFolder === 'inbox' ||
     mailboxFolder === 'all' ||
     hasCreatedDateFilter ||
-    hasLastUpdatedFilter ||
-    dynamicFieldClientFilters.length > 0;
+    hasLastUpdatedFilter;
 
   const hasListFilter = Boolean(
     assignedTo?.length ||
@@ -214,7 +196,6 @@ export function useTicketsListData(
     conversationIdsKey,
     userGroupsKey,
     dynamicFieldKey,
-    dynamicFieldClientKey,
     hasAiDraft ? '1' : '',
     hasSubTickets ? '1' : '',
     conversationLabelId ?? '',
@@ -293,14 +274,10 @@ export function useTicketsListData(
       lastEmailAtStart,
       lastEmailAtEnd,
     );
-    const filtered = filterSupportTicketsByDynamicFieldClientFilters(
-      byLastEmail,
-      dynamicFieldClientFilters,
-    );
     // APP/Slack omit mailboxFolder — keep the archive guard. All Mail may pass
     // overlay-archived rows (isArchived false); ticket-level archived is dropped
     // in the mailbox predicate to match V4.
-    return mapSupportTicketsToListItems(filtered, {
+    return mapSupportTicketsToListItems(byLastEmail, {
       includeArchived: mailboxFolder === 'all',
     });
   }, [
@@ -311,7 +288,6 @@ export function useTicketsListData(
     createdDateEnd,
     lastEmailAtStart,
     lastEmailAtEnd,
-    dynamicFieldClientFilters,
   ]);
 
   useEffect(() => {

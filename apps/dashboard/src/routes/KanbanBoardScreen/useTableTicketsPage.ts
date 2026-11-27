@@ -8,6 +8,7 @@ import {
   getDynamicFieldScalarFilters,
   getFormFieldValue,
   toQueryFilters,
+  withGroupByFieldType,
   type KanbanTicketsPageRow,
   type KanbanTicketsPageBaseArgs,
 } from './useKanbanTicketsPage';
@@ -144,7 +145,7 @@ export const useTableTicketsPage = (
           excludeFlowSteps: options.excludeFlowSteps,
           limit: pageSize,
           start: null as PageCursor | null,
-          groupBy: options.groupBy,
+          groupBy: withGroupByFieldType(options.groupBy, options.dynamicFieldTypes),
           groupKey: options.groupKey,
           formFieldValue: getFormFieldValue(options.groupBy, options.groupKey),
           ...(vespaTicketIds ? { vespaTicketIds } : {}),

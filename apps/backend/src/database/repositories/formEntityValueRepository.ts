@@ -70,7 +70,6 @@ const RECORD_SELECT = {
   dateValue: true,
   boolValue: true,
   plainValue: true,
-  actualFieldValue: true,
   items: { select: { item: true }, orderBy: { item: 'asc' } },
 } satisfies Prisma.FormEntityValuesSelect;
 
@@ -111,7 +110,7 @@ function storedColumns(fieldType: FormFieldType, value: unknown, fieldId: string
   const { dateValue, ...columns } = typed.columns;
   return {
     data: {
-      // Dual write: clients that still read actualFieldValue keep seeing current values.
+      // Dual write: kept so a rollback to code that reads actualFieldValue still sees current values.
       actualFieldValue:
         value === null || value === undefined ? Prisma.DbNull : (value as Prisma.InputJsonValue),
       ...columns,
