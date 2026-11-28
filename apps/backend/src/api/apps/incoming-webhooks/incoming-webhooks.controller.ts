@@ -1,9 +1,9 @@
+import { xyneApps } from '@/api/apps/xyne-apps.access';
 import crypto from 'node:crypto';
-import { api, AppIncomingWebhookAction, AppIncomingWebhookType, type RouteBody, type RouteQuery } from '@xyne/shared';
+import { AccessType, AppIncomingWebhookAction, AppIncomingWebhookType, api } from '@xyne/shared';
 import { repositories } from '@/database/repositories';
-import { ContractError } from '@/framework/api';
+import { ContractError, controller } from '@/framework/api';
 import { decrypt, encrypt } from '@/services/encryptionService';
-import type { AuthenticatedUser } from '@/types/express';
 import { logger } from '@/utils/logger';
 import { incomingWebhookController } from '../../../apps/controllers/incomingWebhookController';
 
@@ -12,7 +12,8 @@ import { incomingWebhookController } from '../../../apps/controllers/incomingWeb
 type BotUser = (Awaited<ReturnType<typeof repositories.users.findById>> & { workspaceId?: string }) | null;
 
 /** POST /apps/incoming-webhooks */
-export async function createIncomingWebhook(input: { body: RouteBody<typeof api.apps.incomingWebhooks.create>; user: AuthenticatedUser | undefined }) {
+export const createIncomingWebhook = controller(api.apps.incomingWebhooks.create, { checks: xyneApps(AccessType.WRITE) }, async (input, reply) => {
+  reply.status(201);
   try {
     const { installedAppId, channelId, boardId, name, type, action } = input.body;
     const user = input.user;
@@ -88,14 +89,10 @@ export async function createIncomingWebhook(input: { body: RouteBody<typeof api.
     logger.error('[Incoming-Webhook] Error creating webhook', { userId: input.user?.id, error });
     throw new ContractError(500, { error: 'Internal server error' });
   }
-}
+});
 
 /** GET /apps/incoming-webhooks/:installedAppId */
-export async function listIncomingWebhooks(input: {
-  params: { installedAppId: string };
-  query: RouteQuery<typeof api.apps.incomingWebhooks.list>;
-  user: AuthenticatedUser | undefined;
-}) {
+export const listIncomingWebhooks = controller(api.apps.incomingWebhooks.list, { checks: xyneApps(AccessType.READ) }, async (input) => {
   const { installedAppId } = input.params;
   try {
     const { limit, offset, includeInactive } = input.query;
@@ -144,7 +141,7 @@ export async function listIncomingWebhooks(input: {
     logger.error('[Incoming-Webhook] Error listing webhooks', { installedAppId, error });
     throw new ContractError(500, { error: 'Internal server error' });
   }
-}
+});
 
 /** The webhook, if it belongs to an install of the caller's workspace (any other is "not found"). */
 async function ownWebhook(webhookId: string, workspaceId: string | undefined) {
@@ -157,11 +154,7 @@ async function ownWebhook(webhookId: string, workspaceId: string | undefined) {
 }
 
 /** PATCH /apps/incoming-webhooks/:webhookId: rename (not a revoked one). */
-export async function updateIncomingWebhook(input: {
-  params: { webhookId: string };
-  body: RouteBody<typeof api.apps.incomingWebhooks.update>;
-  user: AuthenticatedUser | undefined;
-}) {
+export const updateIncomingWebhook = controller(api.apps.incomingWebhooks.update, { checks: xyneApps(AccessType.WRITE) }, async (input) => {
   const { webhookId } = input.params;
   try {
     const webhook = await ownWebhook(webhookId, input.user?.workspaceId);
@@ -173,10 +166,10 @@ export async function updateIncomingWebhook(input: {
     logger.error('[Incoming-Webhook] Error updating webhook', { webhookId, userId: input.user?.id, error });
     throw new ContractError(500, { error: 'Internal server error' });
   }
-}
+});
 
 /** POST /apps/incoming-webhooks/:webhookId/revoke */
-export async function revokeIncomingWebhook(input: { params: { webhookId: string }; user: AuthenticatedUser | undefined }) {
+export const revokeIncomingWebhook = controller(api.apps.incomingWebhooks.revoke, { checks: xyneApps(AccessType.WRITE) }, async (input) => {
   const { webhookId } = input.params;
   try {
     const userId = input.user?.id;
@@ -194,4 +187,4 @@ export async function revokeIncomingWebhook(input: { params: { webhookId: string
     logger.error('[Incoming-Webhook] Error revoking webhook', { webhookId, userId: input.user?.id, error });
     throw new ContractError(500, { error: 'Internal server error' });
   }
-}
+});

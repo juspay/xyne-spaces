@@ -1,22 +1,26 @@
-import { api, type RouteBody } from '@xyne/shared';
+import { AccessType, api } from '@xyne/shared';
 import { db } from '@/database/client';
-import { ContractError } from '@/framework/api';
+import { ContractError, controller } from '@/framework/api';
+import { resourceAccess } from '@/framework/dashboardAccess';
 import { logger } from '@/utils/logger';
 import { internal } from '../settings.helpers';
+
+/** Changing aliases needs USER_ACTIVITY admin. */
+const userActivityAdmin = { userActivity: resourceAccess('USER_ACTIVITY', AccessType.ADMIN) };
 
 // ─── Activity aliases ───────────────────────────────────────────────────────
 
 /** GET /activity-aliases */
-export async function listAliases() {
+export const listAliases = controller(api.activityAliases.list, async () => {
   try {
     return { aliases: await db.activityAlias.findMany({ orderBy: { createdAt: 'desc' } }) };
   } catch (error) {
     throw internal(error, '[ACTIVITY-ALIASES] Error fetching aliases:', { error: 'Failed to fetch aliases' });
   }
-}
+});
 
 /** POST /activity-aliases */
-export async function createAlias(input: { body: RouteBody<typeof api.activityAliases.create> }) {
+export const createAlias = controller(api.activityAliases.create, { checks: userActivityAdmin }, async (input) => {
   try {
     const { eventName, eventCategory, aliasEventName, aliasEventCategory, isBlacklisted } = input.body;
     const existingAlias = await db.activityAlias.findUnique({ where: { eventName_eventCategory: { eventName, eventCategory } } });
@@ -38,10 +42,10 @@ export async function createAlias(input: { body: RouteBody<typeof api.activityAl
   } catch (error) {
     throw internal(error, '[ACTIVITY-ALIASES] Error creating alias:', { error: 'Failed to create alias' });
   }
-}
+});
 
 /** PUT /activity-aliases/:id */
-export async function updateAlias(input: { params: { id: string }; body: RouteBody<typeof api.activityAliases.update> }) {
+export const updateAlias = controller(api.activityAliases.update, { checks: userActivityAdmin }, async (input) => {
   try {
     const { id } = input.params;
     const { aliasEventName, aliasEventCategory, isBlacklisted } = input.body;
@@ -67,10 +71,11 @@ export async function updateAlias(input: { params: { id: string }; body: RouteBo
   } catch (error) {
     throw internal(error, '[ACTIVITY-ALIASES] Error updating alias:', { error: 'Failed to update alias' });
   }
-}
+});
 
 /** DELETE /activity-aliases/:id: answers 204 with no body. */
-export async function deleteAlias(input: { params: { id: string } }) {
+export const deleteAlias = controller(api.activityAliases.delete, { checks: userActivityAdmin }, async (input, reply) => {
+  reply.status(204);
   try {
     const { id } = input.params;
     const existingAlias = await db.activityAlias.findUnique({ where: { id } });
@@ -81,4 +86,4 @@ export async function deleteAlias(input: { params: { id: string } }) {
   } catch (error) {
     throw internal(error, '[ACTIVITY-ALIASES] Error deleting alias:', { error: 'Failed to delete alias' });
   }
-}
+});

@@ -1,19 +1,17 @@
 import { api, ChannelRole, ChannelScopeType, ChannelType } from '@xyne/shared';
-import type { z } from 'zod';
 import { db } from '@/database/client';
 import { hasProjectAdminAccess } from '@/database/acl/admin-access';
 import { ChannelParticipantRepository } from '@/database/repositories/channelParticipantRepository';
 import { ChannelRepository } from '@/database/repositories/channelRepository';
 import { UserGroupRepository } from '@/database/repositories/userGroups';
 import { UserRepository } from '@/database/repositories/users';
-import { ContractError } from '@/framework/api';
+import { ContractError, controller } from '@/framework/api';
 import { resolveAppDeskInstalledAppId, extractSlackChannelId } from '@/integrations/core/deskSources';
 import { ExternalSourcePlatform } from '@/integrations/core/types';
 import { SOCIAL_MEDIA_PLATFORMS, isMetaMessagingPlatform, isSocialMediaPlatform } from '@/integrations/social-media/constants';
 import { ChannelEmailAliasService } from '@/services/channelEmailAliasService';
 import { getPreShareStatus, ShareAgentConversationError, type ShareErrorCode } from '@/services/shareAgentConversationService';
 import { vespaService } from '@/services/vespaSearch';
-import type { AuthenticatedUser } from '@/types/express';
 import { logger } from '@/utils/logger';
 
 /**
@@ -38,7 +36,7 @@ const failed = (error: string) => ({ success: false, error });
 // ─── check-duplicate, member-counts, publish-targets ────────────────────────
 
 /** POST /channels/check-duplicate: is this channel name taken in the caller's workspace. */
-export async function checkDuplicate(input: { body: { name: string; projectId?: string }; user: AuthenticatedUser | undefined }) {
+export const checkDuplicate = controller(api.channels.checkDuplicate, async (input) => {
   try {
     const { name, projectId } = input.body;
     const workspaceId = input.user?.workspaceId;
@@ -48,10 +46,10 @@ export async function checkDuplicate(input: { body: { name: string; projectId?: 
   } catch (error) {
     throw internal(error, 'Error checking channel duplicate:');
   }
-}
+});
 
 /** POST /channels/member-counts: participant counts for a set of channels. */
-export async function memberCounts(input: { body: { channelIds: string[] }; user: AuthenticatedUser | undefined }) {
+export const memberCounts = controller(api.channels.memberCounts, async (input) => {
   try {
     if (!input.user?.id) throw new ContractError(401, failed('Unauthorized'));
     const { channelIds } = input.body;
@@ -66,10 +64,10 @@ export async function memberCounts(input: { body: { channelIds: string[] }; user
   } catch (error) {
     throw internal(error, 'Error in getChannelMemberCounts:', failed('Internal server error'));
   }
-}
+});
 
 /** GET /channels/publish-targets: default and document channels the caller is in (no DMs). */
-export async function publishTargets(input: { user: AuthenticatedUser | undefined }) {
+export const publishTargets = controller(api.channels.publishTargets, async (input) => {
   try {
     const userId = input.user?.id;
     if (!userId) throw new ContractError(403, { error: 'Unauthorized - user not authenticated' });
@@ -85,12 +83,12 @@ export async function publishTargets(input: { user: AuthenticatedUser | undefine
   } catch (error) {
     throw internal(error, 'Error getting channels for docs:');
   }
-}
+});
 
 // ─── Search for mentions ────────────────────────────────────────────────────
 
 /** GET /channels/search: users and groups to mention. */
-export async function searchForMentions(input: { query: z.infer<(typeof api.channels.search)['query']>; user: AuthenticatedUser | undefined }) {
+export const searchForMentions = controller(api.channels.search, async (input) => {
   try {
     const userId = input.user!.id;
     const { q, limit = '10', types = 'users,groups' } = input.query;
@@ -143,12 +141,13 @@ export async function searchForMentions(input: { query: z.infer<(typeof api.chan
   } catch (error) {
     throw internal(error, 'Error in unified search for mentions:');
   }
-}
+});
 
 // ─── One channel: connected email, alias, members ───────────────────────────
 
 /** GET /channels/:channelId/connected-email: the desk's mailbox or app or social source. Same rule as the socket layer: workspace boundary, and members only for PRIVATE channels. */
-export async function connectedEmail(input: { params: { channelId: string }; user: AuthenticatedUser | undefined }) {
+export const connectedEmail = controller(api.channels.connectedEmail, async (input, reply) => {
+  reply.header('Cache-Control', 'private, no-cache');
   try {
     const { channelId } = input.params;
     const userId = input.user?.id;
@@ -257,10 +256,10 @@ export async function connectedEmail(input: { params: { channelId: string }; use
   } catch (error) {
     throw internal(error, 'Error in getConnectedEmail:');
   }
-}
+});
 
 /** GET /channels/:channelId/email-alias: members only. */
-export async function emailAlias(input: { params: { channelId: string }; user: AuthenticatedUser | undefined }) {
+export const emailAlias = controller(api.channels.emailAlias, async (input) => {
   try {
     const { channelId } = input.params;
     const userId = input.user?.id;
@@ -272,20 +271,20 @@ export async function emailAlias(input: { params: { channelId: string }; user: A
   } catch (error) {
     throw internal(error, 'Error in getEmailAlias:');
   }
-}
+});
 
 /** GET /channels/:channelId/vespa-participants: user ids from the search index's channel permissions. */
-export async function vespaParticipants(input: { params: { channelId: string }; user: AuthenticatedUser | undefined }) {
+export const vespaParticipants = controller(api.channels.vespaParticipants, async (input) => {
   try {
     const userIds = await vespaService.channelService.getChannelParticipants(input.params.channelId, input.user!.id);
     return { success: true as const, data: { userIds } };
   } catch (error) {
     throw internal(error, 'Error in getVespaParticipants:', failed('Internal server error'));
   }
-}
+});
 
 /** GET /channels/:channelId/members: active members as `{ id, name }`, for members only. */
-export async function channelMembers(input: { params: { channelId: string }; user: AuthenticatedUser | undefined }) {
+export const channelMembers = controller(api.channels.members, async (input) => {
   try {
     const { channelId } = input.params;
     if (!(await channelParticipantRepository.isParticipant(channelId, input.user!.id))) throw new ContractError(403, failed('Forbidden'));
@@ -293,10 +292,10 @@ export async function channelMembers(input: { params: { channelId: string }; use
   } catch (error) {
     throw internal(error, 'Error in getChannelMembers:', failed('Internal server error'));
   }
-}
+});
 
 /** GET /channels/:channelId/can-link-boards: a channel admin, or a project admin. */
-export async function canLinkBoards(input: { params: { channelId: string }; user: AuthenticatedUser | undefined }) {
+export const canLinkBoards = controller(api.channels.canLinkBoards, async (input) => {
   try {
     const userId = input.user!.id;
     const role = await channelParticipantRepository.getParticipantRole(input.params.channelId, userId);
@@ -305,7 +304,7 @@ export async function canLinkBoards(input: { params: { channelId: string }; user
   } catch (error) {
     throw internal(error, 'Error in canLinkChannelBoards:', failed('Internal server error'));
   }
-}
+});
 
 // ─── Share an agent conversation: the pre-share status ──────────────────────
 
@@ -324,11 +323,7 @@ const SHARE_ERROR_STATUS: Record<ShareErrorCode, number> = {
 };
 
 /** GET /channels/:channelId/share-agent-conversation/status */
-export async function shareAgentStatus(input: {
-  params: { channelId: string };
-  query: z.infer<(typeof api.channels.shareAgentStatus)['query']>;
-  user: AuthenticatedUser | undefined;
-}) {
+export const shareAgentStatus = controller(api.channels.shareAgentStatus, async (input) => {
   try {
     const workspaceId = input.user!.workspaceId;
     if (!workspaceId) throw new ContractError(401, { error: 'Unauthorized' });
@@ -348,4 +343,4 @@ export async function shareAgentStatus(input: {
     logger.error('[shareAgentConversation] getStatus failed', { error });
     throw new ContractError(500, { error: 'Failed to share agent conversation' });
   }
-}
+});

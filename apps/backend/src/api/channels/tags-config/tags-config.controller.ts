@@ -1,8 +1,8 @@
-import { api, ChannelRole, type RouteBody } from '@xyne/shared';
+import { api, ChannelRole } from '@xyne/shared';
 import { ChannelParticipantRepository } from '@/database/repositories/channelParticipantRepository';
 import { ChannelRepository } from '@/database/repositories/channelRepository';
 import { EmailClassificationRepository } from '@/database/repositories/emailClassificationRepository';
-import { ContractError, type AccessCheck } from '@/framework/api';
+import { ContractError, controller, type AccessCheck } from '@/framework/api';
 import { DESK_EMAIL_SOURCE_TYPE, DEFAULT_DESK_EMAIL_CONFIG, deskEmailConfigKey, invalidateTagConfigCache, tagService } from '@/tags';
 import { TagsConfigShapeSchema } from '@/tags';
 import { internal } from '../../settings.helpers';
@@ -46,7 +46,7 @@ export function deskTagsAccess(options: { manage: boolean }): AccessCheck<{ user
 }
 
 /** GET /channels/:channelId/tags-config: the desk-email tag-generation categories (the default when none is saved). */
-export async function getChannelTagsConfig(input: { params: { channelId: string } }) {
+export const getChannelTagsConfig = controller(api.channels.tagsConfig.get, { checks: { tags: deskTagsAccess({ manage: false }) } }, async (input) => {
   const { channelId } = input.params;
   try {
     const config = await tagService.getConfig(deskEmailConfigKey(channelId));
@@ -56,23 +56,23 @@ export async function getChannelTagsConfig(input: { params: { channelId: string 
   } catch (error) {
     throw internal(error, '[DESK-TAGS-CONFIG] Failed to get config', { error: 'Failed to get tag generation config' });
   }
-}
+});
 
 /** PATCH /channels/:channelId/tags-config: replace the categories. */
-export async function updateChannelTagsConfig(input: {
-  params: { channelId: string };
-  body: RouteBody<typeof api.channels.tagsConfig.update>;
-  caller: { userId: string; workspaceId: string };
-}) {
-  const { channelId } = input.params;
-  try {
-    const configKey = deskEmailConfigKey(channelId);
-    await tagService.upsertConfig(configKey, DESK_EMAIL_SOURCE_TYPE, input.caller.workspaceId, input.body, input.caller.userId);
-    // Evict the worker-side Redis cache so the pipeline picks up the new config on the very next
-    // job rather than waiting for the TTL to expire.
-    await invalidateTagConfigCache(configKey);
-    return { categories: input.body.categories };
-  } catch (error) {
-    throw internal(error, '[DESK-TAGS-CONFIG] Failed to update config', { error: 'Failed to update tag generation config' });
-  }
-}
+export const updateChannelTagsConfig = controller(
+  api.channels.tagsConfig.update,
+  { checks: { tags: deskTagsAccess({ manage: true }) } },
+  async ({ params, body, access }) => {
+    const caller = access.tags;
+    try {
+      const configKey = deskEmailConfigKey(params.channelId);
+      await tagService.upsertConfig(configKey, DESK_EMAIL_SOURCE_TYPE, caller.workspaceId, body, caller.userId);
+      // Evict the worker-side Redis cache so the pipeline picks up the new config on the very next
+      // job rather than waiting for the TTL to expire.
+      await invalidateTagConfigCache(configKey);
+      return { categories: body.categories };
+    } catch (error) {
+      throw internal(error, '[DESK-TAGS-CONFIG] Failed to update config', { error: 'Failed to update tag generation config' });
+    }
+  },
+);

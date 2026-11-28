@@ -1,7 +1,7 @@
+import { api } from '@xyne/shared';
 import { CustomEmojiRepository } from '@/database/repositories/customEmojiRepository';
-import { ContractError } from '@/framework/api';
+import { ContractError, controller } from '@/framework/api';
 import { getStorageService } from '@/services/storage';
-import type { AuthenticatedUser } from '@/types/express';
 import { logger } from '@/utils/logger';
 import { transformEmoji } from '@/controllers/customEmojiController';
 import { internal, requireUser } from '../settings.helpers';
@@ -11,16 +11,16 @@ import { internal, requireUser } from '../settings.helpers';
 const customEmojiRepository = new CustomEmojiRepository();
 
 /** GET /emojis */
-export async function listEmojis() {
+export const listEmojis = controller(api.emojis.list, async () => {
   try {
     return { success: true as const, emojis: (await customEmojiRepository.findAll()).map(transformEmoji) };
   } catch (error) {
     throw internal(error, 'Error fetching custom emojis:');
   }
-}
+});
 
 /** GET /emojis/:emojiId */
-export async function getEmoji(input: { params: { emojiId: string } }) {
+export const getEmoji = controller(api.emojis.get, async (input) => {
   try {
     const emoji = await customEmojiRepository.findById(input.params.emojiId);
     if (!emoji) throw new ContractError(404, { error: 'Emoji not found' });
@@ -28,10 +28,10 @@ export async function getEmoji(input: { params: { emojiId: string } }) {
   } catch (error) {
     throw internal(error, 'Error fetching custom emoji:');
   }
-}
+});
 
 /** DELETE /emojis/:emojiId: the creator only. */
-export async function deleteEmoji(input: { params: { emojiId: string }; user: AuthenticatedUser | undefined }) {
+export const deleteEmoji = controller(api.emojis.delete, async (input) => {
   try {
     const user = requireUser(input.user);
     const { emojiId } = input.params;
@@ -51,4 +51,4 @@ export async function deleteEmoji(input: { params: { emojiId: string }; user: Au
   } catch (error) {
     throw internal(error, 'Error deleting custom emoji:');
   }
-}
+});

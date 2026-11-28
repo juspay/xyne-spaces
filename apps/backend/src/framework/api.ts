@@ -121,27 +121,66 @@ type HasEncryptedFields<C> =
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   C extends RouteContract<any, any, any, any, any, any, infer F> ? (F extends SourceToDerived ? true : false) : false;
 
-export type RouteImpl<C extends AnyRouteContract, A extends AccessChecks = Record<never, never>> = {
-  /** Default `session`. */
-  auth?: RouteAuth;
+/**
+ * What a controller may set on its answer, at runtime, as Express's `res` does: the success
+ * status (default 200) and response headers. Refusals are thrown ContractErrors, not set here.
+ *
+ *   reply.status(201);                               // created
+ *   reply.header('Cache-Control', 'private, no-cache');
+ */
+export type Reply = {
+  /** The success status: a 2xx (default 200). */
+  status(code: number): Reply;
+  /** A response header, sent with the answer: the success, or a ContractError thrown after it. */
+  header(name: string, value: string): Reply;
+};
+
+type ReplyState = { status: number; headers: Record<string, string> };
+
+function newReply(contract: AnyRouteContract): { reply: Reply; state: ReplyState } {
+  const state: ReplyState = { status: 200, headers: {} };
+  const reply: Reply = {
+    status(code) {
+      if (!Number.isInteger(code) || code < 200 || code > 299) {
+        throw new Error(`[api] ${contract.key}: reply.status(${code}) is not a success status; refuse with a ContractError`);
+      }
+      state.status = code;
+      return reply;
+    },
+    header(name, value) {
+      state.headers[name] = value;
+      return reply;
+    } };
+  return { reply, state };
+}
+
+/** A route's controller: the checked input and the reply in, the answer out (or a thrown ContractError). */
+export type ControllerFn<C, A extends AccessChecks> = (input: HandlerInput<C, A>, reply: Reply) => Promise<RouteResponse<C>>;
+
+/**
+ * A controller's own steps, when it has any: access checks (they run in this order, after the
+ * request is checked; their results are the input's `access`), upload parsing, the encryption
+ * setting (required when the contract has encrypted fields), and the answer to a request that
+ * breaks the contract when the API's wire format is not the default 400 `{ error: 'Validation
+ * error', code: 'VALIDATION_ERROR', details }` (e.g. Slack's 200 `{ ok: false, error:
+ * 'invalid_arguments' }`). No login: the API's auth map has every route's.
+ */
+export type ControllerOptions<C, A extends AccessChecks> = {
+  checks?: A;
   /** Upload parsing (multer): the only step allowed to fill the body before it is checked. */
   upload?: RequestHandler;
-  /** Access checks, by name; they run in this order, after the request is checked. */
-  access?: A;
-  /** Status of the success response. Default 200. */
-  successStatus?: number;
-  /** Headers set on every answer of this route, success or a ContractError (e.g. `Cache-Control`). */
-  responseHeaders?: Record<string, string>;
-  /**
-   * The answer to a request that breaks the contract (params, query or body), when the API's
-   * wire format is not the default 400 `{ error: 'Validation error', code: 'VALIDATION_ERROR',
-   * details }`; e.g. Slack's 200 `{ ok: false, error: 'invalid_arguments' }`. The request is
-   * refused either way.
-   */
   invalidRequest?: () => ContractError;
-  /** The route's controller: the checked input in, the answer out (or a thrown ContractError). */
-  controller: (input: HandlerInput<C, A>) => Promise<RouteResponse<C>>;
 } & (HasEncryptedFields<C> extends true ? { encryption: EncryptionImpl } : { encryption?: never });
+
+/** Everything one mounted route runs: its login (from the auth map), its steps, its controller. */
+type RouteImpl = {
+  auth: RouteAuth;
+  upload?: RequestHandler;
+  checks?: AccessChecks;
+  invalidRequest?: () => ContractError;
+  encryption?: EncryptionImpl;
+  run: ControllerFn<AnyRouteContract, AccessChecks>;
+};
 
 declare const mountedBrand: unique symbol;
 /** A route built for contract `C`, ready to mount. Only `router` makes one. */
@@ -409,27 +448,32 @@ function makeReadable(value: unknown): unknown {
   return value;
 }
 
-function respond<C extends AnyRouteContract, A extends AccessChecks>(contract: C, impl: RouteImpl<C, A>): RequestHandler {
+function respond(contract: AnyRouteContract, impl: RouteImpl): RequestHandler {
   return async function respondMiddleware(req: Request, res: Response, next: NextFunction) {
-    if (impl.responseHeaders) res.set(impl.responseHeaders);
+    const { reply, state } = newReply(contract);
     try {
       // Wrapped here as well as in encryptedRoute, so the handler gets UnreadableString
       // fields whether or not the encryption pipeline ran.
       const requestContract = requestContractOf(contract);
       const body = requestContract ? makeUnreadable(requestContract, req.body ?? {}) : req.body;
       const files = req.files;
-      const result = await impl.controller({
-        ...(checkInput(req) as CheckInput<C>),
-        body: body as RouteBody<C>,
-        derived: req.derived as RouteDerived<C>,
-        access: (checked.get(req)?.access ?? {}) as AccessResults<A>,
-        files: Array.isArray(files) ? files : files ? Object.values(files).flat() : undefined,
-        ip: req.ip,
-        userAgent: req.get('user-agent') });
+      const result = await impl.run(
+        {
+          ...checkInput(req),
+          body: body as never,
+          derived: req.derived as never,
+          access: checked.get(req)?.access ?? {},
+          files: Array.isArray(files) ? files : files ? Object.values(files).flat() : undefined,
+          ip: req.ip,
+          userAgent: req.get('user-agent') },
+        reply,
+      );
       const shaped = shapeAnswer(contract, makeReadable(result));
-      res.status(impl.successStatus ?? 200).json(shaped);
+      res.set(state.headers);
+      res.status(state.status).json(shaped);
     } catch (error) {
       if (error instanceof ContractError) {
+        res.set(state.headers);
         res.status(error.status).json(error.body);
         return;
       }
@@ -462,9 +506,12 @@ function isAppsAddress(path: string): boolean {
  * encryption pipeline (when the contract has encrypted fields) → handler → response,
  * and the error answer for anything a step passes on.
  */
-function build<C extends AnyRouteContract, A extends AccessChecks>(contract: C, impl: RouteImpl<C, A>): MountedRoute<C> {
-  const auth = impl.auth ?? 'session';
-  const encryption = (impl as { encryption?: { resolveWorkspaceId: (req: Request) => Promise<string> } }).encryption;
+function build<C extends AnyRouteContract>(contract: C, impl: RouteImpl): MountedRoute<C> {
+  const auth = impl.auth;
+  const encryption = impl.encryption;
+  if (requestContractOf(contract) && !encryption) {
+    throw new Error(`[api] ${contract.key} has encrypted fields but its controller sets no \`encryption\``);
+  }
   const handlers: RequestHandler[] = [
     throughGate(contract),
     ...(isAppsAddress(contract.path) ? [requireTransitProxyIngress] : []),
@@ -474,7 +521,7 @@ function build<C extends AnyRouteContract, A extends AccessChecks>(contract: C, 
     ...AUTH_STEPS[auth],
     ...(impl.upload ? [impl.upload] : []),
     validate(contract, impl.invalidRequest),
-    ...(impl.access ? [runAccess(impl.access)] : []),
+    ...(impl.checks && Object.keys(impl.checks).length > 0 ? [runAccess(impl.checks)] : []),
     ...encryptionSteps(contract, encryption, auth),
     respond(contract, impl),
     // Last: an error any step passes on (anything not a ContractError) gets the app's error
@@ -485,13 +532,13 @@ function build<C extends AnyRouteContract, A extends AccessChecks>(contract: C, 
 }
 
 /** Every mounted route's setup, with its routers' defaults merged in (access checks included), for callTyped. */
-const mountedImpls = new Map<AnyRouteContract, RouteImpl<AnyRouteContract, AccessChecks>>();
+const mountedImpls = new Map<AnyRouteContract, RouteImpl>();
 
 function mount(route: MountedRoute<AnyRouteContract>): void {
   if (!registerContract(route.contract)) return;
   const method = route.contract.method.toLowerCase() as 'get' | 'post' | 'put' | 'patch' | 'delete';
   typedRouter[method](route.contract.path, ...route.handlers);
-  mountedImpls.set(route.contract, (route as unknown as { impl: RouteImpl<AnyRouteContract, AccessChecks> }).impl);
+  mountedImpls.set(route.contract, (route as unknown as { impl: RouteImpl }).impl);
 }
 
 /** A typed route's answer for another caller of the same API: status, the shaped body, headers. */
@@ -523,47 +570,61 @@ export async function callTyped(contract: AnyRouteContract, req: Request, raw: R
     route: { method: req.method, path: req.originalUrl.split('?')[0] },
     headers: req.headers,
   };
-  const access = impl.access ? await runChecks(impl.access, input) : {};
-  const result = await impl.controller({ ...input, derived: undefined as never, access, files: undefined, ip: req.ip, userAgent: req.get('user-agent') });
+  const access = impl.checks ? await runChecks(impl.checks, input) : {};
+  const { reply, state } = newReply(contract);
+  const result = await impl.run({ ...input, derived: undefined as never, access, files: undefined, ip: req.ip, userAgent: req.get('user-agent') }, reply);
   return {
-    status: impl.successStatus ?? 200,
+    status: state.status,
     body: shapeAnswer(contract, makeReadable(result)),
-    ...(impl.responseHeaders ? { headers: impl.responseHeaders } : {}),
+    ...(Object.keys(state.headers).length > 0 ? { headers: state.headers } : {}),
   };
 }
 
-// ─── The routes file: one tree in the API's shape, a route per contract ─────────
+// ─── Controllers and the routes file ────────────────────────────────────────────
 
-/** A route's own setup in the routes file: everything but its login, which the API's auth map gives. */
-export type RouteSetup<C extends AnyRouteContract, A extends AccessChecks = Record<never, never>> = Omit<RouteImpl<C, A>, 'auth'>;
-
-declare const pendingBrand: unique symbol;
-/** One route of the routes file, for contract `C`: its setup, built at mount time. */
-export type PendingRoute<C extends AnyRouteContract> = {
-  readonly kind: 'PENDING_ROUTE';
-  readonly impl: RouteSetup<C, AccessChecks>;
-  readonly [pendingBrand]: C;
+declare const controllerBrand: unique symbol;
+/** A controller made for contract `C` (`controller(api.…, fn)`): what the routes file places at C's name. */
+export type Controller<C extends AnyRouteContract> = {
+  readonly kind: 'CONTROLLER';
+  readonly contract: C;
+  readonly options: ControllerOptions<C, AccessChecks>;
+  readonly fn: ControllerFn<C, AccessChecks>;
+  readonly [controllerBrand]: C;
 };
 
+/** A contract with encrypted fields needs the options form, for its `encryption` setting. */
+type WithoutEncryptedFields<C> = HasEncryptedFields<C> extends true ? { 'has encrypted fields: pass options with `encryption`': never } : unknown;
+
 /**
- * A route of the routes file: its controller, and its access checks, upload, encryption,
- * success status, headers or wire format for a bad request when it has any. Its contract comes
- * from its place in the tree, so the controller's input and answer are that contract's.
+ * A route's controller, made from its contract: its input, its answer and `access` are typed from
+ * the route (and its checks), so the controller writes no types.
  *
- *   postMessage: handle({ access: { channel: botChannel() }, controller: ({ body }) => send(body) }),
+ *   export const channelMembers = controller(api.channels.members, async ({ params, user }) => { … });
+ *
+ *   export const createApp = controller(api.apps.create, { checks: xyneApps(AccessType.WRITE) }, async ({ body, user }, reply) => {
+ *     …
+ *     reply.status(201);
+ *     return app;
+ *   });
  */
-export function handle<C extends AnyRouteContract, A extends AccessChecks = Record<never, never>>(impl: RouteSetup<C, A>): PendingRoute<C> {
-  return { kind: 'PENDING_ROUTE', impl } as unknown as PendingRoute<C>;
+export function controller<C extends AnyRouteContract>(contract: C & WithoutEncryptedFields<C>, fn: ControllerFn<C, Record<never, never>>): Controller<C>;
+export function controller<C extends AnyRouteContract, A extends AccessChecks = Record<never, never>>(
+  contract: C,
+  options: ControllerOptions<C, A>,
+  fn: ControllerFn<C, A>,
+): Controller<C>;
+export function controller(contract: AnyRouteContract, optionsOrFn: unknown, maybeFn?: unknown): Controller<AnyRouteContract> {
+  const [options, fn] = typeof optionsOrFn === 'function' ? [{}, optionsOrFn] : [optionsOrFn, maybeFn];
+  return { kind: 'CONTROLLER', contract, options, fn } as unknown as Controller<AnyRouteContract>;
 }
 
 /**
  * What a group sets for every route in it, at any depth: access checks (they add up: the outer
- * group's run first, and an inner one cannot replace them), headers, and the wire format for a
- * bad request. A route's own setting wins for headers and the bad-request answer.
+ * group's run first, and an inner group or a controller cannot replace one) and the wire format
+ * for a bad request (a controller's own wins).
  */
 export type GroupDefaults = {
-  access?: AccessChecks;
-  responseHeaders?: Record<string, string>;
+  checks?: AccessChecks;
   invalidRequest?: () => ContractError;
 };
 
@@ -576,12 +637,12 @@ export type RouteGroupNode<T> = {
   readonly [groupBrand]: T;
 };
 
-/** The routes file's shape for API table `T`: a `handle(...)` per contract, the same shape per nested route. */
+/** The routes file's shape for API table `T`: a controller per contract, the same shape per nested route. */
 export type RoutesTree<T> = {
-  [K in keyof T]: T[K] extends AnyRouteContract ? PendingRoute<T[K]> : RoutesTree<T[K]> | RouteGroupNode<T[K]>;
+  [K in keyof T]: T[K] extends AnyRouteContract ? Controller<T[K]> : RoutesTree<T[K]> | RouteGroupNode<T[K]>;
 };
 
-/** Settings shared by every route of a part of the API: `analytics: group({ access: { … } }, { … })`. */
+/** Settings shared by every route of a part of the API: `analytics: group({ checks: { … } }, { … })`. */
 export function group<T>(defaults: GroupDefaults, tree: RoutesTree<T>): RouteGroupNode<T> {
   return { kind: 'ROUTE_GROUP', defaults, tree } as unknown as RouteGroupNode<T>;
 }
@@ -591,32 +652,45 @@ declare const implementedBrand: unique symbol;
 export type ImplementedApi = { readonly api: RouteTable; readonly tree: unknown; readonly [implementedBrand]: true };
 
 /**
- * The routes file: one entry per route of the API, in the API's shape. No paths (they are in
- * the API), no logins (the API's auth map has them). A missing route, an extra one, or a
- * controller that does not fit its contract is a type error.
+ * The routes file: the controller of every route of the API, in the API's shape. No paths (the
+ * API has them), no logins (the API's auth map has them). A missing route, an extra one, or a
+ * controller made for another route is a type error, and stops startup.
  */
 export function implement<T extends RouteTable>(apiTable: T, tree: RoutesTree<T>): ImplementedApi {
   return { api: apiTable, tree } as unknown as ImplementedApi;
 }
 
 function mergeDefaults(parent: GroupDefaults, child: GroupDefaults, where: string): GroupDefaults {
-  const access: AccessChecks = { ...(parent.access ?? {}) };
-  for (const [name, check] of Object.entries(child.access ?? {})) {
-    if (name in access) {
-      // An inner group or a route must not replace an outer check: the outer one stays, the inner one is dropped.
-      logger.error('[api] access check name already set by an outer group; the outer one is kept', { where, check: name });
-      continue;
+  const checks: AccessChecks = { ...(parent.checks ?? {}) };
+  for (const [name, check] of Object.entries(child.checks ?? {})) {
+    if (name in checks) {
+      // An inner group or a controller must not replace an outer check.
+      throw new Error(`[api] ${where}: access check "${name}" is already set by an outer group`);
     }
-    access[name] = check;
+    checks[name] = check;
   }
-  return {
-    access,
-    responseHeaders: { ...(parent.responseHeaders ?? {}), ...(child.responseHeaders ?? {}) },
-    invalidRequest: child.invalidRequest ?? parent.invalidRequest };
+  return { checks, invalidRequest: child.invalidRequest ?? parent.invalidRequest };
 }
 
 function isGroupNode(node: unknown): node is RouteGroupNode<RouteTable> {
   return !!node && typeof node === 'object' && (node as { kind?: unknown }).kind === 'ROUTE_GROUP';
+}
+
+function isController(node: unknown): node is Controller<AnyRouteContract> {
+  return !!node && typeof node === 'object' && (node as { kind?: unknown }).kind === 'CONTROLLER';
+}
+
+/** A controller's route setup, with its login and its groups' settings. */
+function implOf(ctrl: Controller<AnyRouteContract>, auth: RouteAuth, defaults: GroupDefaults): RouteImpl {
+  const options = ctrl.options as ControllerOptions<AnyRouteContract, AccessChecks> & { encryption?: EncryptionImpl };
+  const merged = mergeDefaults(defaults, { checks: options.checks, invalidRequest: options.invalidRequest }, ctrl.contract.key);
+  return {
+    auth,
+    upload: options.upload,
+    encryption: options.encryption,
+    checks: merged.checks,
+    invalidRequest: merged.invalidRequest,
+    run: ctrl.fn as RouteImpl['run'] };
 }
 
 /** Builds and mounts every route of `table`, in table order, with its groups' settings and its login from the auth map. */
@@ -629,20 +703,18 @@ function mountTree(table: RouteTable, node: unknown, inherited: GroupDefaults, w
   }
   for (const [name, contractOrTable] of Object.entries(table)) {
     const entry = entries?.[name];
-    if (!entry) {
-      logger.error('[api] the routes file has no entry for an API name; not mounted', { where, name });
-      continue;
-    }
+    if (!entry) throw new Error(`[api] the routes file has no entry for ${where}.${name}`);
     if ((contractOrTable as { kind?: unknown }).kind !== 'ROUTE') {
       mountTree(contractOrTable as RouteTable, entry, defaults, `${where}.${name}`);
       continue;
     }
     const contract = contractOrTable as AnyRouteContract;
+    if (!isController(entry) || entry.contract !== contract) {
+      throw new Error(`[api] ${where}.${name}: the routes file must place the controller made for this route, controller(${where}.${name}, …)`);
+    }
     const routeAuth = apiAuth.of(contract);
     if (!routeAuth) throw new Error(`[api] ${contract.key} has no login in the API's auth map (packages/shared/src/api/index.ts)`);
-    const impl = (entry as PendingRoute<AnyRouteContract>).impl;
-    const merged = mergeDefaults(defaults, { access: impl.access as AccessChecks | undefined, responseHeaders: impl.responseHeaders, invalidRequest: impl.invalidRequest }, contract.key);
-    mount(build(contract, { ...impl, ...merged, auth: routeAuth } as RouteImpl<AnyRouteContract, AccessChecks>));
+    mount(build(contract, implOf(entry, routeAuth, defaults)));
   }
 }
 
@@ -651,9 +723,9 @@ export function mountApi(implemented: ImplementedApi): void {
   mountTree(implemented.api, implemented.tree, {}, 'api');
 }
 
-/** Mount one typed route outside the routes file (tests), with its login given here. */
-export function mountRoute<C extends AnyRouteContract, A extends AccessChecks = Record<never, never>>(contract: C, impl: RouteImpl<C, A>): void {
-  mount(build(contract, impl));
+/** Mount one controller outside the routes file (tests), with its login given here. */
+export function mountRoute<C extends AnyRouteContract>(ctrl: Controller<C>, auth: RouteAuth): void {
+  mount(build(ctrl.contract, implOf(ctrl as unknown as Controller<AnyRouteContract>, auth, {})));
 }
 
 /** createApp only: mounts the typed router at /api. */

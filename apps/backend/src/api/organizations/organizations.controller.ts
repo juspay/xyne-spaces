@@ -1,8 +1,8 @@
-import { OrgRole } from '@xyne/shared';
+import { OrgRole, api } from '@xyne/shared';
 import { DatabaseClient } from '@/database/client';
 import { OrganizationRepository } from '@/database/repositories/organizationRepository';
 import { UserRepository } from '@/database/repositories/users';
-import { ContractError } from '@/framework/api';
+import { ContractError, controller } from '@/framework/api';
 import { syncOrgResourceAdminAccess } from '@/services/permissionMatrix';
 import type { AuthenticatedUser } from '@/types/express';
 import { logger } from '@/utils/logger';
@@ -83,7 +83,7 @@ async function requireOrganization(orgId: string) {
 }
 
 /** GET /organizations: the caller's organizations, with their role in each. */
-export async function listOrganizations(input: { user: AuthenticatedUser | undefined }) {
+export const listOrganizations = controller(api.organizations.list, async (input) => {
   try {
     const memberships = await orgMemberRepository.getUserOrgs(userIdOf(input.user));
     const withRole = await Promise.all(
@@ -110,10 +110,10 @@ export async function listOrganizations(input: { user: AuthenticatedUser | undef
   } catch (error) {
     throw internal(error, 'Error getting user organizations:');
   }
-}
+});
 
 /** GET /organizations/:orgId: members only. */
-export async function getOrganization(input: { params: { orgId: string }; user: AuthenticatedUser | undefined }) {
+export const getOrganization = controller(api.organizations.get, async (input) => {
   try {
     const { orgId } = input.params;
     const organization = await requireOrganization(orgId);
@@ -143,14 +143,10 @@ export async function getOrganization(input: { params: { orgId: string }; user: 
   } catch (error) {
     throw internal(error, 'Error getting organization details:');
   }
-}
+});
 
 /** POST /organizations/:orgId/members: an owner or admin adds a member; only an owner can add an owner. */
-export async function addMember(input: {
-  params: { orgId: string };
-  body: { userId: string; role: 'OWNER' | 'ADMIN' | 'MEMBER' | 'GUEST' };
-  user: AuthenticatedUser | undefined;
-}) {
+export const addMember = controller(api.organizations.addMember, async (input) => {
   try {
     const { orgId } = input.params;
     const { userId: targetUserId, role } = input.body;
@@ -169,14 +165,10 @@ export async function addMember(input: {
   } catch (error) {
     throw internal(error, 'Error adding organization member:');
   }
-}
+});
 
 /** PUT /organizations/:orgId/members/:userId: change a role. */
-export async function updateMemberRole(input: {
-  params: { orgId: string; userId: string };
-  body: { role: 'OWNER' | 'ADMIN' | 'MEMBER' | 'GUEST' };
-  user: AuthenticatedUser | undefined;
-}) {
+export const updateMemberRole = controller(api.organizations.updateMemberRole, async (input) => {
   try {
     const { orgId, userId: targetUserId } = input.params;
     const { role } = input.body;
@@ -205,10 +197,10 @@ export async function updateMemberRole(input: {
   } catch (error) {
     throw internal(error, 'Error updating member role:');
   }
-}
+});
 
 /** DELETE /organizations/:orgId/members/:userId: an owner or admin removes anyone; anyone may leave. */
-export async function removeMember(input: { params: { orgId: string; userId: string }; user: AuthenticatedUser | undefined }) {
+export const removeMember = controller(api.organizations.removeMember, async (input) => {
   try {
     const { orgId, userId: targetUserId } = input.params;
     const userId = userIdOf(input.user);
@@ -231,4 +223,4 @@ export async function removeMember(input: { params: { orgId: string; userId: str
   } catch (error) {
     throw internal(error, 'Error removing organization member:');
   }
-}
+});

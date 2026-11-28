@@ -1,6 +1,6 @@
-import type { IncomingHttpHeaders } from 'node:http';
+import { api } from '@xyne/shared';
+import { controller } from '@/framework/api';
 import { CacConfigService } from '@/services/cacConfigService';
-import type { AuthenticatedUser } from '@/types/express';
 
 /**
  * CAC config, sub-ticket links and conversation labels on the typed framework: no req/res, same
@@ -10,7 +10,7 @@ import type { AuthenticatedUser } from '@/types/express';
 // ─── CAC config ─────────────────────────────────────────────────────────────
 
 /** GET /cac-config/:key: the Superposition context is the caller's email, workspace and (playground) environment. */
-export async function cacConfig(input: { params: { key: string }; user: AuthenticatedUser | undefined; headers: IncomingHttpHeaders }) {
+export const cacConfig = controller(api.cacConfig.get, async (input) => {
   const email = input.user?.email?.trim();
   const workspaceId = input.user?.workspaceId;
   const routeEnv = input.headers['x-route-env'];
@@ -21,4 +21,4 @@ export async function cacConfig(input: { params: { key: string }; user: Authenti
     ...(isPlayground ? { environment: 'playground' } : {}),
   };
   return { key: input.params.key, config: await CacConfigService.fetch(input.params.key, context) };
-}
+});

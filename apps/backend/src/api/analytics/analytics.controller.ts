@@ -1,10 +1,11 @@
 import { AnalyticsRepository, type AnalyticsFilters } from '@/database/repositories/analyticsRepository';
-import { ContractError } from '@/framework/api';
+import { api } from '@xyne/shared';
+import { ContractError, controller } from '@/framework/api';
 import type { AuthenticatedUser } from '@/types/express';
 import { logger } from '@/utils/logger';
 
 /**
- * The workspace analytics API on the typed framework (routes/analytics.ts): no req/res, same
+ * The workspace analytics API on the typed framework (a controller per route): no req/res, same
  * numbers and answers as the AnalyticsController methods they replace. The route's access
  * checks (workspace present, route ACL, ANALYTICS admin) have run, so `workspaceId` is set.
  */
@@ -52,59 +53,59 @@ const countOrSeries = <C, S>(
       return groupBy ? series(filtersOf(input), groupBy) : count(filtersOf(input));
     });
 
-export const messagesExchanged = (input: Input) =>
-  answer('messages exchanged', () => repo.getMessagesExchanged(filtersOf(input), (input.query.groupBy as 'day' | 'hour' | undefined) ?? 'day'));
+export const messagesExchanged = controller(api.analytics.messagesExchanged, (input) =>
+  answer('messages exchanged', () => repo.getMessagesExchanged(filtersOf(input), (input.query.groupBy as 'day' | 'hour' | undefined) ?? 'day')));
 
-export const activeUsers = (input: Input) =>
-  answer('active users', () => repo.getActiveUsersWithChart(filtersOf(input), (input.query.groupBy as 'day' | 'hour' | undefined) ?? 'day'));
+export const activeUsers = controller(api.analytics.activeUsers, (input) =>
+  answer('active users', () => repo.getActiveUsersWithChart(filtersOf(input), (input.query.groupBy as 'day' | 'hour' | undefined) ?? 'day')));
 
-export const currentActiveUsers = (input: Input) =>
-  answer('current active users', () => repo.getCurrentActiveUsers(workspaceOf(input.user)));
+export const currentActiveUsers = controller(api.analytics.currentActiveUsers, (input) =>
+  answer('current active users', () => repo.getCurrentActiveUsers(workspaceOf(input.user))));
 
-export const activeChannels = countOrSeries(
+export const activeChannels = controller(api.analytics.activeChannels, countOrSeries(
   'active channels',
   (f) => repo.getActiveChannels(f),
   (f, g) => repo.getActiveChannelsTimeSeries(f, g),
-);
-export const filesShared = countOrSeries(
+));
+export const filesShared = controller(api.analytics.filesShared, countOrSeries(
   'files shared',
   (f) => repo.getFilesShared(f),
   (f, g) => repo.getFilesSharedTimeSeries(f, g),
-);
-export const numberOfTickets = countOrSeries(
+));
+export const numberOfTickets = controller(api.analytics.numberOfTickets, countOrSeries(
   'number of tickets',
   (f) => repo.getNumberOfTickets(f),
   (f, g) => repo.getNumberOfTicketsTimeSeries(f, g),
-);
-export const numberOfCanvases = countOrSeries(
+));
+export const numberOfCanvases = controller(api.analytics.numberOfCanvases, countOrSeries(
   'number of canvases',
   (f) => repo.getNumberOfCanvases(f),
   (f, g) => repo.getNumberOfCanvasesTimeSeries(f, g),
-);
-export const numberOfCalls = countOrSeries(
+));
+export const numberOfCalls = controller(api.analytics.numberOfCalls, countOrSeries(
   'number of calls',
   (f) => repo.getNumberOfCalls(f),
   (f, g) => repo.getNumberOfCallsTimeSeries(f, g),
-);
-export const totalCallsDuration = countOrSeries(
+));
+export const totalCallsDuration = controller(api.analytics.totalCallsDuration, countOrSeries(
   'total calls duration',
   (f) => repo.getTotalCallsDuration(f),
   (f, g) => repo.getTotalCallsDurationTimeSeries(f, g),
-);
+));
 
 /** Messages today is the caller's workspace only, whatever the time range. */
-export const messagesToday = (input: Input) =>
+export const messagesToday = controller(api.analytics.messagesToday, (input) =>
   answer<number | { date: string; value: number }[]>('messages today', () => {
     const workspaceId = workspaceOf(input.user);
     return hourOrDay(input.query.groupBy) ? repo.getMessagesTodayTimeSeries(workspaceId) : repo.getMessagesToday(workspaceId);
-  });
+  }));
 
 /** Users onboarded: only `groupBy=day` makes a series. */
-export const usersOnboarded = (input: Input) =>
+export const usersOnboarded = controller(api.analytics.usersOnboarded, (input) =>
   answer<number | { date: string; value: number }[]>('users onboarded', () =>
     input.query.groupBy === 'day' ? repo.getUsersOnboardedTimeSeries(filtersOf(input)) : repo.getUsersOnboarded(filtersOf(input)),
-  );
+  ));
 
-export const topUsersByMessages = (input: Input) =>
+export const topUsersByMessages = controller(api.analytics.topUsersByMessages, (input) =>
   answer('top users by messages', () =>
-    repo.getTopUsersByMessages(filtersOf(input), input.query.limit ? parseInt(input.query.limit, 10) : 10), '');
+    repo.getTopUsersByMessages(filtersOf(input), input.query.limit ? parseInt(input.query.limit, 10) : 10), ''));

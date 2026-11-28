@@ -92,7 +92,7 @@ jest.mock('@/middleware/encryptedRoute', () => ({
   ],
 }));
 
-import { router, route, ContractError, mountApi, mountTypedRoutes, type AccessCheck } from '../api';
+import { controller, ContractError, implement, mountApi, mountRoute, mountTypedRoutes, type AccessCheck } from '../api';
 import { createApp } from '../createApp';
 import { contractGate, findContract } from '../contractGate';
 
@@ -117,9 +117,10 @@ const echo = defineRoute({
   body: z.object({ name: z.string().trim().min(1), note: z.string().optional() }),
   response: z.object({ id: z.string(), name: z.string(), keys: z.array(z.string()), user: z.string().nullable() }),
 });
-route(echo, {
-  controller: async ({ params, body, user }) => ({ id: params.id, name: body.name, keys: Object.keys(body), user: user?.id ?? null }),
-});
+mountRoute(
+  controller(echo, async ({ params, body, user }) => ({ id: params.id, name: body.name, keys: Object.keys(body), user: user?.id ?? null })),
+  'session',
+);
 
 const seen: unknown[] = [];
 const channelCheck: AccessCheck<{ channelId: string }> = async ({ body }) => {
@@ -134,7 +135,7 @@ const appGroup = {
     method: 'POST',
     path: '/test/apps/post',
     body: z.object({ channelId: z.string().min(1), note: unreadableString().optional() }),
-    facts: { note: {} },
+    sourceToDerived: { note: {} },
     response: z.object({ channel: z.string(), app: z.string().nullable(), facts: z.array(z.string()) }),
   }),
   fail: defineRoute({
@@ -143,57 +144,70 @@ const appGroup = {
     response: z.object({}),
   }),
 } as const;
-mountApi(router(appGroup, {}, (serve) => ({
-  post: serve('post', {
-    auth: 'app',
-    access: { channel: channelCheck },
-    encryption: { resolveWorkspaceId: async () => 'ws-1' },
-    successStatus: 201,
-    controller: async ({ access, app, derived }) => ({
+const appPost = controller(
+  appGroup.post,
+  { checks: { channel: channelCheck }, encryption: { resolveWorkspaceId: async () => 'ws-1' } },
+  async ({ access, app, derived }, reply) => {
+    reply.status(201);
+    return {
       channel: access.channel.channelId,
       app: app?.appId ?? null,
       facts: (derived?.fields as Record<string, { userIds?: string[] }> | undefined)?.note?.userIds ?? [],
-    }),
-  }),
-  fail: serve('fail', {
-    auth: 'public',
-    controller: async () => {
-      throw new ContractError(409, { error: 'Conflict', code: 'TEST_CONFLICT' });
-    },
-  }),
-})));
+    };
+  },
+);
+const appFail = controller(appGroup.fail, async () => {
+  throw new ContractError(409, { error: 'Conflict', code: 'TEST_CONFLICT' });
+});
+mountRoute(appPost, 'app');
+mountRoute(appFail, 'public');
 
 const sessionEncrypted = defineRoute({
   method: 'PUT',
   path: '/test/session/note',
   body: z.object({ note: unreadableString() }),
-  facts: { note: {} },
+  sourceToDerived: { note: {} },
   response: z.object({ ok: z.boolean() }),
 });
-route(sessionEncrypted, {
-  encryption: { resolveWorkspaceId: async () => 'ws-1' },
-  controller: async () => ({ ok: true }),
-});
+mountRoute(controller(sessionEncrypted, { encryption: { resolveWorkspaceId: async () => 'ws-1' } }, async () => ({ ok: true })), 'session');
 
 /** An encrypted field next to plain ones, one of them nested: the handler echoes the plain ones. */
 const sessionEncryptedPlain = defineRoute({
   method: 'POST',
   path: '/test/session/titled',
   body: z.object({ note: unreadableString(), title: z.string().trim().min(1), meta: z.object({ tag: z.string() }).optional() }),
-  facts: { note: {} },
+  sourceToDerived: { note: {} },
   response: z.object({ title: z.string(), keys: z.array(z.string()) }),
 });
-route(sessionEncryptedPlain, {
-  encryption: { resolveWorkspaceId: async () => 'ws-1' },
-  controller: async ({ body }) => ({ title: body.title, keys: Object.keys(body).sort() }),
-});
+mountRoute(
+  controller(sessionEncryptedPlain, { encryption: { resolveWorkspaceId: async () => 'ws-1' } }, async ({ body }) => ({ title: body.title, keys: Object.keys(body).sort() })),
+  'session',
+);
 
-route(defineRoute({ method: 'GET', path: '/test/boom', response: z.object({}) }), {
-  auth: 'public',
-  controller: async () => {
+mountRoute(
+  controller(defineRoute({ method: 'GET', path: '/test/boom', response: z.object({}) }), async () => {
     throw new Error('boom');
-  },
+  }),
+  'public',
+);
+
+/** Status and headers are the controller's, at runtime (reply). */
+const replied = defineRoute({
+  method: 'POST',
+  path: '/test/replied',
+  body: z.object({ mode: z.enum(['created', 'plain', 'refused', 'bad']) }),
+  response: z.object({ mode: z.string() }),
 });
+mountRoute(
+  controller(replied, async ({ body }, reply) => {
+    reply.header('Cache-Control', 'private, no-cache');
+    if (body.mode === 'created') reply.status(201);
+    if (body.mode === 'refused') throw new ContractError(409, { error: 'Conflict' });
+    if (body.mode === 'bad') reply.status(400);
+    return { mode: body.mode };
+  }),
+  'public',
+);
 
 const slackStyle = defineRoute({
   method: 'POST',
@@ -201,16 +215,21 @@ const slackStyle = defineRoute({
   body: z.object({ ts: z.string().min(1) }),
   response: z.object({ ok: z.literal(true), ts: z.string() }),
 });
-route(slackStyle, {
-  auth: 'slack-app',
-  invalidRequest: () => new ContractError(200, { ok: false, error: 'invalid_arguments' }),
-  access: {
-    gone: async ({ body }: { body: unknown }) => {
-      if ((body as { ts: string }).ts === 'gone') throw new ContractError(404, { error: 'message_not_found' });
+mountRoute(
+  controller(
+    slackStyle,
+    {
+      invalidRequest: () => new ContractError(200, { ok: false, error: 'invalid_arguments' }),
+      checks: {
+        gone: async ({ body }: { body: unknown }) => {
+          if ((body as { ts: string }).ts === 'gone') throw new ContractError(404, { error: 'message_not_found' });
+        },
+      },
     },
-  },
-  controller: async ({ body }) => ({ ok: true as const, ts: body.ts }),
-});
+    async ({ body }) => ({ ok: true as const, ts: body.ts }),
+  ),
+  'slack-app',
+);
 
 beforeEach(() => {
   encryptionRuns.length = 0;
@@ -373,23 +392,22 @@ describe('with the ingress transit proxy deployed', () => {
   it('/apps routes refuse calls that did not come through the proxy, and run the encryption pipeline', async () => {
     jest.resetModules();
     mockConfig.internal.transitProxyIngressEnabled = true;
-    const { route: freshRoute } = await import('../api');
+    const { controller: freshController, mountRoute: freshMountRoute } = await import('../api');
     const { createApp: freshCreateApp } = await import('../createApp');
     const shared = await import('@xyne/shared');
     const contract = shared.defineRoute({
       method: 'POST',
       path: '/apps/test/proxied',
       body: z.object({ note: shared.unreadableString().optional() }),
-      facts: { note: {} },
+      sourceToDerived: { note: {} },
       response: z.object({ facts: z.array(z.string()) }),
     });
-    freshRoute(contract, {
-      auth: 'app',
-      encryption: { resolveWorkspaceId: async () => 'ws-1' },
-      controller: async ({ derived }) => ({
+    freshMountRoute(
+      freshController(contract, { encryption: { resolveWorkspaceId: async () => 'ws-1' } }, async ({ derived }) => ({
         facts: (derived?.fields as Record<string, { userIds?: string[] }> | undefined)?.note?.userIds ?? [],
-      }),
-    });
+      })),
+      'app',
+    );
     const app = freshCreateApp();
 
     const direct = await request(app).post('/api/apps/test/proxied').send({ note: 'x' });
@@ -401,6 +419,36 @@ describe('with the ingress transit proxy deployed', () => {
     expect(res.status).toBe(200);
     expect(res.body).toEqual({ facts: ['u-9'] });
     expect(encryptionRuns).toEqual(['/apps/test/proxied']);
+  });
+});
+
+describe('reply: status and headers, decided by the controller', () => {
+  it('answers 200 by default and the status the controller set, with its headers', async () => {
+    const app = makeApp();
+    const plain = await request(app).post('/api/test/replied').send({ mode: 'plain' });
+    expect(plain.status).toBe(200);
+    expect(plain.headers['cache-control']).toBe('private, no-cache');
+    const created = await request(app).post('/api/test/replied').send({ mode: 'created' });
+    expect(created.status).toBe(201);
+    expect(created.body).toEqual({ mode: 'created' });
+  });
+
+  it('sends the headers set before a thrown ContractError with it', async () => {
+    const res = await request(makeApp()).post('/api/test/replied').send({ mode: 'refused' });
+    expect(res.status).toBe(409);
+    expect(res.headers['cache-control']).toBe('private, no-cache');
+  });
+
+  it('refuses a non-2xx reply.status as a server error (refusals are ContractErrors)', async () => {
+    const res = await request(makeApp()).post('/api/test/replied').send({ mode: 'bad' });
+    expect(res.status).toBe(500);
+  });
+});
+
+describe('the routes file', () => {
+  it('stops startup when a route has another route\'s controller, or none', () => {
+    expect(() => mountApi(implement(appGroup, { post: appPost, fail: appPost as never }))).toThrow(/controller made for this route/);
+    expect(() => mountApi(implement(appGroup, { post: appPost } as never))).toThrow(/no entry/);
   });
 });
 
@@ -450,22 +498,18 @@ describe('typed routes depend on nothing app.ts adds', () => {
   });
 });
 
-// Type-level checks (tsc --noEmit): a group must serve every entry, each under its own name.
+// Type-level checks (tsc --noEmit): the routes file places every route's own controller.
 function typeChecks() {
   // @ts-expect-error `fail` is missing
-  mountApi(router(appGroup, {}, (serve) => ({
-    post: serve('post', { auth: 'app', encryption: { resolveWorkspaceId: async () => 'ws' }, controller: async () => ({ channel: '', app: null, facts: [] }) }),
-  })));
-  mountApi(router(appGroup, {}, (serve) => ({
-    post: serve('post', { auth: 'app', encryption: { resolveWorkspaceId: async () => 'ws' }, controller: async () => ({ channel: '', app: null, facts: [] }) }),
-    // @ts-expect-error built for `post`, mounted as `fail`
-    fail: serve('post', { auth: 'app', encryption: { resolveWorkspaceId: async () => 'ws' }, controller: async () => ({ channel: '', app: null, facts: [] }) }),
-  })));
-  // @ts-expect-error a route with an encryption contract must say where its fields are stored
-  route(sessionEncrypted, { controller: async () => ({ ok: true }) });
-  route(echo, {
-    // @ts-expect-error the handler gets no req
-    controller: async ({ req }) => ({ id: req, name: '', keys: [], user: null }),
-  });
+  implement(appGroup, { post: appPost });
+  // @ts-expect-error made for `post`, placed as `fail`
+  implement(appGroup, { post: appPost, fail: appPost });
+  implement(appGroup, { post: appPost, fail: appFail });
+  // @ts-expect-error a route with encrypted fields must say where they are stored
+  controller(sessionEncrypted, async () => ({ ok: true }));
+  // @ts-expect-error the controller gets no req
+  controller(echo, async ({ req }) => ({ id: req, name: '', keys: [], user: null }));
+  // @ts-expect-error the answer must fit the contract
+  controller(echo, async () => ({ id: 1 }));
 }
 void typeChecks;

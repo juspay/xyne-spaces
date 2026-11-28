@@ -1,4 +1,6 @@
-import { ContractError, type AppCaller } from '@/framework/api';
+import { api } from '@xyne/shared';
+import { appPermission } from '@/apps/access';
+import { ContractError, controller, type AppCaller } from '@/framework/api';
 import type { AuthenticatedUser } from '@/types/express';
 import { logger } from '@/utils/logger';
 import { GuestError, createGuest, issueGuestToken, listGuests, updateGuest, type GuestApp } from '../../../apps/core/guestUtils';
@@ -21,24 +23,23 @@ async function guestAction<T>(action: string, run: () => Promise<T>): Promise<T>
   }
 }
 
-type GuestInput<B> = { body: B; user: AuthenticatedUser | undefined; app: AppCaller | undefined };
-
 /** POST /apps/guests/create */
-export function createAppGuest(input: GuestInput<Parameters<typeof createGuest>[1]>) {
+export const createAppGuest = controller(api.apps.guests.create, { checks: { permission: appPermission('guests:write') } }, async (input, reply) => {
+  reply.status(201);
   return guestAction('create', () => createGuest(guestApp(input.user, input.app), input.body));
-}
+});
 
 /** POST /apps/guests/get */
-export function listAppGuests(input: GuestInput<Parameters<typeof listGuests>[1]>) {
+export const listAppGuests = controller(api.apps.guests.get, { checks: { permission: appPermission('guests:read') } }, async (input) => {
   return guestAction('list', () => listGuests(guestApp(input.user, input.app), input.body));
-}
+});
 
 /** POST /apps/guests/update */
-export function updateAppGuest(input: GuestInput<Parameters<typeof updateGuest>[1]>) {
+export const updateAppGuest = controller(api.apps.guests.update, { checks: { permission: appPermission('guests:write') } }, async (input) => {
   return guestAction('update', () => updateGuest(guestApp(input.user, input.app), input.body));
-}
+});
 
 /** POST /apps/guests/token */
-export function appGuestToken(input: GuestInput<{ email: string }>) {
+export const appGuestToken = controller(api.apps.guests.token, { checks: { permission: appPermission('guests:write') } }, async (input) => {
   return guestAction('token', () => issueGuestToken(guestApp(input.user, input.app), input.body.email));
-}
+});

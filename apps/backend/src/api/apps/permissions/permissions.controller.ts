@@ -1,20 +1,20 @@
-import { api, type RouteBody } from '@xyne/shared';
+import { xyneApps } from '@/api/apps/xyne-apps.access';
+import { AccessType, api } from '@xyne/shared';
 import { repositories } from '@/database/repositories';
-import { ContractError } from '@/framework/api';
-import type { AuthenticatedUser } from '@/types/express';
+import { ContractError, controller } from '@/framework/api';
 import { permissionsFailure } from '../dashboard.helpers';
 
 /** GET /apps/permissions: everything in the registry. */
-export async function listAvailablePermissions() {
+export const listAvailablePermissions = controller(api.apps.permissions.list, async () => {
   try {
     return { permissions: await repositories.appPermissions.findAll() };
   } catch {
     throw new ContractError(500, { error: 'Internal server error' });
   }
-}
+});
 
 /** GET /apps/permissions/:appId: the app TEMPLATE permissions. */
-export async function getAppPermissions(input: { params: { appId: string } }) {
+export const getAppPermissions = controller(api.apps.permissions.get, { checks: xyneApps(AccessType.READ) }, async (input) => {
   try {
     const permissions = await repositories.appPermissions.getAppPermissions(input.params.appId);
     if (permissions.length === 0) {
@@ -31,14 +31,10 @@ export async function getAppPermissions(input: { params: { appId: string } }) {
     if (error instanceof ContractError) throw error;
     throw new ContractError(500, { error: 'Internal server error' });
   }
-}
+});
 
 /** POST /apps/permissions/:appId: replace the TEMPLATE permissions (creator only); bumps the version. */
-export async function setAppPermissions(input: {
-  params: { appId: string };
-  body: RouteBody<typeof api.apps.permissions.set>;
-  user: AuthenticatedUser | undefined;
-}) {
+export const setAppPermissions = controller(api.apps.permissions.set, { checks: xyneApps(AccessType.WRITE) }, async (input) => {
   try {
     const { appId } = input.params;
     const app = await repositories.apps.findById(appId);
@@ -54,4 +50,4 @@ export async function setAppPermissions(input: {
   } catch (error) {
     throw permissionsFailure(error);
   }
-}
+});

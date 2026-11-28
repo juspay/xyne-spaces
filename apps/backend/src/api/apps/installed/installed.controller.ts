@@ -1,7 +1,8 @@
-import { api, AppPermissionStatus, type RouteBody, type RouteQuery } from '@xyne/shared';
+import { xyneApps } from '@/api/apps/xyne-apps.access';
+import { AccessType, AppPermissionStatus, api } from '@xyne/shared';
 import { repositories } from '@/database/repositories';
 import { CommandType } from '@/database/repositories/appCommandRepository';
-import { ContractError } from '@/framework/api';
+import { ContractError, controller } from '@/framework/api';
 import { appResourceAccessService } from '@/services/appResourceAccessService';
 import type { AuthenticatedUser } from '@/types/express';
 import { isValidUrl } from '@/utils/urlUtils';
@@ -25,11 +26,7 @@ function requireWorkspaceId(user: AuthenticatedUser | undefined, message: string
 }
 
 /** PATCH /apps/installed/:installedAppId: the outbound webhook URL of the caller's install. */
-export async function updateInstalledApp(input: {
-  params: { installedAppId: string };
-  body: RouteBody<typeof api.apps.installed.update>;
-  user: AuthenticatedUser | undefined;
-}) {
+export const updateInstalledApp = controller(api.apps.installed.update, { checks: xyneApps(AccessType.WRITE) }, async (input) => {
   try {
     const workspaceId = requireWorkspaceId(input.user, 'installedAppId and workspace are required');
     const { webhookUrl } = input.body;
@@ -50,10 +47,10 @@ export async function updateInstalledApp(input: {
   } catch (error) {
     throw internal(error, 'Error updating installed app:');
   }
-}
+});
 
 /** GET /apps/installed/:installedAppId/permissions: the INSTALL's permissions with approval statuses. */
-export async function getInstalledPermissions(input: { params: { installedAppId: string }; user: AuthenticatedUser | undefined }) {
+export const getInstalledPermissions = controller(api.apps.installed.permissions, { checks: xyneApps(AccessType.READ) }, async (input) => {
   try {
     const workspaceId = requireWorkspaceId(input.user, 'installedAppId and workspace are required');
     const install = await findOwnInstall(input.params.installedAppId, workspaceId);
@@ -86,14 +83,10 @@ export async function getInstalledPermissions(input: { params: { installedAppId:
     if (error instanceof ContractError) throw error;
     throw new ContractError(500, { error: 'Internal server error' });
   }
-}
+});
 
 /** POST /apps/installed/:installedAppId/permissions: replace the INSTALL's permissions (no version bump). */
-export async function setInstalledPermissions(input: {
-  params: { installedAppId: string };
-  body: RouteBody<typeof api.apps.installed.permissionsSet>;
-  user: AuthenticatedUser | undefined;
-}) {
+export const setInstalledPermissions = controller(api.apps.installed.permissionsSet, { checks: xyneApps(AccessType.WRITE) }, async (input) => {
   try {
     const workspaceId = requireWorkspaceId(input.user, 'installedAppId and workspace are required');
     const install = await findOwnInstall(input.params.installedAppId, workspaceId);
@@ -103,10 +96,10 @@ export async function setInstalledPermissions(input: {
   } catch (error) {
     throw permissionsFailure(error);
   }
-}
+});
 
 /** POST /apps/installed/:installedAppId/permissions/activate: pending edits to approved, deletions applied. */
-export async function activateInstalledPermissions(input: { params: { installedAppId: string }; user: AuthenticatedUser | undefined }) {
+export const activateInstalledPermissions = controller(api.apps.installed.permissionsActivate, { checks: xyneApps(AccessType.WRITE) }, async (input) => {
   try {
     const workspaceId = requireWorkspaceId(input.user, 'installedAppId and workspace are required');
     const install = await findOwnInstall(input.params.installedAppId, workspaceId);
@@ -117,14 +110,10 @@ export async function activateInstalledPermissions(input: { params: { installedA
     if (error instanceof ContractError) throw error;
     throw new ContractError(500, { error: error instanceof Error ? error.message : 'Internal server error' });
   }
-}
+});
 
 /** GET /apps/installed/:installedAppId/commands?commandType=: the INSTALL's snapshot, scoped to the caller's workspace. */
-export async function listInstalledCommands(input: {
-  params: { installedAppId: string };
-  query: RouteQuery<typeof api.apps.installed.commands>;
-  user: AuthenticatedUser | undefined;
-}) {
+export const listInstalledCommands = controller(api.apps.installed.commands, { checks: xyneApps(AccessType.READ) }, async (input) => {
   try {
     const workspaceId = requireWorkspaceId(input.user, 'installedAppId and workspace are required');
     const install = await findOwnInstall(input.params.installedAppId, workspaceId);
@@ -133,7 +122,7 @@ export async function listInstalledCommands(input: {
   } catch (error) {
     throw internal(error, '[COMMANDS] getInstalledCommands error:');
   }
-}
+});
 
 // ─── Attached resources ─────────────────────────────────────────────────────
 
@@ -155,28 +144,21 @@ async function currentAttachedItems(installedAppId: string, workspaceId: string,
 }
 
 /** GET /apps/installed/:installedAppId/resources/:resourceType */
-export async function listAttachedResources(input: {
-  params: { installedAppId: string; resourceType: string };
-  user: AuthenticatedUser | undefined;
-}) {
+export const listAttachedResources = controller(api.apps.installed.resources, { checks: xyneApps(AccessType.READ) }, async (input) => {
   try {
     const { install, resource, workspaceId } = await resolveAttachable(input.params, input.user);
     return { resourceType: resource.kind, items: await currentAttachedItems(install.id, workspaceId, resource) };
   } catch (error) {
     throw internal(error, 'Error listing attached resources:', { error: 'Failed to list attached resources' });
   }
-}
+});
 
 /**
  * PATCH /apps/installed/:installedAppId/resources/:resourceType: a delta (added / removed ids)
  * rather than the whole set, effective at once. An id in both ends up attached (the repository
  * deletes before it creates).
  */
-export async function setAttachedResources(input: {
-  params: { installedAppId: string; resourceType: string };
-  body: RouteBody<typeof api.apps.installed.resourcesSet>;
-  user: AuthenticatedUser | undefined;
-}) {
+export const setAttachedResources = controller(api.apps.installed.resourcesSet, { checks: xyneApps(AccessType.ADMIN) }, async (input) => {
   try {
     const added = [...new Set(input.body.added ?? [])];
     const removed = [...new Set(input.body.removed ?? [])];
@@ -200,7 +182,7 @@ export async function setAttachedResources(input: {
   } catch (error) {
     throw internal(error, 'Error updating attached resources:', { error: 'Failed to update attached resources' });
   }
-}
+});
 
 // ─── Fetch config ───────────────────────────────────────────────────────────
 
@@ -211,7 +193,7 @@ const installNotFound = () =>
  * GET /apps/installed/:installedAppId/fetch-config: the stored config (secrets redacted), or a
  * default derived from the install's webhook URL when none is stored; `configured` tells which.
  */
-export async function getFetchConfig(input: { params: { installedAppId: string }; user: AuthenticatedUser | undefined }) {
+export const getFetchConfig = controller(api.apps.installed.fetchConfig, { checks: xyneApps(AccessType.READ) }, async (input) => {
   try {
     const workspaceId = requireWorkspaceId(input.user, 'installedAppId and workspace are required');
     const install = await findOwnInstall(input.params.installedAppId, workspaceId);
@@ -239,10 +221,10 @@ export async function getFetchConfig(input: { params: { installedAppId: string }
   } catch (error) {
     throw internal(error, 'Error reading app fetch config:');
   }
-}
+});
 
 /** DELETE /apps/installed/:installedAppId/fetch-config: turns history pulls off for this install. */
-export async function deleteFetchConfig(input: { params: { installedAppId: string }; user: AuthenticatedUser | undefined }) {
+export const deleteFetchConfig = controller(api.apps.installed.fetchConfigDelete, { checks: xyneApps(AccessType.WRITE) }, async (input) => {
   try {
     const workspaceId = requireWorkspaceId(input.user, 'installedAppId and workspace are required');
     const install = await findOwnInstall(input.params.installedAppId, workspaceId);
@@ -252,4 +234,4 @@ export async function deleteFetchConfig(input: { params: { installedAppId: strin
   } catch (error) {
     throw internal(error, 'Error clearing app fetch config:');
   }
-}
+});

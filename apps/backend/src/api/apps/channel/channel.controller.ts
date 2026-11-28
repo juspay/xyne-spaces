@@ -1,10 +1,11 @@
-import { api, ChannelRole, type RouteBody, type RouteQuery } from '@xyne/shared';
+import { appPermission, botChannel } from '@/apps/access';
+import { api, ChannelRole } from '@xyne/shared';
 import { setAppChannelOnDesk } from '@/channelsDesk/admin';
 import { ChannelController } from '@/controllers/channelController';
 import { db } from '@/database/client';
 import { repositories } from '@/database/repositories';
 import { EmailChannelPreferenceRepository } from '@/database/repositories/emailChannelPreferenceRepository';
-import { ContractError, type AppCaller } from '@/framework/api';
+import { ContractError, controller } from '@/framework/api';
 import { AppError } from '@/middleware/errorHandler';
 import { applyChannelParticipants, planChannelParticipants, type AddedChannelParticipant, type ChannelParticipantsPlan } from '@/services/channelParticipantsService';
 import { ChannelFieldError, prepareChannelFields, writeChannelFields } from '@/services/channelFieldService';
@@ -28,7 +29,7 @@ function requireBot(user: AuthenticatedUser | undefined): AuthenticatedUser & { 
 }
 
 /** POST /apps/channel/openDm: the bot's DM with a user of its own workspace. */
-export async function openDm(input: { body: RouteBody<typeof api.apps.channel.openDm>; user: AuthenticatedUser | undefined }) {
+export const openDm = controller(api.apps.channel.openDm, { checks: { permission: appPermission('im:write') } }, async (input) => {
   const bot = input.user;
   const workspaceId = bot?.workspaceId; // tenant from the verified token, never the body
   if (!bot || !workspaceId) throw new ContractError(401, { error: 'Unauthorized' });
@@ -48,7 +49,7 @@ export async function openDm(input: { body: RouteBody<typeof api.apps.channel.op
     logger.error('[openDm] Failed to open DM:', error);
     throw new ContractError(500, { error: 'Internal server error' });
   }
-}
+});
 
 async function findChannel(channelId: string | undefined, channelName: string | undefined) {
   const channel = channelId ? await repositories.channels.findById(channelId) : await repositories.channels.findByName(channelName!);
@@ -57,7 +58,7 @@ async function findChannel(channelId: string | undefined, channelName: string | 
 }
 
 /** POST /apps/channel/info */
-export async function channelInfo(input: { body: RouteBody<typeof api.apps.channel.info> }) {
+export const channelInfo = controller(api.apps.channel.info, { checks: { permission: appPermission('channels:read'), channel: botChannel({ allowDm: false }) } }, async (input) => {
   try {
     const channel = await findChannel(input.body.channelId, input.body.channelName);
     return {
@@ -77,10 +78,10 @@ export async function channelInfo(input: { body: RouteBody<typeof api.apps.chann
     logger.error('[CHANNEL-CONTROLLER] Error getting channel by name:', error);
     throw internalError();
   }
-}
+});
 
 /** POST /apps/channel/deskChannelConfig: the channel's EmailChannelPreference. */
-export async function deskChannelConfig(input: { body: RouteBody<typeof api.apps.channel.deskChannelConfig> }) {
+export const deskChannelConfig = controller(api.apps.channel.deskChannelConfig, { checks: { permission: appPermission('desk:read'), channel: botChannel({ allowDm: false }) } }, async (input) => {
   try {
     const channel = await findChannel(input.body.channelId, input.body.channelName);
     const config = await new EmailChannelPreferenceRepository().findByChannelId(channel.id);
@@ -90,10 +91,10 @@ export async function deskChannelConfig(input: { body: RouteBody<typeof api.apps
     logger.error('[CHANNEL-CONTROLLER] Error getting desk config:', error);
     throw internalError();
   }
-}
+});
 
 /** GET /apps/channel/list: cursor pagination, optional exact name filter. */
-export async function listChannels(input: { query: RouteQuery<typeof api.apps.channel.list>; user: AuthenticatedUser | undefined }) {
+export const listChannels = controller(api.apps.channel.list, { checks: { permission: appPermission('channels:read') } }, async (input) => {
   const { limit, cursor, joined, projectId, scopeType, name } = input.query;
   // Tenant comes from the verified app token, never from the query string.
   const bot = requireBot(input.user);
@@ -125,7 +126,7 @@ export async function listChannels(input: { query: RouteQuery<typeof api.apps.ch
     logger.error('[CHANNEL-CONTROLLER] Error listing channels:', error);
     throw internalError();
   }
-}
+});
 
 const NO_DESK = { error: 'This app has no Channels desk yet; an admin links one in Desks.', code: 'NO_DESK' };
 const ON_OTHER_DESK = { error: 'This channel is already on another desk.', code: 'CHANNEL_ON_OTHER_DESK' };
@@ -184,11 +185,7 @@ async function announceAdded(bot: AuthenticatedUser, channelId: string, added: A
  * POST /apps/channel/update: set the fields of a channel the bot is in, put it on the app's
  * Channels desk or take it off, and add people (with updateRoles, also set existing roles).
  */
-export async function updateChannel(input: {
-  body: RouteBody<typeof api.apps.channel.update>;
-  user: AuthenticatedUser | undefined;
-  app: AppCaller | undefined;
-}) {
+export const updateChannel = controller(api.apps.channel.update, { checks: { permission: appPermission('channels:write') } }, async (input) => {
   const bot = requireBot(input.user);
   const { channelId, fields, desk, updateRoles } = input.body;
   const adminEmails = [...new Set(input.body.adminEmails)];
@@ -250,4 +247,4 @@ export async function updateChannel(input: {
     logger.error('[APP-CHANNEL] Channel update failed:', error);
     throw new ContractError(500, { error: 'Internal server error' });
   }
-}
+});

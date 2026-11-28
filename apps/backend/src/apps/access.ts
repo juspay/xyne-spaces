@@ -3,7 +3,7 @@ import { logger } from '@/utils/logger';
 import { ChannelValidationSchema, checkChannelAccess, resolveBotDmChannelId } from './middelware/channelValidation';
 
 /**
- * Access checks for typed Xyne Apps routes (`access` in api.routes). They run after the body is
+ * Access checks for typed Xyne Apps routes (a controller's `checks`). They run after the body is
  * checked against its contract and answer exactly as the middlewares they replace
  * (requirePermission, validateChannelAccessForPost, validateChannelAccessForPostWithDm).
  */
@@ -85,3 +85,8 @@ export function botChannel(options: { allowDm: boolean }): AccessCheck<BotChanne
     return { channelId: result.channelId, dm: false };
   };
 }
+
+/** The bot's workspace: whose key a bot route's encrypted fields are stored under (`encryption`). */
+export const encryptUnderBotWorkspace = {
+  resolveWorkspaceId: async (req: { user?: { workspaceId: string } }) => req.user!.workspaceId,
+};

@@ -1,15 +1,16 @@
+import { api } from '@xyne/shared';
+import { appPermission } from '@/apps/access';
 import { repositories } from '@/database/repositories';
-import { ContractError } from '@/framework/api';
+import { ContractError, controller } from '@/framework/api';
 import { callShareService } from '@/services/callShareService';
 import { transcriptService } from '@/services/transcriptService';
 import { summaryTemplateService } from '@/services/summaryTemplateService';
-import type { AuthenticatedUser } from '@/types/express';
 import { isTranscriptUnlinked } from '@/utils/transcriptUnlink';
 import { logger } from '@/utils/logger';
 import { requireUser } from '../calls-tickets.helpers';
 
 /** GET /apps/calls/:callId: call detail plus participants, behind the native read check. */
-export async function getCall(input: { params: { callId: string }; user: AuthenticatedUser | undefined }) {
+export const getCall = controller(api.apps.calls.get, { checks: { permission: appPermission('calls:read') } }, async (input) => {
   const user = requireUser(input.user);
   const { callId } = input.params;
   try {
@@ -78,10 +79,10 @@ export async function getCall(input: { params: { callId: string }; user: Authent
     if (!(error instanceof ContractError)) logger.error(`[AppCallController] [${callId}] Failed to get call:`, error);
     throw error;
   }
-}
+});
 
 /** GET /apps/calls/summary-templates: summary rows only (prompt bodies come from the single-template route). */
-export async function listSummaryTemplates(input: { user: AuthenticatedUser | undefined }) {
+export const listSummaryTemplates = controller(api.apps.calls.summaryTemplates, { checks: { permission: appPermission('summaries:read') } }, async (input) => {
   const user = requireUser(input.user);
   try {
     const templates = await summaryTemplateService.list(user.workspaceId, user.id);
@@ -104,10 +105,10 @@ export async function listSummaryTemplates(input: { user: AuthenticatedUser | un
     logger.error('[AppCallController] Failed to list summary templates:', error);
     throw error;
   }
-}
+});
 
 /** GET /apps/calls/summary-templates/:templateId: full template detail. */
-export async function getSummaryTemplate(input: { params: { templateId: string }; user: AuthenticatedUser | undefined }) {
+export const getSummaryTemplate = controller(api.apps.calls.summaryTemplate, { checks: { permission: appPermission('summaries:read') } }, async (input) => {
   const user = requireUser(input.user);
   const { templateId } = input.params;
   try {
@@ -118,4 +119,4 @@ export async function getSummaryTemplate(input: { params: { templateId: string }
     if (!(error instanceof ContractError)) logger.error(`[AppCallController] [${templateId}] Failed to get summary template:`, error);
     throw error;
   }
-}
+});

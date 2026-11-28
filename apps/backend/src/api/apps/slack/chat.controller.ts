@@ -15,7 +15,7 @@ import { transformPostEphemeralResponse, transformPostMessageResponse, transform
 
 /**
  * The Slack-compatible write methods (/apps/slack/chat.postMessage, chat.postEphemeral,
- * chat.update) on the typed framework (slack/routes.ts). Same answers as the old controller
+ * chat.update), for the controllers in slack.controller.ts. Same answers as the old controller
  * handlers. `text` is an UnreadableString: the handlers never read it. The content is built by
  * compose (template slackChatContent): by the encryption service while DB encryption is on,
  * here otherwise, from the ids looked up here, which come from the facts of `text` (from the
@@ -141,7 +141,7 @@ function requireWorkspace(user: AuthenticatedUser | undefined): string {
 }
 
 /** POST /apps/slack/chat.postMessage */
-export async function slackChatPostMessage(input: SlackWriteInput<RouteBody<typeof api.apps.slack.chatPostMessage>>) {
+export async function postSlackMessage(input: SlackWriteInput<RouteBody<typeof api.apps.slack.chatPostMessage>>) {
 	const { body, user, app, channel, textFacts } = input;
 	if (isTooLong(body, textFacts)) throw slackError("msg_too_long");
 
@@ -181,7 +181,7 @@ export async function slackChatPostMessage(input: SlackWriteInput<RouteBody<type
 }
 
 /** POST /apps/slack/chat.postEphemeral */
-export async function slackChatPostEphemeral(input: SlackWriteInput<RouteBody<typeof api.apps.slack.chatPostEphemeral>>) {
+export async function postSlackEphemeral(input: SlackWriteInput<RouteBody<typeof api.apps.slack.chatPostEphemeral>>) {
 	const { body, user, app, channel, textFacts } = input;
 	if (isTooLong(body, textFacts)) throw slackError("msg_too_long");
 
@@ -226,7 +226,7 @@ export async function slackChatPostEphemeral(input: SlackWriteInput<RouteBody<ty
 }
 
 /** POST /apps/slack/chat.update */
-export async function slackChatUpdate(input: SlackWriteInput<RouteBody<typeof api.apps.slack.chatUpdate>>) {
+export async function updateSlackMessage(input: SlackWriteInput<RouteBody<typeof api.apps.slack.chatUpdate>>) {
 	const { body, user, channel, textFacts } = input;
 	if (isTooLong(body, textFacts)) throw slackError("msg_too_long");
 

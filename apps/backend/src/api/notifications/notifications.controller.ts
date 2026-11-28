@@ -1,6 +1,5 @@
-import { api, NotificationType, type RouteBody } from '@xyne/shared';
-import type { IncomingHttpHeaders } from 'node:http';
-import { ContractError } from '@/framework/api';
+import { api, NotificationType } from '@xyne/shared';
+import { ContractError, controller } from '@/framework/api';
 import { deviceKeyFromHeaders } from '@/services/authSessionService';
 import { notificationService } from '@/services/notificationService';
 import { unreadService } from '@/services/unreadService';
@@ -25,11 +24,7 @@ const requireUserId = (user: AuthenticatedUser | undefined): string => {
 const ok = { success: true as const };
 
 /** POST /notifications/subscribe: a browser push subscription. */
-export async function subscribe(input: {
-  body: RouteBody<typeof api.notifications.subscribe>;
-  user: AuthenticatedUser | undefined;
-  userAgent: string | undefined;
-}) {
+export const subscribe = controller(api.notifications.subscribe, async (input) => {
   try {
     const userId = requireUserId(input.user);
     await notificationService.saveSubscription(userId, {
@@ -42,24 +37,20 @@ export async function subscribe(input: {
   } catch (error) {
     throw internal(error, 'Failed to save notification subscription:');
   }
-}
+});
 
 /** DELETE /notifications/unsubscribe */
-export async function unsubscribe(input: { body: { endpoint: string }; user: AuthenticatedUser | undefined }) {
+export const unsubscribe = controller(api.notifications.unsubscribe, async (input) => {
   try {
     await notificationService.removeSubscription(requireUserId(input.user), input.body.endpoint);
     return ok;
   } catch (error) {
     throw internal(error, 'Failed to remove notification subscription:');
   }
-}
+});
 
 /** POST /notifications/mobile/register: a push token, tied to this login session and device. */
-export async function registerMobilePushToken(input: {
-  body: RouteBody<typeof api.notifications.mobileRegister>;
-  user: AuthenticatedUser | undefined;
-  headers: IncomingHttpHeaders;
-}) {
+export const registerMobilePushToken = controller(api.notifications.mobileRegister, async (input) => {
   try {
     const userId = requireUserId(input.user);
     const sessionId = input.user?.sid;
@@ -78,10 +69,10 @@ export async function registerMobilePushToken(input: {
   } catch (error) {
     throw internal(error, 'Failed to register mobile push token:');
   }
-}
+});
 
 /** POST /notifications/mobile/unregister */
-export async function unregisterMobilePushToken(input: { user: AuthenticatedUser | undefined; headers: IncomingHttpHeaders }) {
+export const unregisterMobilePushToken = controller(api.notifications.mobileUnregister, async (input) => {
   try {
     const userId = requireUserId(input.user);
     await notificationService.unregisterMobilePushToken(userId, input.user?.sid ?? undefined, {
@@ -92,10 +83,10 @@ export async function unregisterMobilePushToken(input: { user: AuthenticatedUser
   } catch (error) {
     throw internal(error, 'Failed to unregister mobile push token:');
   }
-}
+});
 
 /** GET /notifications/queue-stats */
-export async function queueStats() {
+export const queueStats = controller(api.notifications.queueStats, async () => {
   try {
     const stats = await notificationService.getStats();
     if (!stats) throw new ContractError(500, { error: 'Failed to retrieve queue stats' });
@@ -103,19 +94,19 @@ export async function queueStats() {
   } catch (error) {
     throw internal(error, 'Failed to get queue stats:');
   }
-}
+});
 
 /** GET /notifications/unread-count */
-export async function unreadCount(input: { user: AuthenticatedUser | undefined }) {
+export const unreadCount = controller(api.notifications.unreadCount, async (input) => {
   try {
     return { count: await notificationService.getUnreadCount(requireUserId(input.user)) };
   } catch (error) {
     throw internal(error, 'Failed to get unread notification count:');
   }
-}
+});
 
 /** GET /notifications/workspace-counts: by the org member, so every workspace of the person. */
-export async function workspaceCounts(input: { user: AuthenticatedUser | undefined }) {
+export const workspaceCounts = controller(api.notifications.workspaceCounts, async (input) => {
   try {
     const memberId = input.user?.memberId;
     if (!memberId) throw unauthorized();
@@ -123,10 +114,10 @@ export async function workspaceCounts(input: { user: AuthenticatedUser | undefin
   } catch (error) {
     throw internal(error, 'Failed to get workspace notification counts:');
   }
-}
+});
 
 /** POST /notifications/test: makes a test notification for the caller. */
-export async function sendTest(input: { user: AuthenticatedUser | undefined }) {
+export const sendTest = controller(api.notifications.test, async (input) => {
   try {
     const userId = requireUserId(input.user);
     await notificationService.createNotification(userId, {
@@ -141,24 +132,20 @@ export async function sendTest(input: { user: AuthenticatedUser | undefined }) {
   } catch (error) {
     throw internal(error, 'Failed to send test notification:');
   }
-}
+});
 
 /** PATCH /notifications/mark-all-read */
-export async function markAllRead(input: { user: AuthenticatedUser | undefined }) {
+export const markAllRead = controller(api.notifications.markAllRead, async (input) => {
   try {
     await notificationService.markAllAsRead(requireUserId(input.user));
     return ok;
   } catch (error) {
     throw internal(error, 'Failed to mark all notifications as read:');
   }
-}
+});
 
 /** PATCH /notifications/:id/read: also marks the channel and thread the notification was opened from as viewed. */
-export async function markRead(input: {
-  params: { id: string };
-  body: { channelId?: unknown; conversationId?: unknown };
-  user: AuthenticatedUser | undefined;
-}) {
+export const markRead = controller(api.notifications.read, async (input) => {
   try {
     const userId = requireUserId(input.user);
     const { channelId, conversationId } = input.body;
@@ -169,33 +156,33 @@ export async function markRead(input: {
   } catch (error) {
     throw internal(error, 'Failed to mark notification as read:');
   }
-}
+});
 
 /** PATCH /notifications/:id/dismiss */
-export async function dismiss(input: { params: { id: string }; user: AuthenticatedUser | undefined }) {
+export const dismiss = controller(api.notifications.dismiss, async (input) => {
   try {
     await notificationService.dismiss(input.params.id, requireUserId(input.user));
     return ok;
   } catch (error) {
     throw internal(error, 'Failed to dismiss notification:');
   }
-}
+});
 
 /** GET /notifications/preferences */
-export async function getPreferences(input: { user: AuthenticatedUser | undefined }): Promise<Record<string, { browserEnabled: boolean; emailEnabled: boolean; slackEnabled: boolean }>> {
+export const getPreferences = controller(api.notifications.preferences, async (input) => {
   try {
     return await notificationService.getUserPreferences(requireUserId(input.user));
   } catch (error) {
     throw internal(error, 'Failed to get notification preferences:');
   }
-}
+});
 
 /** PUT /notifications/preferences (unknown notification types were already dropped by the contract). */
-export async function updatePreferences(input: { body: RouteBody<typeof api.notifications.preferencesSet>; user: AuthenticatedUser | undefined }) {
+export const updatePreferences = controller(api.notifications.preferencesSet, async (input) => {
   try {
     await notificationService.updateUserPreferences(requireUserId(input.user), input.body);
     return ok;
   } catch (error) {
     throw internal(error, 'Failed to update notification preferences:');
   }
-}
+});

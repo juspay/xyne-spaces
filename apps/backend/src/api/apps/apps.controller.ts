@@ -1,9 +1,10 @@
-import { api, AccessType, type RouteBody } from '@xyne/shared';
+import { xyneApps } from '@/api/apps/xyne-apps.access';
+import { api, AccessType } from '@xyne/shared';
 import { db } from '@/database/client';
 import { repositories } from '@/database/repositories';
 import { CreateAppInput } from '@/database/repositories/appsRepository';
 import { withWorkspaceScope } from '@/database/tenant/context';
-import { ContractError } from '@/framework/api';
+import { ContractError, controller } from '@/framework/api';
 import { promoteAppToGlobal } from '@/bypassAcl/appServices';
 import { vespaQueue } from '@/queues/vespaQueue';
 import { ClawAgentLookupError } from '@/services/clawAgentService';
@@ -29,7 +30,7 @@ async function isAclAdmin(userId: string): Promise<boolean> {
 // ─── App setup ──────────────────────────────────────────────────────────────
 
 /** POST /apps/create */
-export async function createApp(input: { body: RouteBody<typeof api.apps.create>; user: AuthenticatedUser | undefined }) {
+export const createApp = controller(api.apps.create, { checks: xyneApps(AccessType.WRITE) }, async (input, reply) => {
   const user = requireUser(input.user);
   try {
     const { name, description } = input.body;
@@ -54,6 +55,7 @@ export async function createApp(input: { body: RouteBody<typeof api.apps.create>
     vespaQueue
       .addJob({ schema: appSchema, jobType: 'feed', docId: app.id })
       .catch((err) => logger.error(`Failed to queue Vespa feed for app ${app.id}:`, err));
+    reply.status(201);
     return app;
   } catch (error) {
     if (error instanceof ContractError) throw error;
@@ -63,10 +65,11 @@ export async function createApp(input: { body: RouteBody<typeof api.apps.create>
     }
     throw new ContractError(500, { error: 'Internal server error' });
   }
-}
+});
 
 /** POST /apps/install/:appId */
-export async function installAppHandler(input: { params: { appId: string }; user: AuthenticatedUser | undefined }) {
+export const installAppHandler = controller(api.apps.install, { checks: xyneApps(AccessType.ADMIN) }, async (input, reply) => {
+  reply.status(201);
   try {
     const { appId } = input.params;
     const workspaceId = input.user?.workspaceId;
@@ -93,10 +96,10 @@ export async function installAppHandler(input: { params: { appId: string }; user
     if (isNotFound(error)) throw new ContractError(404, { error: error.message, code: 'APP_NOT_FOUND' });
     throw new ContractError(500, { error: 'Internal server error' });
   }
-}
+});
 
 /** POST /apps/promote/:appId: ORG scope to GLOBAL (marketplace). XYNE-APPS admin only. */
-export async function promoteApp(input: { params: { appId: string }; user: AuthenticatedUser | undefined }) {
+export const promoteApp = controller(api.apps.promote, { checks: xyneApps(AccessType.ADMIN) }, async (input) => {
   try {
     const { appId } = input.params;
     const user = requireUser(input.user);
@@ -119,14 +122,10 @@ export async function promoteApp(input: { params: { appId: string }; user: Authe
   } catch (error) {
     throw internal(error, 'Error promoting app:');
   }
-}
+});
 
 /** POST /apps/configureWebhook/:appId */
-export async function configureAppWebhook(input: {
-  params: { appId: string };
-  body: RouteBody<typeof api.apps.configureWebhook>;
-  user: AuthenticatedUser | undefined;
-}) {
+export const configureAppWebhook = controller(api.apps.configureWebhook, { checks: xyneApps(AccessType.WRITE) }, async (input) => {
   try {
     const workspaceId = input.user?.workspaceId;
     if (!workspaceId) throw new ContractError(401, { error: 'Unauthorized' });
@@ -140,10 +139,10 @@ export async function configureAppWebhook(input: {
     }
     throw new ContractError(500, { error: 'Internal server error' });
   }
-}
+});
 
 /** POST /apps/regenerate-jwt/:appId: the XYNE-APPS admin or the app's creator. */
-export async function regenerateAppJwt(input: { params: { appId: string }; user: AuthenticatedUser | undefined }) {
+export const regenerateAppJwt = controller(api.apps.regenerateJwt, { checks: xyneApps(AccessType.WRITE) }, async (input) => {
   try {
     const { appId } = input.params;
     const user = requireUser(input.user);
@@ -159,10 +158,10 @@ export async function regenerateAppJwt(input: { params: { appId: string }; user:
     if (isNotFound(error)) throw new ContractError(404, { error: error.message, code: 'INSTALLED_APP_NOT_FOUND' });
     throw new ContractError(500, { error: 'Internal server error' });
   }
-}
+});
 
 /** POST /apps/signing-secret/:appId: the app's creator or an admin. */
-export async function appSigningSecret(input: { params: { appId: string }; user: AuthenticatedUser | undefined }) {
+export const appSigningSecret = controller(api.apps.signingSecret, { checks: xyneApps(AccessType.WRITE) }, async (input) => {
   try {
     const user = requireUser(input.user);
     const isAdmin = await isAclAdmin(user.id);
@@ -176,12 +175,12 @@ export async function appSigningSecret(input: { params: { appId: string }; user:
     if (isNotFound(error)) throw new ContractError(404, { error: error.message, code: 'NOT_FOUND' });
     throw new ContractError(500, { error: 'Internal server error' });
   }
-}
+});
 
 // ─── Lookups ────────────────────────────────────────────────────────────────
 
 /** GET /apps/bot-channels/:appId: channels the app's bot is in that the caller can also see. */
-export async function botChannels(input: { params: { appId: string }; user: AuthenticatedUser | undefined }) {
+export const botChannels = controller(api.apps.botChannels, { checks: xyneApps(AccessType.READ) }, async (input) => {
   try {
     const user = requireUser(input.user);
     const installedApp = await repositories.installedApps.findFirst({ where: { appId: input.params.appId } });
@@ -196,10 +195,10 @@ export async function botChannels(input: { params: { appId: string }; user: Auth
   } catch (error) {
     throw internal(error, 'Error getting bot channels:');
   }
-}
+});
 
 /** GET /apps/project-boards/:projectId */
-export async function projectBoards(input: { params: { projectId: string }; user: AuthenticatedUser | undefined }) {
+export const projectBoards = controller(api.apps.projectBoards, { checks: xyneApps(AccessType.READ) }, async (input) => {
   try {
     const workspaceId = input.user?.workspaceId;
     if (!workspaceId) throw new ContractError(401, { error: 'Unauthorized' });
@@ -212,10 +211,10 @@ export async function projectBoards(input: { params: { projectId: string }; user
   } catch (error) {
     throw internal(error, 'Error getting project boards:');
   }
-}
+});
 
 /** POST /apps/org-names: org ids to names, only for the ids asked about. */
-export async function orgNames(input: { body: RouteBody<typeof api.apps.orgNames> }) {
+export const orgNames = controller(api.apps.orgNames, { checks: xyneApps(AccessType.READ) }, async (input) => {
   try {
     const ids = Array.from(new Set(input.body.orgIds)).filter(Boolean);
     if (ids.length === 0) return { orgNames: {} };
@@ -229,4 +228,4 @@ export async function orgNames(input: { body: RouteBody<typeof api.apps.orgNames
   } catch (error) {
     throw internal(error, 'Error resolving org names:');
   }
-}
+});

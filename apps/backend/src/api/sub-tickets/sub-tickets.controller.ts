@@ -1,4 +1,5 @@
-import { ContractError } from '@/framework/api';
+import { api } from '@xyne/shared';
+import { ContractError, controller } from '@/framework/api';
 import { linkExistingSubTicket, SubTicketLinkError, unlinkSubTicket, type SubTicketLinkActor } from '@/services/subTicketLinkService';
 import type { AuthenticatedUser } from '@/types/express';
 import { logger } from '@/utils/logger';
@@ -22,10 +23,8 @@ function subTicketFailure(error: unknown, fallback: string): ContractError {
 }
 
 /** POST /sub-tickets/link: answers 201. */
-export async function linkSubTicket(input: {
-  body: { ticketId: string; mappedTicketId: string; subTicketTitle?: unknown };
-  user: AuthenticatedUser | undefined;
-}) {
+export const linkSubTicket = controller(api.subTickets.link, async (input, reply) => {
+  reply.status(201);
   const actor = subTicketActor(input.user);
   const { ticketId, mappedTicketId, subTicketTitle } = input.body;
   try {
@@ -38,10 +37,11 @@ export async function linkSubTicket(input: {
   } catch (error) {
     throw subTicketFailure(error, 'Failed to link sub-ticket');
   }
-}
+});
 
 /** POST /sub-tickets/unlink: answers 204. */
-export async function unlinkSubTicketHandler(input: { body: { mappingId: string }; user: AuthenticatedUser | undefined }) {
+export const unlinkSubTicketHandler = controller(api.subTickets.unlink, async (input, reply) => {
+  reply.status(204);
   const actor = subTicketActor(input.user);
   try {
     await unlinkSubTicket({ actor, mappingId: input.body.mappingId.trim() });
@@ -49,4 +49,4 @@ export async function unlinkSubTicketHandler(input: { body: { mappingId: string 
   } catch (error) {
     throw subTicketFailure(error, 'Failed to unlink sub-ticket');
   }
-}
+});

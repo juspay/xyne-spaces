@@ -1,6 +1,7 @@
+import { api } from '@xyne/shared';
+import { appPermission } from '@/apps/access';
 import { repositories } from '@/database/repositories';
-import { ContractError } from '@/framework/api';
-import type { AuthenticatedUser } from '@/types/express';
+import { ContractError, controller } from '@/framework/api';
 import { extractEmailAddress } from '@/utils/email';
 import { logger } from '@/utils/logger';
 import { prismaClient } from '../../../apps/controllers/ticketController';
@@ -13,7 +14,7 @@ const workspaceRequired = () => new ContractError(400, { error: 'Authenticated w
 const internalError = () => new ContractError(500, { error: 'Internal server error', code: 'INTERNAL_ERROR' });
 
 /** GET /apps/ticket/boards */
-export async function listBoards(input: { query: { projectId?: string }; user: AuthenticatedUser | undefined }) {
+export const listBoards = controller(api.apps.ticket.boards, { checks: { permission: appPermission('tickets:read') } }, async (input) => {
   const workspaceId = input.user?.workspaceId;
   if (!workspaceId) throw workspaceRequired();
   try {
@@ -38,10 +39,10 @@ export async function listBoards(input: { query: { projectId?: string }; user: A
     logger.error('[TicketController] listBoards error:', error);
     throw internalError();
   }
-}
+});
 
 /** GET /apps/ticket/boards/:boardId/stages */
-export async function listBoardStages(input: { params: { boardId: string }; user: AuthenticatedUser | undefined }) {
+export const listBoardStages = controller(api.apps.ticket.boardStages, { checks: { permission: appPermission('tickets:read') } }, async (input) => {
   const workspaceId = input.user?.workspaceId;
   if (!workspaceId) throw workspaceRequired();
   const { boardId } = input.params;
@@ -70,7 +71,7 @@ export async function listBoardStages(input: { params: { boardId: string }; user
     logger.error('[TicketController] listBoardStages error:', error);
     throw internalError();
   }
-}
+});
 
 interface MerchantTicketsListCursor {
   id: string;
@@ -78,10 +79,7 @@ interface MerchantTicketsListCursor {
 }
 
 /** GET /apps/ticket/listBySender: a sender's tickets in channels the bot is in. */
-export async function listBySender(input: {
-  query: { channelIds: string[]; senderEmail: string; limit: number; cursor?: string };
-  user: AuthenticatedUser | undefined;
-}) {
+export const listBySender = controller(api.apps.ticket.listBySender, { checks: { permission: appPermission('tickets:read') } }, async (input) => {
   const user = requireUser(input.user);
   const { channelIds, senderEmail, limit: rawLimit, cursor } = input.query;
   try {
@@ -125,4 +123,4 @@ export async function listBySender(input: {
     }
     throw internalError();
   }
-}
+});

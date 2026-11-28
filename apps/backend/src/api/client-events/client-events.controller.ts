@@ -1,11 +1,15 @@
-import { api, type RouteBody } from '@xyne/shared';
+import { AccessType, api } from '@xyne/shared';
 import { DatabaseClient } from '@/database/client';
 import { withWorkspaceScope } from '@/database/tenant/context';
-import { ContractError } from '@/framework/api';
+import { ContractError, controller } from '@/framework/api';
+import { resourceAccess } from '@/framework/dashboardAccess';
 import { redisService } from '@/services/redisService';
 import type { AuthenticatedUser } from '@/types/express';
 import { logger } from '@/utils/logger';
 import { requireUser } from '../settings.helpers';
+
+/** Everything but the caller's own overrides needs TICKET-MIGRATION admin. */
+const clientEventsAdmin = { ticketMigration: resourceAccess('TICKET-MIGRATION', AccessType.ADMIN) };
 
 // ─── Client events and header overrides ─────────────────────────────────────
 
@@ -81,7 +85,7 @@ function clientEventFailure(error: unknown, logMessage: string): ContractError {
 }
 
 /** GET /client-events/me: the caller's own overrides; ones saved before the allowlist existed are not handed back. */
-export async function myHeaderOverrides(input: { user: AuthenticatedUser | undefined }) {
+export const myHeaderOverrides = controller(api.clientEvents.mine, async (input) => {
   try {
     const user = requireUser(input.user);
     const stored = await redisService.getUserHeaderOverrides(user.id);
@@ -93,10 +97,10 @@ export async function myHeaderOverrides(input: { user: AuthenticatedUser | undef
   } catch (error) {
     throw clientEventFailure(error, '[CLIENT-EVENT] Failed to get own header overrides:');
   }
-}
+});
 
 /** GET /client-events: every override of users in the caller's workspace. */
-export async function allHeaderOverrides(input: { user: AuthenticatedUser | undefined }) {
+export const allHeaderOverrides = controller(api.clientEvents.list, { checks: clientEventsAdmin }, async (input) => {
   try {
     const overrides = await redisService.getAllUserHeaderOverrides();
     const allowed = await filterToCallerWorkspace(input.user, Object.keys(overrides));
@@ -104,10 +108,10 @@ export async function allHeaderOverrides(input: { user: AuthenticatedUser | unde
   } catch (error) {
     throw clientEventFailure(error, '[CLIENT-EVENT] Failed to get header overrides:');
   }
-}
+});
 
 /** POST /client-events: push a command (header_update or reload) to users' browsers. */
-export async function postClientEvent(input: { body: RouteBody<typeof api.clientEvents.post>; user: AuthenticatedUser | undefined }) {
+export const postClientEvent = controller(api.clientEvents.post, { checks: clientEventsAdmin }, async (input) => {
   try {
     const { userIds, event, payload } = input.body;
     const force = input.body.force === true;
@@ -134,10 +138,10 @@ export async function postClientEvent(input: { body: RouteBody<typeof api.client
   } catch (error) {
     throw clientEventFailure(error, '[CLIENT-EVENT] Failed to push client event:');
   }
-}
+});
 
 /** DELETE /client-events: remove header overrides (all, or the named ones) and tell the users' browsers. */
-export async function removeHeaderOverrides(input: { body: RouteBody<typeof api.clientEvents.remove>; user: AuthenticatedUser | undefined }) {
+export const removeHeaderOverrides = controller(api.clientEvents.remove, { checks: clientEventsAdmin }, async (input) => {
   try {
     const { userIds, headerNames } = input.body;
     const options = { force: input.body.force === true, loadingSeconds: input.body.loadingSeconds ?? DEFAULT_LOADING_SECONDS };
@@ -154,4 +158,4 @@ export async function removeHeaderOverrides(input: { body: RouteBody<typeof api.
   } catch (error) {
     throw clientEventFailure(error, '[CLIENT-EVENT] Failed to remove header overrides:');
   }
-}
+});

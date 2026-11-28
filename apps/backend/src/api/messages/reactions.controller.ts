@@ -1,7 +1,7 @@
-import { MessageType } from '@xyne/shared';
+import { MessageType, api } from '@xyne/shared';
 import { MessageRepository } from '@/database/repositories/messageRepository';
 import { ReactionRepository } from '@/database/repositories/reactionRepository';
-import { ContractError } from '@/framework/api';
+import { ContractError, controller } from '@/framework/api';
 import { redisService } from '@/services/redisService';
 import type { AuthenticatedUser } from '@/types/express';
 import { logger } from '@/utils/logger';
@@ -22,7 +22,7 @@ const internal = (error: unknown, logMessage: string) => {
 };
 
 /** POST /messages/:messageId/reactions */
-export async function addReaction(input: { params: { messageId: string }; body: { emojiName: string }; user: AuthenticatedUser | undefined }) {
+export const addReaction = controller(api.messages.reactions.add, async (input) => {
   try {
     const { messageId } = input.params;
     const { emojiName } = input.body;
@@ -41,10 +41,10 @@ export async function addReaction(input: { params: { messageId: string }; body: 
     }
     throw internal(error, 'Error adding reaction:');
   }
-}
+});
 
 /** DELETE /messages/:messageId/reactions/:emojiName */
-export async function removeReaction(input: { params: { messageId: string; emojiName: string }; user: AuthenticatedUser | undefined }) {
+export const removeReaction = controller(api.messages.reactions.remove, async (input) => {
   try {
     const { messageId, emojiName } = input.params;
     const userId = userIdOf(input.user);
@@ -55,10 +55,10 @@ export async function removeReaction(input: { params: { messageId: string; emoji
   } catch (error) {
     throw internal(error, 'Error removing reaction:');
   }
-}
+});
 
 /** POST /messages/:messageId/reactions/:emojiName/toggle: adds, or removes if it was there. */
-export async function toggleReaction(input: { params: { messageId: string; emojiName: string }; user: AuthenticatedUser | undefined }) {
+export const toggleReaction = controller(api.messages.reactions.toggle, async (input) => {
   try {
     const { messageId, emojiName } = input.params;
     const userId = userIdOf(input.user);
@@ -82,7 +82,7 @@ export async function toggleReaction(input: { params: { messageId: string; emoji
   } catch (error) {
     throw internal(error, 'Error toggling reaction:');
   }
-}
+});
 
 async function broadcastReactionUpdate(messageId: string, reactions: unknown, emoji: string, userId: string): Promise<void> {
   try {
@@ -107,19 +107,19 @@ async function broadcastReactionUpdate(messageId: string, reactions: unknown, em
 }
 
 /** GET /messages/:messageId/reactions */
-export async function getMessageReactions(input: { params: { messageId: string }; user: AuthenticatedUser | undefined }) {
+export const getMessageReactions = controller(api.messages.reactions.get, async (input) => {
   try {
     return { reactions: await reactionRepository.getMessageReactions(input.params.messageId, userIdOf(input.user)) };
   } catch (error) {
     throw internal(error, 'Error getting message reactions:');
   }
-}
+});
 
 /** POST /messages/reactions/bulk */
-export async function getMessagesReactions(input: { body: { messageIds: string[] }; user: AuthenticatedUser | undefined }) {
+export const getMessagesReactions = controller(api.messages.reactions.bulk, async (input) => {
   try {
     return { success: true as const, reactions: await reactionRepository.getMessagesReactions(input.body.messageIds, userIdOf(input.user)) };
   } catch (error) {
     throw internal(error, 'Error getting messages reactions:');
   }
-}
+});

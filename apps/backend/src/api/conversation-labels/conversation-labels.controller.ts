@@ -1,7 +1,6 @@
 import { api } from '@xyne/shared';
-import type { z } from 'zod';
 import { ConversationLabelLifecycleError, conversationLabelLifecycleService } from '@/automations/services/conversation-label-lifecycle.service';
-import { ContractError } from '@/framework/api';
+import { ContractError, controller } from '@/framework/api';
 import { getLabelUnreadCount, getLabelUnreadCounts } from '@/services/conversationLabelUnreadService';
 import type { AuthenticatedUser } from '@/types/express';
 import { assertChannelMembershipOf } from '@/utils/channelMembership';
@@ -36,7 +35,7 @@ function lifecycleFailure(error: unknown, fallback: string, logLabel: string): C
 const labelsAnswer = <T>(data: T) => ({ success: true as const, data, timestamp: new Date().toISOString() });
 
 /** GET /conversation-labels/unread-counts?channelId= */
-export async function labelUnreadCounts(input: { query: { channelId: string }; user: AuthenticatedUser | undefined }) {
+export const labelUnreadCounts = controller(api.conversationLabels.unreadCounts, async (input) => {
   try {
     const auth = labelAuth(input.user);
     await requireChannelMember(input.user, input.query.channelId);
@@ -44,10 +43,10 @@ export async function labelUnreadCounts(input: { query: { channelId: string }; u
   } catch (error) {
     throw lifecycleFailure(error, 'Failed to get label unread counts', 'unread-counts');
   }
-}
+});
 
 /** POST /conversation-labels/unread-counts: one label's count, with filters. */
-export async function labelUnreadCount(input: { body: z.infer<(typeof api.conversationLabels.unreadCount)['body']>; user: AuthenticatedUser | undefined }) {
+export const labelUnreadCount = controller(api.conversationLabels.unreadCount, async (input) => {
   try {
     const auth = labelAuth(input.user);
     const { channelId, labelId, filters } = input.body;
@@ -56,22 +55,22 @@ export async function labelUnreadCount(input: { body: z.infer<(typeof api.conver
   } catch (error) {
     throw lifecycleFailure(error, 'Failed to get label unread count', 'filtered unread-count');
   }
-}
+});
 
 /** GET /conversation-labels/:labelId/delete-impact */
-export async function labelDeleteImpact(input: { params: { labelId: string }; user: AuthenticatedUser | undefined }) {
+export const labelDeleteImpact = controller(api.conversationLabels.deleteImpact, async (input) => {
   try {
     return labelsAnswer(await conversationLabelLifecycleService.getDeleteImpact(labelAuth(input.user), input.params.labelId));
   } catch (error) {
     throw lifecycleFailure(error, 'Failed to calculate label delete impact', 'delete-impact');
   }
-}
+});
 
 /** DELETE /conversation-labels/:labelId */
-export async function labelDelete(input: { params: { labelId: string }; user: AuthenticatedUser | undefined }) {
+export const labelDelete = controller(api.conversationLabels.delete, async (input) => {
   try {
     return labelsAnswer(await conversationLabelLifecycleService.deleteLabel(labelAuth(input.user), input.params.labelId));
   } catch (error) {
     throw lifecycleFailure(error, 'Failed to delete label', 'delete');
   }
-}
+});

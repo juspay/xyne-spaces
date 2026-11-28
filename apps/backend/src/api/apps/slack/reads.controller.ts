@@ -14,9 +14,9 @@ import { transformUsersInfoResponse } from '../../../apps/platform-adapters/slac
 import type { SlackAuthTestResponse } from '../../../apps/platform-adapters/slack/types';
 
 /**
- * The Slack-compatible read methods on the typed framework (slack/routes.ts): no req/res,
+ * The Slack-compatible read methods, for the controllers in slack.controller.ts: no req/res,
  * same answers as the controller handlers they replace. Errors are Slack codes (slackError,
- * HTTP 200); the route wraps each in slackHandle for unexpected errors.
+ * HTTP 200); each controller runs them in slackHandle, for unexpected errors.
  */
 
 type Caller = { user: AuthenticatedUser | undefined; app: AppCaller | undefined };
@@ -83,7 +83,7 @@ export async function slackConversationsList(args: Parameters<typeof transformLi
 }
 
 /** conversations.open: an existing channel the bot is in, its DM with one user, or a group DM. */
-export async function slackConversationsOpen(input: { body: { users?: string; channel?: string } } & Caller) {
+export async function openSlackConversation(input: { body: { users?: string; channel?: string } } & Caller) {
 	const userId = input.user?.id ?? "";
 	const botUser = await repositories.users.findById(userId);
 	if (!botUser?.workspaceId) throw new Error("Workspace not found");
