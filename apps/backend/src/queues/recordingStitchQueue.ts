@@ -53,10 +53,24 @@ class RecordingStitchQueue {
     return this.queue;
   }
 
-  /** Producer side (API): enqueue a stitch job. Never registers a processor. */
-  async enqueue(recordingId: string): Promise<void> {
+  /**
+   * Producer side (API): enqueue a stitch job. Never registers a processor.
+   *
+   * `delayMs` schedules it for later: agent recordings enqueue a delayed job when they
+   * stop, as a fallback in case the agent never reports that its last chunks landed.
+   * Enqueueing again without a delay (the agent did report) runs that same job now.
+   */
+  async enqueue(recordingId: string, opts: { delayMs?: number } = {}): Promise<void> {
     const queue = this.ensureQueue();
-    await queue.add('stitch', { recordingId }, { jobId: `stitch-${recordingId}` });
+    const jobId = `stitch-${recordingId}`;
+    if (!opts.delayMs) {
+      const existing = await queue.getJob(jobId);
+      if (existing && (await existing.isDelayed())) {
+        await existing.promote();
+        return;
+      }
+    }
+    await queue.add('stitch', { recordingId }, { jobId, ...(opts.delayMs ? { delay: opts.delayMs } : {}) });
   }
 
   /** Consumer side (dedicated stitch worker only): register the ffmpeg processor. */

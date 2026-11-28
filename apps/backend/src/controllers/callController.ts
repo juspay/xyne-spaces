@@ -31,7 +31,7 @@ import { notificationService } from '@/services/notificationService';
 import { scheduledCallNotificationService } from '@/services/scheduledCallNotificationService';
 import { normalizeStoragePath } from '@xyne/storage';
 import { sdlcCallLinkSchema, type SdlcCallLink } from '@xyne/shared';
-import { callRecordingService } from '@/services/callRecordingService';
+import { callRecordingService, RecordingStartError } from '@/services/callRecordingService';
 import { callEncryptionService } from '@/services/callEncryptionService';
 import { pinCallEncryptionKeyVersion } from '@/bypassAcl/callServices';
 import { isRecording, isRecordingType } from '@/utils/callTypeUtils';
@@ -3168,22 +3168,28 @@ export class CallController {
         return;
       }
 
-      // The recording workers sit outside the trust boundary and cannot decrypt E2EE media.
-      if (callEncryptionService.isCallEncrypted(call)) {
-        res.status(409).json({
-          success: false,
-          error: 'Recording is not available on end-to-end encrypted calls',
-          code: 'CALL_ENCRYPTED',
+      // Egress sits outside the trust boundary and can't decrypt E2EE media, so on an
+      // encrypted call the transcription agent records (any type).
+      let result: Awaited<ReturnType<typeof callRecordingService.startRecording>>;
+      try {
+        result = await callRecordingService.startRecording({
+          call,
+          recordingType,
+          startedBy: userId,
+          name: name ?? null,
         });
-        return;
+      } catch (error) {
+        if (error instanceof RecordingStartError) {
+          logger.warn(`[CallController] startCallRecording refused | callId=${callId}, code=${error.code}`);
+          res.status(409).json({
+            success: false,
+            error: 'The recorder is not in this call yet. Try again in a moment.',
+            code: error.code,
+          });
+          return;
+        }
+        throw error;
       }
-
-      const result = await callRecordingService.startRecording({
-        call,
-        recordingType,
-        startedBy: userId,
-        name: name ?? null,
-      });
 
       if (!result) {
         res.status(500).json({ success: false, error: 'Failed to start recording' });

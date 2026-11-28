@@ -3,7 +3,7 @@ AWS S3 storage bucket provider
 """
 import io
 import logging
-from typing import Optional
+from typing import Dict, Optional
 
 import boto3
 from botocore.config import Config as BotoConfig
@@ -126,6 +126,13 @@ class S3StorageBucket(StorageBucket):
             Key=filename,
             Body=content.encode('utf-8'),
             ContentType=content_type,
+        )
+
+    def upload_bytes(
+        self, filename: str, content: bytes, content_type: str, metadata: Optional[Dict[str, str]] = None
+    ) -> None:
+        self._s3.put_object(
+            Bucket=self._bucket_name, Key=filename, Body=content, ContentType=content_type, Metadata=metadata or {}
         )
 
     def open_writer(self, filename: str, content_type: str) -> BlobWriter:

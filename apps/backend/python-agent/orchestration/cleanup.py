@@ -38,6 +38,8 @@ class CleanupManager:
         self.additional_storages: List[TranscriptionStorage] = additional_storages or []
         # MultiUserTranscriber.drain: last turns still being transcribed and the final eval batch
         self.transcriber_drain: Optional[Callable[[], Awaitable[None]]] = None
+        # CallRecorder.aclose: finish an encrypted-call recording in progress (bounded internally)
+        self.recorder_close: Optional[Callable[[], Awaitable[None]]] = None
 
         # Idempotency: cleanup can be triggered from multiple paths (empty room,
         # SIGTERM shutdown callback, entrypoint finally). Only run once; concurrent
@@ -94,8 +96,9 @@ class CleanupManager:
             logger.error("storage_memory_release_failed", exc_info=True)
 
     async def _run_cleanup_steps(self):
-        # 0. Let the transcriber finish last turns, so the transcript is flushed and notified once
-        await self._drain_transcriber()
+        # 0. Let the transcriber finish last turns, so the transcript is flushed and notified once,
+        #    while the recorder uploads its last chunks (both must finish before disconnecting)
+        await asyncio.gather(self._drain_transcriber(), self._close_recorder())
 
         # 1. Upload transcript to GCS (what we have so far)
         await self._flush_storage()
@@ -149,6 +152,14 @@ class CleanupManager:
                 logger.info(f"backend_webhook_retry | reason=transcript_updated")
             except Exception:
                 logger.error(f"backend_webhook_failed | stage=retry", exc_info=True)
+
+    async def _close_recorder(self):
+        if self.recorder_close is None:
+            return
+        try:
+            await self.recorder_close()
+        except Exception:
+            logger.error("recorder_close_failed", exc_info=True)
 
     async def _drain_transcriber(self):
         if self.transcriber_drain is None:

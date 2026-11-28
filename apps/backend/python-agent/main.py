@@ -21,6 +21,8 @@ from transcription import (
 )
 from infra import WebhookNotifier, GCSBucketProvider, S3BucketProvider
 from infra.call_session import CallSessionError, fetch_call_session
+from infra.recording_session import RecordingSessionClient
+from modules.call_recorder import CallRecorder
 from history import ConversationStore
 from ai import AISessionManager
 from orchestration import CleanupManager, ParticipantTracker, RoomLifecycle
@@ -555,6 +557,23 @@ async def entrypoint(ctx: JobContext):
         multi_user_transcriber.set_ai_manager(ai_manager)
         logger.info("Linked AgentSession and AI Manager to MultiUserTranscriber for speech interruption and adaptive turn detection")
 
+    # Recording of end-to-end encrypted calls: egress can't decrypt them, this agent can.
+    # Only for encrypted calls (others are recorded by egress) and with somewhere to upload.
+    call_recorder = None
+    if call_session.call_key is not None and call_session.private_key is not None and bucket is not None:
+        call_recorder = CallRecorder(
+            ctx.room,
+            RecordingSessionClient(
+                config.backend_url,
+                config.transcription_agent_api_key,
+                call_id,
+                call_session.dispatch_id,
+                call_session.public_key_b64,
+                call_session.private_key,
+            ),
+            bucket,
+        )
+
     # Initialize cleanup manager
     participant_tracker = ParticipantTracker()
     
@@ -583,6 +602,9 @@ async def entrypoint(ctx: JobContext):
     cleanup_manager.stt_tasks = room_lifecycle.get_stt_tasks()
     # Cleanup waits for the transcriber's last speech and final eval batch before it flushes
     cleanup_manager.transcriber_drain = multi_user_transcriber.drain
+    # ...and for the recorder to upload its last chunks of a recording in progress
+    if call_recorder is not None:
+        cleanup_manager.recorder_close = call_recorder.aclose
     
     # Register all room event handlers
     room_lifecycle.register_handlers()
@@ -598,6 +620,10 @@ async def entrypoint(ctx: JobContext):
     # Handle any participants already in room
     multi_user_transcriber.handle_existing_participants()
     logger.info(f"event_handlers_registered | timing=after_agent_ready")
+
+    # Picks up a recording already running (e.g. this agent was redispatched mid-call)
+    if call_recorder is not None:
+        call_recorder.start()
 
     # Simple wait - let the agent run until LiveKit disconnects it.
     # Durability of the transcript does NOT depend on this exit path: the buffer is

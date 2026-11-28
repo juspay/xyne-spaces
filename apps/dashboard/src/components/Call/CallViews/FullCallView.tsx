@@ -508,7 +508,7 @@ export function FullCallView({
             : null;
 
   const activeCalls = useSelector(roomActor, state => state.context.activeCalls);
-  // End-to-end encrypted call: the recording workers cannot decrypt it, so recording is off.
+  // End-to-end encrypted call: egress can't decrypt it, so the transcription agent records it.
   const isEncryptedCall = useSelector(roomActor, state => state.context.encryption !== null);
   const currentCall = useMemo(
     () =>
@@ -815,8 +815,8 @@ export function FullCallView({
             isHost={isHost}
             isRecording={isRecordingActive}
             canStopRecording={canStopRecording}
-            onStartRecording={isEncryptedCall ? undefined : handleStartRecording}
-            onStopRecording={isEncryptedCall ? undefined : handleStopRecording}
+            onStartRecording={handleStartRecording}
+            onStopRecording={handleStopRecording}
             onTogglePresentationMode={
               isTelepresenceEnabled ? () => setIsPresentationMode(prev => !prev) : undefined
             }

@@ -9,6 +9,13 @@ router.post('/:callId/transcript-ready', transcriptionAgentController.inCallWork
 // Call key + state for an agent job, before it joins the room
 router.post('/:callId/session', transcriptionAgentController.inCallWorkspace(transcriptionAgentController.callSession));
 
+// What to record on an encrypted call (recording key sealed to the agent job) and its completion
+router.post('/:callId/recording-session', transcriptionAgentController.inCallWorkspace(transcriptionAgentController.recordingSession));
+router.post(
+  '/:callId/recordings/:recordingId/complete',
+  transcriptionAgentController.inCallWorkspace(transcriptionAgentController.recordingComplete),
+);
+
 // Ticket creation tool from Python agent (AI assistant)
 router.post('/:callId/ticket', transcriptionAgentController.inCallWorkspace(transcriptionAgentController.ticketTool));
 

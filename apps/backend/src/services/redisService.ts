@@ -313,6 +313,33 @@ class RedisService {
     return (await this.redis.get(claimKey)) === agentPublicKey ? 'claimed_by_caller' : 'claimed';
   }
 
+  /**
+   * Read-only check that `dispatchId` is a dispatch this backend recorded for `roomName`
+   * and that `agentPublicKey` is the job key that already claimed its session. Never
+   * claims. The public key is not a secret, so a pass alone proves nothing: callers must
+   * either seal their answer to that key or check a proof only the job can produce.
+   *
+   * On a pass the dispatch record and its claim are kept alive for `refreshTtlSeconds`
+   * more: a job that keeps calling (the recorder polls) stays recognised past the
+   * dispatch's original TTL, for calls longer than an hour.
+   */
+  async isAgentDispatchClaimedBy(
+    dispatchId: string,
+    roomName: string,
+    agentPublicKey: string,
+    refreshTtlSeconds?: number,
+  ): Promise<boolean> {
+    if (!this.redis) throw new Error('Redis not initialized');
+    const recordKey = `agent-dispatch:${dispatchId}`;
+    const claimKey = `agent-dispatch-claim:${dispatchId}`;
+    const [room, claimedBy] = await this.redis.mget(recordKey, claimKey);
+    if (room !== roomName || claimedBy !== agentPublicKey) return false;
+    if (refreshTtlSeconds) {
+      await this.redis.multi().expire(recordKey, refreshTtlSeconds).expire(claimKey, refreshTtlSeconds).exec();
+    }
+    return true;
+  }
+
   // Session subscription management
   async subscribeToSession(sessionId: string, socketId: string): Promise<void> {
     if (!this.redis) throw new Error('Redis not initialized');

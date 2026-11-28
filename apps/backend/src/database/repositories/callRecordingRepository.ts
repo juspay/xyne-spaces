@@ -145,6 +145,23 @@ export class CallRecordingRepository {
     });
   }
 
+  /**
+   * Compare-and-set status move, for transitions two paths may race on (the agent's
+   * completion call and the fallback stitch job). True only for the caller that moved it.
+   */
+  async transitionStatus(
+    id: string,
+    from: RecordingStatus[],
+    to: RecordingStatus,
+    data: { endedAt?: Date } = {},
+  ): Promise<boolean> {
+    const { count } = await this.db.callRecording.updateMany({
+      where: { id, status: { in: from } },
+      data: { status: to, ...data },
+    });
+    return count === 1;
+  }
+
   /** Stitch (ffmpeg) failed though segments exist — retryable. */
   async markProcessingFailed(id: string): Promise<CallRecording> {
     return this.db.callRecording.update({
