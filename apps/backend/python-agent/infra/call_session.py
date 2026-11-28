@@ -8,7 +8,7 @@ memory. Never log it.
 """
 import asyncio
 import base64
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 import aiohttp
@@ -35,6 +35,12 @@ class CallSessionError(Exception):
 class CallSession:
     # The call key as the clients receive it (base64 text), or None for an unencrypted call.
     call_key: Optional[str]
+    # This job's identity towards the backend: the dispatch it claimed and the one-time
+    # X25519 key it claimed it with. Later secrets (recording keys) are sealed to the same
+    # key, so they stay useless to anyone but this job. Never logged.
+    dispatch_id: str = ""
+    public_key_b64: str = ""
+    private_key: Optional[X25519PrivateKey] = field(default=None, compare=False)
 
     def __repr__(self) -> str:  # keep the key out of any accidental log line
         return f"CallSession(encrypted={self.call_key is not None})"
@@ -89,9 +95,14 @@ async def fetch_call_session(backend_url: str, api_key: str, room_name: str, dis
                 ) as response:
                     if response.status == 200:
                         data = await response.json()
+                        identity = {
+                            "dispatch_id": dispatch_id,
+                            "public_key_b64": body["publicKey"],
+                            "private_key": private_key,
+                        }
                         if not data.get("encrypted"):
-                            return CallSession(call_key=None)
-                        return CallSession(call_key=_unseal(room_name, private_key, data["sealedKey"]))
+                            return CallSession(call_key=None, **identity)
+                        return CallSession(call_key=_unseal(room_name, private_key, data["sealedKey"]), **identity)
                     reason = ""
                     if response.status == 403:
                         try:

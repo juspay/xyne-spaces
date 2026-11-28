@@ -136,6 +136,8 @@ interface CallControlsProps {
   canStopRecording?: boolean | undefined;
   onStartRecording?: ((type: RecordingType) => void | Promise<void>) | undefined;
   onStopRecording?: (() => void | Promise<void>) | undefined;
+  /** End-to-end encrypted call: recorded by the transcription agent, stored encrypted. */
+  recordingEncrypted?: boolean | undefined;
   onTogglePresentationMode?: (() => void) | undefined;
   isPresentationMode?: boolean | undefined;
   hidePresentationMode?: boolean | undefined;
@@ -191,6 +193,7 @@ export function CallControls({
   canStopRecording = true,
   onStartRecording,
   onStopRecording,
+  recordingEncrypted,
   onTogglePresentationMode,
   isPresentationMode = false,
   infoSlot,
@@ -634,6 +637,7 @@ export function CallControls({
       canStopRecording={canStopRecording}
       onStartRecording={onStartRecording}
       onStopRecording={onStopRecording}
+      encrypted={recordingEncrypted ?? false}
       sizing={sizing}
       callId={callId}
     />

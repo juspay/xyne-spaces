@@ -44,6 +44,11 @@ class StorageBucket(abc.ABC):
         ...
 
     @abc.abstractmethod
+    def upload_bytes(self, filename: str, content: bytes, content_type: str) -> None:
+        """Upload binary content in one request (replaces any existing object)."""
+        ...
+
+    @abc.abstractmethod
     def open_writer(self, filename: str, content_type: str) -> BlobWriter:
         """Open a streaming writer for the given file."""
         ...

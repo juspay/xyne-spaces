@@ -128,6 +128,9 @@ class S3StorageBucket(StorageBucket):
             ContentType=content_type,
         )
 
+    def upload_bytes(self, filename: str, content: bytes, content_type: str) -> None:
+        self._s3.put_object(Bucket=self._bucket_name, Key=filename, Body=content, ContentType=content_type)
+
     def open_writer(self, filename: str, content_type: str) -> BlobWriter:
         return S3BlobWriter(self._s3, self._bucket_name, filename, content_type)
 

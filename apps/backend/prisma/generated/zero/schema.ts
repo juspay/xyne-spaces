@@ -1939,6 +1939,8 @@ export const callRecordingTable = table("call_recordings")
     segmentPrefix: string().optional(),
     messageId: string().optional(),
     attachmentId: string().optional(),
+    recorder: string().optional(),
+    encryption: json().optional(),
     startedAt: number(),
     endedAt: number().optional(),
     createdAt: number(),

@@ -203,13 +203,22 @@ class CallEncryptionService {
 
   sealKeyForAgent(roomName: string, key: string | undefined, agentPublicKeyB64: string): SealedCallKey {
     if (!key) throw new Error('Only a derived call key can be sealed for the agent');
+    return this.sealToAgent(agentPublicKeyB64, AGENT_SEAL_INFO, Buffer.from(roomName, 'utf8'), Buffer.from(key, 'utf8'));
+  }
+
+  /**
+   * Seals `plaintext` to an agent job's X25519 public key: X25519 with a fresh ephemeral
+   * key -> HKDF-SHA256(info) -> AES-256-GCM(aad). Each kind of secret uses its own `info`,
+   * so a value sealed for one purpose never unseals as another.
+   */
+  sealToAgent(agentPublicKeyB64: string, info: string, aad: Buffer, plaintext: Buffer): SealedCallKey {
     const ephemeral = generateKeyPairSync('x25519');
     const shared = this.agreeWithAgent(agentPublicKeyB64, ephemeral.privateKey);
-    const wrapKey = Buffer.from(hkdfSync('sha256', shared, Buffer.alloc(0), Buffer.from(AGENT_SEAL_INFO, 'utf8'), 32));
+    const wrapKey = Buffer.from(hkdfSync('sha256', shared, Buffer.alloc(0), Buffer.from(info, 'utf8'), 32));
     const nonce = randomBytes(12);
     const cipher = createCipheriv('aes-256-gcm', wrapKey, nonce);
-    cipher.setAAD(Buffer.from(roomName, 'utf8'));
-    const ciphertext = Buffer.concat([cipher.update(key, 'utf8'), cipher.final(), cipher.getAuthTag()]);
+    cipher.setAAD(aad);
+    const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final(), cipher.getAuthTag()]);
     const ephemeralX = ephemeral.publicKey.export({ format: 'jwk' }).x as string;
     return {
       ephemeralPublicKey: Buffer.from(ephemeralX, 'base64url').toString('base64'),

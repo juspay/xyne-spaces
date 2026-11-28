@@ -12,6 +12,7 @@ import { redisService } from '@/services/redisService';
 import { computeSttHintNames, STT_HINT_NAMES_REDIS_KEY } from '@/queues/warmUserRegistryQueue';
 import { callEncryptionService } from '@/services/callEncryptionService';
 import { pinCallEncryptionKeyVersion } from '@/bypassAcl/callServices';
+import { callRecordingService } from '@/services/callRecordingService';
 import { TicketController } from './ticketController';
 // import { CallController } from './callController';
 
@@ -35,6 +36,16 @@ const callSessionBodySchema = z.object({
   publicKey: z.string().refine((value) => callEncryptionService.isUsableAgentPublicKey(value), 'publicKey must be a 32-byte X25519 key'),
   /** The LiveKit dispatch this job belongs to (`ctx.job.dispatch_id`). */
   dispatchId: z.string().min(1).max(128),
+});
+
+/** HKDF info for a recording chunk key sealed to an agent job; must match python-agent/infra/recording_session.py. */
+const AGENT_RECORDING_SEAL_INFO = 'xyne-agent-recording-key:v1';
+
+const recordingCompleteBodySchema = callSessionBodySchema.extend({
+  /** The agent instance that recorded (16 hex chars). */
+  session: z.string().regex(/^[a-f0-9]{16}$/),
+  /** base64 HMAC-SHA256(chunkKey, "xyne-rec-complete:v1|<recordingId>|<session>"). */
+  proof: z.string().min(1).max(128),
 });
 
 /** A caller-supplied `limit` query param, parsed and bounded so one request can't pull a whole table. */
@@ -193,6 +204,105 @@ class TranscriptionAgentController {
     } catch (error) {
       logger.error(`[${callId}] agent_call_session_failed`, error);
       res.status(500).json({ success: false, error: 'Failed to open call session' });
+    }
+  };
+
+  /**
+   * POST /api/transcriptionAgent/:callId/recording-session
+   * What the agent should record on an end-to-end encrypted call. The agent asks when
+   * room metadata says a recording started or stopped (a hint LiveKit could forge) and
+   * on a slow poll; this answer is the authority.
+   *
+   * Only the job that claimed this dispatch's session may ask, and the recording's chunk
+   * key comes back sealed to that job's X25519 key (bound to call + recording), so the
+   * answer is useless to anyone else holding the agent API key. A pass also keeps the
+   * dispatch recognised for the rest of a long call.
+   */
+  recordingSession = async (req: Request, res: Response): Promise<void> => {
+    const { callId } = req.params;
+    res.set('Cache-Control', 'no-store');
+
+    const parsed = callSessionBodySchema.safeParse(req.body);
+    if (!callId || !parsed.success) {
+      res.status(400).json({ success: false, error: 'callId, publicKey and dispatchId are required' });
+      return;
+    }
+
+    try {
+      const call = await repositories.calls.findByExternalId(callId);
+      if (!call) {
+        res.status(404).json({ success: false, error: 'Call not found' });
+        return;
+      }
+      const { dispatchId, publicKey } = parsed.data;
+      const verified = await redisService.isAgentDispatchClaimedBy(dispatchId, callId, publicKey, AGENT_DISPATCH_CLAIM_TTL_SECONDS);
+      if (!verified) {
+        logger.warn(`[${callId}] agent_recording_session_refused | reason=dispatch_not_claimed_by_caller, dispatch_id=${dispatchId}`);
+        res.status(403).json({ success: false, error: 'Dispatch not recognised' });
+        return;
+      }
+
+      const session = await callRecordingService.getAgentRecordingSession(call);
+      if (!session.active) {
+        res.json({ success: true, active: false });
+        return;
+      }
+      const sealedKey = callEncryptionService.sealToAgent(
+        publicKey,
+        AGENT_RECORDING_SEAL_INFO,
+        Buffer.from(`${callId}|${session.recordingId}`, 'utf8'),
+        session.chunkKey,
+      );
+      res.json({
+        success: true,
+        active: true,
+        recordingId: session.recordingId,
+        recordingType: session.recordingType,
+        startedAtMs: session.startedAtMs,
+        chunkPrefix: session.chunkPrefix,
+        sealedKey,
+      });
+    } catch (error) {
+      logger.error(`[${callId}] agent_recording_session_failed`, error);
+      res.status(500).json({ success: false, error: 'Failed to load recording session' });
+    }
+  };
+
+  /**
+   * POST /api/transcriptionAgent/:callId/recordings/:recordingId/complete
+   * The agent uploaded its last chunks for a recording (it stopped, or the agent is
+   * leaving). Runs the stitch now instead of waiting for the fallback. `proof` is an
+   * HMAC under the recording's chunk key, which only the recording job holds.
+   */
+  recordingComplete = async (req: Request, res: Response): Promise<void> => {
+    const { callId, recordingId } = req.params;
+    const parsed = recordingCompleteBodySchema.safeParse(req.body);
+    if (!callId || !recordingId || !parsed.success) {
+      res.status(400).json({ success: false, error: 'dispatchId, publicKey, session and proof are required' });
+      return;
+    }
+
+    try {
+      const call = await repositories.calls.findByExternalId(callId);
+      if (!call) {
+        res.status(404).json({ success: false, error: 'Call not found' });
+        return;
+      }
+      const { dispatchId, publicKey, session, proof } = parsed.data;
+      if (!(await redisService.isAgentDispatchClaimedBy(dispatchId, callId, publicKey))) {
+        logger.warn(`[${callId}] agent_recording_complete_refused | reason=dispatch_not_claimed_by_caller, dispatch_id=${dispatchId}`);
+        res.status(403).json({ success: false, error: 'Dispatch not recognised' });
+        return;
+      }
+      if (!(await callRecordingService.completeAgentRecording(call, recordingId, session, proof))) {
+        logger.warn(`[${callId}] agent_recording_complete_refused | reason=recording_or_proof_invalid, recording_id=${recordingId}`);
+        res.status(403).json({ success: false, error: 'Recording completion refused' });
+        return;
+      }
+      res.json({ success: true });
+    } catch (error) {
+      logger.error(`[${callId}] agent_recording_complete_failed | recording_id=${recordingId}`, error);
+      res.status(500).json({ success: false, error: 'Failed to complete recording' });
     }
   };
 

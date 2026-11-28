@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { Mic, Monitor, CircleDot, CircleStop } from 'lucide-react';
+import { Mic, Monitor, CircleDot, CircleStop, Lock } from 'lucide-react';
 import { RecordingType } from '@xyne/shared';
 import { cn } from '../../../utils/classNames';
 import { ControlButton, type ControlSizing } from './ControlButton';
@@ -15,6 +15,8 @@ export interface RecordingButtonProps {
   canStopRecording?: boolean;
   onStartRecording?: ((type: RecordingType) => void | Promise<void>) | undefined;
   onStopRecording?: (() => void | Promise<void>) | undefined;
+  /** End-to-end encrypted call: the transcription agent records it and it is stored encrypted. */
+  encrypted?: boolean;
   sizing: ControlSizing;
   callId: string;
 }
@@ -24,6 +26,7 @@ export function RecordingButton({
   canStopRecording = true,
   onStartRecording,
   onStopRecording,
+  encrypted = false,
   sizing,
   callId,
 }: RecordingButtonProps): React.ReactElement {
@@ -139,6 +142,12 @@ export function RecordingButton({
               </div>
             </div>
           </button>
+          {encrypted && (
+            <div className='flex items-center gap-2 px-4 pt-1 pb-2.5 text-xs text-[#9aa0a6]'>
+              <Lock className='w-3 h-3 flex-shrink-0' aria-hidden />
+              Encrypted call: the recording is stored encrypted
+            </div>
+          )}
         </div>
       )}
     </div>

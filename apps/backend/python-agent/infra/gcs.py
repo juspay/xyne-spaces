@@ -48,6 +48,9 @@ class GCSStorageBucket(StorageBucket):
     def upload_from_string(self, filename: str, content: str, content_type: str) -> None:
         self._bucket.blob(filename).upload_from_string(content, content_type=content_type)
 
+    def upload_bytes(self, filename: str, content: bytes, content_type: str) -> None:
+        self._bucket.blob(filename).upload_from_string(content, content_type=content_type)
+
     def open_writer(self, filename: str, content_type: str) -> BlobWriter:
         blob = self._bucket.blob(filename)
         writer = blob.open("w", content_type=content_type)
