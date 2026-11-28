@@ -274,6 +274,9 @@ const envSchema = Joi.object({
   CALL_E2EE_KEY_SOURCE: Joi.string().valid('derived', 'encryption-service').default('derived'),
   // Call Recording Configuration
   CALL_RECORDING_ENABLED: Joi.boolean().default(false),
+  // Page LiveKit egress opens to record an end-to-end encrypted call: the dashboard's
+  // recording-template.html, as egress reaches it. Empty = encrypted calls can't be recorded.
+  CALL_RECORDING_TEMPLATE_URL: Joi.string().uri({ scheme: ['http', 'https'] }).allow('').default(''),
   CALL_RECORDING_RETENTION_DAYS: Joi.number().integer().min(0).default(0).max(365),
   SCREEN_RECORDING_RETENTION_DAYS: Joi.number().integer().min(0).default(30),
   FCM_PROJECT_ID: Joi.string().allow('').default(''),
@@ -1206,6 +1209,7 @@ export const config = {
   callRecording: {
     enabled: envVars.CALL_RECORDING_ENABLED,
     retentionDays: envVars.CALL_RECORDING_RETENTION_DAYS,
+    templateUrl: envVars.CALL_RECORDING_TEMPLATE_URL as string,
   },
   screenRecording: {
     retentionDays: envVars.SCREEN_RECORDING_RETENTION_DAYS,

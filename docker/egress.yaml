@@ -15,3 +15,9 @@ ws_url: ws://livekit:7880
 # File upload configuration
 # In development, Egress uploads to fake-gcs via STORAGE_EMULATOR_HOST env var
 # In production, Egress uses Application Default Credentials for GCS
+
+# Encrypted calls are recorded through the dashboard's recording template, which needs a
+# secure context (WebCrypto) to decrypt. Locally it is served over plain http, so let egress's
+# Chrome treat the dev server as secure. Production serves the template over https.
+chrome_flags:
+  unsafely-treat-insecure-origin-as-secure: "http://dashboard:5173"

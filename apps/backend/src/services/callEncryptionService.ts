@@ -164,6 +164,20 @@ class CallEncryptionService {
     return this.credentials(call, keyVersion, authToken);
   }
 
+  /**
+   * The key of an encrypted call that the backend itself can derive, for a recorder that has
+   * to decrypt the call (LiveKit egress joining through the recording template). Null for an
+   * unencrypted call, one not activated yet, or one keyed by the encryption service, whose key
+   * the backend never holds.
+   */
+  recorderKey(call: Pick<Call, 'externalId' | 'metadata' | 'status'>): string | null {
+    const state = encryptionStateOf(call);
+    if (state?.enabled !== true) return null;
+    const keyVersion = state.keyVersion ?? (isNotYetActivated(call) ? undefined : LEGACY_KEY_VERSION);
+    if (keyVersion === undefined || keyVersion === SERVICE_KEY_VERSION) return null;
+    return this.deriveKey(call.externalId, keyVersion).toString('base64');
+  }
+
   /** Same, for a call whose row is being written in the same request (not activated yet). */
   async credentialsForState(
     call: Pick<Call, 'externalId' | 'workspaceId'>,
