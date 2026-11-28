@@ -29,7 +29,7 @@
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
-    "test:ticket-dependency-transport": "dotenv -e .env.local -- node --import tsx --test --test-concurrency=1 tests/dependencies/dependencyTransport.test.ts tests/dependencies/dependencyAcl.test.ts tests/dependencies/dependencyPrismaBoundary.test.ts tests/dependencies/dependencyHttp.test.ts",
+    "test:ticket-dependency-transport": "dotenv -e .env.local -- node --import tsx --test --test-concurrency=1 tests/dependencies/dependencyTransport.test.ts tests/dependencies/dependencyAcl.test.ts tests/dependencies/dependencyPrismaBoundary.test.ts tests/dependencies/dependencyHttp.test.ts tests/dependencies/dependencyWriteShape.test.ts",
     "test:ticket-dependency-compatibility": "node --import tsx --test --test-concurrency=1 tests/dependencies/referenceMutators.test.ts",
     "test:zero-fallback": "pnpm exec tsx tests/verify-zero-fallback.ts 2>&1 | sed -n '/Summary/,/procedure/p'",
     "lint": "eslint 'src/**/*.ts'",

@@ -109,3 +109,36 @@ test('Zero SQL adapter requires and reuses the existing adapter transaction', as
   } };
   assert.deepEqual(await zeroDependencySql({ dbTransaction: connection }).query('SELECT $1', values), [{ value: 'result' }]);
 });
+
+test('nested policy refusal stays behind the outer model ACL and never executes a write', async () => {
+  const originalFactory = ACLFactory.getACL;
+  try {
+    for (const allowed of [false, true]) {
+      const events: string[] = [];
+      let handler!: (args: QueryArgs) => Promise<unknown>;
+      ACLFactory.getACL = (() => ({ getMutateWhere: async () => {
+        events.push('acl');
+        return { workspaceId: 'workspace' };
+      } })) as typeof ACLFactory.getACL;
+      const fake = {
+        ticket: { count: async () => { events.push('acl-count'); return allowed ? 1 : 0; } },
+        $transaction: async () => { throw new Error('Must not open a transaction'); },
+        $extends(extension: { query?: { $allModels: { $allOperations: typeof handler } } }) {
+          if (extension.query) handler = extension.query.$allModels.$allOperations;
+          return fake;
+        },
+      };
+      withAclExtension(fake as unknown as PrismaClient);
+      const action = () => runInRequestContext(request, () => handler({
+        model: 'Ticket', operation: 'update',
+        args: { where: { id: 'ticket' }, data: { board: { update: { metadata: {
+          dependencyPolicy: { defaultStrength: 'SOFT' },
+        } } } } },
+        query: async () => { events.push('write'); },
+      }));
+      if (allowed) await assert.rejects(action(), { code: 'DEPENDENCY_UNSUPPORTED_WRITER' });
+      else await assert.rejects(action(), /No Ticket found/);
+      assert.deepEqual(events, ['acl', 'acl-count']);
+    }
+  } finally { ACLFactory.getACL = originalFactory; }
+});

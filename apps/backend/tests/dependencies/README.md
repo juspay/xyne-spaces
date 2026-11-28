@@ -21,6 +21,7 @@ The SQL suite requires PostgreSQL and permission to create an isolated schema. I
 | Transport and ACL tests | Input schemas, restricted projections, sync exclusions and private audit ACL denial | Live workspace grant revocation |
 | HTTP context tests | Authenticated identity, asynchronous propagation, strict override input and count-only errors | Real REST/SDK routing, atomic multi-service updates or application ACLs |
 | Prisma boundary tests | ACL checks precede the dependency continuation, scoped bulk predicates survive, existing transaction context reaches the guard | A live Prisma engine write with production ACLs |
+| Nested writer shape tests | Generated Prisma relation traversal, nested ticket-stage and board-policy refusals, inverse board reassignment, relational board-connect classification, JSON/predicate isolation and disabled-stage compatibility | A live nested Prisma engine write, every raw/bypass writer or complete lifecycle coverage |
 | SQL transaction tests | Independent PostgreSQL connections, mixed graph lock contention, gate decisions, latches, rollback, private audit storage and migration SQL | A registered application mutator, authorization or synchronization |
 | Compatibility tests | Legacy reference mutation behavior | Every importer, merge, integration or deletion path |
 | Typechecks | Backend and dashboard contract compatibility | User-visible acceptance |
@@ -52,6 +53,15 @@ Required flag evaluation uses OpenFeature details. Errors and default fallbacks 
 - Prisma and Zero policy changes serialize with graph writers and check live board administration. The feature-gated board editor preserves other metadata and maps new stage IDs. SQL tests cover authority/reset/revocation; the actual board editor still needs application acceptance.
 - REST PATCH and SDK update handlers propagate authenticated override intent and typed count-only errors. SDK request logging no longer records the reason-bearing body. **These handlers still call multiple service writes: a later refused stage/status operation may follow an already-committed unrelated update. Atomic request-level behavior and every writer remain release blockers.**
 - Jira stale-link cleanup preserves application-owned BLOCKS mappings. This is not complete Jira import/export acceptance.
+
+## Nested-writer continuation
+
+- The final ACL-approved continuation checks schema-declared nested relation writes. Covered nested ticket stage/status/board/archive/ETA updates and inverse `Board.tickets` connections fail closed when the readiness interlock is enabled. Existing disabled-stage writers remain unchanged. Nested board metadata edits must use an explicit board update, including while ticket enforcement is disabled, so a nested write cannot evade the board-policy authorization guard.
+- A direct `Ticket.board.connect` is classified as a board move on the original guarded transaction. Arguments are not rewritten. Ambiguous board destinations fail closed without echoing input.
+- Sub-ticket controller failures now use the existing typed dependency HTTP response, preserving cycle/busy/flag-unavailable statuses rather than turning them into generic server failures. The transport unit tests do not establish live controller/service integration.
+- Focused transport/ACL/boundary/HTTP/shape tests passed (59), legacy compatibility passed (10), and the isolated PostgreSQL transaction suite passed (29). Source-file ESLint passed; the test files are ignored by the configured lint command. An explicit `--no-ignore` attempt failed because the backend lint tsconfig excludes these tests; test-file lint is not established. No live application or browser acceptance is claimed.
+- Initial backend typechecks used a stale generated Prisma client and failed on dependency metadata/private-audit types. The client was regenerated and the final backend typecheck passed. Regeneration is required after applying this branch's schema changes.
+- Full backend `pnpm build` remains blocked by the unchanged ACL-bypass prebuild guard. It flags existing callback-taking helpers, including `dependencyTicketWrite`, `dependencyBoardPolicyWrite` and `dependencyBulkStageWrite`. No guard was relaxed. This is a release blocker, not a passing build or a reason to enable the feature.
 
 ## Remaining release requirements
 

@@ -6,6 +6,7 @@ import {
   type SubTicketLinkActor,
 } from '@/services/subTicketLinkService';
 import { logger } from '@/utils/logger';
+import { sendDependencyError } from '@/services/dependencies/http';
 
 function resolveActor(req: Request): SubTicketLinkActor | null {
   const userId = req.user?.id;
@@ -19,6 +20,7 @@ function resolveActor(req: Request): SubTicketLinkActor | null {
 }
 
 function handleError(res: Response, error: unknown, fallback: string): void {
+  if (sendDependencyError(error, res)) return;
   if (error instanceof SubTicketLinkError) {
     res.status(error.status).json({ error: error.message });
     return;

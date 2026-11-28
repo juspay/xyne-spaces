@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { assertSupportedDependencyWriteShape, dependencyBoardDestination } from './dependencyWriteShape';
 import { dependencyPolicy } from '@xyne/shared';
 import type { Prisma, PrismaClient } from '@prisma/client';
 import { currentTransactionClient } from '../tenant/acl-extension';
@@ -16,14 +17,22 @@ import {
 const transactionShape = new AsyncLocalStorage<boolean>();
 const fields = ['stageName', 'statusV2', 'boardId', 'isArchived', 'eta'];
 export function dependencyWriteData(value: unknown): Record<string, unknown> | null {
-  if (!value || typeof value !== 'object' || !fields.some(f => f in value)) return null;
+  if (!value || typeof value !== 'object') return null;
   const data = value as Record<string, unknown>;
-  return Object.fromEntries(
+  const boardId = dependencyBoardDestination(data);
+  if (boardId === undefined && !fields.some(f => f in data)) return null;
+  const normalized = Object.fromEntries(
     Object.entries(data).map(([key, value]) => [
       key,
       value && typeof value === 'object' && 'set' in value ? value.set : value,
     ]),
   );
+  if (boardId !== undefined) {
+    if ('boardId' in normalized && normalized.boardId !== boardId)
+      throw new DependencyError('DEPENDENCY_INPUT', 'Conflicting board destinations', 400);
+    normalized.boardId = boardId;
+  }
+  return normalized;
 }
 
 /** Middleware precedes query extensions. It MUST NOT redirect writes or perform privileged reads. */
@@ -45,6 +54,7 @@ export async function guardTicketDependencyWrite(
   execute: (args: unknown) => Promise<unknown>,
   connection?: Prisma.TransactionClient,
 ): Promise<unknown> {
+  assertSupportedDependencyWriteShape(model, operation, input, TICKET_DEPENDENCIES_ENFORCEMENT_READY);
   if (model === 'Board')
     return guardBoardDependencyWrite(rawClient, operation, input, execute, connection);
   if (

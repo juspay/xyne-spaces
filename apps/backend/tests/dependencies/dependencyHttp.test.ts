@@ -91,3 +91,19 @@ test('HTTP refusal returns typed counts only and does not capture ordinary error
     details: { code: error.code, hardCount: 2, softCount: 1, canAdminOverride: true },
   });
 });
+
+for (const [code, status] of [
+  ['DEPENDENCY_CYCLE', 409],
+  ['DEPENDENCY_BUSY', 409],
+  ['DEPENDENCY_FLAG_UNAVAILABLE', 503],
+] as const) {
+  test(`HTTP ${code} preserves its retry status without returning private context`, () => {
+    const result = response();
+    const error = new DependencyError(code, 'Dependency operation cannot proceed', status);
+    assert.equal(sendDependencyError(error, result.res), true);
+    assert.equal(result.status(), status);
+    assert.deepEqual(result.body(), {
+      error: 'Dependency operation cannot proceed', code, details: { code },
+    });
+  });
+}
