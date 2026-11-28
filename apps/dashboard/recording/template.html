@@ -1,0 +1,20 @@
+<!doctype html>
+<!-- The page LiveKit egress opens to record an end-to-end encrypted call
+     (CALL_RECORDING_TEMPLATE_URL on the backend). Its own small entry
+     (src/recordingTemplate/main.tsx): it joins the call with the call key, so
+     egress records decrypted media. No app shell, no sign-in. -->
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <title>Recording</title>
+    <style>
+      html, body, #root { margin: 0; width: 100%; height: 100%; overflow: hidden; background: #0b0b0c; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/recordingTemplate/main.tsx"></script>
+  </body>
+</html>

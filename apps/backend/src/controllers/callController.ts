@@ -3168,8 +3168,13 @@ export class CallController {
         return;
       }
 
-      // The recording workers sit outside the trust boundary and cannot decrypt E2EE media.
-      if (callEncryptionService.isCallEncrypted(call)) {
+      // Egress records an end-to-end encrypted call through the recording template, which
+      // joins with the call key. That needs the template configured and a key the backend can
+      // derive (not one held only by the encryption service).
+      if (
+        callEncryptionService.isCallEncrypted(call) &&
+        (!config.callRecording.templateUrl || !callEncryptionService.recorderKey(call))
+      ) {
         res.status(409).json({
           success: false,
           error: 'Recording is not available on end-to-end encrypted calls',

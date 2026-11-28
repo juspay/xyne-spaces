@@ -108,6 +108,8 @@ export default defineConfig(({ command, mode }) => {
         input: {
           main: path.resolve(__dirname, 'index.html'),
           callWindow: path.resolve(__dirname, 'newWindow/call.html'),
+          // The page LiveKit egress opens to record an end-to-end encrypted call.
+          recordingTemplate: path.resolve(__dirname, 'recording/template.html'),
         },
       },
     },

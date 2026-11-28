@@ -4,6 +4,7 @@ import { promises as fs } from 'fs';
 import os from 'os';
 import path from 'path';
 import { config } from '@/config/env';
+import { callEncryptionService } from '@/services/callEncryptionService';
 import { repositories } from '@/database/repositories';
 import { logger } from '@/utils/logger';
 import { getStorageService } from '@/services/storage';
@@ -142,10 +143,15 @@ class CallRecordingService {
         output: this.buildUploadOutput(),
       });
 
+      // An end-to-end encrypted call is recorded through our template page, which joins with
+      // the call key (it fetches it with egress's recorder token), so egress records decrypted
+      // media. The controller refuses encrypted calls when no template is configured.
+      const customBaseUrl = callEncryptionService.isCallEncrypted(call) ? config.callRecording.templateUrl : undefined;
       let info: EgressInfo;
       if (recordingType === RecordingType.AUDIO_ONLY) {
         info = await this.egressClient.startRoomCompositeEgress(call.externalId, output, {
           audioOnly: true,
+          ...(customBaseUrl ? { customBaseUrl } : {}),
         });
       } else {
         // AUDIO_SCREEN: speaker-dark keeps the active screen-share large.
@@ -154,6 +160,7 @@ class CallRecordingService {
         info = await this.egressClient.startRoomCompositeEgress(call.externalId, output, {
           layout,
           audioOnly: false,
+          ...(customBaseUrl ? { customBaseUrl } : {}),
         });
       }
 

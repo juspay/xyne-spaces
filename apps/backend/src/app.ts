@@ -87,6 +87,7 @@ import ttsRoutes from '@/routes/tts';
 import { attachVoiceInputStreamHandler } from '@/routes/voiceInputStream';
 import transcriptionAgentRoutes from '@/routes/transcriptionAgent';
 import livekitWebhookRoutes from '@/routes/livekitWebhook';
+import recordingTemplateRoutes from '@/routes/recordingTemplate';
 import zeroRoutes from '@/routes/zero';
 import userHeaderOverridesRoutes from '@/routes/userHeaderOverrides';
 import encryptionRoutes from '@/routes/encryption';
@@ -369,6 +370,9 @@ export class App {
 
     // LiveKit webhook routes (MUST be before body parser for raw body signature verification)
     this.app.use('/api/livekit', livekitWebhookRoutes);
+    // The page egress opens to record an encrypted call; authenticated by egress's LiveKit
+    // recorder token, not a session, so it sits before the session-bound body middlewares.
+    this.app.use('/api/recording-template', webhookLimiter, recordingTemplateRoutes);
     this.app.use('/api/workflows-v2', workflowsPublicRouter);
 
     // Body parsing for all other routes (10mb limit)

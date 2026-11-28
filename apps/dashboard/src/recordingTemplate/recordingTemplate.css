@@ -1,0 +1,30 @@
+/* Recording template: fills egress's fixed viewport, dark, no controls. */
+.recording-template {
+  width: 100vw;
+  height: 100vh;
+  background: #0b0b0c;
+  padding: 8px;
+  box-sizing: border-box;
+}
+
+.recording-template .lk-grid-layout {
+  height: 100%;
+}
+
+/* Screen share large; cameras in a strip on the right. */
+.recording-template__focus {
+  height: 100%;
+  display: grid;
+  grid-template-columns: 1fr minmax(0, 18%);
+  gap: 8px;
+}
+
+.recording-template__focus .lk-carousel {
+  height: 100%;
+}
+
+.recording-template__status {
+  color: #9aa0a6;
+  font: 14px -apple-system, Helvetica, Arial, sans-serif;
+  padding: 24px;
+}

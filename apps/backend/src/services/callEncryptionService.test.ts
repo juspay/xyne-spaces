@@ -151,6 +151,22 @@ describe('callEncryptionService with keys from the encryption service', () => {
   });
 });
 
+describe('callEncryptionService.recorderKey', () => {
+  it('gives the recorder the key every participant derives for an activated call', () => {
+    expect(callEncryptionService.recorderKey(row('ACTIVE', { enabled: true, keyVersion: 1 }))).toBe(keyAt(1));
+    expect(callEncryptionService.recorderKey(row('ENDED', { enabled: true, keyVersion: 2 }))).toBe(keyAt(2));
+    // Activated before versions existed: version 1, as for joins.
+    expect(callEncryptionService.recorderKey(row('ACTIVE', { enabled: true }))).toBe(keyAt(1));
+  });
+
+  it('has no key for an unencrypted call, one not activated yet, or one keyed by the encryption service', () => {
+    expect(callEncryptionService.recorderKey(row('ACTIVE'))).toBeNull();
+    expect(callEncryptionService.recorderKey(row('ACTIVE', { enabled: false, keyVersion: 1 }))).toBeNull();
+    expect(callEncryptionService.recorderKey(row('PENDING', { enabled: true }))).toBeNull();
+    expect(callEncryptionService.recorderKey(row('ACTIVE', { enabled: true, keyVersion: SERVICE_KEY_VERSION }))).toBeNull();
+  });
+});
+
 describe('callEncryptionService.sealKeyForAgent', () => {
   const CALL_KEY = Buffer.alloc(32, 7).toString('base64');
   // Mirrors the agent's unseal (python-agent/infra/call_session.py).
