@@ -14,7 +14,12 @@ import { ExternalMessageRepository } from '@/database/repositories/externalMessa
 import { UserRepository } from '@/database/repositories/users';
 import { logger } from '@/utils/logger';
 import { callTranscriptionQueue } from '@/queues/callTranscriptionQueue';
-import { ozonetelConfigService, type OzonetelTicketRules } from './ozonetelConfigService';
+import type { CallConnection } from '@/services/telephony/callConnectionService';
+import { isCallProviderSourceType } from '@/services/telephony/callProviderIds';
+import {
+  deskCallSettingsService,
+  type DeskCallTicketRules,
+} from '@/services/telephony/deskCallSettingsService';
 import { unifiedBotUserService } from '@/bots/unified/services/unified-bot-user-service';
 import { syncConversationTicketMdFromPrismaTicket } from '@/utils/ticketMd';
 import { resolveTelephonyAgentUserId } from './telephonyAgentUserService';
@@ -48,7 +53,7 @@ const TELEPHONY_FORM_FIELDS: Array<{ fieldName: string; fieldType: FormFieldType
 const SYSTEM_AGENT_LABEL = 'Xyne Automatic';
 
 interface TelephonyStoredMetadata {
-  provider: 'ozonetel';
+  provider: string;
   externalId: string;
   workspaceId: string;
   status: TelephonyStatus;
@@ -66,7 +71,7 @@ interface TelephonyStoredMetadata {
 }
 
 export interface TelephonyEmailBodyPayload {
-  provider: 'ozonetel';
+  provider: string;
   from?: string;
   agent?: string;
   monitorUcid?: string;
@@ -88,13 +93,13 @@ export interface TelephonyEmailBodyPayload {
 
 /**
  * Parse the raw JSON payload stored in a telephony call email body.
- * Returns null when the body is not an Ozonetel call payload.
+ * Returns null when the body is not a call-provider payload.
  */
 export function parseTelephonyEmailBodyPayload(body: string | null | undefined): TelephonyEmailBodyPayload | null {
   if (!body) return null;
   try {
     const payload = JSON.parse(body) as Partial<TelephonyEmailBodyPayload> | null;
-    if (!payload || typeof payload !== 'object' || payload.provider !== 'ozonetel') return null;
+    if (!payload || typeof payload !== 'object' || !isCallProviderSourceType(payload.provider)) return null;
     return {
       ...(payload as TelephonyEmailBodyPayload),
       transcription: sanitizeTranscriptionState(payload.transcription),
@@ -109,7 +114,7 @@ function parseStoredTelephonyEmailBody(body: string): Partial<TelephonyStoredMet
 
   try {
     const payload = JSON.parse(body) as TelephonyEmailBodyPayload;
-    if (payload.provider !== 'ozonetel') return null;
+    if (!isCallProviderSourceType(payload.provider)) return null;
 
     const startedAt = parseSerializedTelephonyTimestamp(payload.startTime);
     const endedAt = parseSerializedTelephonyTimestamp(payload.endTime);
@@ -225,23 +230,18 @@ function sanitizeStoredMetadata(
 }
 
 function isEnabledForCallType(
-  rules: OzonetelTicketRules | undefined,
+  rules: DeskCallTicketRules,
   callType: string | null | undefined,
 ): boolean {
-  const normalized = String(callType ?? '').toLowerCase();
-  if (normalized === 'inbound') return !!rules?.createTicketOnInbound;
-  if (normalized === 'manual') return !!rules?.createTicketOnManual;
-  if (normalized === 'preview') return !!rules?.createTicketOnPreview;
-  if (normalized === 'progressive') return !!rules?.createTicketOnProgressive;
-  if (normalized === 'predictive') return !!rules?.createTicketOnPredictive;
-  return false;
+  const normalized = String(callType ?? '').trim().toLowerCase();
+  return normalized.length > 0 && rules.callTypes.includes(normalized);
 }
 
 function shouldCreateTicketNow(
-  rules: OzonetelTicketRules | undefined,
+  rules: DeskCallTicketRules,
   call: { status: TelephonyStatus; metadata: Record<string, unknown> },
 ): boolean {
-  const trigger = rules?.createTicketOnEvent ?? 'new_call';
+  const trigger = rules.createTicketOnEvent;
   if (trigger === 'new_call') return true;
   const agentId = typeof call.metadata.agentId === 'string' ? call.metadata.agentId.trim() : '';
   const agentStatus = String(call.metadata.agentStatus ?? '').toLowerCase();
@@ -311,7 +311,7 @@ function normalizeStatusLabel(status: TelephonyStatus, metadata: Record<string, 
 function buildEmailBody(meta: TelephonyStoredMetadata): string {
   const metadata = meta.metadata ?? {};
   const payload: TelephonyEmailBodyPayload = {
-    provider: 'ozonetel',
+    provider: meta.provider,
     from: String(metadata.callerId ?? meta.fromNumber ?? meta.toNumber ?? '').trim() || undefined,
     agent:
       (typeof metadata.agentId === 'string' && typeof metadata.agentPhoneNumber === 'string'
@@ -483,35 +483,37 @@ export class TelephonyEmailService {
     return { hasTrackingRecord: true, email };
   }
 
-  private async resolveCreateContext(event: TelephonyEvent) {
-    const cfg = await ozonetelConfigService.getConfig(event.workspaceId);
-    const rules = cfg?.ticketRules;
+  private async resolveCreateContext(event: TelephonyEvent, connection: CallConnection) {
+    const settings = await deskCallSettingsService.listForConnection(event.workspaceId, connection.id);
+    const campaignName =
+      typeof event.metadata?.campaignName === 'string' ? event.metadata.campaignName : null;
+    const desk = deskCallSettingsService.pickDesk(settings, campaignName);
+    if (!desk) return null;
     const callType = String(event.metadata?.callType ?? '');
-    if (!isEnabledForCallType(rules, callType)) return null;
-    if (!shouldCreateTicketNow(rules, { status: event.status, metadata: event.metadata ?? {} })) return null;
-    const targetChannelId = ozonetelConfigService.resolveTargetChannelId(
-      rules,
-      (event.metadata as Record<string, unknown> | null | undefined) ?? null,
-    );
-    if (!targetChannelId) return null;
+    if (!isEnabledForCallType(desk.ticketRules, callType)) return null;
+    if (!shouldCreateTicketNow(desk.ticketRules, { status: event.status, metadata: event.metadata ?? {} })) {
+      return null;
+    }
 
     const [channel, preference] = await Promise.all([
       db.channel.findUnique({
-        where: { id: targetChannelId },
-        select: { id: true },
+        where: { id: desk.channelId },
+        select: { id: true, type: true },
       }),
       db.emailChannelPreference.findUnique({
-        where: { channelId: targetChannelId },
+        where: { channelId: desk.channelId },
         select: { ownerUserId: true, boardId: true },
       }),
     ]);
-    if (!channel || !preference?.ownerUserId || !preference.boardId) return null;
+    if (channel?.type !== ChannelType.CALL || !preference?.ownerUserId || !preference.boardId) {
+      return null;
+    }
 
     const agentUserId = await resolveTelephonyAgentUserId(
       event.workspaceId,
       event.metadata ?? {},
       event.agentUserId,
-      cfg?.agentMapping,
+      connection.agentMapping,
     );
     const xyneAutomaticBot = await unifiedBotUserService.getBotByBotId(
       'xyne-automatic',
@@ -527,10 +529,10 @@ export class TelephonyEmailService {
 
   async prepareCoreIngestion(
     event: TelephonyEvent,
-    sourceId: string,
+    connection: CallConnection,
   ): Promise<{ channelId: string; creatorUserId?: string; targetConversationId?: string } | null> {
     const trackedCall = await this.findTrackedCallEmail(
-      sourceId,
+      connection.id,
       event.externalId,
       event.workspaceId,
     );
@@ -539,7 +541,7 @@ export class TelephonyEmailService {
     }
     if (trackedCall.hasTrackingRecord) {
       logger.warn(`${TAG} event deferred: invalid tracked email`, {
-        sourceId,
+        connectionId: connection.id,
         externalId: event.externalId,
         workspaceId: event.workspaceId,
         status: event.status,
@@ -547,8 +549,8 @@ export class TelephonyEmailService {
       return null;
     }
 
-    // Linked calls attach to an existing ticket, so the createTicketOn* gates do not apply.
-    const linkedTicket = await resolveLinkedTicketTarget(event);
+    // Linked calls attach to an existing ticket, so the desk's ticket rules do not apply.
+    const linkedTicket = await resolveLinkedTicketTarget(event, connection.id);
     if (linkedTicket) {
       logger.info(`${TAG} event linked to ticket`, {
         externalId: event.externalId,
@@ -562,9 +564,10 @@ export class TelephonyEmailService {
       };
     }
 
-    const context = await this.resolveCreateContext(event);
+    const context = await this.resolveCreateContext(event, connection);
     if (!context?.channelId) {
       logger.info(`${TAG} event deferred`, {
+        connectionId: connection.id,
         externalId: event.externalId,
         workspaceId: event.workspaceId,
         status: event.status,
@@ -626,12 +629,22 @@ export class TelephonyEmailService {
   async applyEvent(
     event: TelephonyEvent,
     emailId: string,
+    connection: CallConnection | null,
   ): Promise<{ emailId: string; externalId: string; ticketId?: string | null }> {
     const existingEmail = await this.findCallEmailById(emailId, event.workspaceId);
-    const cfg = await ozonetelConfigService.getConfig(event.workspaceId);
-    const configuredSubjectTemplate = cfg?.ticketRules?.ticketSubjectTemplate?.trim();
+    if (!existingEmail) {
+      logger.warn(`${TAG} postprocess skipped: core email not found`, {
+        externalId: event.externalId,
+        workspaceId: event.workspaceId,
+        status: event.status,
+      });
+      return { emailId: '', externalId: event.externalId, ticketId: null };
+    }
+    // App desks (linked calls) have no template and keep the default subject.
+    const deskSettings = await deskCallSettingsService.get(event.workspaceId, existingEmail.channelId);
+    const configuredSubjectTemplate = deskSettings?.ticketRules.subjectTemplate?.trim();
     const nextMeta: TelephonyStoredMetadata = {
-      provider: 'ozonetel',
+      provider: event.provider,
       externalId: event.externalId,
       workspaceId: event.workspaceId,
       status: event.status,
@@ -651,7 +664,7 @@ export class TelephonyEmailService {
         event.workspaceId,
         nextMeta.metadata ?? {},
         event.agentUserId,
-        cfg?.agentMapping,
+        connection?.agentMapping,
       )) ?? undefined);
     const nextMetadata = { ...(nextMeta.metadata ?? {}) };
     if (configuredSubjectTemplate) {
@@ -660,14 +673,6 @@ export class TelephonyEmailService {
       delete nextMetadata.ticketSubjectTemplate;
     }
     nextMeta.metadata = nextMetadata;
-    if (!existingEmail) {
-      logger.warn(`${TAG} postprocess skipped: core email not found`, {
-        externalId: event.externalId,
-        workspaceId: event.workspaceId,
-        status: event.status,
-      });
-      return { emailId: '', externalId: event.externalId, ticketId: null };
-    }
 
     const previousMeta = parseStoredTelephonyEmailBody(existingEmail.body);
     const mergedMeta: TelephonyStoredMetadata = {

@@ -20,6 +20,7 @@ import { toGooglePlayErrorResponse } from '@/integrations/adapters/social-media/
 import { db } from '@/database/client';
 import { ExternalSourcePlatform } from '@/integrations/core/types';
 import { isPlainAddress } from '@/services/dlResolver';
+import { isCallProviderSourceType } from '@/services/telephony/callProviderIds';
 
 const externalSourceRepo = new ExternalSourceRepository();
 
@@ -210,7 +211,7 @@ class EmailFetchWorker {
       `[EMAIL-FETCH-WORKER] Job ${job.id} done — processed=${result.processed} new=${result.newTickets} skipped=${result.skipped} errors=${result.errors?.length ?? 0}`,
     );
 
-    await this.notifySuccess(job.data, result, source.sourceType === 'ozonetel' ? 'call' : 'email');
+    await this.notifySuccess(job.data, result, isCallProviderSourceType(source.sourceType) ? 'call' : 'email');
 
     if (isDlMemberSync) {
       await this.cleanupDlMemberSyncSource(source.id, source.workspaceId);

@@ -1,18 +1,21 @@
 import { ReactElement } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { getOzonetelToolbar } from '../../../services/clients/telephonyApi';
+import { getSoftphone, TELEPHONY_QUERY_KEYS } from '../../../services/clients/telephonyApi';
 import { openFloatingDock } from '../CloudAgentDock/CloudAgentDock';
 import Tooltip from '../../ui/Tooltip';
 import { PhoneDefault } from '@xyne/icons';
 
-export const CallButton = (): ReactElement | null => {
-  const { data: toolbar } = useQuery({
-    queryKey: ['workspace-ozonetel-toolbar'],
-    queryFn: getOzonetelToolbar,
+/** Calls from an app-desk ticket go through the desk's own call connection. */
+export const CallButton = ({ channelId }: { channelId: string }): ReactElement | null => {
+  const { data } = useQuery({
+    queryKey: TELEPHONY_QUERY_KEYS.softphone(channelId),
+    queryFn: () => getSoftphone(channelId),
   });
-  const toolbarUrl = toolbar?.toolbarUrl ?? null;
+  const deskConnection = data?.connections.find(
+    connection => connection.id === data.deskConnectionId,
+  );
 
-  if (!toolbarUrl) return null;
+  if (!data || !deskConnection) return null;
 
   return (
     <Tooltip side='bottom' delayDuration={300} content='Call customer and log it to this ticket'>
@@ -22,7 +25,7 @@ export const CallButton = (): ReactElement | null => {
         aria-label='Call customer'
         data-track-category='Support'
         data-track-name='OpenOzonetelForTicket'
-        onClick={() => openFloatingDock(toolbarUrl)}
+        onClick={() => openFloatingDock(deskConnection, data.connections)}
       >
         <PhoneDefault size={16} className='shrink-0' />
       </button>

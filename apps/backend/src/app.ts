@@ -63,7 +63,7 @@ import workspaceDeskRoutes from '@/integrations/routes/workspace-desk';
 import slackDeskRoutes from '@/integrations/routes/slack-desk';
 import appDeskRoutes from '@/integrations/routes/app-desk';
 import socialMediaRoutes from './integrations/routes/social-media.js';
-import ozonetelIntegrationRoutes from '@/integrations/routes/ozonetel';
+import telephonyRoutes from '@/integrations/routes/telephony';
 import slackUserAuthRoutes from '@/integrations/routes/slack-user-auth';
 import migrationRoutes from '@/migration';
 // Disabled (all workers)
@@ -108,6 +108,7 @@ import auditLogRoutes from '@/routes/auditLogs';
 import recordingPointerBackfillRoutes from '@/routes/recordingPointerBackfill';
 import formEntityValueBackfillRoutes from '@/routes/formEntityValueBackfill';
 import sdlcRepoCredentialBackfillRoutes from '@/routes/sdlcRepoCredentialBackfill';
+import callRoutingBackfillRoutes from '@/routes/callRoutingBackfill';
 import searchMetricsRoutes from '@/routes/searchMetrics';
 import searchFeedbackRoutes from '@/routes/searchFeedback';
 import knowledgeRoutes from '@/routes/knowledge';
@@ -484,6 +485,8 @@ export class App {
     // (runs as the system actor), and the '-backfill' suffix puts it behind backfillMountGuard.
     this.app.use('/api/admin/form-entity-value-backfill', formEntityValueBackfillRoutes);
     this.app.use('/api/admin/sdlc-repo-credential-backfill', sdlcRepoCredentialBackfillRoutes);
+    // Moves call routing saved on connections before per-desk settings onto the desks; caller's workspace only.
+    this.app.use('/api/admin/call-routing-backfill', callRoutingBackfillRoutes);
     // Same shape: the one-off SDLC multi-repo data migration spans every workspace,
     // so it opens its own runAsSystem scope rather than taking workspaceScopedRoute.
 
@@ -537,7 +540,7 @@ export class App {
 
     // New chat schema routes
     this.app.use('/api/integrations/microsoft', microsoftDeskAuthRoutes); // Microsoft email channel OAuth (auth handled per-route)
-    this.app.use('/api/integrations/ozonetel', authMiddleware.authenticate, ozonetelIntegrationRoutes);
+    this.app.use('/api/integrations/telephony', authMiddleware.authenticate, telephonyRoutes);
     this.app.use('/api/channels', authMiddleware.authenticate, channelRoutes);
     // Claw MCP route (user + app auth) — must be before /api/conversations
     this.app.use('/api/conversations/claw', authenticateUserOrApp, conversationRoutes);
