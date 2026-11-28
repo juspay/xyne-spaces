@@ -3169,7 +3169,7 @@ export class CallController {
       }
 
       // Egress sits outside the trust boundary and can't decrypt E2EE media, so on an
-      // encrypted call the transcription agent records (any type), stored encrypted.
+      // encrypted call the transcription agent records (any type).
       let result: Awaited<ReturnType<typeof callRecordingService.startRecording>>;
       try {
         result = await callRecordingService.startRecording({
@@ -3183,11 +3183,8 @@ export class CallController {
           logger.warn(`[CallController] startCallRecording refused | callId=${callId}, code=${error.code}`);
           res.status(409).json({
             success: false,
-            error:
-              error.code === 'RECORDER_UNAVAILABLE'
-                ? 'The recorder is not in this call yet. Try again in a moment.'
-                : 'Recording is not available on end-to-end encrypted calls',
-            code: error.code === 'RECORDER_UNAVAILABLE' ? 'RECORDER_UNAVAILABLE' : 'CALL_ENCRYPTED',
+            error: 'The recorder is not in this call yet. Try again in a moment.',
+            code: error.code,
           });
           return;
         }

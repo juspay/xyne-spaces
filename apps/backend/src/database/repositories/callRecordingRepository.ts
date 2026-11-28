@@ -4,15 +4,11 @@ import { RecordingStatus, RecordingType } from '@xyne/shared';
 
 export type { CallRecording };
 
-/** Who records: LiveKit egress (unencrypted calls) or the transcription agent (E2EE calls). */
-export type RecordingRecorder = 'EGRESS' | 'AGENT';
-
 export interface StartActiveInput {
   callId: string;          // internal calls.id (FK), NOT the externalId
   recordingType: RecordingType;
   startedBy: string;
   name?: string | null;
-  recorder?: RecordingRecorder;
 }
 
 export interface StartActiveResult {
@@ -54,7 +50,6 @@ export class CallRecordingRepository {
           status: RecordingStatus.RECORDING_ACTIVE,
           startedBy: input.startedBy,
           name: input.name ?? null,
-          recorder: input.recorder ?? 'EGRESS',
           startedAt: now,
           createdAt: now,
         },
@@ -120,16 +115,6 @@ export class CallRecordingRepository {
   /** HLS segment dir, decided at start and read back by the stitch job. */
   async setSegmentPrefix(id: string, segmentPrefix: string): Promise<void> {
     await this.db.callRecording.update({ where: { id }, data: { segmentPrefix } });
-  }
-
-  /** The wrapped data key of an encrypted recording, written once right after the row is created. */
-  async setEncryption(id: string, encryption: Prisma.InputJsonValue): Promise<void> {
-    await this.db.callRecording.update({ where: { id }, data: { encryption } });
-  }
-
-  /** Crypto-shred: drop the wrapped data key so no copy of the recording can be decrypted again. */
-  async clearEncryption(id: string): Promise<void> {
-    await this.db.callRecording.update({ where: { id }, data: { encryption: Prisma.DbNull } });
   }
 
   async setMessageId(id: string, messageId: string): Promise<void> {

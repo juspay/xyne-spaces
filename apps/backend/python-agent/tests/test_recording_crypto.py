@@ -1,5 +1,5 @@
 """Cross-language checks for encrypted-call recording: the agent must produce exactly
-what the backend (apps/backend/src/services/recordingEncryptionService.ts) accepts.
+what the backend (apps/backend/src/services/agentRecordingCrypto.ts) accepts.
 
 Run from python-agent/:  python -m unittest tests.test_recording_crypto
 """
@@ -20,11 +20,11 @@ from infra.recording_session import _unseal
 
 SESSION = "0123456789abcdef"
 
-# Generated with Node's crypto exactly as the backend does (see recordingEncryptionService.test.ts).
+# Generated with Node's crypto exactly as the backend does (see agentRecordingCrypto.test.ts).
 NODE_CHUNK_VECTOR = bytes.fromhex("01" + "01" * 12 + "1e84e5dbff9f837ea4a736e17d79c6dcfe0140d3f197ea0edf04")
 
 # callEncryptionService.sealToAgent(info "xyne-agent-recording-key:v1", aad "call-vector|rec-vector")
-# of a chunk key of 0x09 * 32, to the agent key whose private scalar is 0x05 * 32.
+# of a recording key of 0x09 * 32, to the agent key whose private scalar is 0x05 * 32.
 NODE_SEALED_KEY = {
     "ephemeralPublicKey": "WB39gxVkGeeVeL7pbvfWOKuK0XpH7+NQpSICmAT27DY=",
     "nonce": "NibgL5bmIih+P94H",

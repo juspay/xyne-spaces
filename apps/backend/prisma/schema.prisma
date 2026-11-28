@@ -3315,8 +3315,6 @@ model CallRecording {
   segmentPrefix String?                          // HLS segment dir, set at start; deleted after a successful stitch
   messageId     String?                          // thread message this recording is posted under
   attachmentId  String?                          // RECORDING message_attachments row (note-taker recordings)
-  recorder      String?                          // EGRESS (null = legacy egress) | AGENT (transcription agent, E2EE calls)
-  encryption    Json?                            // wrapped per-recording data key (recordingEncryptionService); null = unencrypted or shredded
   startedAt     DateTime                         // Set explicitly in code (no DB default — team convention)
   endedAt       DateTime?
   createdAt     DateTime                         // Set explicitly in code (no DB default — team convention)

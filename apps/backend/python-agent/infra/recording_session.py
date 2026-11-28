@@ -2,9 +2,10 @@
 
 Room metadata (`activeRecording`) only tells the agent *when* to ask: LiveKit could
 forge it. The answer comes from POST /api/transcriptionAgent/:callId/recording-session,
-which only the job that claimed the dispatch's call session can use, and which returns
-the recording's chunk key sealed to this job's X25519 key. The key lives only in this
-process's memory. Never log it.
+which only the job that claimed the dispatch's call session can use. With storage
+encryption on it returns the recording's storage key (from the encryption service)
+sealed to this job's X25519 key, and the key's wrapped form, which goes on every object
+this job uploads. The key lives only in this process's memory. Never log it.
 """
 import asyncio
 import base64
@@ -42,7 +43,9 @@ class ActiveRecording:
     started_at_ms: int
     # Where this recording's objects go, e.g. "recordings/<call>/<recording>/".
     chunk_prefix: str
-    chunk_key: bytes
+    # The recording's storage key and its wrapped form; None when storage encryption is off.
+    key: Optional[bytes]
+    wrapped_key: Optional[str]
 
     def __repr__(self) -> str:  # keep the key out of any accidental log line
         return f"ActiveRecording(recording_id={self.recording_id})"
@@ -96,19 +99,26 @@ class RecordingSessionClient:
             prefix = str(data["chunkPrefix"])
             if not _PREFIX_PATTERN.match(prefix) or f"/{recording_id}/" not in prefix:
                 raise ValueError("unexpected chunk prefix")
-            chunk_key = _unseal(
-                self._private_key,
-                data["sealedKey"],
-                f"{self._call_id}|{recording_id}".encode("utf-8"),
-            )
-            if len(chunk_key) != KEY_LENGTH:
-                raise ValueError("chunk key has the wrong length")
+            key: Optional[bytes] = None
+            wrapped_key: Optional[str] = None
+            if data.get("sealedKey") is not None or data.get("wrappedKey") is not None:
+                key = _unseal(
+                    self._private_key,
+                    data["sealedKey"],
+                    f"{self._call_id}|{recording_id}".encode("utf-8"),
+                )
+                if len(key) != KEY_LENGTH:
+                    raise ValueError("recording key has the wrong length")
+                wrapped_key = str(data["wrappedKey"])
+                if not wrapped_key:
+                    raise ValueError("wrapped key is empty")
             return ActiveRecording(
                 recording_id=recording_id,
                 recording_type=str(data.get("recordingType") or "AUDIO_ONLY"),
                 started_at_ms=int(data["startedAtMs"]),
                 chunk_prefix=prefix,
-                chunk_key=chunk_key,
+                key=key,
+                wrapped_key=wrapped_key,
             )
         except Exception as e:  # malformed answer or unseal failure
             raise RecordingSessionError(f"invalid recording session: {type(e).__name__}") from None
@@ -116,8 +126,10 @@ class RecordingSessionClient:
     async def complete(self, recording: ActiveRecording, session_id: str, attempts: int = 5) -> bool:
         """Report that every chunk of `session_id` is uploaded, so the backend stitches now
         rather than after its fallback delay. Best effort: the fallback still runs."""
-        proof = base64.b64encode(completion_proof(recording.chunk_key, recording.recording_id, session_id)).decode("ascii")
-        body = {**self._identity, "session": session_id, "proof": proof}
+        body = {**self._identity, "session": session_id}
+        if recording.key and recording.wrapped_key:
+            proof = completion_proof(recording.key, recording.recording_id, session_id)
+            body.update(proof=base64.b64encode(proof).decode("ascii"), wrappedKey=recording.wrapped_key)
         url = f"{self._base}/recordings/{recording.recording_id}/complete"
         for attempt in range(attempts):
             try:

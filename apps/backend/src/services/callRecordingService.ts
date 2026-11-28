@@ -16,14 +16,16 @@ import { MessageType, AttachmentEntityType, RecordingStatus, RecordingType } fro
 import { isRecording } from '@/utils/callTypeUtils';
 import { callEncryptionService } from '@/services/callEncryptionService';
 import type { CreateMessageAttachmentInput } from '@/database/repositories/messageAttachmentRepository';
+import { getEncryptionProvider } from '@/services/encryption';
+import { redisService } from '@/services/redisService';
+import { runAsServiceActor } from '@/database/tenant/context';
 import {
   completionProofMessage,
+  decryptLiveObject,
   liveChunkAad,
   liveVideoChunkAad,
   manifestAad,
-  recordingEncryptionService,
-  XREC_HEADER_LENGTH,
-} from '@/services/recordingEncryptionService';
+} from '@/services/agentRecordingCrypto';
 
 /** HLS segment length. Smaller = more frequent uploads (less data lost on crash). */
 const SEGMENT_DURATION_SECONDS = 6;
@@ -47,6 +49,19 @@ const agentVideoMixTimeoutMs = (durationMs: number): number => AGENT_MIX_TIMEOUT
 /** One agent instance's run on a recording; a redispatched agent resumes under a new session. */
 const AGENT_SESSION_PATTERN = /^[a-f0-9]{16}$/;
 
+/**
+ * Object metadata holding the wrapped storage key an agent object is encrypted with, as on
+ * every encrypted storage object (SafeStorageService). Must match python-agent/modules/call_recorder.py.
+ */
+const WRAPPED_KEY_METADATA = 'enc-wdek';
+
+/**
+ * An agent recording's wrapped storage key, while it records: every agent job on the
+ * recording gets the same key. Its objects carry it too, so the stitch never needs this.
+ */
+const agentKeyRedisKey = (recordingId: string): string => `call-recording:agent-key:${recordingId}`;
+const AGENT_KEY_TTL_SECONDS = 2 * 24 * 60 * 60;
+
 const manifestTrackSchema = z.object({
   index: z.number().int().min(0).max(999),
   /** Track start on the recording timeline: ms after the recording's startedAt. */
@@ -66,7 +81,7 @@ const agentManifestSchema = z.object({
 /** Why a recording could not be started; the controller maps these to responses. */
 export class RecordingStartError extends Error {
   constructor(
-    public readonly code: 'RECORDER_NOT_CONFIGURED' | 'RECORDER_UNAVAILABLE',
+    public readonly code: 'RECORDER_UNAVAILABLE',
     message: string,
   ) {
     super(message);
@@ -84,10 +99,15 @@ export type AgentRecordingSession =
       recordingType: RecordingType;
       startedAtMs: number;
       chunkPrefix: string;
-      chunkKey: Buffer;
+      /** The recording's storage key and its wrapped form; absent when storage encryption is off. */
+      key?: { key: Buffer; wrappedKey: string };
     };
 
-const isAgentRecording = (recording: Pick<CallRecording, 'recorder'>): boolean => recording.recorder === 'AGENT';
+/**
+ * Egress can't decrypt an end-to-end encrypted call, so every recording on one is made by
+ * the transcription agent.
+ */
+const isAgentRecordingCall = (call: Pick<Call, 'metadata'>): boolean => callEncryptionService.isCallEncrypted(call);
 
 const recordingMimetype = (recordingType: string): string =>
   recordingType === RecordingType.AUDIO_ONLY ? 'audio/mp4' : 'video/mp4';
@@ -268,7 +288,8 @@ class CallRecordingService {
    */
   async stopRecording(recording: CallRecording, callExternalId: string): Promise<void> {
     await repositories.callRecordings.markStopped(recording.id);
-    if (isAgentRecording(recording)) {
+    const call = await repositories.calls.findById(recording.callId);
+    if (call && isAgentRecordingCall(call)) {
       // The agent sees the stop (room metadata + its poll), uploads its last chunks and
       // reports completion, which runs the stitch at once. This job is the fallback.
       const { recordingStitchQueue } = await import('@/queues/recordingStitchQueue');
@@ -279,7 +300,6 @@ class CallRecordingService {
 
     // Clear the active-recording indicator on every stop path (HTTP stop, call-end).
     // The egress_ended webhook still finalizes the file. Non-blocking; row is authoritative.
-    const call = await repositories.calls.findById(recording.callId);
     if (call) void livekitService.setRecordingState(call.externalId, null);
   }
 
@@ -299,15 +319,17 @@ class CallRecordingService {
   // ── Agent recordings (end-to-end encrypted calls) ────────────────────────────────
   //
   // Egress can't decrypt an E2EE call, so the transcription agent, which already holds
-  // the call key, records the audio it receives. It never stores plaintext: it encrypts
-  // per-participant Ogg/Opus chunks with a key derived from this recording's data key,
-  // and the stitch worker turns them into one encrypted file. See recordingEncryptionService.
+  // the call key, records what it receives. Its objects are encrypted like any stored file:
+  // under a storage key from the encryption service (wrapped key in each object's
+  // `enc-wdek` metadata), and the final file goes through the storage service like an
+  // egress recording's, so it is stored as the workspace's encrypted container.
+  // See agentRecordingCrypto.
   //
-  //   start (API)     row ACTIVE + wrapped data key; room metadata tells the agent
-  //   agent           fetches the sealed chunk key, uploads encrypted chunks every few seconds
+  //   start (API)     row ACTIVE + a storage key for the recording; room metadata tells the agent
+  //   agent           fetches the key sealed to its job, uploads encrypted chunks every few seconds
   //   stop (API)      row STOPPED; delayed fallback stitch queued
   //   agent           uploads its last chunks, reports completion -> stitch runs now
-  //   stitch worker   decrypt chunks, mix, encrypt (XREC), upload, delete chunks
+  //   stitch worker   decrypt chunks, mix, upload through the storage service, delete chunks
 
   /**
    * Start a recording made by the transcription agent. AUDIO_ONLY records each speaker;
@@ -321,9 +343,6 @@ class CallRecordingService {
     name?: string | null;
   }): Promise<StartRecordingResult | null> {
     const { call, recordingType, startedBy, name } = params;
-    if (!recordingEncryptionService.isConfigured()) {
-      throw new RecordingStartError('RECORDER_NOT_CONFIGURED', 'CALL_RECORDING_MASTER_KEY is not configured');
-    }
     // The agent is the only recorder that can hear this call. Without it the row would sit
     // ACTIVE recording nothing.
     const participants = await livekitService.listParticipants(call.externalId);
@@ -336,7 +355,6 @@ class CallRecordingService {
       recordingType,
       startedBy,
       name: name ?? null,
-      recorder: 'AGENT',
     });
     if (!created) {
       logger.info(`[CallRecording] start ignored — recording ${recording.id} already ACTIVE for call ${call.externalId}`);
@@ -345,8 +363,7 @@ class CallRecordingService {
 
     const paths = this.buildPaths(call.externalId, recording.id);
     try {
-      const { state } = recordingEncryptionService.createRecordingKey(recording.id);
-      await repositories.callRecordings.setEncryption(recording.id, { ...state });
+      await this.createAgentRecordingKey(call, recording.id);
       await repositories.callRecordings.setSegmentPrefix(recording.id, paths.segmentPrefix);
     } catch (error) {
       logger.error(`[CallRecording] agent recording setup failed for call ${call.externalId}, recordingId=${recording.id}:`, error);
@@ -370,44 +387,74 @@ class CallRecordingService {
   }
 
   /**
+   * A storage key for an agent recording, from the encryption service, kept (wrapped) for
+   * the agent jobs that record it. Nothing to do with storage encryption off: the agent's
+   * objects are then stored like every other file, in clear.
+   */
+  private async createAgentRecordingKey(call: Call, recordingId: string): Promise<string | null> {
+    if (!config.enc.enableStorageEncryption) return null;
+    const { wrappedKey } = await getEncryptionProvider().generateStorageKey({ workspaceId: call.workspaceId });
+    await redisService.set(agentKeyRedisKey(recordingId), wrappedKey, AGENT_KEY_TTL_SECONDS);
+    return wrappedKey;
+  }
+
+  private async unwrapStorageKey(call: Call, wrappedKey: string): Promise<Buffer> {
+    const [key] = await runAsServiceActor(call.createdByUserId, call.workspaceId, () =>
+      getEncryptionProvider().unwrapStorageKeys([wrappedKey]),
+    );
+    if (!key) throw new Error('recording storage key could not be unwrapped');
+    return key;
+  }
+
+  /**
    * What the call's agent should be recording right now. The caller has verified the
-   * agent job and must seal `chunkKey` to it; the key must never be sent in clear.
+   * agent job and must seal `key.key` to it; the key must never be sent in clear.
    */
   async getAgentRecordingSession(call: Call): Promise<AgentRecordingSession> {
+    if (!isAgentRecordingCall(call)) return { active: false };
     const active = await repositories.callRecordings.findActiveByCallId(call.id);
-    if (!active || !isAgentRecording(active) || !active.segmentPrefix) return { active: false };
-    if (!recordingEncryptionService.isEncryptedRecording(active)) return { active: false };
-    const dek = recordingEncryptionService.unwrapRecordingKey(active.id, active.encryption);
-    return {
-      active: true,
+    if (!active || !active.segmentPrefix) return { active: false };
+    const session = {
+      active: true as const,
       recordingId: active.id,
       recordingType: active.recordingType as RecordingType,
       startedAtMs: new Date(active.startedAt).getTime(),
       chunkPrefix: active.segmentPrefix,
-      chunkKey: recordingEncryptionService.deriveChunkKey(dek, active.id),
     };
+    if (!config.enc.enableStorageEncryption) return session;
+    // Lost from Redis (eviction): a new key. Each object names its own, so both decrypt.
+    const wrappedKey =
+      (await redisService.get(agentKeyRedisKey(active.id))) ?? (await this.createAgentRecordingKey(call, active.id));
+    if (!wrappedKey) return { active: false };
+    return { ...session, key: { key: await this.unwrapStorageKey(call, wrappedKey), wrappedKey } };
   }
 
   /**
-   * The agent finished uploading `session`'s chunks for a recording. `proof` is
-   * HMAC-SHA256(chunkKey, completionProofMessage): only the job holding the chunk key can
-   * produce it, so a leaked agent API key can't end someone's recording.
+   * The agent finished uploading `session`'s chunks for a recording. With storage
+   * encryption on, `proof` is HMAC-SHA256(key, completionProofMessage) under the recording
+   * key `wrappedKey` wraps: only a job the key was sealed to can produce it, so a leaked
+   * agent API key can't end someone's recording.
    *
    * Still ACTIVE means the agent is leaving the call (call ended, agent shut down), which
    * ends the recording. Returns false if the proof or the recording doesn't check out.
    */
-  async completeAgentRecording(call: Call, recordingId: string, session: string, proof: string): Promise<boolean> {
+  async completeAgentRecording(
+    call: Call,
+    recordingId: string,
+    session: string,
+    proof?: { proof: string; wrappedKey: string },
+  ): Promise<boolean> {
     const recording = await repositories.callRecordings.findById(recordingId);
-    if (!recording || recording.callId !== call.id || !isAgentRecording(recording)) return false;
-    if (!AGENT_SESSION_PATTERN.test(session) || !recordingEncryptionService.isEncryptedRecording(recording)) return false;
+    if (!recording || recording.callId !== call.id || !isAgentRecordingCall(call)) return false;
+    if (!AGENT_SESSION_PATTERN.test(session)) return false;
 
-    const chunkKey = recordingEncryptionService.deriveChunkKey(
-      recordingEncryptionService.unwrapRecordingKey(recording.id, recording.encryption),
-      recording.id,
-    );
-    const expected = createHmac('sha256', chunkKey).update(completionProofMessage(recordingId, session)).digest();
-    const supplied = Buffer.from(proof, 'base64');
-    if (supplied.length !== expected.length || !timingSafeEqual(supplied, expected)) return false;
+    if (config.enc.enableStorageEncryption) {
+      if (!proof) return false;
+      const key = await this.unwrapStorageKey(call, proof.wrappedKey);
+      const expected = createHmac('sha256', key).update(completionProofMessage(recordingId, session)).digest();
+      const supplied = Buffer.from(proof.proof, 'base64');
+      if (supplied.length !== expected.length || !timingSafeEqual(supplied, expected)) return false;
+    }
 
     if (recording.status === RecordingStatus.RECORDING_ACTIVE) {
       logger.info(`[CallRecording] agent left during recording ${recording.id}; stopping it`);
@@ -421,10 +468,11 @@ class CallRecordingService {
 
   /**
    * Stitch an agent recording: decrypt every session's chunks, rebuild each participant's
-   * Ogg/Opus track, mix them on the recording timeline, encrypt the result and upload it.
-   * Plaintext exists only in this worker's private temp dir, which is always removed.
+   * Ogg/Opus track (and the composed video), mix them on the recording timeline and upload
+   * the result through the storage service, like an egress recording. Plaintext exists only
+   * in this worker's private temp dir, which is always removed.
    */
-  private async stitchAgentRecording(recording: CallRecording): Promise<void> {
+  private async stitchAgentRecording(recording: CallRecording, call: Call): Promise<void> {
     const recordingId = recording.id;
     const stitchable: RecordingStatus[] = [
       RecordingStatus.RECORDING_STOPPED,
@@ -448,21 +496,17 @@ class CallRecordingService {
       }
     }
 
-    const call = await repositories.calls.findById(recording.callId);
-    if (!call || !recording.segmentPrefix || !recordingEncryptionService.isEncryptedRecording(recording)) {
+    if (!recording.segmentPrefix) {
       await repositories.callRecordings.markProcessingFailed(recordingId);
-      logger.error('[CallRecording] agent_stitch_missing_context', { recordingId, hasCall: !!call, segmentPrefix: recording.segmentPrefix });
+      logger.error('[CallRecording] agent_stitch_missing_context', { recordingId, segmentPrefix: recording.segmentPrefix });
       return;
     }
 
-    const dek = recordingEncryptionService.unwrapRecordingKey(recordingId, recording.encryption);
-    const chunkKey = recordingEncryptionService.deriveChunkKey(dek, recordingId);
-    const fileKey = recordingEncryptionService.deriveFileKey(dek, recordingId);
     const paths = this.buildPaths(call.externalId, recordingId);
     const workDir = await fs.mkdtemp(path.join(os.tmpdir(), `rec-${recordingId}-`));
 
     try {
-      const { audio, video } = await this.rebuildAgentTracks(recording, recording.segmentPrefix, chunkKey, workDir);
+      const { audio, video } = await this.rebuildAgentTracks(call, recording, recording.segmentPrefix, workDir);
       const isVideo = recording.recordingType !== RecordingType.AUDIO_ONLY;
       if (audio.length === 0 && (!isVideo || video.length === 0)) {
         await repositories.callRecordings.markUploadFailed(recordingId);
@@ -478,24 +522,31 @@ class CallRecordingService {
       } else {
         await mixAudioTracks(audio, localOut, AGENT_MIX_TIMEOUT_MS);
       }
-      const plaintext = await fs.readFile(localOut);
-      const container = recordingEncryptionService.encryptFile(fileKey, plaintext);
-      // A generic type: the stored object is ciphertext, not something a client can play.
-      await this.storageService.uploadFileV2(container, { path: paths.mp4Path, contentType: 'application/octet-stream' });
+      const buffer = await fs.readFile(localOut);
+      // As the workspace: with storage encryption on, the storage service stores the file as
+      // the workspace's encrypted container, as it does an egress recording.
+      await runAsServiceActor(recording.startedBy, call.workspaceId, () =>
+        this.storageService.uploadFileV2(buffer, { path: paths.mp4Path, contentType: recordingMimetype(recording.recordingType) }),
+      );
       if (!(await this.waitForFileExists(paths.mp4Path))) {
-        throw new Error(`encrypted recording not found at ${paths.mp4Path}`);
+        throw new Error(`stitched agent recording not found at ${paths.mp4Path}`);
+      }
+
+      // Before markUploaded, so a recording is never reported playable without its attachment.
+      if (isRecording(call)) {
+        await this.attachNoteTakerRecording(call, recording, paths.mp4Path, buffer.length);
       }
 
       await repositories.callRecordings.markUploaded(recordingId, { storagePath: paths.mp4Path });
       logger.info(
-        `[CallRecording] agent recording ${recordingId} UPLOADED (encrypted), type=${recording.recordingType}, ` +
+        `[CallRecording] agent recording ${recordingId} UPLOADED, type=${recording.recordingType}, ` +
           `audioTracks=${audio.length}, videoStreams=${video.length}, path=${paths.mp4Path}`,
       );
       await this.deleteSegments(recording.segmentPrefix);
 
       if (!isRecording(call)) {
         try {
-          await this.postRecordingMessageAndAttachment(call, { ...recording, storagePath: paths.mp4Path }, plaintext.length);
+          await this.postRecordingMessageAndAttachment(call, { ...recording, storagePath: paths.mp4Path }, buffer.length);
         } catch (err) {
           logger.error(`[CallRecording] Failed to post recording message/attachment for recording ${recordingId}:`, err);
         }
@@ -525,17 +576,18 @@ class CallRecordingService {
 
   /**
    * Decrypt each agent session's chunks into local files: one Ogg/Opus file per audio
-   * track and one MPEG-TS file per composed video stream. Object layout (written by
-   * python-agent/modules/call_recorder.py):
+   * track and one MPEG-TS file per composed video stream. A session's key is the one its
+   * manifest's `enc-wdek` metadata wraps; with storage encryption off its objects are plain.
+   * Object layout (written by python-agent/modules/call_recorder.py):
    *   <prefix><session>/manifest.bin              track and video offsets
    *   <prefix><session>/t<index:3>/<seq:8>.bin    consecutive slices of an audio track's Ogg stream
    *   <prefix><session>/v<index:3>/<seq:8>.bin    consecutive slices of a video stream's MPEG-TS
    * A stream stops at its first missing chunk: bytes after a gap can't continue it.
    */
   private async rebuildAgentTracks(
+    call: Call,
     recording: CallRecording,
     prefix: string,
-    chunkKey: Buffer,
     workDir: string,
   ): Promise<{ audio: AudioTrackInput[]; video: VideoTrackInput[] }> {
     const files = await this.storageService.listFiles(prefix);
@@ -564,14 +616,22 @@ class CallRecordingService {
     const audio: AudioTrackInput[] = [];
     const video: VideoTrackInput[] = [];
     for (const [session, streams] of sessions) {
-      const manifestBlob = await this.storageService.getFileBuffer(`${prefix}${session}/manifest.bin`).catch(() => null);
+      const manifestPath = `${prefix}${session}/manifest.bin`;
+      const manifestBlob = await this.storageService.getFileBuffer(manifestPath).catch(() => null);
       if (!manifestBlob) {
         logger.warn('[CallRecording] agent_stitch_session_skipped', { recording: recording.id, session, reason: 'no_manifest' });
         continue;
       }
-      const manifest = agentManifestSchema.parse(
-        JSON.parse(recordingEncryptionService.decryptLiveObject(chunkKey, manifestAad(recording.id, session), manifestBlob).toString('utf8')),
-      );
+      const wrappedKey = (await this.storageService.headObject(manifestPath))?.metadata?.[WRAPPED_KEY_METADATA];
+      if (!wrappedKey && config.enc.enableStorageEncryption) {
+        // Not written by an agent holding the recording's key: never mix it in.
+        logger.warn('[CallRecording] agent_stitch_session_skipped', { recording: recording.id, session, reason: 'unencrypted_session' });
+        continue;
+      }
+      const key = wrappedKey ? await this.unwrapStorageKey(call, wrappedKey) : null;
+      // An authentication failure throws: tampered or foreign data fails the stitch.
+      const open = (aad: Buffer, blob: Buffer): Buffer => (key ? decryptLiveObject(key, aad, blob) : blob);
+      const manifest = agentManifestSchema.parse(JSON.parse(open(manifestAad(recording.id, session), manifestBlob).toString('utf8')));
       if (manifest.recordingId !== recording.id || manifest.session !== session) {
         throw new Error(`manifest of session ${session} does not belong to recording ${recording.id}`);
       }
@@ -601,8 +661,7 @@ class CallRecordingService {
           const aad = kind === 't'
             ? liveChunkAad(recording.id, session, index, seq)
             : liveVideoChunkAad(recording.id, session, index, seq);
-          // An authentication failure throws: tampered or foreign data fails the stitch.
-          const plain = recordingEncryptionService.decryptLiveObject(chunkKey, aad, blob);
+          const plain = open(aad, blob);
           await fs.appendFile(localPath, plain, { mode: 0o600 });
           expected++;
         }
@@ -706,15 +765,15 @@ class CallRecordingService {
       logger.warn('[CallRecording] stitch_no_recording', { recordingId });
       return;
     }
-    if (isAgentRecording(recording)) {
-      await this.stitchAgentRecording(recording);
+    const call = await repositories.calls.findById(recording.callId);
+    if (call && isAgentRecordingCall(call)) {
+      await this.stitchAgentRecording(recording, call);
       return;
     }
     if (recording.status !== 'PROCESSING_RECORDING' && recording.status !== 'PROCESSING_FAILED') {
       logger.info(`[CallRecording] stitch skipped — recording ${recordingId} in state ${recording.status}`);
       return;
     }
-    const call = await repositories.calls.findById(recording.callId);
     if (!call || !recording.segmentPrefix) {
       await repositories.callRecordings.markProcessingFailed(recordingId);
       logger.error('[CallRecording] stitch_missing_context', { recordingId, hasCall: !!call, segmentPrefix: recording.segmentPrefix });
@@ -979,10 +1038,6 @@ class CallRecordingService {
       }
     }
     await repositories.callRecordings.markDeleted(recording.id);
-    if (recordingEncryptionService.isEncryptedRecording(recording)) {
-      // Crypto-shred: without its data key no copy of this recording can be decrypted.
-      await repositories.callRecordings.clearEncryption(recording.id);
-    }
     logger.info(`[CallRecording] Soft-deleted recording ${recording.id}`);
   }
 
@@ -990,56 +1045,9 @@ class CallRecordingService {
   async streamRecordingById(recordingId: string): Promise<{ stream: NodeJS.ReadableStream; filename: string } | null> {
     const path = await this.getStoragePathById(recordingId);
     if (!path) return null;
-    const filename = path.split('/').pop() ?? `recording-${recordingId}.mp4`;
-    const recording = await repositories.callRecordings.findById(recordingId);
-    if (recording && recordingEncryptionService.isEncryptedRecording(recording)) {
-      const { stream } = await this.openDecryptedStream(recording, path);
-      return { stream, filename };
-    }
     const stream = await this.storageService.createReadStream(path);
+    const filename = path.split('/').pop() ?? `recording-${recordingId}.mp4`;
     return { stream, filename };
-  }
-
-  /**
-   * Plaintext size and the decryption context of an encrypted recording file, from its
-   * 32-byte header. Used by every reader (download, email, attachment streaming).
-   */
-  async describeEncryptedFile(recording: CallRecording, storagePath: string) {
-    const fileKey = recordingEncryptionService.deriveFileKey(
-      recordingEncryptionService.unwrapRecordingKey(recording.id, recording.encryption),
-      recording.id,
-    );
-    const headerBytes = await this.readRange(storagePath, 0, XREC_HEADER_LENGTH - 1);
-    const header = recordingEncryptionService.parseHeader(headerBytes);
-    return { fileKey, header };
-  }
-
-  /**
-   * Decrypted bytes [start, end] of an encrypted recording file (the whole file without a
-   * range). Reads only the container chunks that hold the range, so seeking stays cheap.
-   */
-  async openDecryptedStream(
-    recording: CallRecording,
-    storagePath: string,
-    range?: { start: number; end: number },
-  ): Promise<{ stream: NodeJS.ReadableStream; plaintextLength: number }> {
-    const { fileKey, header } = await this.describeEncryptedFile(recording, storagePath);
-    if (header.plaintextLength === 0) throw new Error(`recording ${recording.id} is empty`);
-    const plain = range ?? { start: 0, end: header.plaintextLength - 1 };
-    const cipher = recordingEncryptionService.ciphertextRange(header, plain.start, plain.end);
-    const source = await this.storageService.createReadStream(storagePath, { start: cipher.start, end: cipher.end });
-    const decrypt = recordingEncryptionService.createDecryptStream(fileKey, header, plain);
-    source.on('error', (err) => decrypt.destroy(err));
-    return { stream: source.pipe(decrypt), plaintextLength: header.plaintextLength };
-  }
-
-  private async readRange(storagePath: string, start: number, end: number): Promise<Buffer> {
-    const stream = await this.storageService.createReadStream(storagePath, { start, end });
-    const parts: Buffer[] = [];
-    for await (const part of stream as AsyncIterable<Buffer | string>) {
-      parts.push(typeof part === 'string' ? Buffer.from(part) : part);
-    }
-    return Buffer.concat(parts);
   }
 
   async getRecordingMetadataById(recordingId: string): Promise<Record<string, unknown> | null> {
@@ -1098,9 +1106,6 @@ class CallRecordingService {
               await this.storageService.deleteFile(recording.storagePath);
             }
             await repositories.callRecordings.markExpired(recording.id);
-            if (recordingEncryptionService.isEncryptedRecording(recording)) {
-              await repositories.callRecordings.clearEncryption(recording.id);
-            }
             await repositories.messageAttachments.deleteByRecordingIds([recording.id]);
             if (recording.messageId) {
               await repositories.messageAttachments.deleteByMessageId(recording.messageId);

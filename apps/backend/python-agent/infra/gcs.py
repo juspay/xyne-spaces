@@ -2,7 +2,7 @@
 Google Cloud Storage bucket provider
 """
 import logging
-from typing import Optional
+from typing import Dict, Optional
 import google.auth
 from google.auth import load_credentials_from_file
 from google.auth.transport.requests import Request as GoogleAuthRequest
@@ -48,8 +48,13 @@ class GCSStorageBucket(StorageBucket):
     def upload_from_string(self, filename: str, content: str, content_type: str) -> None:
         self._bucket.blob(filename).upload_from_string(content, content_type=content_type)
 
-    def upload_bytes(self, filename: str, content: bytes, content_type: str) -> None:
-        self._bucket.blob(filename).upload_from_string(content, content_type=content_type)
+    def upload_bytes(
+        self, filename: str, content: bytes, content_type: str, metadata: Optional[Dict[str, str]] = None
+    ) -> None:
+        blob = self._bucket.blob(filename)
+        if metadata:
+            blob.metadata = metadata
+        blob.upload_from_string(content, content_type=content_type)
 
     def open_writer(self, filename: str, content_type: str) -> BlobWriter:
         blob = self._bucket.blob(filename)

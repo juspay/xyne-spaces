@@ -4,17 +4,21 @@ LiveKit egress can't record an E2EE call: it never has the key. This agent does 
 decrypts every participant's audio for transcription), so when a recording is started
 on such a call, the agent records the audio it already receives.
 
-Nothing it records is ever stored in clear:
+Its objects are encrypted like any stored file when storage encryption is on:
 
   * each participant's audio (one *segment* per subscription, split on long gaps) is
     encoded to an Ogg/Opus stream in memory, off the event loop;
-  * every few seconds the bytes produced so far are encrypted with the recording's chunk
-    key (recording_crypto.py) and uploaded as the segment's next numbered chunk;
-  * an encrypted manifest records where each segment starts on the recording timeline.
+  * every few seconds the bytes produced so far are encrypted with the recording's
+    storage key (recording_crypto.py; the backend gets it from the encryption service and
+    seals it to this job) and uploaded as the segment's next numbered chunk, with the
+    wrapped key in the object's `enc-wdek` metadata;
+  * a manifest, encrypted the same way, records where each segment starts on the timeline.
 
-After the recording stops, the backend's stitch worker decrypts and mixes the segments
-into one encrypted file (apps/backend/src/services/callRecordingService.ts). Object
-layout under the recording's prefix (`<session>` is this agent instance):
+With storage encryption off there is no key and the objects are stored as they are, like
+every other file. After the recording stops, the backend's stitch worker decrypts and mixes
+the segments and stores the result through its storage service
+(apps/backend/src/services/callRecordingService.ts). Object layout under the recording's
+prefix (`<session>` is this agent instance):
 
     <prefix><session>/manifest.bin
     <prefix><session>/t<index:03d>/<seq:08d>.bin
@@ -289,6 +293,12 @@ class _RecordingRun:
     def _base(self) -> str:
         return f"{self.recording.chunk_prefix}{self.session_id}/"
 
+    @property
+    def _metadata(self) -> Optional[Dict[str, str]]:
+        # The wrapped key on every object, as on any encrypted storage object; the backend
+        # unwraps it to decrypt. Must match WRAPPED_KEY_METADATA in callRecordingService.ts.
+        return {"enc-wdek": self.recording.wrapped_key} if self.recording.wrapped_key else None
+
     def start(self) -> None:
         self._uploader = asyncio.create_task(self._upload_loop())
         self._flusher = asyncio.create_task(self._flush_loop())
@@ -388,16 +398,14 @@ class _RecordingRun:
             self._offsets[segment.index] = segment.offset_ms
             self._manifest_dirty = True
         aad = chunk_aad(self.recording.recording_id, self.session_id, segment.index, seq)
-        blob = encrypt_live_object(self.recording.chunk_key, aad, ogg)
-        self._enqueue(_Upload(f"{self._base}t{segment.index:03d}/{seq:08d}.bin", blob))
+        self._enqueue(_Upload(f"{self._base}t{segment.index:03d}/{seq:08d}.bin", self._seal(aad, ogg)))
 
     def _queue_video_chunk(self, seq: int, ts: bytes) -> None:
         if self._video_offset is None and self.video is not None and self.video.offset_ms is not None:
             self._video_offset = self.video.offset_ms
             self._manifest_dirty = True
         aad = video_chunk_aad(self.recording.recording_id, self.session_id, 0, seq)
-        blob = encrypt_live_object(self.recording.chunk_key, aad, ts)
-        self._enqueue(_Upload(f"{self._base}v000/{seq:08d}.bin", blob))
+        self._enqueue(_Upload(f"{self._base}v000/{seq:08d}.bin", self._seal(aad, ts)))
 
     def _queue_manifest(self) -> None:
         manifest = {
@@ -408,13 +416,16 @@ class _RecordingRun:
         }
         if self._video_offset is not None:
             manifest["video"] = [{"index": 0, "offsetMs": self._video_offset}]
-        blob = encrypt_live_object(
-            self.recording.chunk_key,
+        blob = self._seal(
             manifest_aad(self.recording.recording_id, self.session_id),
             json.dumps(manifest, separators=(",", ":")).encode("utf-8"),
         )
         self._manifest_dirty = False
         self._enqueue(_Upload(f"{self._base}manifest.bin", blob))
+
+    def _seal(self, aad: bytes, data: bytes) -> bytes:
+        """Encrypted under the recording's storage key; as is when storage encryption is off."""
+        return encrypt_live_object(self.recording.key, aad, data) if self.recording.key else data
 
     def _enqueue(self, upload: _Upload) -> None:
         self._pending_bytes += len(upload.blob)
@@ -433,7 +444,9 @@ class _RecordingRun:
             delay = 1.0
             while True:
                 try:
-                    await asyncio.to_thread(self.bucket.upload_bytes, upload.name, upload.blob, CONTENT_TYPE)
+                    await asyncio.to_thread(
+                        self.bucket.upload_bytes, upload.name, upload.blob, CONTENT_TYPE, self._metadata
+                    )
                     break
                 except Exception as e:  # noqa: BLE001 — retried: a missing chunk truncates the track
                     logger.warning(f"recording_upload_retry | error={type(e).__name__}, retry_in_s={delay}")

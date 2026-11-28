@@ -4,7 +4,7 @@ Supports both GCS and S3 backends.
 """
 import abc
 import io
-from typing import Optional
+from typing import Dict, Optional
 
 
 class BlobWriter(abc.ABC):
@@ -44,8 +44,10 @@ class StorageBucket(abc.ABC):
         ...
 
     @abc.abstractmethod
-    def upload_bytes(self, filename: str, content: bytes, content_type: str) -> None:
-        """Upload binary content in one request (replaces any existing object)."""
+    def upload_bytes(
+        self, filename: str, content: bytes, content_type: str, metadata: Optional[Dict[str, str]] = None
+    ) -> None:
+        """Upload binary content in one request (replaces any existing object), with optional custom metadata."""
         ...
 
     @abc.abstractmethod

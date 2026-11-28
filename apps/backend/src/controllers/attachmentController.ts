@@ -13,7 +13,7 @@ import { getHeicRendition, HeicRenditionError, isHeicAttachment, toWebpFilename 
 import { heicRenditionQueue } from '../queues/heicRenditionQueue';
 import { getVideoRendition, isVideoMimetype } from '../services/videoRenditionService';
 import { videoRenditionQueue } from '../queues/videoRenditionQueue';
-import { MessageAttachment, type CallRecording } from '@prisma/client';
+import { MessageAttachment } from '@prisma/client';
 import { AttachmentEntityType, ChannelVisibility } from '@xyne/shared';
 import {
   isAllowedSdlcUpload,
@@ -34,9 +34,6 @@ import { pipeline } from 'node:stream/promises';
 import { findFormEntityValue } from '@/database/repositories/formEntityValueRepository';
 import { isClientFileEncryption } from '@/middleware/clientFileEncryption';
 import { SafeStorageService, type EncryptedLayout } from '@/services/storage/safeStorageService';
-import { repositories } from '@/database/repositories';
-import { callRecordingService } from '@/services/callRecordingService';
-import { recordingEncryptionService } from '@/services/recordingEncryptionService';
 
 const db = DatabaseClient.getInstance();
 
@@ -52,14 +49,9 @@ const getAttachmentStorage = (attachment: MessageAttachment): typeof storageServ
     ? getStorageService(config.gcs.transcriptionBucketName)
     : storageService;
 
-/**
- * Transcripts can be rewritten, so they are never cached; other files are. Encrypted
- * recordings are served decrypted and must not land in a browser or proxy cache either.
- */
-const setAttachmentCacheHeaders = (res: Response, attachment: MessageAttachment, encrypted = false): void => {
-  if (encrypted) {
-    res.setHeader('Cache-Control', 'private, no-store');
-  } else if (NO_CACHE_TYPES.has(getAttachmentType(attachment))) {
+/** Transcripts can be rewritten, so they are never cached; other files are. */
+const setAttachmentCacheHeaders = (res: Response, attachment: MessageAttachment): void => {
+  if (NO_CACHE_TYPES.has(getAttachmentType(attachment))) {
     res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
     res.setHeader('Pragma', 'no-cache');
     res.setHeader('Expires', '0');
@@ -87,25 +79,8 @@ const STREAM_TARGET_TTL_SECONDS = 30;
 interface ResolvedStreamTarget {
   attachment: MessageAttachment;
   filePath: string;
-  /** Bytes the client sees: the plaintext size for an encrypted recording. */
   fileSize: number;
-  /** Set when the file is an encrypted call recording; served decrypted. */
-  encryptedRecording?: CallRecording;
 }
-
-/**
- * The recording behind a 'recording' attachment when its file is stored encrypted
- * (recordings of end-to-end encrypted calls), else null. The row must point at this
- * very file, so an attachment can't borrow another recording's key.
- */
-const findEncryptedRecording = async (attachment: MessageAttachment, filePath: string): Promise<CallRecording | null> => {
-  if (getAttachmentType(attachment) !== 'recording') return null;
-  const recordingId = (attachment.metadata as { recordingId?: unknown } | null)?.recordingId;
-  if (typeof recordingId !== 'string') return null;
-  const recording = await repositories.callRecordings.findById(recordingId);
-  if (!recording || recording.storagePath !== filePath) return null;
-  return recordingEncryptionService.isEncryptedRecording(recording) ? recording : null;
-};
 
 type StreamTargetResult =
   | { ok: true; target: ResolvedStreamTarget }
@@ -305,25 +280,6 @@ export class AttachmentController {
       }
 
       logger.info(`Streaming attachment ${attachmentId} from path: ${filePath}`);
-
-      const encryptedRecording = await findEncryptedRecording(attachment, filePath);
-      if (encryptedRecording) {
-        const { stream, plaintextLength } = await callRecordingService.openDecryptedStream(encryptedRecording, filePath);
-        res.setHeader('Content-Length', plaintextLength);
-        setSafeDownloadHeaders(res, {
-          mimetype: attachment.mimetype,
-          filename: attachment.originalFilename,
-        });
-        setAttachmentCacheHeaders(res, attachment, true);
-        try {
-          await pipeline(stream, res);
-        } catch (error) {
-          logger.error('Encrypted recording download failed:', error);
-          if (!res.headersSent) res.status(500).json({ error: 'Failed to download attachment' });
-          else if (!res.destroyed) res.destroy();
-        }
-        return;
-      }
 
       const buffer = await service.getFileBuffer(filePath);
 
@@ -527,17 +483,9 @@ export class AttachmentController {
     // getFileMetadata already fails on a missing object, so the fileExists()
     // HEAD that used to precede it was a second round trip for the same answer.
     let fileSize: number;
-    let encryptedRecording: CallRecording | null = null;
     try {
-      encryptedRecording = await findEncryptedRecording(attachment, filePath);
-      if (encryptedRecording) {
-        // The header holds the plaintext length; that is what the player seeks within.
-        const { header } = await callRecordingService.describeEncryptedFile(encryptedRecording, filePath);
-        fileSize = header.plaintextLength;
-      } else {
-        const metadata = await getAttachmentStorage(attachment).getFileMetadata(filePath);
-        fileSize = parseInt(String(metadata.size || '0'), 10);
-      }
+      const metadata = await getAttachmentStorage(attachment).getFileMetadata(filePath);
+      fileSize = parseInt(String(metadata.size || '0'), 10);
     } catch (error) {
       logger.error(`File not found in storage: ${forLog(filePath)}`, error);
       return { ok: false, status: 404, body: { error: 'File not found in storage' } };
@@ -549,12 +497,7 @@ export class AttachmentController {
       `Resolved attachment stream ${forLog(attachment.id)} -> ${forLog(filePath)} (${fileSize} bytes)`,
     );
 
-    const target: ResolvedStreamTarget = {
-      attachment,
-      filePath,
-      fileSize,
-      ...(encryptedRecording ? { encryptedRecording } : {}),
-    };
+    const target: ResolvedStreamTarget = { attachment, filePath, fileSize };
     // Transcripts are rewritten in place, so a remembered size would go stale.
     if (!NO_CACHE_TYPES.has(getAttachmentType(attachment))) {
       cacheManager.set(cacheKey, target, STREAM_TARGET_TTL_SECONDS);
@@ -768,11 +711,8 @@ export class AttachmentController {
       const filePath = served.path;
       const fileSize = served.size;
 
-      const { encryptedRecording } = resolved.target;
       const pipeToResponse = async (options?: { start: number; end: number }): Promise<void> => {
-        const stream = encryptedRecording
-          ? (await callRecordingService.openDecryptedStream(encryptedRecording, filePath, options)).stream
-          : await service.createReadStream(filePath, options);
+        const stream = await service.createReadStream(filePath, options);
 
         // Opening the stream is itself a round trip, and a scrubbing player can
         // abort within it. The response would then already have closed before
@@ -816,7 +756,7 @@ export class AttachmentController {
         });
         res.setHeader('Content-Length', fileSize);
         res.setHeader('Accept-Ranges', 'bytes');
-        setAttachmentCacheHeaders(res, attachment, !!encryptedRecording);
+        setAttachmentCacheHeaders(res, attachment);
 
         await pipeToResponse();
         return;
@@ -866,7 +806,7 @@ export class AttachmentController {
       res.setHeader('Content-Length', chunkSize);
       res.setHeader('Content-Range', `bytes ${start}-${end}/${fileSize}`);
       res.setHeader('Accept-Ranges', 'bytes');
-      setAttachmentCacheHeaders(res, attachment, !!encryptedRecording);
+      setAttachmentCacheHeaders(res, attachment);
 
       await pipeToResponse({ start, end });
     } catch (error) {

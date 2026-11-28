@@ -7,30 +7,6 @@ import { envDefaultOverrides } from '@/config/env-override';
 import { getKmsSecrets } from '@/config/kmsSecrets';
 import { parseInternalAppHostMap } from '@/utils/internalHostMap';
 
-/** A master-key ring's retired versions: a JSON object of version -> base64 key, e.g. {"1":"<old key>"}. */
-const previousMasterKeysSchema = (name: string) =>
-  Joi.string()
-    .allow('')
-    .default('')
-    .custom((value: string, helpers) => {
-      if (!value) return value;
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(value);
-      } catch {
-        return helpers.message({ custom: `${name} must be a JSON object of version -> base64 key` });
-      }
-      if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-        return helpers.message({ custom: `${name} must be a JSON object of version -> base64 key` });
-      }
-      for (const [version, key] of Object.entries(parsed as Record<string, unknown>)) {
-        if (!/^[1-9]\d*$/.test(version) || typeof key !== 'string' || !key) {
-          return helpers.message({ custom: `${name} has an invalid entry for version "${version}"` });
-        }
-      }
-      return value;
-    });
-
 const envSchema = Joi.object({
   NODE_ENV: Joi.string().valid('development', 'production', 'test').default('development'),
   SANDBOX_TEST_MODE: Joi.boolean().default(false),
@@ -271,20 +247,31 @@ const envSchema = Joi.object({
   // Rotation: JSON object of version -> base64 master key for versions that calls still
   // in progress were activated with, e.g. {"1":"<old key>"}. Remove a version once no
   // call activated with it is live.
-  CALL_E2EE_PREVIOUS_MASTER_KEYS: previousMasterKeysSchema('CALL_E2EE_PREVIOUS_MASTER_KEYS'),
+  CALL_E2EE_PREVIOUS_MASTER_KEYS: Joi.string()
+    .allow('')
+    .default('')
+    .custom((value: string, helpers) => {
+      if (!value) return value;
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(value);
+      } catch {
+        return helpers.message({ custom: 'CALL_E2EE_PREVIOUS_MASTER_KEYS must be a JSON object of version -> base64 key' });
+      }
+      if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+        return helpers.message({ custom: 'CALL_E2EE_PREVIOUS_MASTER_KEYS must be a JSON object of version -> base64 key' });
+      }
+      for (const [version, key] of Object.entries(parsed as Record<string, unknown>)) {
+        if (!/^[1-9]\d*$/.test(version) || typeof key !== 'string' || !key) {
+          return helpers.message({ custom: `CALL_E2EE_PREVIOUS_MASTER_KEYS has an invalid entry for version "${version}"` });
+        }
+      }
+      return value;
+    }),
   // Where keys of newly activated calls come from: `derived` (HKDF of CALL_E2EE_MASTER_KEY) or
   // `encryption-service` (random per call, released encrypted to each joiner; the backend never
   // holds it). A call keeps the source it activated with. Switch once every client can open them.
   CALL_E2EE_KEY_SOURCE: Joi.string().valid('derived', 'encryption-service').default('derived'),
-  // 32 random bytes, base64. Wraps the per-recording data keys of recordings made on
-  // end-to-end encrypted calls (recordingEncryptionService). Empty = such calls can't be
-  // recorded. Keep it separate from CALL_E2EE_MASTER_KEY: losing it loses every recording.
-  CALL_RECORDING_MASTER_KEY: Joi.string().allow('').base64().default(''),
-  // Version of CALL_RECORDING_MASTER_KEY. New recordings wrap their key with this version.
-  CALL_RECORDING_MASTER_KEY_VERSION: Joi.number().integer().min(1).default(1),
-  // Rotation: JSON object of version -> base64 key for versions that stored recordings were
-  // wrapped with. Unlike call keys, these stay until every recording wrapped with them is gone.
-  CALL_RECORDING_PREVIOUS_MASTER_KEYS: previousMasterKeysSchema('CALL_RECORDING_PREVIOUS_MASTER_KEYS'),
   // Call Recording Configuration
   CALL_RECORDING_ENABLED: Joi.boolean().default(false),
   CALL_RECORDING_RETENTION_DAYS: Joi.number().integer().min(0).default(0).max(365),
@@ -1219,11 +1206,6 @@ export const config = {
   callRecording: {
     enabled: envVars.CALL_RECORDING_ENABLED,
     retentionDays: envVars.CALL_RECORDING_RETENTION_DAYS,
-    masterKey: envVars.CALL_RECORDING_MASTER_KEY as string,
-    masterKeyVersion: envVars.CALL_RECORDING_MASTER_KEY_VERSION as number,
-    previousMasterKeys: (envVars.CALL_RECORDING_PREVIOUS_MASTER_KEYS
-      ? JSON.parse(envVars.CALL_RECORDING_PREVIOUS_MASTER_KEYS as string)
-      : {}) as Record<string, string>,
   },
   screenRecording: {
     retentionDays: envVars.SCREEN_RECORDING_RETENTION_DAYS,
