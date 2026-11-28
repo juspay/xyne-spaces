@@ -1,3 +1,4 @@
+import { useDependencyHighlightSource } from '../../../hooks/useDependencyHighlight';
 import { useState } from 'react';
 import { useDependencyData } from '../../../hooks/useDependencyState';
 import { HoverCard } from '../../ui/HoverCard/HoverCard';
@@ -14,6 +15,8 @@ export function TicketDependencyBadge({
   const [open, setOpen] = useState(false);
   const view = useDependencyData([ticketId]).get(ticketId);
   const state = view?.batch.states[ticketId];
+  const hasBadge = Boolean(state && (state.primary || state.blocking.length));
+  useDependencyHighlightSource(ticketId, hasBadge ? view?.batch : undefined, open);
   if (!state || (!state.primary && !state.blocking.length)) return null;
   const edges = new Map(view.batch.edges.map(edge => [edge.id, edge]));
   return (
@@ -39,7 +42,8 @@ export function TicketDependencyBadge({
             data-track-category='TICKET_DEPENDENCIES'
             data-track-name='DependencyAction'
             type='button'
-            onClick={() => setOpen(value => !value)}
+            onClick={() => setOpen(true)}
+            onFocus={() => setOpen(true)}
             className='max-w-full rounded focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
             aria-expanded={open}
             aria-label={`${state.primary ?? 'Dependencies'}${state.blockedBy.length ? `, waiting on ${state.blockedBy.length} tickets` : ''}${state.blocking.length ? `, blocking ${state.blocking.length} tickets` : ''}`}

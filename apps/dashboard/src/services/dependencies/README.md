@@ -89,7 +89,8 @@ These surfaces still require application acceptance before enabling enforcement.
 
 - Finish stage option propagation and application acceptance through every writer,
   including non-linear forms, approvals and REST/SDK multi-write atomicity.
-- Board policy application acceptance, dependency filters, related-ticket highlighting and
+- Board policy application acceptance and dependency filters.
+- Live ACL, keyboard and browser acceptance for related-ticket highlighting and
   specialized activity rendering.
 - Merge/cancellation/deletion lifecycle behavior, notifications, risk watcher,
   Jira/export/MCP compatibility and production-shaped graph-bound acceptance.
@@ -98,3 +99,30 @@ These surfaces still require application acceptance before enabling enforcement.
 
 These are implementation and acceptance gaps, not a request to enable the
 feature. Keep PR #3710 draft.
+
+## Related-ticket highlighting and dependency activity continuation
+
+Opening or keyboard-focusing a dependency badge outlines its readable, unsatisfied
+incident endpoints across mounted cards, both list rows and calendar badges.
+TicketCardV2 delegates to the common card. No extra graph request, raw endpoint
+attribute or persistent saved-view state is added. Restricted edges, missing
+summaries, satisfied edges and unrelated edges cannot nominate another card.
+Closing/unmounting the source, an identity change, a failed/empty read or flag
+removal releases the transient selection. Old popup cleanup cannot erase a newer
+popup's selection.
+
+The ticket timeline describes BLOCKS/CHILD additions, changes, satisfaction,
+review and overrides without interpolating endpoint titles, IDs or private
+reasons. Other reference relations retain their existing renderer. This does not
+add missing lifecycle notifications or change activity attribution.
+
+Run the focused command above with `src/hooks/useDependencyHighlight.test.tsx`,
+`src/hooks/useDependencyState.auth.test.tsx`,
+`src/components/Tickets/Dependencies/TicketDependencyBadge.test.tsx` and
+`src/utils/dependencyActivity.test.ts` appended. Hook tests mount real React
+under StrictMode but mock auth and flags. Badge tests use the real Radix disclosure
+with a mocked layout observer and REST data; they verify focus/click, Escape and
+projection-loss cleanup. The auth regression mounts the real batch hook with a
+mocked REST API to cover loss of authentication with a retained user object.
+These are not live revocation, browser, actual-card layout or synchronization
+acceptance.

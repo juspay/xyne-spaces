@@ -1,3 +1,4 @@
+import { useDependencyHighlight } from '../../../hooks/useDependencyHighlight';
 import { TicketDependencyBadge } from '../Dependencies/TicketDependencyBadge';
 import React from 'react';
 import type { Ticket, TicketTag } from '@xyne/shared';
@@ -71,6 +72,7 @@ const TicketListRowBase: React.FC<TicketListRowProps> = ({
   expandableSubTickets = false,
   treeConnector,
 }) => {
+  const dependencyHighlighted = useDependencyHighlight(ticket.id);
   const noun = useTicketNoun();
   const subTicketsOpen =
     useSubTicketsShown(ticket.id) > 0 && expandableSubTickets && (subProgress?.total ?? 0) > 0;
@@ -87,7 +89,8 @@ const TicketListRowBase: React.FC<TicketListRowProps> = ({
 
   return (
     <div
-      className={`group/listrow flex h-full min-w-0 cursor-pointer items-center px-3 ${
+      data-dependency-highlighted={dependencyHighlighted || undefined}
+      className={`${dependencyHighlighted ? 'outline outline-2 outline-primary -outline-offset-2' : ''} group/listrow flex h-full min-w-0 cursor-pointer items-center px-3 ${
         isComfortView ? 'gap-2.5' : 'gap-2'
       }`}
       onClick={() => onOpen(ticket)}

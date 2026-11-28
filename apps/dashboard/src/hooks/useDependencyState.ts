@@ -35,9 +35,9 @@ export function useTicketDependenciesEnabled(): boolean {
 export function useDependencyData(
   ticketIds: readonly string[],
 ): ReadonlyMap<string, DependencyTicketView> {
-  const { user } = useAuth();
+  const { user, isAuthenticated } = useAuth();
   const enabled = useTicketDependenciesEnabled();
-  const scope = enabled && user ? JSON.stringify([user.workspaceId, user.id]) : null;
+  const scope = enabled && isAuthenticated && user ? JSON.stringify([user.workspaceId, user.id]) : null;
   const key = JSON.stringify([...new Set(ticketIds.filter(Boolean))].sort());
   const ids = useMemo(() => JSON.parse(key) as string[], [key]);
   const entry = useMemo(() => {

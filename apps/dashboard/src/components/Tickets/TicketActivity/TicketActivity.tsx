@@ -1,3 +1,4 @@
+import { dependencyActivityDescription } from '../../../utils/dependencyActivity';
 import { ReactElement, ReactNode, useMemo, useState } from 'react';
 import { Archive } from 'lucide-react';
 import {
@@ -516,6 +517,8 @@ export const getActivityDescription = (
       };
 
     case ActivityType.REFERENCE_TICKET: {
+      const dependencyDescription = dependencyActivityDescription(value);
+      if (dependencyDescription) return { description: dependencyDescription, details: '' };
       const action = value?.action;
       if (action === 'created') {
         return {

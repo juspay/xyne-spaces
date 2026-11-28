@@ -1,3 +1,4 @@
+import { useDependencyHighlight } from '../../../hooks/useDependencyHighlight';
 import { TicketDependencyBadge } from '../Dependencies/TicketDependencyBadge';
 import { Fragment, MouseEvent, ReactElement, ReactNode, useMemo } from 'react';
 import { Wand2 } from 'lucide-react';
@@ -111,6 +112,7 @@ export const TicketListRow = ({
   dynamicFieldByKey,
   deskType,
 }: TicketListRowProps): ReactElement => {
+  const dependencyHighlighted = useDependencyHighlight(ticket.id);
   const isSocialMedia = deskType === DeskType.SOCIAL_MEDIA;
   const ticketIdValue = ticket.xyneId || ticket.id || '';
   const isHumanInterventionTicket = ticket.stageName?.toLowerCase().includes('human') ?? false;
@@ -446,7 +448,9 @@ export const TicketListRow = ({
       role='button'
       tabIndex={0}
       data-slot='ticket-list-row'
+      data-dependency-highlighted={dependencyHighlighted || undefined}
       className={cn(
+        dependencyHighlighted && 'outline outline-2 outline-primary -outline-offset-2',
         'grid items-center gap-x-3 px-6 py-3 border-b border-border last:border-b-0 w-full cursor-pointer transition-colors',
         isActive
           ? 'bg-primary/10 hover:bg-primary/15'

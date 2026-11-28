@@ -1,11 +1,16 @@
+import { useDependencyHighlight } from '../../../../hooks/useDependencyHighlight';
 import { TicketDependencyBadge } from '../../Dependencies/TicketDependencyBadge';
 import { getTicketStatusColor } from './utils';
 import type { CompactTicketBadgeProps } from './types';
 
 export function CompactTicketBadge({ ticket, onClick }: CompactTicketBadgeProps) {
+  const dependencyHighlighted = useDependencyHighlight(ticket.id);
   const statusColor = getTicketStatusColor(ticket.statusV2);
   return (
-    <div className='w-full rounded-lg border border-border bg-muted p-2 transition-all hover:bg-background hover:shadow-sm'>
+    <div
+      data-dependency-highlighted={dependencyHighlighted || undefined}
+      className={`${dependencyHighlighted ? 'outline outline-2 outline-primary -outline-offset-2' : ''} w-full rounded-lg border border-border bg-muted p-2 transition-all hover:bg-background hover:shadow-sm`}
+    >
       <button
         type='button'
         onClick={onClick}

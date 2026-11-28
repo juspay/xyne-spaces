@@ -1,3 +1,4 @@
+import { useDependencyHighlight } from '../../../hooks/useDependencyHighlight';
 import { TicketDependencyBadge } from '../Dependencies/TicketDependencyBadge';
 import React, { createContext, useContext, useMemo, useRef, useState } from 'react';
 import {
@@ -239,6 +240,7 @@ export const TicketCard: React.FC<TicketCardProps> = ({
   slaPolicies: slaPoliciesProp,
   subProgress,
 }) => {
+  const dependencyHighlighted = useDependencyHighlight(ticket.id);
   const zero = useZero();
   const { userID } = useAuthContextValues();
   const contentRef = useRef<HTMLDivElement>(null);
@@ -625,7 +627,9 @@ export const TicketCard: React.FC<TicketCardProps> = ({
           }}
           onClick={e => onClick?.(e)}
           data-testid={`ticket-card-${ticket.id}`}
+          data-dependency-highlighted={dependencyHighlighted || undefined}
           className={cn(
+            dependencyHighlighted && 'outline outline-2 outline-primary -outline-offset-2',
             `flex items-center gap-3 text-left ${releaseBoardBgColor} rounded-md border w-full px-3 py-1.5 hover:shadow-sm transition cursor-pointer group shadow-sm`,
           )}
           data-track-category='Tickets'
@@ -680,8 +684,10 @@ export const TicketCard: React.FC<TicketCardProps> = ({
         onClick?.(e.nativeEvent);
       }}
       data-testid={`ticket-card-${ticket.id}`}
+      data-dependency-highlighted={dependencyHighlighted || undefined}
       className={cn(
         width,
+        dependencyHighlighted && 'outline outline-2 outline-primary -outline-offset-2',
         `text-left ${releaseBoardBgColor} rounded-xl border w-full max-w-lg hover:shadow-sm transition cursor-pointer group shadow-sm relative container-type-inline overflow-hidden`,
         isCompact ? 'p-3' : 'p-0',
         isCompact && isEmailRead && 'email-read-card shadow-none',
