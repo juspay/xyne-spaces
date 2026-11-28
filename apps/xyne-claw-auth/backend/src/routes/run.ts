@@ -49,10 +49,12 @@ import {
 } from "../middleware/require-auth.js";
 import { handleRunCompletion } from "../queue/run-recovery-worker.js";
 import { getWorkspaceIdForUser } from "../lib/spaces-db.js";
+import { resolveSpacesAuthFromRequest } from "../surfaces/spaces/identity.js";
 import { resolveAgentSpacesAuth } from "../surfaces/spaces/user-auth.js";
 import { isAllowedExternalCallbackUrl, isInternalCallbackOrigin, type ExternalResultCallbackConfig } from "../surfaces/external-api/delivery.js";
-import type { VerifiedCliToken } from "../lib/cli-tokens.js";
-import { agentScopeAllows, canPostToChannels, sanitizeExternalRunBody } from "../lib/service-tokens.js";
+import { TOKEN_PREFIX, SERVICE_TOKEN_PREFIX, type VerifiedCliToken } from "../lib/cli-tokens.js";
+import { DELEGATION_HEADER } from "../lib/spaces-delegation.js";
+import { agentScopeAllows, canPostToChannels, rejectPrivilegedRunFields, sanitizeExternalRunBody } from "../lib/service-tokens.js";
 import { encryptSurfaceSecret } from "../lib/surface-resolver.js";
 import { resolveClawUserIdForSpacesIdentity } from "../lib/users-jit.js";
 
@@ -82,11 +84,24 @@ const router = Router();
 
 
 
+function presentsAccessToken(req: Request): boolean {
+  const header = req.headers.authorization;
+  if (typeof header !== "string") return false;
+  const raw = /^Bearer\s+(.+)$/i.exec(header.trim())?.[1]?.trim();
+  if (!raw) return false;
+  return raw.startsWith(TOKEN_PREFIX) || raw.startsWith(SERVICE_TOKEN_PREFIX);
+}
+
+function presentsDelegation(req: Request): boolean {
+  const raw = req.headers[DELEGATION_HEADER];
+  return typeof raw === "string" && raw.trim().length > 0;
+}
+
 function requireRunCaller(req: Request, res: Response, next: NextFunction): void | Promise<void> {
   if (req.originalUrl.includes("/internal/run")) {
     return requireAuth(req, res, next);
   }
-  if ((req.body as { triggerSource?: unknown } | undefined)?.triggerSource === "api") {
+  if (presentsAccessToken(req) || presentsDelegation(req)) {
     return requireAuth(req, res, next);
   }
   return requireUserAuth(req, res, next);
@@ -94,97 +109,6 @@ function requireRunCaller(req: Request, res: Response, next: NextFunction): void
 
 
 
-// ── Resolve Spaces auth from request (for service-to-service calls) ──
-
-async function resolveSpacesAuthFromRequest(
-  req: Request,
-  userId?: string,
-): Promise<SpacesAuthContext | undefined> {
-  try {
-    // Parse cookies — may be absent, header/Authorization fallbacks still apply.
-    const cookieMap = new Map<string, string>();
-    const cookies = req.headers.cookie;
-    if (cookies) {
-      for (const cookie of cookies.split(";")) {
-        const [name, ...rest] = cookie.trim().split("=");
-        if (name && rest.length > 0) {
-          cookieMap.set(name, rest.join("="));
-        }
-      }
-    }
-
-    // Workspace id: VERIFIED x-spaces-workspace-id (requireAuth derived it
-    // from the session's active workspace) → x-workspace-id header →
-    // xyne_last_workspace cookie. The verified header must win: the others
-    // are client-supplied conveniences.
-    const verifiedWorkspaceHeader = req.headers["x-spaces-workspace-id"];
-    const verifiedWorkspaceId =
-      typeof verifiedWorkspaceHeader === "string" && verifiedWorkspaceHeader.trim()
-        ? verifiedWorkspaceHeader.trim()
-        : undefined;
-    const workspaceHeader = req.headers["x-workspace-id"];
-    const workspaceId =
-      verifiedWorkspaceId ??
-      (typeof workspaceHeader === "string" && workspaceHeader.trim()
-        ? workspaceHeader.trim()
-        : cookieMap.get("xyne_last_workspace"));
-
-    // Token: workspace-scoped JWT → legacy google_access_token JWT → Authorization Bearer
-    let token: string | undefined;
-    if (workspaceId) {
-      const wsToken = cookieMap.get(`xyne_ws_${workspaceId}_token`);
-      if (wsToken && wsToken.split(".").length === 3) {
-        token = wsToken;
-      }
-    }
-    if (!token) {
-      const legacy = cookieMap.get("google_access_token");
-      if (legacy && legacy.split(".").length === 3) {
-        token = legacy;
-      }
-    }
-    if (!token) {
-      const authHeader = req.headers.authorization;
-      if (typeof authHeader === "string" && authHeader.startsWith("Bearer ")) {
-        token = authHeader.slice(7);
-      }
-    }
-
-    // Session id: x-session-id header → xyne_session cookie → user_session_id cookie.
-    // Spaces' authV2 sets `user_session_id`, not `xyne_session` — checking both
-    // keeps legacy callers working while fixing the dominant miss.
-    const sessionHeader = req.headers["x-session-id"];
-    const sessionId =
-      typeof sessionHeader === "string" && sessionHeader.trim()
-        ? sessionHeader.trim()
-        : (cookieMap.get("xyne_session") ?? cookieMap.get("user_session_id"));
-
-    if (!token && !sessionId) return undefined;
-
-    const spacesUserIdHeader = req.headers["x-spaces-user-id"];
-    const spacesUserId = typeof spacesUserIdHeader === "string" && spacesUserIdHeader.trim()
-      ? spacesUserIdHeader.trim()
-      : userId;
-    const effectiveWorkspaceId =
-      workspaceId ??
-      (spacesUserId ? await getWorkspaceIdForUser(spacesUserId, "require-auth").catch(() => null) : null) ??
-      undefined;
-    if (!workspaceId && effectiveWorkspaceId) {
-      log.info(
-        `[run] resolved Spaces workspaceId=${effectiveWorkspaceId} from user row for userId=${userId ?? "unknown"}`,
-      );
-    }
-
-    return {
-      ...(token ? { token } : {}),
-      ...(sessionId ? { sessionId } : {}),
-      ...(effectiveWorkspaceId ? { workspaceId: effectiveWorkspaceId } : {}),
-    };
-  } catch (err) {
-    log.warn("[run] Failed to resolve Spaces auth from request:", err);
-    return undefined;
-  }
-}
 
 
 // ── POST /clone-session — forward chat-branching session clone to xyne-claw ──
@@ -526,12 +450,29 @@ router.get(
 // ── POST /run — accept task, resolve identity + agent, forward to xyne-claw ──
 
 router.post("/run", requireRunCaller, async (req: Request, res: Response) => {
+  log.info(`[run-entry] entry=run mount=${req.originalUrl.includes("/internal/run") ? "internal" : "public"} path=${req.originalUrl}`);
   // Service tokens get the EXTERNAL body contract: unknown fields (provider
   // overrides, eventType, session plumbing) are stripped before the shared
   // destructure below ever sees them — external traffic must not be able to
   // masquerade as internal traffic.
   const serviceToken = (res.locals ?? {})["accessToken"] as VerifiedCliToken | undefined;
   const isServiceTokenCaller = serviceToken?.client === "service";
+
+  // Public mount only. `/internal/run` keeps the full contract (its callers are
+  // verified services), and service tokens are handled by the strip below.
+  const onInternalMount = req.baseUrl.includes("/internal");
+  if (!onInternalMount && !isServiceTokenCaller) {
+    const privileged = rejectPrivilegedRunFields(req.body as Record<string, unknown> | undefined);
+    if (!privileged.ok) {
+      log.warn(`[run] public caller sent privileged fields: ${privileged.fields.join(", ")}`);
+      res.status(400).json({
+        success: false,
+        error: `these fields are not accepted on this endpoint: ${privileged.fields.join(", ")}`,
+      });
+      return;
+    }
+  }
+
   if (isServiceTokenCaller) {
     // Channel-delivery fields (channelId/deliverTo) survive the strip ONLY
     // when the token carries CHANNELS_POST_SCOPE; otherwise external callers

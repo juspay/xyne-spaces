@@ -45,6 +45,22 @@ export function mintChatSessionId(): string {
   return randomUUID();
 }
 
+export const SESSION_LOCKED_MESSAGE = "Still finishing your previous answer - try again in a few seconds.";
+
+export function isSessionLockedError(error: unknown): boolean {
+  return error === "session_locked" || error === "sessionLocked";
+}
+
+export function widgetErrorContent(error: unknown, fallback: string): string {
+  return isSessionLockedError(error) ? SESSION_LOCKED_MESSAGE : fallback;
+}
+
+export function normalizeRunStatus(status: unknown): "completed" | "failed" | "cancelled" {
+  if (status === "completed") return "completed";
+  if (status === "cancelled") return "cancelled";
+  return "failed";
+}
+
 function publishCc(event: Record<string, unknown>): void {
   redisService
     .getConnection()

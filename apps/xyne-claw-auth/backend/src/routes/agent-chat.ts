@@ -18,6 +18,10 @@ import {
   finalTurnFields,
   normalizeAssistantParts,
   reasoningText,
+  SESSION_LOCKED_MESSAGE,
+  isSessionLockedError,
+  widgetErrorContent,
+  normalizeRunStatus,
   type AssistantPart,
 } from "../lib/chat-run-record.js";
 import { isDirectChatConversation } from "../lib/conversation-kind.js";
@@ -82,7 +86,6 @@ import {
   MANUAL_CHAT_TITLE_MAX_CHARS,
 } from "../services/chatTitleClient.js";
 import { gcsService } from "../services/storageService.js";
-import type { SpacesAuthContext } from "../mcp/servers/xyne-spaces-client.js";
 import {
   buildAttachedContextPayload,
   normalizeAttachedContext,
@@ -91,6 +94,15 @@ import {
 } from "../services/agentChatContextService.js";
 import { appendCitations, collectCitationIconUrls } from "../lib/citations.js";
 import { getWorkspaceIdForUser, requestWorkspaceHint } from "../lib/spaces-db.js";
+import {
+  getCookieValue,
+  extractSpacesUserToken,
+  extractSpacesSessionId,
+  extractSpacesWorkspaceId,
+  resolveSpacesAuth,
+  resolveSpacesActor,
+} from "../surfaces/spaces/identity.js";
+import { dispatchSpacesRun } from "../surfaces/spaces/dispatch.js";
 import { consumeClawStream } from "../lib/consume-claw-stream.js";
 import { cancelRunSession } from "../lib/experiment.js";
 import { redisService } from "../redis.js";
@@ -134,16 +146,6 @@ function withoutFollowUpRecorderInvocations(value: unknown[]): unknown[] {
 // Match the SLIDE_JSON_START/END markers emitted by create-ppt / edit-ppt so
 // we can persist the slide JSON on the attachment's metadata for the viewer.
 const SLIDE_JSON_RE = /SLIDE_JSON_START\s*([\s\S]+?)\s*SLIDE_JSON_END/;
-const SESSION_LOCKED_MESSAGE = "Still finishing your previous answer - try again in a few seconds.";
-
-function isSessionLockedError(error: unknown): boolean {
-  return error === "session_locked" || error === "sessionLocked";
-}
-
-function widgetErrorContent(error: unknown, fallback: string): string {
-  return isSessionLockedError(error) ? SESSION_LOCKED_MESSAGE : fallback;
-}
-
 /**
  * Coerce a pi-coding-agent tool result into plain text. The persisted shape is
  * often a JSON-encoded string wrapping the MCP envelope
@@ -694,12 +696,6 @@ async function persistAssistantResult(args: {
   return { messageId: finalAssistantMsg.id, persistedAttachments };
 }
 
-function normalizeRunStatus(status: unknown): "completed" | "failed" | "cancelled" {
-  if (status === "completed") return "completed";
-  if (status === "cancelled") return "cancelled";
-  return "failed";
-}
-
 async function resolveCallbackOrgId(req: Request, sessionId?: string, userId?: string): Promise<string | undefined> {
   const headerOrgId = getOrgId(req);
   if (headerOrgId) return headerOrgId;
@@ -712,81 +708,6 @@ async function resolveCallbackOrgId(req: Request, sessionId?: string, userId?: s
     if (user?.orgId) return user.orgId;
   }
   return undefined;
-}
-
-function getCookieValue(req: Request, name: string): string | undefined {
-  const cookie = req.headers["cookie"] ?? "";
-  const match = cookie.match(new RegExp(`(?:^|;\\s*)${name}=([^;]*)`));
-  return match?.[1] ? decodeURIComponent(match[1]) : undefined;
-}
-
-function extractSpacesUserToken(req: Request): string | undefined {
-  const bodyToken = (req.body as { userToken?: string } | undefined)?.userToken;
-  if (bodyToken) return bodyToken;
-
-  const authHeader = req.headers["authorization"];
-  if (authHeader?.startsWith("Bearer ")) return authHeader.slice(7);
-
-  const lastWorkspace = getCookieValue(req, "xyne_last_workspace");
-  if (lastWorkspace) {
-    const workspaceToken = getCookieValue(req, `xyne_ws_${lastWorkspace}_token`);
-    if (workspaceToken) return workspaceToken;
-  }
-
-  const legacy = getCookieValue(req, "google_access_token");
-  if (legacy && legacy.split(".").length === 3) return legacy;
-
-  return undefined;
-}
-
-function extractSpacesSessionId(req: Request): string | undefined {
-  const header = req.headers["x-session-id"];
-  if (typeof header === "string" && header.trim()) return header.trim();
-  return getCookieValue(req, "xyne_session") ?? getCookieValue(req, "user_session_id");
-}
-
-function extractSpacesWorkspaceId(req: Request): string | undefined {
-  const verifiedHeader = req.headers["x-spaces-workspace-id"];
-  if (typeof verifiedHeader === "string" && verifiedHeader.trim()) return verifiedHeader.trim();
-  const header = req.headers["x-workspace-id"];
-  if (typeof header === "string" && header.trim()) return header.trim();
-  return getCookieValue(req, "xyne_last_workspace");
-}
-
-async function resolveSpacesAuth(req: Request, userId: string): Promise<SpacesAuthContext | undefined> {
-  // `userId` is canonical Claw identity. Spaces DB reads must use the raw
-  // workspace membership identity retained by requireAuth.
-  const spacesUserIdHeader = req.headers["x-spaces-user-id"];
-  const spacesUserId = typeof spacesUserIdHeader === "string" && spacesUserIdHeader.trim()
-    ? spacesUserIdHeader.trim()
-    : userId;
-  const verifiedWorkspaceId = extractSpacesWorkspaceId(req);
-  // The user is present in their browser: forward THEIR Spaces cookie from
-  // this request. Spaces validates it itself — claw-auth never reads or stores
-  // another user's session (no Spaces-DB session reads, no cached token copy).
-  const cookie = req.headers.cookie;
-  if (typeof cookie === "string" && cookie.trim()) {
-    return {
-      cookie,
-      baseUrl: CONFIG.spacesInternalUrl,
-      ...(verifiedWorkspaceId ? { workspaceId: verifiedWorkspaceId } : {}),
-    };
-  }
-
-  const token = extractSpacesUserToken(req);
-  if (!token) return undefined;
-  const sessionId = extractSpacesSessionId(req);
-  const workspaceIdFromRequest = verifiedWorkspaceId;
-  const workspaceId = workspaceIdFromRequest ?? await getWorkspaceIdForUser(spacesUserId, "agent-chat").catch(() => null) ?? undefined;
-  if (!workspaceIdFromRequest && workspaceId) {
-    log.info(`[agent-chat] resolved workspaceId=${workspaceId} from user row for request Spaces auth userId=${userId}`);
-  }
-  return {
-    token,
-    baseUrl: CONFIG.spacesInternalUrl,
-    ...(sessionId ? { sessionId } : {}),
-    ...(workspaceId ? { workspaceId } : {}),
-  };
 }
 
 // Chat projects (routes/chat-projects.ts). Mounted here, ahead of every
@@ -1238,6 +1159,7 @@ function evalRunSwitches(req: Request, optimizations: unknown): { optimizations?
 }
 
 router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response) => {
+  log.info(`[run-entry] entry=agent-chat path=${req.originalUrl}`);
   // Visible to the outer catch. A turn that throws after these are set owns a
   // placeholder and a run row that must both be driven to a terminal state —
   // otherwise the assistant row sits at "running" forever and the run row (if it
@@ -1989,12 +1911,8 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
       // honours it because this is an internal run, so the row, the dispatch and
       // every later callback all key on the same id.
       sessionId: runSessionId,
-      userId,
-      userName: user?.name,
-      userEmail: user?.email,
       task: studioMode === "design" ? `/design ${message.trim()}` : aiScreenCommand.task,
       conversationId,
-      orgId: agent.orgId,
       ...(piConversationId !== conversationId ? { piSessionConversationId: piConversationId } : {}),
       ...(isRegenerate ? { isRegenerate: true } : {}),
       agentSlug: slug,
@@ -2182,16 +2100,20 @@ router.post("/:slug/chat", async (req: Request<{ slug: string }>, res: Response)
         assistantMessageId: assistantMsg.id,
       });
     } else {
-      const runUrl = `${CONFIG.internalUrl}/claw/api/v1/internal/run`;
-      const runRes = await fetch(runUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...serviceAuthHeaders("xyne-claw-auth", "POST", runUrl),
-        },
-        body: JSON.stringify(forwardBody),
+      const actorResult = resolveSpacesActor(req);
+      if (!actorResult.ok) {
+        res.status(actorResult.status).json({ success: false, error: actorResult.error });
+        return;
+      }
+      const dispatched = await dispatchSpacesRun({
+        actor: actorResult.actor,
+        agent: { slug, config: agent.config },
+        conversationId,
+        body: forwardBody,
       });
-      runBody = (await runRes.json()) as { success: boolean; sessionId?: string; error?: string };
+      runBody = dispatched.ok
+        ? { success: true, sessionId: dispatched.sessionId }
+        : { success: false, error: dispatched.error };
     }
 
     // The run row and the cc:events start signal were written before dispatch —

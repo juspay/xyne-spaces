@@ -45,8 +45,11 @@ import {
   parseLateFollowUpCallback,
 } from "../lib/follow-up-suggestions.js";
 import { consumeClawStream } from "../lib/consume-claw-stream.js";
-import { mintChatSessionId, beginChatRun, failChatRun } from "../lib/chat-run-record.js";
+import { mintChatSessionId, beginChatRun, failChatRun, SESSION_LOCKED_MESSAGE, isSessionLockedError, widgetErrorContent, normalizeRunStatus } from "../lib/chat-run-record.js";
 import { recordUploadedArtifacts } from "../lib/conversation-artifact-signals.js";
+import { resolveSpacesAuthFromRequest } from "../surfaces/spaces/identity.js";
+import { dispatchSpacesRun } from "../surfaces/spaces/dispatch.js";
+import { stripIdentityFields } from "../surfaces/spaces/schema.js";
 import { attachArtifactToApp, type ArtifactAppTarget } from "../lib/artifact-app-session.js";
 import { recordDeliveredArtifacts } from "../lib/delivered-artifacts.js";
 import { publishLiveEvent } from "../lib/live-conversation-bus.js";
@@ -72,7 +75,6 @@ import { internalServiceHeaders } from "../lib/internal-service-auth.js";
 import { callerService, requireRuntime, requireSpacesService, serviceAuthHeaders } from "../lib/service-assertion.js";
 import { selfAuthHeaders } from "../lib/internal-call.js";
 const log = createLogger("run-stream");
-const SESSION_LOCKED_MESSAGE = "Still finishing your previous answer - try again in a few seconds.";
 
 const publicRouter = Router();
 const internalRouter = Router();
@@ -133,20 +135,6 @@ interface StreamMeta {
 
 const pendingStreams = new Map<string, PendingStream>();
 const streamMeta = new Map<string, StreamMeta>();
-
-function normalizeRunStatus(status: unknown): "completed" | "failed" | "cancelled" {
-  if (status === "completed") return "completed";
-  if (status === "cancelled") return "cancelled";
-  return "failed";
-}
-
-function isSessionLockedError(error: unknown): boolean {
-  return error === "session_locked" || error === "sessionLocked";
-}
-
-function widgetErrorContent(error: unknown, fallback: string): string {
-  return isSessionLockedError(error) ? SESSION_LOCKED_MESSAGE : fallback;
-}
 
 // `session_locked` is an internal HA signal (another worker owns the
 // conversation lock, or claw fail-closed because the lock service was briefly
@@ -537,6 +525,7 @@ export async function persistRunStreamResult(args: {
  * from xyne-claw, proxying them as SSE events.
  */
 publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, res: Response) => {
+  log.info(`[run-entry] entry=run-stream path=${req.originalUrl}`);
   const streamId = randomUUID();
   // Periodic keepalive on the frontend leg (Spaces backend ← claw-auth).
   // Started once the SSE response is open, stopped on disconnect and in the
@@ -1946,22 +1935,17 @@ publicRouter.post("/", requireAuth, requireNoAccessToken, async (req: Request, r
       return;
     }
 
-    const runRes = await fetch(`${CONFIG.internalUrl}/claw/api/v1/internal/run`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...serviceAuthHeaders("xyne-claw-auth", "POST", `${CONFIG.internalUrl}/claw/api/v1/internal/run`),
-        ...(req.headers["cookie"] ? { Cookie: req.headers["cookie"] as string } : {}),
-      },
-      body: JSON.stringify(runRequestBody),
-      signal: upstreamAbort.signal,
+    const dispatched = await dispatchSpacesRun({
+      actor: { kind: "user", userId, orgId },
+      agent: { slug, config: agentRow.config },
+      conversationId: convId,
+      body: stripIdentityFields(runRequestBody),
+      resolveSpacesAuth: (uid: string) => resolveSpacesAuthFromRequest(req, uid),
     });
 
-    const runBody = (await runRes.json()) as {
-      success: boolean;
-      sessionId?: string;
-      error?: string;
-    };
+    const runBody: { success: boolean; sessionId?: string; error?: string } = dispatched.ok
+      ? { success: true, sessionId: dispatched.sessionId }
+      : { success: false, error: dispatched.error };
 
     if (!runBody.success) {
       pendingStreams.delete(streamId);

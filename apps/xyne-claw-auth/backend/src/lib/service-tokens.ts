@@ -98,6 +98,65 @@ export const EXTERNAL_RUN_BODY_FIELDS = [
   "userId",
 ] as const;
 
+/**
+ * Fields the PUBLIC browser-cookie `POST /run` mount must never accept.
+ *
+ * These are not merely unused by the dashboard — each one changes server-side
+ * trust decisions, so a caller-supplied value would let a browser pick its own
+ * security behaviour:
+ *
+ *   eventType                  "automation"/"scheduled_job" disables the
+ *                              conversation-ownership backstop in prepareRun
+ *                              (isScheduledOrAutomationEvent).
+ *   providerConfigs            short-circuits server-side provider resolution,
+ *                              so the run uses caller-supplied provider config
+ *                              instead of the agent's.
+ *   __persistedByCaller        suppresses the user-message / AgentRun writes.
+ *   __skipUserMessagePersist   suppresses the user-message write.
+ *   subagentProviders          picks the providers subagent runs use, in place
+ *                              of the agent's configured set.
+ *   subagentProviderMode       ungated agent-config override.
+ *   agentConfig                supplants the stored agent config for the run.
+ *   userId                     impersonation. The shared layer accepts a body
+ *                              userId only when it matches the session
+ *                              (start-run.ts), so a public caller gains
+ *                              nothing by sending one.
+ *   orgId                      selects the tenant the run is attributed to.
+ *   workspaceId                authorization scope. Per the agreed model it is
+ *                              derived from the credential, never accepted in
+ *                              a body.
+ *
+ * Body fields only. The trusted `x-workspace-id` / `x-spaces-workspace-id`
+ * headers are a separate, verified path and are unaffected by this list.
+ *
+ * REJECTED, not stripped: the only public caller is our own dashboard, which
+ * never sends these, so a silent strip would hide a real client bug. Internal
+ * and service-token callers are unaffected — this list is applied on the public
+ * mount only. `userId` therefore stays in EXTERNAL_RUN_BODY_FIELDS: service
+ * tokens may still send it, and the escalation check in start-run.ts is what
+ * holds for them.
+ */
+export const PRIVILEGED_PUBLIC_RUN_FIELDS = [
+  "eventType",
+  "providerConfigs",
+  "__persistedByCaller",
+  "__skipUserMessagePersist",
+  "subagentProviders",
+  "subagentProviderMode",
+  "agentConfig",
+  "userId",
+  "orgId",
+  "workspaceId",
+] as const;
+
+export function rejectPrivilegedRunFields(
+  body: Record<string, unknown> | undefined,
+): { ok: true } | { ok: false; fields: string[] } {
+  if (!body) return { ok: true };
+  const fields = PRIVILEGED_PUBLIC_RUN_FIELDS.filter((key) => body[key] !== undefined);
+  return fields.length > 0 ? { ok: false, fields: [...fields] } : { ok: true };
+}
+
 export function sanitizeExternalRunBody(
   body: Record<string, unknown>,
   opts: { allowChannelDelivery?: boolean } = {},

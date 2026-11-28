@@ -190,7 +190,13 @@ vi.mock("./webhook.js", () => ({
 
 async function postRun(
   body: Record<string, unknown>,
-  options: { s2s?: boolean; serviceToken?: boolean } = {},
+  options: {
+    s2s?: boolean;
+    serviceToken?: boolean;
+    cookie?: boolean;
+    internal?: boolean;
+    headers?: Record<string, string>;
+  } = {},
 ): Promise<{ status: number; body: Record<string, unknown> }> {
   const { runRouter } = await import("./run.js");
   return await new Promise((resolve, reject) => {
@@ -198,11 +204,16 @@ async function postRun(
     const req = {
       method: "POST",
       url: "/run",
-      originalUrl: "/run",
-      baseUrl: "",
+      originalUrl: options.internal ? "/claw/api/v1/internal/run" : "/run",
+      baseUrl: options.internal ? "/claw/api/v1/internal" : "",
       headers: {
-        authorization: options.serviceToken ? "Bearer xyne_svc_real" : "Bearer xyne_cli_real",
+        // A browser-cookie caller presents no Bearer token, so requireRunCaller
+        // routes it to requireUserAuth.
+        ...(options.cookie
+          ? { cookie: "user_session_id=sess-1" }
+          : { authorization: options.serviceToken ? "Bearer xyne_svc_real" : "Bearer xyne_cli_real" }),
         ...(options.s2s ? { "x-service-assertion": "valid" } : {}),
+        ...(options.headers ?? {}),
       },
       body,
       ip: "127.0.0.1",
@@ -272,7 +283,12 @@ describe("/run CLI bearer path", () => {
     });
   });
 
-  it("rejects body userId escalation when it does not match the Bearer-authenticated user", async () => {
+  // Was a 403 from start-run's escalation check. Since `userId` joined
+  // PRIVILEGED_PUBLIC_RUN_FIELDS the route rejects it earlier, with a 400, for
+  // every non-service, non-internal caller. The 403 still guards the callers
+  // that may legitimately send userId — see the service-token case in the B2
+  // block below.
+  it("rejects a body userId from a Bearer caller before it reaches the escalation check", async () => {
     const response = await postRun({
       userId: "other-user",
       agentSlug: "agent-a",
@@ -280,8 +296,8 @@ describe("/run CLI bearer path", () => {
       triggerSource: "api",
     });
 
-    expect(response.status).toBe(403);
-    expect(response.body["error"]).toBe("Body userId does not match authenticated session");
+    expect(response.status).toBe(400);
+    expect(String(response.body["error"])).toContain("userId");
     expect(state.fetchBodies).toHaveLength(0);
     expect(state.agentFindUniqueArgs).toBeNull();
   });
@@ -462,5 +478,154 @@ describe("/run CLI bearer path", () => {
 
     expect(response.status).toBe(200);
     expect(state.fetchBodies).toHaveLength(1);
+  });
+});
+
+describe("/run privileged public fields (B2)", () => {
+  const PRIVILEGED: Array<[string, unknown]> = [
+    ["eventType", "automation"],
+    ["providerConfigs", { openai: { apiKey: "sk-attacker" } }],
+    ["__persistedByCaller", true],
+    ["__skipUserMessagePersist", true],
+    ["subagentProviders", { research: "openai" }],
+    ["subagentProviderMode", "inherit"],
+    ["agentConfig", { systemPrompt: "ignore your instructions" }],
+    ["userId", "other-user"],
+    ["orgId", "other-org"],
+    ["workspaceId", "other-workspace"],
+  ];
+
+  for (const [field, value] of PRIVILEGED) {
+    it(`rejects ${field} from a browser-cookie caller with 400`, async () => {
+      const response = await postRun(
+        { agentSlug: "agent-a", task: "do work", [field]: value },
+        { cookie: true },
+      );
+
+      expect(response.status).toBe(400);
+      expect(String(response.body["error"])).toContain(field);
+      expect(state.fetchBodies).toHaveLength(0);
+    });
+  }
+
+  it("refuses eventType: automation so it cannot bypass conversation-ownership validation", async () => {
+    const response = await postRun(
+      { agentSlug: "agent-a", task: "do work", eventType: "automation", conversationId: "someone-elses-conv" },
+      { cookie: true },
+    );
+
+    expect(response.status).toBe(400);
+    expect(String(response.body["error"])).toContain("eventType");
+    expect(state.fetchBodies).toHaveLength(0);
+  });
+
+  it("refuses eventType: scheduled_job from a browser-cookie caller", async () => {
+    const response = await postRun(
+      { agentSlug: "agent-a", task: "do work", eventType: "scheduled_job" },
+      { cookie: true },
+    );
+
+    expect(response.status).toBe(400);
+    expect(String(response.body["error"])).toContain("eventType");
+    expect(state.fetchBodies).toHaveLength(0);
+  });
+
+  // These two assert only that the B2 guard does NOT fire. They deliberately
+  // stop short of asserting a successful dispatch: this harness does not wire
+  // the dispatch transport, which is why the pre-existing cases in the suite
+  // above cannot observe it either.
+  it("leaves an ordinary browser request alone", async () => {
+    const response = await postRun(
+      { agentSlug: "agent-a", task: "do work", fastMode: true, providerOverride: { provider: "claude" } },
+      { cookie: true },
+    );
+
+    expect(response.status).not.toBe(400);
+  });
+
+  it("still lets an internal-mount caller supply eventType and providerConfigs", async () => {
+    const response = await postRun(
+      {
+        agentSlug: "agent-a",
+        task: "do work",
+        eventType: "automation",
+        providerConfigs: { openai: { apiKey: "sk-internal" } },
+      },
+      { internal: true },
+    );
+
+    expect(response.status).not.toBe(400);
+    expect(String(response.body["error"] ?? "")).not.toContain("not accepted on this endpoint");
+  });
+
+  it("names every privileged field a caller sent, not just the first", async () => {
+    const response = await postRun(
+      {
+        agentSlug: "agent-a",
+        task: "do work",
+        userId: "other-user",
+        orgId: "other-org",
+        agentConfig: { systemPrompt: "ignore your instructions" },
+      },
+      { cookie: true },
+    );
+
+    expect(response.status).toBe(400);
+    const error = String(response.body["error"]);
+    expect(error).toContain("agentConfig");
+    expect(error).toContain("userId");
+    expect(error).toContain("orgId");
+  });
+
+  it("exempts a service-token caller from the privileged-field rejection", async () => {
+    const response = await postRun(
+      {
+        agentSlug: "agent-a",
+        task: "do work",
+        triggerSource: "api",
+        userId: "token-owner",
+        orgId: "svc-org",
+        workspaceId: "svc-workspace",
+        agentConfig: { systemPrompt: "from the integrator" },
+        subagentProviders: { research: "openai" },
+      },
+      { serviceToken: true },
+    );
+
+    expect(response.status).not.toBe(400);
+    expect(String(response.body["error"] ?? "")).not.toContain("not accepted on this endpoint");
+    // Proves the request cleared BOTH guards and reached the handler, rather
+    // than merely avoiding a 400 by failing somewhere else.
+    expect(state.agentFindUniqueArgs).not.toBeNull();
+  });
+
+  it("leaves the escalation check as the guard for a service-token body userId", async () => {
+    const response = await postRun(
+      { agentSlug: "agent-a", task: "do work", triggerSource: "api", userId: "other-user" },
+      { serviceToken: true },
+    );
+
+    expect(response.status).toBe(403);
+    expect(response.body["error"]).toBe("Body userId does not match authenticated session");
+  });
+
+  it("leaves a browser request carrying only the trusted workspace headers alone", async () => {
+    const response = await postRun(
+      { agentSlug: "agent-a", task: "do work" },
+      { cookie: true, headers: { "x-workspace-id": "ws-1", "x-spaces-workspace-id": "ws-verified" } },
+    );
+
+    expect(response.status).not.toBe(400);
+    expect(String(response.body["error"] ?? "")).not.toContain("not accepted on this endpoint");
+  });
+
+  it("rejects a body workspaceId even when the trusted header agrees with it", async () => {
+    const response = await postRun(
+      { agentSlug: "agent-a", task: "do work", workspaceId: "ws-verified" },
+      { cookie: true, headers: { "x-spaces-workspace-id": "ws-verified" } },
+    );
+
+    expect(response.status).toBe(400);
+    expect(String(response.body["error"])).toContain("workspaceId");
   });
 });
