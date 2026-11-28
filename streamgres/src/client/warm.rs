@@ -93,7 +93,7 @@ impl WarmStart {
                 return Vec::new();
             }
         };
-        shapes.sort_by(|a, b| b.last.cmp(&a.last));
+        shapes.sort_by_key(|shape| std::cmp::Reverse(shape.last));
         shapes.truncate(self.capacity);
         let mut seen = self.lock();
         for shape in &shapes {
@@ -187,7 +187,7 @@ impl WarmStart {
         let started = Instant::now();
         let total = shapes.len();
         let mut outcome = Replayed::default();
-        let mut work = stream::iter(shapes.into_iter())
+        let mut work = stream::iter(shapes)
             .map(|shape| async move {
                 let ast: Ast = match serde_json::from_str(shape.ast.get()) {
                     Ok(ast) => ast,

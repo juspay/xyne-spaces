@@ -1744,8 +1744,8 @@ impl Conn {
         counter: u64,
         owed_from_ns: Option<u64>,
     ) -> Result<Arc<Conn>, String> {
-        let client_id = format!("lc-{counter}-{}", &name);
-        let group_id = format!("lg-{counter}-{}", &name);
+        let client_id = format!("lc-{counter}-{name}");
+        let group_id = format!("lg-{counter}-{name}");
         let patch = profile.patch(&shared.world);
         let wanted: HashSet<String> = patch
             .iter()
@@ -1902,14 +1902,11 @@ impl Conn {
                     .push(format!("transformError: {}", preview(&body.to_string())));
                 self.changed.notify_waiters();
             }
-            "pushResponse" => {
-                if body.get("error").is_some() {
-                    self.errors
-                        .lock()
-                        .unwrap()
-                        .push(format!("pushResponse: {}", preview(&body.to_string())));
-                }
-            }
+            "pushResponse" if body.get("error").is_some() => self
+                .errors
+                .lock()
+                .unwrap()
+                .push(format!("pushResponse: {}", preview(&body.to_string()))),
             _ => {}
         }
     }
