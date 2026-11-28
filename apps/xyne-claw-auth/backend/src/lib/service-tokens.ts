@@ -113,17 +113,40 @@ export const EXTERNAL_RUN_BODY_FIELDS = [
  *                              instead of the agent's.
  *   __persistedByCaller        suppresses the user-message / AgentRun writes.
  *   __skipUserMessagePersist   suppresses the user-message write.
+ *   subagentProviders          picks the providers subagent runs use, in place
+ *                              of the agent's configured set.
+ *   subagentProviderMode       ungated agent-config override.
+ *   agentConfig                supplants the stored agent config for the run.
+ *   userId                     impersonation. The shared layer accepts a body
+ *                              userId only when it matches the session
+ *                              (start-run.ts), so a public caller gains
+ *                              nothing by sending one.
+ *   orgId                      selects the tenant the run is attributed to.
+ *   workspaceId                authorization scope. Per the agreed model it is
+ *                              derived from the credential, never accepted in
+ *                              a body.
+ *
+ * Body fields only. The trusted `x-workspace-id` / `x-spaces-workspace-id`
+ * headers are a separate, verified path and are unaffected by this list.
  *
  * REJECTED, not stripped: the only public caller is our own dashboard, which
  * never sends these, so a silent strip would hide a real client bug. Internal
  * and service-token callers are unaffected — this list is applied on the public
- * mount only.
+ * mount only. `userId` therefore stays in EXTERNAL_RUN_BODY_FIELDS: service
+ * tokens may still send it, and the escalation check in start-run.ts is what
+ * holds for them.
  */
 export const PRIVILEGED_PUBLIC_RUN_FIELDS = [
   "eventType",
   "providerConfigs",
   "__persistedByCaller",
   "__skipUserMessagePersist",
+  "subagentProviders",
+  "subagentProviderMode",
+  "agentConfig",
+  "userId",
+  "orgId",
+  "workspaceId",
 ] as const;
 
 export function rejectPrivilegedRunFields(
